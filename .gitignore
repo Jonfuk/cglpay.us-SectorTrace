@@ -1,5 +1,8 @@
 # Secrets
 .env
+secrets/
+*.pem
+*-service-account.json
 
 # Data — raw archives and the canonical warehouse are local state, not source
 data/raw/

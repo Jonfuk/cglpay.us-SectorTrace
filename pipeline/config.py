@@ -90,6 +90,27 @@ class Settings(BaseSettings):
             )
         return self.cqc_subscription_key
 
+    def require_google_service_account(self) -> Path:
+        """Path to the service-account JSON file. This must be a *path*, not
+        the JSON itself — dotenv can't parse an unquoted multi-line value,
+        so pasting the blob into .env silently truncates it.
+        """
+        if not self.google_service_account_json:
+            raise RuntimeError(
+                "GOOGLE_SERVICE_ACCOUNT_JSON is not set in .env. It must be a "
+                "path to a credential file (e.g. secrets/google-service-account.json), "
+                "not the JSON contents."
+            )
+        path = self.google_service_account_json
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        if not path.is_file():
+            raise RuntimeError(
+                f"GOOGLE_SERVICE_ACCOUNT_JSON points to {path}, which does not exist. "
+                "Set it to the path of the service-account credential file."
+            )
+        return path
+
 
 def get_settings() -> Settings:
     return Settings()
