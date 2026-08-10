@@ -105,9 +105,15 @@ def record_parse_failure(
     reason: str,
     source_url: str | None = None,
 ) -> None:
+    """Idempotent: re-running a module must not append duplicate copies of
+    the same failure (constraint 5). Uniqueness is on
+    (module, source_url, field_name, raw_fragment) — see migration 0007.
+    """
     conn.execute(
         "INSERT INTO parse_failures (module, source_url, field_name, raw_fragment, reason, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (module, COALESCE(source_url, ''), COALESCE(field_name, ''), COALESCE(raw_fragment, '')) "
+        "DO UPDATE SET reason = excluded.reason",
         (module, source_url, field_name, raw_fragment, reason, _utcnow()),
     )
 
@@ -119,9 +125,16 @@ def record_review_item(
     raw_value: str,
     context_json: str | None = None,
 ) -> None:
+    """Idempotent: an unresolved item re-observed on a later run updates its
+    context rather than being appended again, so "how many items need
+    review?" stays answerable. A row already marked resolved is left alone.
+    """
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, status, created_at) "
-        "VALUES (?, ?, ?, ?, 'pending', ?)",
+        "VALUES (?, ?, ?, ?, 'pending', ?) "
+        "ON CONFLICT (module, item_type, raw_value) DO UPDATE SET "
+        "context_json = excluded.context_json "
+        "WHERE review_queue.status = 'pending'",
         (module, item_type, raw_value, context_json, _utcnow()),
     )
 

@@ -114,14 +114,14 @@ def _arcgis_search(client: PipelineHTTPClient, query: str, num: int = 100) -> li
     result = client.get(ARCGIS_SEARCH_URL, params={
         "q": query, "f": "json", "num": num, "sortField": "created", "sortOrder": "desc",
     })
-    if result.status_code != 200:
+    if not result.ok:
         raise DiscoveryError(f"ArcGIS search failed ({result.status_code}) for query: {query}")
     return json.loads(result.body).get("results", [])
 
 
 def _item_service_url(client: PipelineHTTPClient, item_id: str) -> str:
     result = client.get(ARCGIS_ITEM_URL.format(item_id=item_id), params={"f": "json"})
-    if result.status_code != 200:
+    if not result.ok:
         raise DiscoveryError(f"Failed to fetch ArcGIS item {item_id} ({result.status_code})")
     data = json.loads(result.body)
     url = data.get("url")
@@ -187,7 +187,7 @@ def _discover_latest_lookup(client: PipelineHTTPClient, phrase: str) -> Vintage:
 
 def _layer_field_names(client: PipelineHTTPClient, service_url: str) -> list[str]:
     result = client.get(f"{service_url}/0", params={"f": "json"})
-    if result.status_code != 200:
+    if not result.ok:
         raise DiscoveryError(f"Failed to fetch layer metadata for {service_url}")
     return [f["name"] for f in json.loads(result.body).get("fields", [])]
 
@@ -209,7 +209,7 @@ def _query_paged(client: PipelineHTTPClient, service_url: str, params_base: dict
     while True:
         params = dict(params_base, resultOffset=offset, resultRecordCount=page_size)
         result = client.get(f"{service_url}/0/query", params=params)
-        if result.status_code != 200:
+        if not result.ok:
             raise DiscoveryError(f"ArcGIS query failed ({result.status_code}) for {service_url}: {params}")
         data = json.loads(result.body)
         if isinstance(data, dict) and data.get("error"):
@@ -266,7 +266,7 @@ def _fetch_geometry_by_codes(client: PipelineHTTPClient, service_url: str, code_
         result = client.get(f"{service_url}/0/query", params={
             "where": where, "outFields": code_field, "outSR": 4326, "f": "geojson",
         })
-        if result.status_code != 200:
+        if not result.ok:
             raise DiscoveryError(f"Geometry query failed ({result.status_code}) for {service_url}: {where}")
         data = json.loads(result.body)
         for feat in data.get("features", []):

@@ -77,6 +77,17 @@ class FetchResult:
     def content_type(self) -> str | None:
         return self.headers.get("content-type")
 
+    @property
+    def ok(self) -> bool:
+        """True when this result carries usable content.
+
+        Modules must test this rather than `status_code == 200`: a 304 is a
+        successful conditional request whose body is served from the raw
+        archive, and treating it as a failure silently drops every document
+        on the second and subsequent runs.
+        """
+        return bool(self.body) and self.status_code < 400
+
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise httpx.HTTPStatusError(
@@ -126,6 +137,21 @@ class _RobotsCache:
                 parser.parse([])
             self._parsers[origin] = parser
         return parser.can_fetch(self._user_agent, url)
+
+
+def _find_archived(raw_dir: Path, source_system: str, sha256: str) -> Path | None:
+    """Locate a previously archived body by its content hash. The extension
+    varies with content-type, so match on the stem.
+    """
+    if not sha256:
+        return None
+    out_dir = raw_dir / source_system
+    if not out_dir.is_dir():
+        return None
+    for candidate in out_dir.glob(f"{sha256}.*"):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _archive_raw(raw_dir: Path, source_system: str, sha256: str, content_type: str | None, body: bytes) -> Path:
@@ -214,14 +240,39 @@ class PipelineHTTPClient:
         retrieved_at = datetime.now(timezone.utc)
 
         not_modified = response.status_code == 304
-        body = b"" if not_modified else response.content
-        sha256 = hashlib.sha256(body).hexdigest() if body else (cached["payload_sha256"] if cached else "")
-
         archived_path = None
-        if archive and body:
-            archived_path = _archive_raw(
-                self.settings.raw_archive_dir, self.source_system, sha256, response.headers.get("content-type"), body
-            )
+
+        if not_modified:
+            # A 304 means "unchanged since you last fetched it" — the caller
+            # still needs the content. Serve the archived copy rather than
+            # handing back an empty body, which callers would otherwise read
+            # as "this document has no content" and silently record as zero
+            # rows. If the archive is missing, re-fetch unconditionally: a
+            # cache entry without its payload is not a usable cache hit.
+            sha256 = cached["payload_sha256"] if cached else ""
+            archived_path = _find_archived(self.settings.raw_archive_dir, self.source_system, sha256)
+            if archived_path is not None:
+                body = archived_path.read_bytes()
+            else:
+                log.info("http.cache_miss_refetch", url=request_url, source_system=self.source_system)
+                response = self._do_request("GET", url, params=params, headers=dict(headers or {}))
+                retrieved_at = datetime.now(timezone.utc)
+                not_modified = False
+                body = response.content
+                sha256 = hashlib.sha256(body).hexdigest() if body else ""
+                if archive and body:
+                    archived_path = _archive_raw(
+                        self.settings.raw_archive_dir, self.source_system, sha256,
+                        response.headers.get("content-type"), body,
+                    )
+        else:
+            body = response.content
+            sha256 = hashlib.sha256(body).hexdigest() if body else ""
+            if archive and body:
+                archived_path = _archive_raw(
+                    self.settings.raw_archive_dir, self.source_system, sha256,
+                    response.headers.get("content-type"), body,
+                )
 
         if self.conn is not None:
             db.set_http_cache(

@@ -47,10 +47,23 @@ def test_get_captures_provenance_and_archives_body(httpx_mock, settings):
 
 
 def test_conditional_request_sends_cached_etag(httpx_mock, settings, conn):
+    """A 304 must still yield the document's bytes, served from the archive.
+
+    Regression: previously a 304 returned an empty body, so a caller that
+    counted attachments in the response silently recorded zero — real data
+    loss that looked like a successful run.
+    """
     _allow_all_robots(httpx_mock)
     url = "https://example.com/doc.txt"
-    db.set_http_cache(conn, url=url, host="example.com", etag="abc123", last_modified=None, payload_sha256="deadbeef")
+    body = b"archived content"
+    sha = hashlib.sha256(body).hexdigest()
 
+    # seed the archive as a previous run would have
+    archive_dir = settings.raw_archive_dir / "test_source"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    (archive_dir / f"{sha}.txt").write_bytes(body)
+
+    db.set_http_cache(conn, url=url, host="example.com", etag="abc123", last_modified=None, payload_sha256=sha)
     httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
 
     client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
@@ -58,8 +71,29 @@ def test_conditional_request_sends_cached_etag(httpx_mock, settings, conn):
     client.close()
 
     assert result.not_modified is True
-    assert result.body == b""
-    assert result.payload_sha256 == "deadbeef"
+    assert result.body == body
+    assert result.payload_sha256 == sha
+
+
+def test_304_without_archived_body_refetches(httpx_mock, settings, conn):
+    """If the cache entry exists but its archived payload is gone, the
+    client must re-fetch rather than return an empty body.
+    """
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.txt"
+    db.set_http_cache(conn, url=url, host="example.com", etag="abc123", last_modified=None,
+                       payload_sha256="0" * 64)
+
+    httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
+    httpx_mock.add_response(url=url, status_code=200, content=b"refetched body",
+                             headers={"content-type": "text/plain"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    result = client.get(url)
+    client.close()
+
+    assert result.not_modified is False
+    assert result.body == b"refetched body"
 
 
 def test_rate_limiter_enforces_minimum_interval(settings):

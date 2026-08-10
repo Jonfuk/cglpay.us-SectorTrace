@@ -323,7 +323,7 @@ def _walk_and_process(
     while url:
         result = client.get(url, params=params)
         params = None
-        if result.status_code != 200:
+        if not result.ok:
             db.record_parse_failure(conn, module_name, "page", url, f"status {result.status_code}", source_url=result.url)
             return total_matched
 

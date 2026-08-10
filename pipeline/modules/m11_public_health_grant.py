@@ -138,7 +138,7 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
         "filter_organisations": "department-of-health-and-social-care",
         "count": 100,
     })
-    if result.status_code != 200:
+    if not result.ok:
         raise DiscoveryError(f"GOV.UK search failed ({result.status_code})")
     publications = []
     for r in json.loads(result.body).get("results", []):
@@ -177,7 +177,7 @@ def run(ctx: ModuleContext) -> None:
         total_rows = 0
         for pub in publications:
             content_result = client.get(f"{GOVUK_CONTENT_BASE}{pub['link']}")
-            if content_result.status_code != 200:
+            if not content_result.ok:
                 db.record_parse_failure(conn, module_name, "publication", pub["link"],
                                          f"content API returned {content_result.status_code}",
                                          source_url=content_result.url)
@@ -202,7 +202,7 @@ def run(ctx: ModuleContext) -> None:
 
             attachment = ods_attachments[0]
             file_result = client.get(attachment["url"])
-            if file_result.status_code != 200:
+            if not file_result.ok:
                 db.record_parse_failure(conn, module_name, "spreadsheet", attachment["url"],
                                          f"download returned {file_result.status_code}", source_url=file_result.url)
                 continue

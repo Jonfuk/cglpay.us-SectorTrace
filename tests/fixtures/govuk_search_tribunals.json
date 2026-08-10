@@ -1,0 +1,79 @@
+{
+  "total": 37,
+  "results": [
+    {
+      "title": "Ms X Roe v Change, Grow, Live: 1308908/2022",
+      "link": "/employment-tribunal-decisions/ms-a-doe-v-change-grow-live-1308908-slash-2022",
+      "tribunal_decision_categories": [
+        "race-discrimination",
+        "unfair-dismissal"
+      ],
+      "tribunal_decision_decision_date": "2025-02-18",
+      "tribunal_decision_country": "england-and-wales",
+      "index": "govuk",
+      "es_score": 0.08727624,
+      "_id": "/employment-tribunal-decisions/ms-a-doe-v-change-grow-live-1308908-slash-2022",
+      "elasticsearch_type": "employment_tribunal_decision",
+      "document_type": "employment_tribunal_decision"
+    },
+    {
+      "title": "Mr X Roe v Change Grow Live: 6011159/2024",
+      "link": "/employment-tribunal-decisions/mr-k-fazal-v-change-grow-live-6011159-slash-2024",
+      "tribunal_decision_categories": [
+        "unfair-dismissal"
+      ],
+      "tribunal_decision_decision_date": "2025-07-08",
+      "tribunal_decision_country": "england-and-wales",
+      "index": "govuk",
+      "es_score": 0.08726047,
+      "_id": "/employment-tribunal-decisions/mr-k-fazal-v-change-grow-live-6011159-slash-2024",
+      "elasticsearch_type": "employment_tribunal_decision",
+      "document_type": "employment_tribunal_decision"
+    },
+    {
+      "title": "Ms X Roe v Change Grow Live: 2409308/2022",
+      "link": "/employment-tribunal-decisions/ms-s-thompson-v-change-grow-live-2409308-slash-2022",
+      "tribunal_decision_categories": [
+        "public-interest-disclosure",
+        "race-discrimination",
+        "sex-discrimination",
+        "unfair-dismissal"
+      ],
+      "tribunal_decision_decision_date": "2023-08-10",
+      "tribunal_decision_country": "england-and-wales",
+      "index": "govuk",
+      "es_score": 0.087146305,
+      "_id": "/employment-tribunal-decisions/ms-s-thompson-v-change-grow-live-2409308-slash-2022",
+      "elasticsearch_type": "employment_tribunal_decision",
+      "document_type": "employment_tribunal_decision"
+    },
+    {
+      "title": "Mrs X Roe v Change Grow Live: 2409700/2023",
+      "link": "/employment-tribunal-decisions/mrs-c-fairbanks-v-change-grow-live-2409700-slash-2023",
+      "tribunal_decision_categories": [
+        "religion-or-belief-discrimination"
+      ],
+      "tribunal_decision_decision_date": "2024-10-25",
+      "tribunal_decision_country": "england-and-wales",
+      "index": "govuk",
+      "es_score": 0.08714249,
+      "_id": "/employment-tribunal-decisions/mrs-c-fairbanks-v-change-grow-live-2409700-slash-2023",
+      "elasticsearch_type": "employment_tribunal_decision",
+      "document_type": "employment_tribunal_decision"
+    },
+    {
+      "title": "Dr X Roe v Change Grow Live: 6000900/2023",
+      "link": "/employment-tribunal-decisions/dr-p-balfour-v-change-grow-live-6000900-slash-2023",
+      "tribunal_decision_categories": [
+        "religion-or-belief-discrimination"
+      ],
+      "tribunal_decision_decision_date": "2023-11-08",
+      "tribunal_decision_country": "england-and-wales",
+      "index": "govuk",
+      "es_score": 0.087129004,
+      "_id": "/employment-tribunal-decisions/dr-p-balfour-v-change-grow-live-6000900-slash-2023",
+      "elasticsearch_type": "employment_tribunal_decision",
+      "document_type": "employment_tribunal_decision"
+    }
+  ]
+}
