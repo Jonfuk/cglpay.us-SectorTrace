@@ -13,6 +13,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "python-dotenv>=1.0",
     "shapely>=2.1.2",
+    "odfpy>=1.4.1",
 ]
 
 [project.optional-dependencies]
