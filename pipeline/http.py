@@ -192,6 +192,21 @@ class PipelineHTTPClient:
     def __exit__(self, *exc_info) -> None:
         self.close()
 
+    def set_basic_auth(self, username: str, password: str = "") -> None:
+        """HTTP basic auth for sources that authenticate that way (Companies
+        House passes the API key as the username with an empty password).
+        Credentials live on the httpx client, so they are never captured into
+        provenance or written to the raw archive.
+        """
+        self._client.auth = httpx.BasicAuth(username, password)
+
+    def set_default_headers(self, headers: dict[str, str]) -> None:
+        """Headers applied to every request from this client — used for
+        subscription-key auth (CQC, Charity Commission). Set here rather than
+        passed per-call so a key cannot leak into a logged request URL.
+        """
+        self._client.headers.update(headers)
+
     def close(self) -> None:
         self._client.close()
 

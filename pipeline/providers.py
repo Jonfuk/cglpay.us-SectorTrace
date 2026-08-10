@@ -73,6 +73,22 @@ def seed_providers(conn) -> None:
                    natural_key=["provider_key", "scheme", "identifier"])
 
 
+def normalise_identifier(scheme: str, identifier: str) -> str:
+    """Canonical form for an identifier, so the same entity discovered by two
+    modules produces one row rather than two.
+
+    Company numbers are the case that bites: the Charity Commission publishes
+    them unpadded ("3861209") while Companies House uses 8 characters
+    ("03861209"), and storing both would split one company's evidence in two.
+    """
+    value = str(identifier).strip()
+    if scheme == "company_number":
+        from pipeline.modules.m04_companies import normalise_company_number
+
+        return normalise_company_number(value)
+    return value
+
+
 def record_discovered_identifier(
     conn, provider_key: str, scheme: str, identifier: str, discovered_by: str, role: str | None = None
 ) -> None:
@@ -82,6 +98,7 @@ def record_discovered_identifier(
     """
     from pipeline import db
 
+    identifier = normalise_identifier(scheme, identifier)
     existing = conn.execute(
         "SELECT status FROM provider_identifiers WHERE provider_key = ? AND scheme = ? AND identifier = ?",
         (provider_key, scheme, identifier),

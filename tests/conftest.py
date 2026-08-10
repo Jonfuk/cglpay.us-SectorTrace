@@ -17,6 +17,14 @@ def settings(tmp_path: Path) -> Settings:
         raw_archive_dir=tmp_path / "raw",
         migrations_dir=Path(__file__).resolve().parent.parent / "pipeline" / "migrations",
         logs_dir=tmp_path / "logs",
+        # No politeness delay against mocked transports — the rate limiter is
+        # exercised directly in test_http.py with its own explicit override.
+        default_rate_limit_seconds=0.0,
+        # Dummy credentials so modules that require a key can be exercised.
+        # Never real values: every outbound call in the suite is mocked.
+        charity_commission_api_key="test-charity-key",
+        companies_house_api_key="test-companies-house-key",
+        cqc_subscription_key="test-cqc-key",
         _env_file=None,
     )
 
