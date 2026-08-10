@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Data — raw archives and the canonical warehouse are local state, not source
+data/raw/
+data/warehouse.db
+data/warehouse.db-*
+
+# Anything that could carry restricted_ (personal-data) columns out of the DB
+exports/output/restricted_*
+**/restricted_*.csv
+**/restricted_*.json
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# uv
+.uv/
