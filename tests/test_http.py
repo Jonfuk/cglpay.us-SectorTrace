@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import time
 
+import httpx
 import pytest
 
 from pipeline import db
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed, _RateLimiter
+from pipeline.http import PipelineHTTPClient, RobotsDisallowed, _RateLimiter, _wait_respecting_retry_after
 
 
 def _allow_all_robots(httpx_mock, origin: str = "https://example.com") -> None:
@@ -71,3 +72,36 @@ def test_rate_limiter_enforces_minimum_interval(settings):
     # time.sleep can wake slightly early on Windows; allow a small tolerance
     # rather than asserting an exact wall-clock floor.
     assert elapsed >= 0.2 - 0.02
+
+
+class _FakeOutcome:
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def exception(self):
+        return self._exc
+
+
+class _FakeRetryState:
+    def __init__(self, exc: BaseException) -> None:
+        self.outcome = _FakeOutcome(exc)
+        self.attempt_number = 1
+
+
+def test_wait_respecting_retry_after_honours_header():
+    response = httpx.Response(429, headers={"Retry-After": "7"}, request=httpx.Request("GET", "https://example.com"))
+    exc = httpx.HTTPStatusError("429", request=response.request, response=response)
+    assert _wait_respecting_retry_after(_FakeRetryState(exc)) == 7.0
+
+
+def test_wait_respecting_retry_after_falls_back_without_header():
+    response = httpx.Response(503, request=httpx.Request("GET", "https://example.com"))
+    exc = httpx.HTTPStatusError("503", request=response.request, response=response)
+    # no Retry-After header -> falls back to exponential backoff, which for
+    # the first attempt is small but still a real positive wait.
+    assert _wait_respecting_retry_after(_FakeRetryState(exc)) > 0
+
+
+def test_wait_respecting_retry_after_falls_back_for_non_http_errors():
+    exc = ConnectionError("boom")
+    assert _wait_respecting_retry_after(_FakeRetryState(exc)) > 0

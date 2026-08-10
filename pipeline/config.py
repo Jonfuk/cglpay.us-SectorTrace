@@ -23,9 +23,14 @@ class Settings(BaseSettings):
     contact_email: str = Field(..., description="Used in User-Agent and as an operator contact point")
 
     default_rate_limit_seconds: float = 2.0
-    # Per-host overrides, e.g. {"www.find-tender.service.gov.uk": 1.0}. Kept
-    # in code (not .env) since it's structural config modules will extend.
-    rate_limit_overrides: dict[str, float] = {}
+    # Per-host overrides. Kept in code (not .env) since it's structural
+    # config modules will extend. Contracts Finder documents a harsh
+    # multi-minute block on repeat rate-limit violations (unlike Find a
+    # Tender's simple Retry-After backoff), so it gets a more conservative
+    # default than the general 2s/host.
+    rate_limit_overrides: dict[str, float] = {
+        "www.contractsfinder.service.gov.uk": 5.0,
+    }
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"

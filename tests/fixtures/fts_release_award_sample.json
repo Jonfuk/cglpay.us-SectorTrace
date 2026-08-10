@@ -1,0 +1,154 @@
+{
+  "ocid": "ocds-h6vhtk-06d974",
+  "id": "072960-2026",
+  "tag": [
+    "award",
+    "contract"
+  ],
+  "date": "2026-08-01T20:22:44+01:00",
+  "initiationType": "tender",
+  "parties": [
+    {
+      "name": "West Northamptonshire Council",
+      "id": "GB-PPON-PGDV-8944-CMBP",
+      "identifier": {
+        "scheme": "GB-PPON",
+        "id": "PGDV-8944-CMBP"
+      },
+      "address": {
+        "streetAddress": "West Northamptonshire Council",
+        "locality": "Northampton",
+        "postalCode": "NN1 1ED",
+        "country": "GB",
+        "countryName": "United Kingdom",
+        "region": "UKF24"
+      },
+      "contactPoint": {
+        "name": "Tom Callaghan",
+        "email": "tcallaghan@northamptonshire.gov.uk"
+      },
+      "roles": [
+        "buyer"
+      ],
+      "details": {
+        "url": "https://www.westnorthants.gov.uk/",
+        "classifications": [
+          {
+            "scheme": "UK_CA_TYPE",
+            "id": "publicAuthoritySubCentralGovernment",
+            "description": "Public authority - sub-central government"
+          }
+        ]
+      }
+    },
+    {
+      "name": "H2S Cars Ltd",
+      "id": "GB-FTS-119928",
+      "address": {
+        "streetAddress": "15 Waverley Road",
+        "locality": "Northampton",
+        "postalCode": "NN2 7DA",
+        "country": "GB",
+        "countryName": "United Kingdom",
+        "region": "UKF24"
+      },
+      "contactPoint": {
+        "name": "Gofur Miah",
+        "email": "h2s.cars@yahoo.com"
+      },
+      "roles": [
+        "supplier"
+      ],
+      "details": {
+        "scale": "large",
+        "vcse": false
+      }
+    }
+  ],
+  "buyer": {
+    "id": "GB-PPON-PGDV-8944-CMBP",
+    "name": "West Northamptonshire Council"
+  },
+  "tender": {
+    "id": "SA1381039",
+    "legalBasis": {
+      "id": "2023/54",
+      "scheme": "UKPGA",
+      "uri": "https://www.legislation.gov.uk/ukpga/2023/54/contents"
+    },
+    "title": "Passenger Transport Services 2026 - Route Based (1-8 Seat Provision)",
+    "description": "Passenger Transport Services 2026 - Route Based (1-8 Seat Provision) : SN2482 \nWith PA \nOutbound - Monday AM\n07:38  The Kennels, Leicester Lane, Daventry, NN11 3QD\n08:50 - Dorothy Goodman School - Dorothy Goodman School, Stoke Road, Hinckley, LE10 0EA\nReturn - Monday PM\n15:10 - Dorothy Goodman School - Dorothy Goodman School, Stoke Road, Hinckley, LE10 0EA\n16:22 The Kennels, Leicester Lane, Daventry, NN11 3QD\n* West Northants Council will set a starting price on this contract. *\nOB - Social, emotional difficulties and non Verbal - Booster Seat",
+    "status": "complete",
+    "procurementMethod": "limited",
+    "procurementMethodDetails": "Below threshold - limited competition",
+    "specialRegime": [
+      "lightTouch"
+    ],
+    "lots": [
+      {
+        "id": "2755",
+        "status": "complete"
+      }
+    ]
+  },
+  "awards": [
+    {
+      "id": "1",
+      "status": "active",
+      "mainProcurementCategory": "services",
+      "suppliers": [
+        {
+          "id": "GB-FTS-119928",
+          "name": "H2S Cars Ltd"
+        }
+      ],
+      "items": [
+        {
+          "id": "2755",
+          "additionalClassifications": [
+            {
+              "scheme": "CPV",
+              "id": "60000000",
+              "description": "Transport services (excl. Waste transport)"
+            }
+          ],
+          "relatedLot": "2755"
+        }
+      ],
+      "relatedLots": [
+        "2755"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "1",
+      "awardID": "1",
+      "title": "Passenger Transport Services 2026 - Route Based (1-8 Seat Provision)",
+      "status": "active",
+      "period": {
+        "startDate": "2026-09-02T00:00:00Z",
+        "endDate": "2028-07-23T23:59:59Z"
+      },
+      "value": {
+        "amountGross": 90000,
+        "amount": 90000,
+        "currency": "GBP"
+      },
+      "aboveThreshold": false,
+      "dateSigned": "2026-08-01T00:00:00Z",
+      "documents": [
+        {
+          "id": "072960-2026",
+          "documentType": "contractNotice",
+          "noticeType": "UK7",
+          "description": "Contract details notice on Find a Tender",
+          "url": "https://www.find-tender.service.gov.uk/Notice/072960-2026",
+          "datePublished": "2026-08-01T20:22:44+01:00",
+          "format": "text/html"
+        }
+      ]
+    }
+  ],
+  "language": "en"
+}

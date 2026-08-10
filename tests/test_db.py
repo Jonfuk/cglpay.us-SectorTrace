@@ -54,6 +54,10 @@ def test_cursor_round_trip(conn: sqlite3.Connection):
 
 
 def test_restricted_tables_are_discoverable(conn: sqlite3.Connection):
-    conn.execute("CREATE TABLE restricted_tribunal_parties (case_number TEXT PRIMARY KEY, claimant_name_raw TEXT)")
-    conn.execute("CREATE TABLE tribunal_cases (case_number TEXT PRIMARY KEY)")
-    assert db.restricted_tables(conn) == ["restricted_tribunal_parties"]
+    # Names deliberately don't match real schema tables (e.g.
+    # 'restricted_tribunal_parties') since the conn fixture applies every
+    # real migration and a same-named CREATE TABLE here would collide once
+    # that module exists.
+    conn.execute("CREATE TABLE restricted_example_parties (case_number TEXT PRIMARY KEY, claimant_name_raw TEXT)")
+    conn.execute("CREATE TABLE example_cases (case_number TEXT PRIMARY KEY)")
+    assert db.restricted_tables(conn) == ["restricted_example_parties"]

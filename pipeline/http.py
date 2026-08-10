@@ -42,6 +42,26 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
+_fallback_wait = wait_exponential(multiplier=1, min=1, max=30)
+
+
+def _wait_respecting_retry_after(retry_state):
+    """429/503 responses on these APIs document a Retry-After header
+    (seconds) that must be honoured rather than guessed at with blind
+    exponential backoff — some sources (e.g. Contracts Finder) impose a
+    multi-minute block on repeat offenders.
+    """
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, httpx.HTTPStatusError):
+        retry_after = exc.response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+    return _fallback_wait(retry_state)
+
+
 @dataclass
 class FetchResult:
     url: str
@@ -151,8 +171,8 @@ class PipelineHTTPClient:
 
     @retry(
         retry=retry_if_exception(_is_retryable),
-        wait=wait_exponential(multiplier=1, min=1, max=30),
-        stop=stop_after_attempt(5),
+        wait=_wait_respecting_retry_after,
+        stop=stop_after_attempt(6),
         reraise=True,
     )
     def _do_request(self, method: str, url: str, **kwargs) -> httpx.Response:
