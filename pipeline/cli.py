@@ -50,7 +50,18 @@ def run(
     ctx = ModuleContext(conn=conn, settings=settings, since=since, dry_run=dry_run, limit=limit)
     for name, fn in targets:
         typer.echo(f"--- running {name} ---")
-        fn(ctx)
+        try:
+            fn(ctx)
+        except Exception:
+            # Roll back this module's partial writes; earlier modules in a
+            # `run all` batch already committed and are unaffected.
+            conn.rollback()
+            conn.close()
+            raise
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
 
     conn.close()
 

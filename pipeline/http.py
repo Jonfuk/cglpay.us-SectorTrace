@@ -176,15 +176,20 @@ class PipelineHTTPClient:
         host = urlparse(url).netloc
         self._rate_limiter.wait(host)
 
+        # Resolve the full request URL (with query params) up front so
+        # provenance and the conditional-request cache key reflect the
+        # exact resource fetched, not just the base endpoint.
+        request_url = str(httpx.URL(url, params=params)) if params else url
+
         request_headers = dict(headers or {})
-        cached = db.get_http_cache(self.conn, url) if (self.conn and use_conditional) else None
+        cached = db.get_http_cache(self.conn, request_url) if (self.conn and use_conditional) else None
         if cached:
             if cached["etag"]:
                 request_headers["If-None-Match"] = cached["etag"]
             if cached["last_modified"]:
                 request_headers["If-Modified-Since"] = cached["last_modified"]
 
-        log.info("http.get", url=url, source_system=self.source_system)
+        log.info("http.get", url=request_url, source_system=self.source_system)
         response = self._do_request("GET", url, params=params, headers=request_headers)
         retrieved_at = datetime.now(timezone.utc)
 
@@ -201,7 +206,7 @@ class PipelineHTTPClient:
         if self.conn is not None:
             db.set_http_cache(
                 self.conn,
-                url=url,
+                url=request_url,
                 host=host,
                 etag=response.headers.get("etag"),
                 last_modified=response.headers.get("last-modified"),
@@ -209,7 +214,7 @@ class PipelineHTTPClient:
             )
 
         return FetchResult(
-            url=url,
+            url=request_url,
             status_code=response.status_code,
             body=body,
             headers=response.headers,
