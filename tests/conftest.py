@@ -9,6 +9,18 @@ from pipeline import db
 from pipeline.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def _reset_host_clock():
+    """The per-host rate limiter is process-wide by design, so it would
+    otherwise carry timing state from one test into the next.
+    """
+    from pipeline.http import HOST_CLOCK
+
+    HOST_CLOCK.reset()
+    yield
+    HOST_CLOCK.reset()
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(

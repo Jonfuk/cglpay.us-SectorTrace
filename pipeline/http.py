@@ -10,6 +10,7 @@ import json
 import mimetypes
 import re
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -96,21 +97,68 @@ class FetchResult:
             )
 
 
+class _HostClock:
+    """Process-wide next-free time per host.
+
+    The rate limit is a promise about the host, not about the client object
+    that happens to be talking to it. This state used to live on each
+    PipelineHTTPClient, and every module builds its own client, so the
+    interval held only because modules ran strictly one at a time. Two
+    clients on one host — a thread pool, or simply m11 finishing and m13
+    starting a second later, both on www.gov.uk — each independently believed
+    it was within budget. That makes "one request per 2 seconds per host" a
+    description of the schedule rather than a guarantee, which is not what
+    this project says in its documentation or in its emails to sources.
+
+    Callers reserve the next slot under the lock and then sleep outside it,
+    so waiting on a slow host never blocks requests to a different one, and
+    N threads queueing on the same host take N consecutive slots instead of
+    stampeding the moment one frees up.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_free: dict[str, float] = {}
+
+    def reserve(self, host: str, min_interval: float) -> float:
+        """Block until this host may be called again. Returns seconds waited."""
+        with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next_free.get(host, now))
+            # Claimed before releasing the lock, so no other caller can take
+            # the same slot. A caller that then fails simply leaves the slot
+            # unused, which errs towards politeness rather than away from it.
+            self._next_free[host] = start + min_interval
+        delay = start - now
+        if delay > 0:
+            time.sleep(delay)
+        return max(delay, 0.0)
+
+    def reset(self) -> None:
+        """Forget all hosts. For tests; never call this during a run."""
+        with self._lock:
+            self._next_free.clear()
+
+
+# One clock for the process. Deliberately module-level rather than injected:
+# an injected clock is one a caller can forget to share, which is the bug
+# this replaces.
+HOST_CLOCK = _HostClock()
+
+
 class _RateLimiter:
+    """Per-client view of the shared clock.
+
+    Kept as a class because the interval depends on settings (Contracts
+    Finder gets 5s, everything else the default) and settings are per client,
+    while the timing state must not be.
+    """
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._last_request_at: dict[str, float] = {}
 
-    def wait(self, host: str) -> None:
-        min_interval = self._settings.rate_limit_for_host(host)
-        last = self._last_request_at.get(host)
-        now = time.monotonic()
-        if last is not None:
-            elapsed = now - last
-            remaining = min_interval - elapsed
-            if remaining > 0:
-                time.sleep(remaining)
-        self._last_request_at[host] = time.monotonic()
+    def wait(self, host: str) -> float:
+        return HOST_CLOCK.reserve(host, self._settings.rate_limit_for_host(host))
 
 
 class RobotsRules:
