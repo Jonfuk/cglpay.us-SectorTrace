@@ -120,7 +120,9 @@ contact email from `.env`, so any operator can reach the person running it.
 | Licence | Varies by authority; most publish under OGL v3.0 but this is not guaranteed — check per document before republishing |
 | Key | None |
 | Rate limit | Default, per host |
-| Coverage | Bounded by `pipeline/authority_websites.py`, which holds only entries verified by request. Authorities without one are queued in `review_queue` |
+| Endpoints | ModernGov document search: `{committee_url}/ieSearchResults2.aspx?SS={term}&DT=3&ADV=0&CA=false&SB=true&PG={n}` — a plain GET; the parameters are the search form's own hidden defaults |
+| Coverage | Bounded by `pipeline/authority_websites.py`, which holds only entries verified by request, plus committee-system links a council publishes on its own home page where the target then answers a ModernGov signature path. Authorities with neither are queued in `review_queue`. Only ModernGov is searchable — CMIS and others are detected and recorded as unsupported |
+| Notes | Verified live against Kent, Kirklees and Darlington on 2026-08-11. `/mgSearchResults.aspx` and `/mgDocumentSearch.aspx` are **not** the document search and 302 to `mgError.aspx`. Capped at 3 result pages per term per council |
 
 ## Module 11 — Public Health Grant
 
@@ -143,7 +145,82 @@ contact email from `.env`, so any operator can reach the person running it.
 | Rate limit | Default |
 | Notes | Area types are versioned by local government reorganisation period; indicator IDs are pinned in `pipeline/fingertips_indicators.py` so the collected set cannot change silently |
 
+## Module 13 — Local authority revenue budgets
+
+| | |
+| --- | --- |
+| Source | MHCLG local authority revenue expenditure and financing, published on GOV.UK |
+| Endpoints | `https://www.gov.uk/api/search.json`, `https://www.gov.uk/api/content/{path}`, and the attached ODS budget returns |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | Budgeted, not outturn. Line codes and column labels are stored as published rather than mapped to a normalised chart of accounts |
+
+## Module 14 — Provider annual reports
+
+| | |
+| --- | --- |
+| Source | The accounts PDFs Module 3 has already downloaded from the Charity Commission — **no new fetching** |
+| Licence | The charity's own copyright; filed accounts are a public record. Passages are extracted for evidence, not republished wholesale |
+| Key | None |
+| Rate limit | N/A — reads the local raw archive |
+| Notes | Records disclosure gaps as facts: a topic with no matching passage is recorded as not disclosed, which is a finding about the report rather than a failure to find one |
+
+## Module 15 — FOI evidence
+
+| | |
+| --- | --- |
+| Sources | mySociety's published authority register (WhatDoTheyKnow); council disclosure logs |
+| Endpoints | mySociety's sanctioned authority CSV; per-council disclosure log pages |
+| Licence | mySociety data under CC BY-SA; council disclosure logs vary, most OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | **Publicly published FOI evidence, not all FOI responses.** WhatDoTheyKnow's `/search/` is disallowed by its robots.txt and its site is behind a bot challenge; this module uses the CSV mySociety publish for the purpose instead, which is why it covers 315 authorities rather than one |
+
 ---
+
+## Considered and not collected
+
+Sources that were scoped and then deliberately left out. Recorded here so the
+absence is a decision with reasons attached rather than an oversight.
+
+### Care Opinion
+
+| | |
+| --- | --- |
+| Source | `https://www.careopinion.org.uk` — first-person stories about health and care services |
+| Status | **Not collected.** See the decision below |
+| Licence | CC BY-NC-SA 4.0 — non-commercial, attribution, share-alike |
+| Checked | 2026-08-11 |
+
+Four findings, any one of which would be enough:
+
+1. **The API is subscriber-only.** "API access is always in the context of a
+   subscription on Care Opinion." There is no free non-commercial tier, so the
+   brief's "prefer official APIs over scraping" route is closed without the
+   campaign buying a subscription.
+2. **`robots.txt` disallows every path that would make crawling useful** —
+   `/api/`, `/opinions/searchresults`, `/tagstats`, `/activitystats`, `/feed/`.
+   The service pages that remain crawlable render their content through those
+   same disallowed endpoints, so a compliant fetch returns "Loading stories".
+3. **There is no filtered route to the relevant stories.** The sitemap offers
+   774,150 individual opinion URLs and 53,996 service pages with no way to
+   narrow to substance misuse services without the disallowed search. Reading
+   them all is precisely the behaviour that robots.txt spends a hundred lines
+   objecting to.
+4. **It is the wrong kind of evidence, collected the wrong way.** These are
+   first-person health narratives written by patients and their families to
+   improve their own care. Corpus-collecting them into a pay campaign database
+   is not what they were published for, and what they speak to is service
+   quality — turning that into an argument about pay is exactly the inference
+   this pipeline refuses to manufacture elsewhere.
+
+The share-alike licence is a fifth problem for exports, which are otherwise
+OGL throughout.
+
+If a subscription is obtained, (1) and (2) resolve and the module becomes
+buildable against API v2 (documented at 5 requests per second). (4) would
+still need answering, and it is not a technical question.
 
 ## Exports
 
