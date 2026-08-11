@@ -97,6 +97,43 @@ class FetchResult:
             )
 
 
+class _RequestCounter:
+    """How many requests this process has made, and to how many hosts.
+
+    Per-request log lines used to be the only sign a run was alive, and they
+    scrolled the progress display away. This is the same information at a
+    scale a person can actually read: a number that goes up. The detail is
+    still written to logs/{module}.log for every request.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.total = 0
+        self.not_modified = 0
+        self._hosts: set[str] = set()
+
+    def record(self, host: str, not_modified: bool) -> None:
+        with self._lock:
+            self.total += 1
+            self._hosts.add(host)
+            if not_modified:
+                self.not_modified += 1
+
+    @property
+    def hosts(self) -> int:
+        with self._lock:
+            return len(self._hosts)
+
+    def reset(self) -> None:
+        with self._lock:
+            self.total = 0
+            self.not_modified = 0
+            self._hosts.clear()
+
+
+REQUESTS = _RequestCounter()
+
+
 class _HostClock:
     """Process-wide next-free time per host.
 
@@ -425,9 +462,14 @@ class PipelineHTTPClient:
             if cached["last_modified"]:
                 request_headers["If-Modified-Since"] = cached["last_modified"]
 
+        # Written to the log file, not the terminal: one line per request is
+        # the audit trail, and at four hours of crawling it is also the thing
+        # that scrolls the progress display into oblivion. The terminal shows
+        # the counter instead.
         log.info("http.get", url=request_url, source_system=self.source_system)
         response = self._do_request("GET", url, params=params, headers=request_headers)
         retrieved_at = datetime.now(timezone.utc)
+        REQUESTS.record(host, response.status_code == 304)
 
         not_modified = response.status_code == 304
         archived_path = None

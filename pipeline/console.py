@@ -32,6 +32,7 @@ from typing import Iterable, Iterator, TypeVar
 from rich.console import Console
 from rich.progress import (
     BarColumn,
+    ProgressColumn,
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
@@ -41,6 +42,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 
 T = TypeVar("T")
@@ -144,6 +146,26 @@ def success(text: str) -> None:
     console().print(f"[pipeline.ok]ok[/] {text}")
 
 
+class RequestCountColumn(ProgressColumn):
+    """Live request total, rendered on every refresh.
+
+    This is what replaced a line per HTTP request on the terminal. A crawl
+    that is rate-limited rather than hung still visibly ticks over, which was
+    the only thing the old firehose of `http.get` lines was really telling
+    anyone.
+    """
+
+    def render(self, task) -> Text:
+        from pipeline.http import REQUESTS
+
+        total = REQUESTS.total
+        if not total:
+            return Text("", style="pipeline.muted")
+        cached = REQUESTS.not_modified
+        suffix = f" ({cached} cached)" if cached else ""
+        return Text(f"{total:,} req{suffix}", style="pipeline.muted")
+
+
 def _columns(show_rate: bool) -> list:
     # "line" is the ASCII spinner (-\|/). Chosen unconditionally rather than
     # only when the encoding forces it, so what the maintainer sees on Windows
@@ -155,6 +177,7 @@ def _columns(show_rate: bool) -> list:
                    finished_style="pipeline.ok", pulse_style="pipeline.source"),
         MofNCompleteColumn(),
         TaskProgressColumn(),
+        RequestCountColumn(),
         TimeElapsedColumn(),
     ]
     if show_rate:
