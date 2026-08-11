@@ -1,0 +1,47 @@
+{
+  "_fixture_note": [
+    "SYNTHETIC PERSON, REAL SHAPE. Every key, nesting and value format here was",
+    "verified against a live /disqualified-officers/natural/{id} response on",
+    "2026-08-11 — this is the only fixture in the suite whose values are not as",
+    "served, and the reason is that the real response identifies a named person",
+    "by full name, date of birth and home address. Committing that to this",
+    "repository would put a specific individual's personal data in a public git",
+    "history to test a parser that does not care what the name is.",
+    "The name, person number, dates and case identifier below are invented.",
+    "This key is ignored by the parser."
+  ],
+  "person_number": "999000010001",
+  "etag": "0000000000000000000000000000000000000000",
+  "kind": "natural-disqualification",
+  "title": "Mr",
+  "forename": "Alexander",
+  "other_forenames": "Peter",
+  "surname": "EXAMPLE",
+  "nationality": "British",
+  "date_of_birth": "1974-03-09",
+  "links": {
+    "self": "/disqualified-officers/natural/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "disqualifications": [
+    {
+      "case_identifier": "INV0000001",
+      "company_names": [
+        "EXAMPLE TRADING LIMITED"
+      ],
+      "disqualification_type": "undertaking",
+      "disqualified_from": "2024-05-01",
+      "disqualified_until": "2031-04-30",
+      "undertaken_on": "2024-04-02",
+      "address": {
+        "address_line_1": "1 Example Street",
+        "locality": "Exampleton",
+        "postal_code": "EX1 1EX"
+      },
+      "reason": {
+        "act": "company-directors-disqualification-act-1986",
+        "section": "7",
+        "description_identifier": "order-or-undertaking-and-reporting-provisions"
+      }
+    }
+  ]
+}

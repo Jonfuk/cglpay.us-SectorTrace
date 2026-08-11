@@ -138,6 +138,11 @@ def _register_company_mocks(httpx_mock, number="03861209"):
             {"transaction_id": "t1", "date": "2025-06-01", "category": "accounts",
              "description": "accounts-with-accounts-type-group"},
         ]})
+    # The disqualification sweep runs for every serving director. An empty
+    # register answer is the normal case and is what these tests want.
+    httpx_mock.add_response(
+        url=re.compile(rf"{base}/search/disqualified-officers.*"),
+        json={"total_results": 0, "items": []}, is_reusable=True)
 
 
 def test_run_from_seed_identifier(httpx_mock, settings, conn):

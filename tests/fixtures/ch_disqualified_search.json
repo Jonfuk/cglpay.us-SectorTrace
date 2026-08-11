@@ -1,0 +1,59 @@
+{
+  "_fixture_note": [
+    "SYNTHETIC PEOPLE, REAL SHAPE — see ch_disqualified_officer_natural.json.",
+    "The two items below are the two kinds the register really returns: a",
+    "natural person and a corporate disqualification. The corporate one is here",
+    "because the live search does return them (sanctioned entities appear",
+    "alongside people) and the sweep has to skip them: a company is not a",
+    "serving director of a provider. Keys and value formats verified live on",
+    "2026-08-11."
+  ],
+  "kind": "search#disqualified-officers",
+  "total_results": 2,
+  "items_per_page": 20,
+  "page_number": 1,
+  "start_index": 0,
+  "items": [
+    {
+      "kind": "searchresults#disqualified-officer",
+      "title": "Alexander Peter EXAMPLE",
+      "description": "Born on 9 March 1974 - Disqualified",
+      "description_identifiers": [
+        "born-on"
+      ],
+      "date_of_birth": "1974-03-09T00:00:00",
+      "address": {
+        "address_line_1": "1 Example Street",
+        "locality": "Exampleton",
+        "postal_code": "EX1 1EX",
+        "country": "United Kingdom"
+      },
+      "address_snippet": "1 Example Street, Exampleton, United Kingdom, EX1 1EX",
+      "matches": {
+        "snippet": []
+      },
+      "snippet": "",
+      "links": {
+        "self": "/disqualified-officers/natural/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "kind": "searchresults#disqualified-officer",
+      "title": "EXAMPLE HOLDINGS LLC",
+      "description": "Disqualified",
+      "address": {
+        "address_line_1": "2 Example Street",
+        "locality": "Exampleton",
+        "country": "United Kingdom"
+      },
+      "address_snippet": "2 Example Street, Exampleton, United Kingdom",
+      "matches": {
+        "snippet": []
+      },
+      "snippet": "",
+      "links": {
+        "self": "/disqualified-officers/corporate/bbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ]
+}

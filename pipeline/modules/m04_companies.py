@@ -34,6 +34,33 @@ by Companies House, not guesses: CGL was "CRIME REDUCTION INITIATIVES" until
 Officers are personal data and live only in restricted_company_officers; a
 name-free v_company_officer_changes view carries the analytically useful
 churn counts.
+
+VIABILITY. Two further questions are answered from the same key and the same
+client, because the register already holds the answers:
+
+  * Insolvency. The company profile publishes `links.insolvency` and a
+    `has_insolvency_history` flag, so the case list is fetched only where the
+    source says there is one — no speculative request per company. A company
+    with no case answers 404, which is "no case published" and not a failure.
+    This is not hypothetical for this sector: LIFELINE PROJECT (01842240) went
+    into administration in 2017 and was wound up in 2018.
+
+    Dissolved is not insolvent. Both dissolved companies this pipeline holds
+    have no insolvency case at all — a company can be struck off having paid
+    everyone — so `company_status` says how a company ended and only the
+    insolvency tables say whether it failed.
+
+  * Disqualified directors. Companies House publishes no link from an
+    appointment to a disqualification, so the only route is a name search of
+    the register. That is exactly the kind of match this module already
+    refuses to trust, and the consequence of being wrong is worse here than
+    anywhere else in the pipeline: it would record that a named person had
+    been banned from directing companies when they had not. So the sweep is
+    narrow (serving directors only, who are the only people the question is
+    about), and nothing is stored without corroboration on the published month
+    and year of birth as well as the name. Weaker matches are review items.
+    Expect no rows: acting while disqualified is a criminal offence, so this
+    is a checkable negative rather than a discovery engine.
 """
 from __future__ import annotations
 
@@ -170,19 +197,31 @@ def _fetch_company(client: PipelineHTTPClient, conn, module_name: str,
     return data
 
 
-def _fetch_officers(client: PipelineHTTPClient, conn, module_name: str, company_number: str) -> int:
+def _fetch_officers(client: PipelineHTTPClient, conn, module_name: str,
+                     company_number: str) -> tuple[int, list[dict]]:
+    """Writes the officer list, and returns (count, serving directors).
+
+    The serving directors travel back to the caller rather than being re-read
+    from the table because the disqualification check needs their date of
+    birth, and their date of birth is deliberately not stored. Companies House
+    publishes it as a month and a year for exactly this reason; holding it
+    would be collecting a person's birthday to answer a question about a
+    provider's governance.
+    """
     result = client.get(f"{API_BASE}/company/{company_number}/officers",
                          params={"items_per_page": 100})
     if not result.ok:
         db.record_review_item(conn, module_name, "company_officers_unavailable", company_number,
                                json.dumps({"status": result.status_code}))
-        return 0
+        return 0, []
     written = 0
+    serving_directors: list[dict] = []
     for officer in json.loads(result.body).get("items", []):
         address = officer.get("address") or {}
+        officer_ref = _officer_ref(officer)
         db.upsert(conn, "restricted_company_officers", {
             "company_number": company_number,
-            "officer_ref": _officer_ref(officer),
+            "officer_ref": officer_ref,
             "officer_name": officer.get("name"),
             "officer_role": officer.get("officer_role"),
             "appointed_on": officer.get("appointed_on"),
@@ -192,6 +231,77 @@ def _fetch_officers(client: PipelineHTTPClient, conn, module_name: str, company_
             "address_locality": address.get("locality"),
         }, natural_key=["company_number", "officer_ref"])
         written += 1
+
+        if is_serving_director(officer):
+            serving_directors.append({
+                "company_number": company_number,
+                "officer_ref": officer_ref,
+                "name": officer.get("name"),
+                "person_number": officer.get("person_number"),
+                "date_of_birth": officer.get("date_of_birth"),
+            })
+    return written, serving_directors
+
+
+def _fetch_insolvency(client: PipelineHTTPClient, conn, module_name: str,
+                       company_number: str, profile: dict) -> int:
+    """Insolvency cases, where the company profile says there are any.
+
+    Gated on the profile's own `links.insolvency` rather than probing every
+    company: the register tells us where to look, and asking nine companies a
+    question eight of them answer 404 to is a request budget spent on nothing.
+    """
+    links = profile.get("links") or {}
+    if not (links.get("insolvency") or profile.get("has_insolvency_history")):
+        return 0
+
+    result = client.get(f"{API_BASE}/company/{company_number}/insolvency")
+    if not result.ok:
+        # A 404 here would contradict the profile, which is worth noticing
+        # rather than passing over — the gate above means we only ask when the
+        # source has said there is something to fetch.
+        db.record_review_item(
+            conn, module_name, "company_insolvency_unavailable", company_number,
+            json.dumps({"status": result.status_code,
+                         "note": "the company profile advertises an insolvency history but the "
+                                  "case list did not answer"}))
+        return 0
+
+    written = 0
+    for index, case in enumerate(json.loads(result.body).get("cases", []), start=1):
+        case_number = str(case.get("number") or index)
+        db.upsert(conn, "company_insolvency_cases", {
+            "company_number": company_number,
+            "case_number": case_number,
+            "case_type": case.get("type"),
+            **_provenance(result),
+        }, natural_key=["company_number", "case_number"])
+        written += 1
+
+        for entry in case.get("dates") or []:
+            if not entry.get("type"):
+                continue
+            db.upsert(conn, "company_insolvency_case_dates", {
+                "company_number": company_number,
+                "case_number": case_number,
+                "date_type": entry["type"],
+                "date_value": entry.get("date"),
+            }, natural_key=["company_number", "case_number", "date_type"])
+
+        for practitioner in case.get("practitioners") or []:
+            if not practitioner.get("name"):
+                continue
+            # Name, role and dates only. The address the source supplies is the
+            # practitioner's firm and answers nothing this pipeline asks.
+            db.upsert(conn, "restricted_company_insolvency_practitioners", {
+                "company_number": company_number,
+                "case_number": case_number,
+                "practitioner_name": practitioner["name"],
+                "role": practitioner.get("role"),
+                "appointed_on": practitioner.get("appointed_on"),
+                "ceased_to_act_on": practitioner.get("ceased_to_act_on"),
+            }, natural_key=["company_number", "case_number", "practitioner_name"])
+
     return written
 
 
@@ -235,6 +345,243 @@ def _fetch_filings(client: PipelineHTTPClient, conn, module_name: str, company_n
         if start_index >= data.get("total_count", 0):
             break
     return written
+
+
+# --- disqualified directors ---------------------------------------------------
+#
+# See the module docstring for why this is narrow and why it stores almost
+# nothing. The short version: a wrong match here is an assertion that a named
+# person was banned from directing companies.
+
+def is_serving_director(officer: dict) -> bool:
+    """Serving directors only.
+
+    Disqualification bars a person from acting as a director, so a serving
+    director is the only officer the question is actually about. Sweeping
+    resigned officers and company secretaries as well would multiply the
+    number of people searched against a disqualification register several-fold
+    in exchange for answering a question nobody asked.
+    """
+    role = (officer.get("officer_role") or "").lower()
+    return "director" in role and not officer.get("resigned_on")
+
+
+def split_officer_name(name: str | None) -> tuple[str, list[str]]:
+    """Companies House writes officer names as "SURNAME, Forename Other".
+
+    Returns (surname, forenames), both lower-cased, or ("", []) when the name
+    cannot be split. A name with no comma is treated as "Forename … Surname",
+    which is the other form the register uses.
+    """
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    if not text:
+        return "", []
+    if "," in text:
+        surname, _, forenames = text.partition(",")
+        return surname.strip().lower(), [p.lower() for p in forenames.split() if p]
+    parts = text.split()
+    if len(parts) < 2:
+        return "", []
+    return parts[-1].lower(), [p.lower() for p in parts[:-1]]
+
+
+def disqualification_search_term(name: str | None) -> str | None:
+    """The name to put to the register's search, as a person would write it."""
+    surname, forenames = split_officer_name(name)
+    if not surname or not forenames:
+        return None
+    return f"{forenames[0]} {surname}".strip()
+
+
+def names_agree(officer_name: str | None, register_title: str | None) -> bool:
+    """Whether an officer and a register hit are even the same name.
+
+    The two sides write names in opposite orders — Companies House gives an
+    officer as "SMITH, Aaron Donald" and the register gives a search hit as
+    "Aaron Donald SMITH" — which split_officer_name handles because the comma
+    is what distinguishes them.
+    """
+    surname, forenames = split_officer_name(officer_name)
+    hit_surname, hit_forenames = split_officer_name(register_title)
+    if not surname or not forenames or not hit_surname or not hit_forenames:
+        return False
+    return surname == hit_surname and forenames[0] == hit_forenames[0]
+
+
+def dates_of_birth_agree(officer: dict, published: str | None) -> bool:
+    """Month and year only — all Companies House publishes for a director.
+
+    Weak alone, decisive alongside a full name. A missing date on either side
+    is never treated as agreement: no corroboration is possible, so there is
+    nothing to corroborate with.
+    """
+    born = officer.get("date_of_birth") or {}
+    month, year = born.get("month"), born.get("year")
+    if not month or not year or not published or len(str(published)) < 7:
+        return False
+    text = str(published)
+    try:
+        return int(text[:4]) == int(year) and int(text[5:7]) == int(month)
+    except ValueError:
+        return False
+
+
+def search_hit_is_worth_opening(officer: dict, item: dict) -> tuple[bool, bool]:
+    """(name agrees, date of birth agrees) for one register search hit.
+
+    Decided from the search response alone, which already carries the hit's
+    full name and date of birth. This is what keeps the sweep bounded: the
+    register's search is fuzzy — a search for one director's name returns
+    every approximate match it holds — and opening each hit's detail record to
+    find that out would be one request per stranger, at one every two seconds,
+    per director. Nothing is opened until both the name and the date of birth
+    already agree.
+    """
+    if not names_agree(officer.get("name"), item.get("title")):
+        return False, False
+    return True, dates_of_birth_agree(officer, item.get("date_of_birth"))
+
+
+def disqualification_match_basis(officer: dict, record: dict) -> str | None:
+    """How, if at all, a register record corroborates an officer's identity.
+
+    'person_number'          both sides carry the same Companies House person
+                              number — an identifier match.
+    'name_and_date_of_birth' surname, first forename and the published month
+                              and year of birth all agree.
+    None                     anything less, which is never stored.
+
+    The date-of-birth test is what makes this usable at all. Companies House
+    publishes only a month and a year for a serving director, which is weak on
+    its own but decisive alongside a full name: sharing a surname, a forename
+    and a birth month with a disqualified director is a coincidence worth
+    acting on, sharing a name alone is not.
+    """
+    officer_person = str(officer.get("person_number") or "").strip()
+    record_person = str(record.get("person_number") or "").strip()
+    if officer_person and officer_person == record_person:
+        return "person_number"
+
+    surname, forenames = split_officer_name(officer.get("name"))
+    if not surname or not forenames:
+        return None
+    if surname != (record.get("surname") or "").strip().lower():
+        return None
+    if forenames[0] != (record.get("forename") or "").strip().lower():
+        return None
+
+    born = officer.get("date_of_birth") or {}
+    month, year = born.get("month"), born.get("year")
+    if not month or not year:
+        # No published date of birth means no corroboration is possible, and a
+        # name on its own is not enough to write this row.
+        return None
+    record_dob = str(record.get("date_of_birth") or "")
+    if len(record_dob) < 7:
+        return None
+    try:
+        if int(record_dob[:4]) != int(year) or int(record_dob[5:7]) != int(month):
+            return None
+    except ValueError:
+        return None
+    return "name_and_date_of_birth"
+
+
+def _sweep_disqualifications(client: PipelineHTTPClient, conn, module_name: str,
+                              directors: list[dict]) -> tuple[int, int]:
+    """Check serving directors against the disqualified officers register.
+
+    Returns (rows written, candidates queued for review). One search per
+    distinct person, not per appointment: a director of three companies in a
+    group is one person and one question.
+    """
+    written = 0
+    queued = 0
+    searched: dict[str, list[dict]] = {}
+    for director in directors:
+        term = disqualification_search_term(director.get("name"))
+        if term:
+            searched.setdefault(term, []).append(director)
+
+    for term, appointments in sorted(searched.items()):
+        result = client.get(f"{API_BASE}/search/disqualified-officers",
+                             params={"q": term, "items_per_page": 20})
+        if not result.ok:
+            db.record_review_item(
+                conn, module_name, "disqualification_search_failed", term,
+                json.dumps({"status": result.status_code}))
+            continue
+
+        for item in json.loads(result.body).get("items", []):
+            self_link = (item.get("links") or {}).get("self") or ""
+            # Corporate disqualifications exist (sanctioned entities) but a
+            # company is not a serving director of these providers.
+            if "/natural/" not in self_link:
+                continue
+
+            # Which of this term's directors, if any, this hit could be —
+            # decided from the search response, before anything is opened.
+            candidates = []
+            for director in appointments:
+                name_agrees, dob_agrees = search_hit_is_worth_opening(director, item)
+                if name_agrees and dob_agrees:
+                    candidates.append(director)
+                elif name_agrees:
+                    # Same name, different birth month or year: a namesake.
+                    # Recorded so the sweep's misses are visible, and
+                    # deliberately without the register record's own name,
+                    # date of birth or case — the whole point of the row is
+                    # that this is NOT known to be the same person, and
+                    # copying their details into it would attach a
+                    # disqualified person's identity to a director who is not
+                    # them.
+                    db.record_review_item(
+                        conn, module_name, "unconfirmed_disqualification_name_match",
+                        f"{director['company_number']} {director['officer_ref']}",
+                        json.dumps({"searched_term": term,
+                                     "note": "the disqualified officers register holds a record "
+                                              "under this director's name whose date of birth "
+                                              "does not match; NOT stored as a disqualification"}))
+                    queued += 1
+            if not candidates:
+                continue
+
+            detail_result = client.get(f"{API_BASE}{self_link}")
+            if not detail_result.ok:
+                continue
+            record = json.loads(detail_result.body)
+
+            for director in candidates:
+                # Re-checked against the full record, which carries the person
+                # number the search response does not. The search filter above
+                # is about bounding requests; this is the decision.
+                basis = disqualification_match_basis(director, record)
+                if basis is None:
+                    continue
+
+                for disqualification in record.get("disqualifications") or []:
+                    case_identifier = disqualification.get("case_identifier")
+                    if not case_identifier:
+                        continue
+                    reason = disqualification.get("reason") or {}
+                    db.upsert(conn, "restricted_officer_disqualifications", {
+                        "company_number": director["company_number"],
+                        "officer_ref": director["officer_ref"],
+                        "officer_name": director.get("name"),
+                        "case_identifier": case_identifier,
+                        "disqualification_type": disqualification.get("disqualification_type"),
+                        "disqualified_from": disqualification.get("disqualified_from"),
+                        "disqualified_until": disqualification.get("disqualified_until"),
+                        "reason_act": reason.get("act"),
+                        "reason_description": reason.get("description_identifier"),
+                        "disqualified_company_names": ", ".join(
+                            disqualification.get("company_names") or []) or None,
+                        "match_basis": basis,
+                        **_provenance(detail_result),
+                    }, natural_key=["company_number", "officer_ref", "case_identifier"])
+                    written += 1
+
+    return written, queued
 
 
 def _search_candidates(client: PipelineHTTPClient, conn, module_name: str,
@@ -300,6 +647,8 @@ def run(ctx: ModuleContext) -> None:
     companies_written = 0
     officers_written = 0
     filings_written = 0
+    insolvency_cases = 0
+    serving_directors: list[dict] = []
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         client.set_basic_auth(api_key, "")
@@ -338,11 +687,27 @@ def run(ctx: ModuleContext) -> None:
                     role=data.get("type"),
                 )
 
-            officers_written += _fetch_officers(client, conn, module_name, company_number)
+            officers, directors = _fetch_officers(client, conn, module_name, company_number)
+            officers_written += officers
+            serving_directors.extend(directors)
             filings_written += _fetch_filings(client, conn, module_name, company_number, ctx.limit)
+            insolvency_cases += _fetch_insolvency(
+                client, conn, module_name, company_number, data)
 
             if not ctx.dry_run:
                 conn.commit()
 
+        # After every company, so a director of several group companies is one
+        # search rather than one per appointment.
+        ctx.phase("checking directors against the disqualified register")
+        disqualifications, unconfirmed = _sweep_disqualifications(
+            client, conn, module_name, serving_directors)
+        if not ctx.dry_run:
+            conn.commit()
+
     log.info("companies.run_complete", companies=companies_written,
-              officers=officers_written, filings=filings_written)
+              officers=officers_written, filings=filings_written,
+              insolvency_cases=insolvency_cases,
+              serving_directors_checked=len(serving_directors),
+              disqualifications=disqualifications,
+              unconfirmed_disqualification_names=unconfirmed)

@@ -1,0 +1,110 @@
+{
+  "etag": "ff11549bfdd513225fd3e3afe5574942b67e9b70",
+  "cases": [
+    {
+      "type": "in-administration",
+      "dates": [
+        {
+          "type": "administration-started-on",
+          "date": "2017-06-02"
+        },
+        {
+          "type": "administration-ended-on",
+          "date": "2018-06-07"
+        }
+      ],
+      "practitioners": [
+        {
+          "name": "Russell Stewart Cash",
+          "address": {
+            "address_line_1": "7th Floor, Ship Canal House 98 King Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4WU"
+          },
+          "ceased_to_act_on": "2018-06-07",
+          "role": "practitioner"
+        },
+        {
+          "name": "Geoffrey Lambert Carton-Kelly",
+          "address": {
+            "address_line_1": "7th Floor Ship Canal House  98 King Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4WU"
+          },
+          "ceased_to_act_on": "2018-06-07",
+          "role": "practitioner"
+        },
+        {
+          "name": "David Thornhill",
+          "address": {
+            "address_line_1": "7th Floor Ship Canal House 98 King Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4WU"
+          },
+          "ceased_to_act_on": "2018-06-07",
+          "role": "practitioner"
+        }
+      ],
+      "number": "1"
+    },
+    {
+      "type": "creditors-voluntary-liquidation",
+      "dates": [
+        {
+          "type": "wound-up-on",
+          "date": "2018-06-07"
+        },
+        {
+          "type": "dissolved-on",
+          "date": "2024-01-25"
+        }
+      ],
+      "practitioners": [
+        {
+          "name": "Anthony Collier",
+          "address": {
+            "address_line_1": "4th Floor Abbey House",
+            "address_line_2": "32 Booth Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4AB"
+          },
+          "appointed_on": "2020-07-13",
+          "role": "practitioner"
+        },
+        {
+          "name": "Russell Stewart Cash",
+          "address": {
+            "address_line_1": "7th Floor, Ship Canal House 98 King Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4WU"
+          },
+          "appointed_on": "2018-06-07",
+          "ceased_to_act_on": "2018-08-22",
+          "role": "practitioner"
+        },
+        {
+          "name": "Geoffrey Lambert Carton-Kelly",
+          "address": {
+            "address_line_1": "2nd Floor 110 Cannon Street",
+            "locality": "London",
+            "postal_code": "EC4N 6EU"
+          },
+          "appointed_on": "2018-06-07",
+          "role": "practitioner"
+        },
+        {
+          "name": "David Thornhill",
+          "address": {
+            "address_line_1": "7th Floor Ship Canal House 98 King Street",
+            "locality": "Manchester",
+            "postal_code": "M2 4WU"
+          },
+          "appointed_on": "2018-06-07",
+          "ceased_to_act_on": "2020-07-13",
+          "role": "practitioner"
+        }
+      ],
+      "number": "2"
+    }
+  ]
+}

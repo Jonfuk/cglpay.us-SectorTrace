@@ -94,6 +94,29 @@ pay scale, and not the pay of anyone currently in post.
   2025. Only `match_basis = 'seed'` rows are linked to a provider.
 - Officer counts are aggregates. Individual officers are personal data and are
   never exported.
+- **Dissolved is not insolvent, and the two must never be reported as one.** A
+  company can be struck off having paid everyone. Of the dissolved companies
+  this pipeline holds, none has an insolvency case. `company_status` says how a
+  company ended; only `company_insolvency_cases` says whether it failed, and
+  `v_provider_viability.viability_flag` keeps the two apart on purpose —
+  `dissolved_no_insolvency_case` is not a failure.
+- **An insolvency case is not a story about pay, and the dates are the
+  evidence.** `company_insolvency_case_dates` keeps Companies House's own date
+  vocabulary because an administration ending and a company being wound up are
+  different events. Do not collapse them into a single "date failed".
+- **`restricted_officer_disqualifications` may be empty, and that is the
+  expected result.** Acting as a director while disqualified is a criminal
+  offence, so a serving director of a large registered charity appearing on
+  that register would be extraordinary. An empty table is a checkable
+  negative, not a check that was skipped.
+- **Nothing reaches that table on a name alone.** Companies House publishes no
+  link from an appointment to a disqualification, so the register is searched
+  by name and a match is stored only where the month and year of birth agree
+  too, or where the person numbers match. Register records that came back for
+  a director's name without corroborating are in `review_queue` under
+  `unconfirmed_disqualification_name_match` — **those are not disqualified
+  people**, they are names that happen to coincide, and the review rows
+  deliberately carry none of the register's identifying detail.
 
 ### CQC (Module 5)
 

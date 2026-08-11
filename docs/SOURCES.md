@@ -69,6 +69,33 @@ contact email from `.env`, so any operator can reach the person running it.
 | Key | **`COMPANIES_HOUSE_API_KEY`** — free registration. HTTP basic auth, key as username |
 | Rate limit | Default (the API's own documented limit is 600 requests / 5 minutes) |
 | Personal data | Officers are named. Stored only in `restricted_company_officers` |
+| Also collects | **Insolvency cases** (`/company/{n}/insolvency`) and a **disqualified-director check** (`/search/disqualified-officers`) — see below |
+
+**Insolvency.** Fetched only where the company profile publishes
+`links.insolvency` or `has_insolvency_history`, so a company with no case
+costs no request. A company with no case answers 404, which is "no case
+published" and not a failure.
+
+Not hypothetical for this sector: **LIFELINE PROJECT (01842240)** — large
+enough to appear as a co-respondent alongside CGL in employment tribunal
+judgments — went into administration on 2017-06-02, was wound up on
+2018-06-07 and dissolved on 2024-01-25.
+
+**Dissolved is not insolvent.** Both dissolved companies this pipeline holds
+have no insolvency case at all: a company can be struck off having paid
+everyone. `company_status` says how a company ended; only
+`company_insolvency_cases` says whether it failed.
+
+**Disqualified directors.** Companies House publishes no link from an
+appointment to a disqualification, so the only route is a name search of the
+register — the exact kind of match this module already refuses to trust, and
+the one where being wrong is worst: it would record that a named person had
+been banned from directing companies. So the sweep covers **serving directors
+only**, and a row is stored only where the register corroborates on the
+published **month and year of birth** as well as the name, or where the person
+numbers match outright. Anything weaker is a review item. Expect the table to
+be empty — acting while disqualified is a criminal offence, so this is a
+checkable negative, not a discovery engine.
 
 ## Module 5 — CQC
 
@@ -250,7 +277,7 @@ Buildable. Worth knowing it is a **risk signal about the employer, not about
 pay** — it belongs in the enforcement chronology rather than in any pay
 figure.
 
-### Insolvency — VIABLE, but not by the proposed route
+### Insolvency — VIABLE, but not by the proposed route — **BUILT into Module 4**
 
 | | |
 | --- | --- |
@@ -263,6 +290,17 @@ disqualification both come through Companies House, where this pipeline
 already holds a key and a working client (m04). That makes it an **extension
 of m04 rather than a new module** — `company_status` already distinguishes
 liquidation and administration.
+
+Built on 2026-08-11; see Module 4 above. Two things the probe had not
+established, both found by building it:
+
+* `/company/{n}/insolvency` answers **404 when there is no case**, and the
+  company profile carries `links.insolvency` and `has_insolvency_history` — so
+  the case list is fetched only where the register says there is one, and no
+  company is asked a question it will answer 404 to.
+* There is **no link from an officer's appointment to a disqualification**, so
+  the register can only be searched by name. That is what forced the
+  name-plus-date-of-birth corroboration rule rather than a simple lookup.
 
 ### Land Registry — PARTLY VIABLE
 

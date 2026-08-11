@@ -118,7 +118,7 @@ one or both.
 | `m01_procurement` | Find a Tender, Contracts Finder | Contract notices, values, suppliers, direct awards |
 | `m02_tribunals` | GOV.UK employment tribunal decisions | Judgments against providers (pseudonymised) |
 | `m03_charity_finance` | Charity Commission + filed accounts | Income, wages, employee numbers, agency spend, pay bands |
-| `m04_companies` | Companies House | Group structure, former names, filings, officer churn |
+| `m04_companies` | Companies House | Group structure, former names, filings, officer churn, insolvency cases, disqualified-director check |
 | `m05_cqc` | CQC public API | Registered locations, ratings, inspection reports |
 | `m06_workforce_census` | NHS Benchmarking Network | Vacancy, turnover, WTE, volunteer and contract-type metrics |
 | `m07_ndtms` | OHID via GOV.UK | Published treatment statistics; LA-level tables where they exist |
