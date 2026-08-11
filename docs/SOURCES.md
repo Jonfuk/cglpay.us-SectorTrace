@@ -177,6 +177,46 @@ contact email from `.env`, so any operator can reach the person running it.
 | Rate limit | Default (2s/host), conditional requests |
 | Notes | **Publicly published FOI evidence, and discovery only — not full responses.** The feed returns a truncated search snippet per event and never a message body; full text needs `/request/<slug>.json`, which returns a Cloudflare 403 to automated clients and is not worked around. The feed is fetched under an explicit, logged exception to mySociety's robots.txt (`Settings.robots_exceptions`) — see `docs/mysociety-access-request.md`, which is the outstanding ask to put it on a permitted footing |
 
+## Module 16 — NHS Jobs advertised pay
+
+| | |
+| --- | --- |
+| Source | NHS Jobs candidate search |
+| Endpoint | `https://www.jobs.nhs.uk/candidate/search/results?employer=…&page=N` |
+| Licence | Crown copyright on the service; the advert content is the employer's |
+| Key | None |
+| Rate limit | Default (2s/host), conditional requests, max 5 result pages per name variant |
+| robots.txt | Answers with an **HTML page, not a rules file** — a "Service Domain Information" shell containing no user-agent, allow or disallow directives. Verified rather than assumed, and asserted in the tests. Re-check it if the service is redesigned |
+| Notes | The only **direct** pay evidence in this pipeline. Read the two limits below before using any figure from it |
+
+**Searching by employer does not filter by employer.** Measured against the
+live service:
+
+| Query | Result |
+| --- | --- |
+| `employer=Change Grow Live` | "20 jobs found"; page 1 all CGL, page 2 drifting into other employers |
+| `employer=Turning Point` | "5 jobs found", one of them **West Point Medical Centre** |
+| `employer=Richmond Fellowship` | "18 jobs found", **every one** Kingston and Richmond NHS Foundation Trust |
+| `employer=Zzqxwv Nonexistent Employer Ltd` | **"659 jobs found"** — Employ-Ability, NHS Employers, Nimbuscare and others |
+| `keyword=zzqxwv nonexistent role` | "11537 jobs found"; `skipPhraseSuggester=true` changes nothing |
+| `employer=Addaction` | **"No result found for Addaction"** — a distinct page with its own markup |
+
+So a non-empty result set says nothing about who was searched for. An advert
+is attributed on **its own employer field**, never on the search that surfaced
+it, and adverts whose employer matches no known provider are discarded and
+counted (`review_queue`, `unmatched_nhs_jobs_employer`).
+
+The last row matters as much as the rest: the service *does* have an empty
+answer and states it explicitly, so "searched and found nothing"
+(`nhs_jobs_search_no_matches`) stays distinguishable from "could not read the
+page" (`nhs_jobs_results_unrecognised`). Paging stops as soon as a page
+attributes nothing, because results are relevance-ranked and everything past
+that point is the fallback.
+
+Coverage is a **floor, never a total.** NHS Jobs carries NHS and some
+commissioned-provider adverts; a provider advertising only on its own site is
+invisible here.
+
 ---
 
 ## Viability checks
@@ -184,23 +224,18 @@ contact email from `.env`, so any operator can reach the person running it.
 Probed live on 2026-08-11 with the pipeline's own User-Agent, one request
 each. Reachability is not the same as buildability — the notes say which.
 
-### NHS Jobs — VIABLE, highest value of the candidates
-
-| | |
-| --- | --- |
-| Endpoint | `https://www.jobs.nhs.uk/candidate/search/results?keyword=…` |
-| Result | 200, 84 KB, server-rendered HTML, 10 adverts per page, **salary present in the markup** |
-| robots.txt | Serves an HTML shell rather than rules — no directives to honour, but worth re-checking before a real crawl |
-| Licence | Crown copyright; advert content is the employer's |
+### NHS Jobs — VIABLE, highest value of the candidates — **BUILT, see Module 16**
 
 Advertised pay bands are **direct pay evidence**, not a proxy and not a
 composite — the only candidate of which that is true. Vacancy duration and
 re-advertisement are the empirical form of "we cannot recruit at this rate",
 which the annual workforce census cannot show.
 
-Note the coverage limit before anyone leans on it: NHS Jobs carries NHS and
-some commissioned-provider adverts. A charity provider advertising only on
-its own site is invisible here, so counts are a floor, never a total.
+Built as Module 16 on 2026-08-11. Building it turned up one thing the
+viability probe had not: searching by employer does not filter by employer,
+and there is no empty result set at all. That is written up under Module 16
+above, and it changed the design — attribution is on the advert's own employer
+field rather than on the search.
 
 ### HSE enforcement — VIABLE
 

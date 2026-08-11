@@ -223,6 +223,19 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "page for most bodies but not all, and a missing one is recorded "
               "rather than invented.",
     ),
+    Smoke(
+        module="m16_nhs_jobs",
+        produces=("nhs_job_adverts",),
+        signal=(("nhs_job_adverts", "employer_name_raw"),
+                ("nhs_job_adverts", "job_title"),
+                ("nhs_job_adverts", "posted_date")),
+        note="salary_min is deliberately NOT a signal column. Plenty of real "
+              "adverts publish 'Depends on experience', and asserting on it "
+              "would fail an advert that is honestly recorded as stating no "
+              "figure. employer_name_raw is the one that matters: it is what "
+              "attribution rests on, and it is what goes blank if the results "
+              "markup changes shape.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

@@ -37,11 +37,11 @@ def test_every_module_reports_progress():
         f"these modules report no progress and will show only a pulsing bar: {silent}")
 
 
-def test_all_sixteen_modules_are_covered():
+def test_all_seventeen_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 16
+    assert len(_real_modules()) == 17
 
 
 @pytest.mark.parametrize("name", [
@@ -49,7 +49,7 @@ def test_all_sixteen_modules_are_covered():
     "m04_companies", "m05_cqc", "m06_workforce_census", "m07_ndtms",
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
-    "m14_annual_reports", "m15_foi",
+    "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
 ])
 def test_the_tracked_loop_carries_a_label(name):
     """A bar labelled with the module name twice tells a reader nothing about
@@ -84,7 +84,7 @@ def test_progress_never_changes_what_a_module_collects():
     "m04_companies", "m05_cqc", "m06_workforce_census", "m07_ndtms",
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
-    "m14_annual_reports", "m15_foi",
+    "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
 ])
 def test_each_module_registers_its_run_function(name):
     """m15_foi was registered to crawl_disclosure_log(profile, client).
@@ -105,7 +105,7 @@ def test_each_module_registers_its_run_function(name):
     "m04_companies", "m05_cqc", "m06_workforce_census", "m07_ndtms",
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
-    "m14_annual_reports", "m15_foi",
+    "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
 ])
 def test_each_module_takes_exactly_a_context(name):
     """The signature the CLI calls with. Catches the same class of mistake

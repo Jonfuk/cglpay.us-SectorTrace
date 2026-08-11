@@ -32,6 +32,16 @@ schema has no provider column for this reason.
 
 **Do not read `indicative_wage_per_head` as a salary.** See below.
 
+**Do not annualise an advertised hourly rate, or convert between any two pay
+periods.** `nhs_job_adverts.salary_period` records what the employer
+published. The conversion depends on contracted hours nobody here knows, and
+would put a figure in the warehouse that no source ever stated. Compare
+hourly with hourly and annual with annual, or say plainly that you cannot.
+
+**Do not read an advertised band as what staff are paid.** It is what an
+employer is offering a new starter on a date. It is not a spine point, not a
+pay scale, and not the pay of anyone currently in post.
+
 ---
 
 ## Per source
@@ -226,6 +236,42 @@ schema has no provider column for this reason.
   `docs/mysociety-access-request.md`. Rows collected this way carry
   `discovery_source = 'wdtk_feed_search'`. If they decline, remove the
   exception and revisit those rows.
+
+### NHS Jobs advertised pay (Module 16)
+
+- **Counts are a floor, never a total.** NHS Jobs carries NHS and some
+  commissioned-provider adverts. A provider advertising only on its own site
+  is invisible here. "CGL advertised 20 posts" means "at least 20, on this one
+  board"; it can never mean "CGL had 20 vacancies".
+- **An advertised band is not a pay scale.** It is an offer to a new starter
+  on a date, not what anyone in post is paid, and not a spine point.
+- **Searching by employer does not filter by employer, so a count from the
+  search is not a measurement of anything.** Searching an employer that does
+  not exist returns "659 jobs found" of unrelated adverts; searching "Richmond
+  Fellowship" returns eighteen, all of them Kingston and Richmond NHS
+  Foundation Trust. Every row in `nhs_job_adverts` was attributed on the
+  advert's **own** employer field; the search that surfaced it is recorded in
+  `searched_variant` and means nothing on its own. Employers the search
+  returned and this pipeline could not attribute are in `review_queue` under
+  `unmatched_nhs_jobs_employer` — they were **not** stored.
+- **`salary_basis = 'not_stated'` is not zero pay.** It means the employer
+  published "Depends on experience" or similar. Exclude those adverts from a
+  pay comparison; do not treat them as £0, and do not silently drop them from
+  a denominator without saying so.
+- **A single-figure advert is stored with `salary_min = salary_max`,** so a
+  range query returns it. If you count adverts "with a range", filter on
+  `salary_basis = 'range'` rather than on the two columns differing.
+- **`v_nhs_repeat_advertised_roles` lists candidates, not findings.** The same
+  title under two references is equally consistent with two genuine vacancies
+  at two sites and with one post re-advertised after a failed round. The view
+  cannot tell those apart and does not try. Read the adverts before calling
+  anything a recruitment failure.
+- **Coverage of comparators is uneven and that is not a finding about them.**
+  A provider with no rows here may simply not advertise on NHS Jobs. The run
+  records which of the two it was rather than leaving a silent zero:
+  `nhs_jobs_search_no_matches` where the service itself said it found nothing,
+  `nhs_jobs_search_matched_nothing` where it returned adverts that all belonged
+  to somebody else. Neither is evidence that a provider is not recruiting.
 
 ---
 
