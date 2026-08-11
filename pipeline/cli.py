@@ -16,6 +16,7 @@ from pipeline.registry import (
     missing_dependencies,
     module_meta,
     resolve_run_order,
+    resolve_run_waves,
 )
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
@@ -115,13 +116,109 @@ def _print_summary(summary: list[dict], dry_run: bool) -> None:
                   "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
 
 
+def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict:
+    """Run one module on its own connection, and report what it did.
+
+    A connection per module rather than one shared across the run. That is
+    required for concurrency — SQLite objects cannot cross threads — but it is
+    better serially too: a module that fails now rolls back only its own
+    writes, where a shared connection could roll back work belonging to
+    whatever else had touched it.
+
+    Never raises. The outcome, including a failure, comes back in the summary
+    so one module cannot take the run down with it.
+    """
+    from pipeline.registry import ModuleContext
+
+    started = time.perf_counter()
+    conn = db.get_connection(settings)
+    try:
+        before = _audit_counts(conn, name)
+        changes_before = conn.total_changes
+        ctx = ModuleContext(conn=conn, settings=settings, since=since,
+                             dry_run=dry_run, limit=limit,
+                             progress=ui.ProgressReporter(bar, parent_description=name))
+        try:
+            fn(ctx)
+        except Exception as exc:
+            conn.rollback()
+            return {"module": name, "status": "failed",
+                     "elapsed": time.perf_counter() - started, "error": exc}
+
+        if dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+
+        after = _audit_counts(conn, name)
+        return {
+            "module": name, "status": "ok",
+            "elapsed": time.perf_counter() - started,
+            "rows": conn.total_changes - changes_before,
+            "review": after["review"] - before["review"],
+            "failures": after["failures"] - before["failures"],
+        }
+    finally:
+        conn.close()
+
+
+def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
+                bar) -> list[dict]:
+    """Each wave concurrently, waves in order.
+
+    Every module in a wave has its dependencies satisfied by an earlier wave,
+    so within a wave there is nothing to order. Concurrency across modules is
+    safe because the per-host rate limit is enforced process-wide: modules on
+    different APIs proceed independently, and the four sharing www.gov.uk
+    queue behind each other on that host alone.
+
+    A wave is joined before the next begins, so a module never starts before
+    the module whose output it reads has finished.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    summary: list[dict] = []
+    for wave in waves:
+        width = max(1, min(jobs, len(wave)))
+        if width == 1:
+            for name in wave:
+                summary.append(_execute_module(
+                    name, MODULE_REGISTRY[name], settings, since, dry_run, limit, bar))
+            continue
+
+        bar.console.print(
+            f"[pipeline.muted]  wave of {len(wave)}, {width} at a time: "
+            f"{', '.join(wave)}[/]")
+        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
+            futures = [pool.submit(_execute_module, name, MODULE_REGISTRY[name],
+                                    settings, since, dry_run, limit, bar)
+                        for name in wave]
+            # Collected in submission order, so the summary reads the same way
+            # twice regardless of which API answered first.
+            summary.extend(future.result() for future in futures)
+    return summary
+
+
 @app.command()
 def run(
     module: str = typer.Argument(..., help="Module name (e.g. m00_geography) or 'all'"),
     since: str = typer.Option(None, help="ISO date; only process records published/updated since this date"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch and parse but do not write to the database"),
     limit: int = typer.Option(None, help="Stop after N records (smoke testing)"),
+    jobs: int = typer.Option(
+        1, "--jobs", "-j", min=1,
+        help="Modules to run at once (`run all` only). Different APIs are "
+              "independent; the per-host rate limit still holds."),
 ) -> None:
+    if limit is not None and limit < 1:
+        # Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
+        # limit at all" — typing --limit 0 to fetch nothing launches a full
+        # live crawl instead. Refused rather than reinterpreted: guessing which
+        # of the two opposite meanings was intended is not this CLI's call.
+        ui.error(f"--limit must be 1 or more; got {limit}. "
+                  "Use --dry-run to fetch and parse without writing.")
+        raise typer.Exit(code=1)
+
     configure_logging(module)
     settings = get_settings()
     conn = db.get_connection(settings)
@@ -183,51 +280,24 @@ def run(
                 if note:
                     typer.echo(f"  {name}: {note}", err=True)
 
-    summary: list[dict] = []
+    waves = resolve_run_waves([name for name, _ in targets])
+
     with ui.progress() as bar:
-        overall = bar.add_task("overall", total=len(targets)) if len(targets) > 1 else None
+        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar)
 
-        for name, fn in targets:
-            ctx.progress = ui.ProgressReporter(bar, parent_description=name)
-            before = _audit_counts(conn, name)
-            # sqlite3 counts every inserted/updated/deleted row on this
-            # connection, which is exactly "what did this module write" without
-            # each module having to keep its own tally and get it wrong.
-            changes_before = conn.total_changes
-            started = time.perf_counter()
-            bar.console.print(f"[pipeline.heading]▸[/] [pipeline.module]{name}[/]")
-
-            try:
-                fn(ctx)
-            except Exception as exc:
-                # Roll back this module's partial writes; earlier modules in a
-                # `run all` batch already committed and are unaffected.
-                conn.rollback()
-                summary.append({"module": name, "status": "failed",
-                                 "elapsed": time.perf_counter() - started})
-                ui.error(f"{name}: {type(exc).__name__}: {exc}")
-                _print_summary(summary, dry_run)
-                conn.close()
-                raise
-
-            if dry_run:
-                conn.rollback()
-            else:
-                conn.commit()
-
-            after = _audit_counts(conn, name)
-            summary.append({
-                "module": name, "status": "ok",
-                "elapsed": time.perf_counter() - started,
-                "rows": conn.total_changes - changes_before,
-                "review": after["review"] - before["review"],
-                "failures": after["failures"] - before["failures"],
-            })
-            if overall is not None:
-                bar.advance(overall)
+    failed = [row for row in summary if row["status"] == "failed"]
+    for row in failed:
+        exc = row.get("error")
+        ui.error(f"{row['module']}: {type(exc).__name__}: {exc}")
 
     _print_summary(summary, dry_run)
     conn.close()
+
+    if failed:
+        # A failing module is a failing run, but the modules that succeeded
+        # keep their work and are reported above -- an aborted crawl that
+        # discards the sources it already asked is the worst outcome here.
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

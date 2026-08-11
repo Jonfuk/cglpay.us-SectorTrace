@@ -163,6 +163,40 @@ note: m04_companies normally runs after m03_charity_finance, m05_cqc.
       It will still run, using whatever those modules left behind.
 ```
 
+### Running several APIs at once
+
+The pipeline talks to eleven independent backends, so most modules have no
+reason to wait for each other:
+
+```bash
+./start.sh run all --jobs 4
+```
+
+`run all` groups modules into **waves** by dependency. Every module in a wave
+has its inputs satisfied by an earlier wave, so a wave runs concurrently and
+the next only begins once it has finished — `m04` still never starts before
+`m03`/`m05`, and `m09`/`m10` never before `m15`.
+
+| Wave | Modules | Backends |
+| --- | --- | --- |
+| 1 | `m00`, `m02`, `m03`, `m06`, `m08` | ArcGIS, GOV.UK, Charity Commission, NHS, Judiciary — all different |
+| 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15` | FTS/CF, CQC, GOV.UK ×3, Fingertips, local, WDTK |
+| 3 | `m04`, `m09`, `m10` | Companies House, council sites |
+
+This is safe because the per-host rate limit is enforced **process-wide**. The
+four modules that share `www.gov.uk` queue behind each other on that host and
+nowhere else, so no source sees a faster request rate than it would have if it
+were the only thing running.
+
+Each module gets **its own database connection**. That is required for
+concurrency, and better serially too: a module that fails rolls back only its
+own writes. A failing module no longer aborts the run — the others finish,
+everything is reported in the summary, and the exit code is still non-zero.
+
+**The default is `--jobs 1`** (unchanged behaviour). The parallel path is
+newer and less exercised than the serial one, and a long crawl is not where
+you want to discover that; raise it deliberately once you trust it.
+
 ### Modules that need a human
 
 `m06`, `m09` and `m10` produce material for review rather than finished

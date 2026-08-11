@@ -1,0 +1,309 @@
+"""Running different APIs at once.
+
+The pipeline talks to eleven independent backends. Only www.gov.uk is shared —
+by m02, m07, m11 and m13 — and the per-host rate limit is enforced
+process-wide, so those four queue behind each other on that host and nowhere
+else. Everything else can proceed at the same time without any source seeing a
+faster request rate than it would have alone.
+
+What must survive the concurrency:
+
+  * a module never starts before the module whose output it reads has
+    finished — m04 after m03/m05, m09/m10 after m15, everything after m00;
+  * the summary reads the same way twice, whichever API answered first;
+  * one module failing costs that module, not the run, and not the work the
+    others already committed.
+"""
+from __future__ import annotations
+
+import threading
+import time
+
+import pytest
+
+from pipeline import cli as cli_module
+from pipeline import console as ui
+from pipeline.registry import (
+    MODULE_REGISTRY,
+    DependencyCycleError,
+    ModuleMeta,
+    discover_modules,
+    resolve_run_order,
+    resolve_run_waves,
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _discovered():
+    discover_modules()
+
+
+# --- waves agree with the order they replace ------------------------------------
+
+def test_flattening_the_waves_reproduces_the_run_order():
+    """Two functions deciding what runs before what must not disagree."""
+    assert [name for wave in resolve_run_waves() for name in wave] == resolve_run_order()
+
+
+def test_every_dependency_lands_in_an_earlier_wave():
+    from pipeline.registry import module_meta
+
+    position = {name: index
+                for index, wave in enumerate(resolve_run_waves())
+                for name in wave}
+    for name, wave_index in position.items():
+        for dependency in module_meta(name).depends_on:
+            assert position[dependency] < wave_index, \
+                f"{name} shares a wave with (or precedes) its dependency {dependency}"
+
+
+def test_geography_is_alone_in_needing_to_go_first():
+    """Everything joins to the authorities table, so m00 must be in the first
+    wave — otherwise concurrency would race it.
+    """
+    assert "m00_geography" in resolve_run_waves()[0]
+
+
+def test_the_first_wave_is_worth_parallelising():
+    """If every wave held one module this would all be pointless."""
+    assert len(resolve_run_waves()[0]) >= 2
+
+
+def test_a_cycle_raises_rather_than_picking_waves(monkeypatch):
+    from pipeline import registry
+
+    monkeypatch.setitem(registry.MODULE_META, "x", ModuleMeta(name="x", depends_on=("y",)))
+    monkeypatch.setitem(registry.MODULE_META, "y", ModuleMeta(name="y", depends_on=("x",)))
+    with pytest.raises(DependencyCycleError):
+        resolve_run_waves(["x", "y"])
+
+
+def test_a_subset_is_not_silently_expanded():
+    waves = resolve_run_waves(["m04_companies", "m00_geography"])
+    assert [n for wave in waves for n in wave] == ["m00_geography", "m04_companies"]
+
+
+# --- the execution engine -------------------------------------------------------
+
+def _settings(tmp_path):
+    from pathlib import Path
+
+    from pipeline.config import Settings
+
+    return Settings(
+        contact_email="t@example.com", database_path=tmp_path / "w.db",
+        raw_archive_dir=tmp_path / "raw", logs_dir=tmp_path / "logs",
+        migrations_dir=Path(__file__).resolve().parent.parent / "pipeline" / "migrations",
+        _env_file=None)
+
+
+@pytest.fixture
+def prepared(tmp_path):
+    from pipeline import db
+
+    settings = _settings(tmp_path)
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    conn.close()
+    return settings
+
+
+def _run_waves(waves, jobs, settings, registry_patch, monkeypatch):
+    for name, fn in registry_patch.items():
+        monkeypatch.setitem(MODULE_REGISTRY, name, fn)
+    with ui.progress() as bar:
+        return cli_module._run_waves(waves, jobs, settings, None, False, None, bar)
+
+
+def test_modules_in_a_wave_actually_overlap(prepared, monkeypatch):
+    """The point of the exercise. Four modules on four different APIs should
+    be in flight together, not one after another.
+    """
+    live = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def make(_name):
+        def module(ctx):
+            nonlocal live, peak
+            with lock:
+                live += 1
+                peak = max(peak, live)
+            time.sleep(0.05)
+            with lock:
+                live -= 1
+        return module
+
+    names = ["a_one", "a_two", "a_three", "a_four"]
+    _run_waves([names], jobs=4, settings=prepared,
+                registry_patch={n: make(n) for n in names}, monkeypatch=monkeypatch)
+    assert peak >= 2, "modules in one wave ran strictly one after another"
+
+
+def test_a_later_wave_never_starts_before_an_earlier_one_finishes(prepared, monkeypatch):
+    """The correctness constraint. m04 reading company numbers m05 has not
+    written yet would silently produce a worse run, exactly as it did when the
+    order was alphabetical.
+    """
+    events: list[str] = []
+    lock = threading.Lock()
+
+    def make(name):
+        def module(ctx):
+            with lock:
+                events.append(f"start {name}")
+            time.sleep(0.03)
+            with lock:
+                events.append(f"end {name}")
+        return module
+
+    names = ["a_first", "a_second", "b_later"]
+    _run_waves([["a_first", "a_second"], ["b_later"]], jobs=4, settings=prepared,
+                registry_patch={n: make(n) for n in names}, monkeypatch=monkeypatch)
+
+    assert events.index("start b_later") > events.index("end a_first")
+    assert events.index("start b_later") > events.index("end a_second")
+
+
+def test_the_summary_order_does_not_depend_on_who_answered_first(prepared, monkeypatch):
+    def make(delay):
+        def module(ctx):
+            time.sleep(delay)
+        return module
+
+    names = ["a_slow", "a_medium", "a_fast"]
+    summary = _run_waves(
+        [names], jobs=3, settings=prepared,
+        registry_patch={"a_slow": make(0.09), "a_medium": make(0.05), "a_fast": make(0.0)},
+        monkeypatch=monkeypatch)
+    assert [row["module"] for row in summary] == names
+
+
+def test_one_module_failing_does_not_stop_the_others(prepared, monkeypatch):
+    def ok(ctx):
+        ctx.conn.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES ('a_ok','x','y','2026-01-01')")
+
+    def boom(ctx):
+        raise RuntimeError("that API is down")
+
+    summary = _run_waves([["a_boom", "a_ok"]], jobs=2, settings=prepared,
+                          registry_patch={"a_boom": boom, "a_ok": ok},
+                          monkeypatch=monkeypatch)
+    by_name = {row["module"]: row for row in summary}
+    assert by_name["a_boom"]["status"] == "failed"
+    assert isinstance(by_name["a_boom"]["error"], RuntimeError)
+    assert by_name["a_ok"]["status"] == "ok"
+
+
+def test_a_failing_module_rolls_back_only_its_own_writes(prepared, monkeypatch):
+    """A connection per module. With one shared connection a rollback could
+    discard work belonging to whatever else had touched it.
+    """
+    from pipeline import db
+
+    def ok(ctx):
+        ctx.conn.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES ('a_keeper','kept','y','2026-01-01')")
+
+    def boom(ctx):
+        ctx.conn.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES ('a_loser','discarded','y','2026-01-01')")
+        raise RuntimeError("failed after writing")
+
+    _run_waves([["a_keeper"], ["a_loser"]], jobs=1, settings=prepared,
+                registry_patch={"a_keeper": ok, "a_loser": boom}, monkeypatch=monkeypatch)
+
+    conn = db.get_connection(prepared)
+    try:
+        kept = {r["item_type"] for r in conn.execute("SELECT item_type FROM review_queue")}
+    finally:
+        conn.close()
+    assert "kept" in kept
+    assert "discarded" not in kept
+
+
+def test_row_counts_are_attributed_to_the_module_that_wrote_them(prepared, monkeypatch):
+    """Per-module connections make total_changes exact; a shared connection
+    would have mixed concurrent modules' counts together.
+    """
+    def writer(label, rows):
+        # A distinct label per writer: review_queue deduplicates on
+        # (module, item_type, raw_value), so two writers sharing a label would
+        # collide on the unique index rather than testing anything.
+        def module(ctx):
+            for i in range(rows):
+                ctx.conn.execute(
+                    "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                    "VALUES (?,?,?,?)", (label, "t", str(i), "2026-01-01"))
+        return module
+
+    summary = _run_waves([["a_three", "a_seven"]], jobs=2, settings=prepared,
+                          registry_patch={"a_three": writer("three", 3),
+                                           "a_seven": writer("seven", 7)},
+                          monkeypatch=monkeypatch)
+    rows = {row["module"]: row["rows"] for row in summary}
+    assert rows["a_three"] == 3
+    assert rows["a_seven"] == 7
+
+
+def test_jobs_of_one_is_still_fully_serial(prepared, monkeypatch):
+    live = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def module(ctx):
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        time.sleep(0.02)
+        with lock:
+            live -= 1
+
+    names = ["a_one", "a_two", "a_three"]
+    _run_waves([names], jobs=1, settings=prepared,
+                registry_patch={n: module for n in names}, monkeypatch=monkeypatch)
+    assert peak == 1
+
+
+# --- --limit 0 ------------------------------------------------------------------------
+
+def test_limit_zero_is_refused_rather_than_reinterpreted(tmp_path, monkeypatch):
+    """Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
+    limit at all". Typing --limit 0 to fetch nothing launched a full live
+    crawl instead — found by doing exactly that.
+    """
+    from typer.testing import CliRunner
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+
+    result = CliRunner().invoke(cli_module.app, ["run", "all", "--limit", "0"])
+    assert result.exit_code == 1
+    assert "--limit must be 1 or more" in result.output
+
+
+def test_a_real_limit_is_still_accepted(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setitem(MODULE_REGISTRY, "m05_cqc", lambda ctx: None)
+
+    result = CliRunner().invoke(cli_module.app, ["run", "m05_cqc", "--limit", "5"])
+    assert "--limit must be" not in result.output
+
+
+def test_jobs_below_one_is_rejected_by_the_option(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+
+    result = CliRunner().invoke(cli_module.app, ["run", "all", "--jobs", "0"])
+    assert result.exit_code != 0

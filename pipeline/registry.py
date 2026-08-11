@@ -158,6 +158,42 @@ def resolve_run_order(names: list[str] | None = None) -> list[str]:
     return ordered
 
 
+def resolve_run_waves(names: list[str] | None = None) -> list[list[str]]:
+    """The same order as `resolve_run_order`, grouped into waves.
+
+    Every module in a wave has all its declared dependencies satisfied by
+    earlier waves, so a wave can run concurrently. Flattening the result
+    reproduces `resolve_run_order` exactly — the two must not disagree about
+    what runs before what.
+
+    Concurrency across modules is safe because the per-host rate limit is
+    enforced process-wide (pipeline.http.HOST_CLOCK). Modules on different
+    APIs proceed independently; the four that share www.gov.uk queue behind
+    each other on that host and nowhere else.
+    """
+    selected = list(MODULE_REGISTRY) if names is None else list(names)
+    remaining = set(selected)
+
+    waves: list[list[str]] = []
+    satisfied: set[str] = set()
+
+    while remaining:
+        ready = sorted(
+            name for name in remaining
+            if all(dep in satisfied or dep not in remaining
+                    for dep in module_meta(name).depends_on)
+        )
+        if not ready:
+            raise DependencyCycleError(
+                "Cannot order modules — declared dependencies form a cycle among: "
+                f"{sorted(remaining)}")
+        waves.append(ready)
+        satisfied.update(ready)
+        remaining.difference_update(ready)
+
+    return waves
+
+
 def missing_dependencies(names: list[str]) -> dict[str, list[str]]:
     """Declared dependencies not included in the given selection, so the CLI
     can say what a partial run will be missing rather than quietly degrading.
