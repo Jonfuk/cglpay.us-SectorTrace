@@ -10,8 +10,19 @@ REM straight through to the Typer CLI:
 REM
 REM   start.cmd                     -^> --help
 REM   start.cmd list-modules
+REM
+REM   Collect ^(13 modules; run m00_geography first - everything joins to it^):
 REM   start.cmd run m00_geography
+REM   start.cmd run all
 REM   start.cmd run m01_procurement --since 2024-01-01 --limit 100
+REM   start.cmd run m03_charity_finance --dry-run
+REM
+REM   Export ^(each file gets a companion .provenance.json^):
+REM   start.cmd export all          - sheets, geojson, echarts, docs
+REM   start.cmd export sheets --push
+REM
+REM m06, m09 and m10 produce review worklists in docs\verification\ rather than
+REM finished evidence - nothing they find is promoted without human confirmation.
 REM ---------------------------------------------------------------------------
 
 REM Run from the repo root regardless of the caller's working directory.

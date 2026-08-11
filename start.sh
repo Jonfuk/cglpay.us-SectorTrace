@@ -8,8 +8,19 @@
 #
 #   ./start.sh                     -> --help
 #   ./start.sh list-modules
+#
+#   Collect (13 modules; run m00_geography first — everything joins to it):
 #   ./start.sh run m00_geography
+#   ./start.sh run all
 #   ./start.sh run m01_procurement --since 2024-01-01 --limit 100
+#   ./start.sh run m03_charity_finance --dry-run
+#
+#   Export (each file gets a companion .provenance.json):
+#   ./start.sh export all          # sheets, geojson, echarts, docs
+#   ./start.sh export sheets --push
+#
+# m06, m09 and m10 produce review worklists in docs/verification/ rather than
+# finished evidence — nothing they find is promoted without human confirmation.
 #
 set -euo pipefail
 

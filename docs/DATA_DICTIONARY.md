@@ -6,7 +6,7 @@
 ./start.sh export docs
 ```
 
-Generated 2026-08-11 07:22 UTC.
+Generated 2026-08-11 07:33 UTC.
 
 `restricted` columns hold personal data. They are excluded from every export by default and `pipeline.exports.guard_columns()` raises if one is referenced.
 

@@ -37,11 +37,13 @@ arguments they show the help menu.
 ./start.sh run m01_procurement --since 2024-01-01     # only recent records
 ./start.sh run m02_tribunals --limit 5                # smoke test
 ./start.sh run m03_charity_finance --dry-run          # fetch/parse, write nothing
+./start.sh export all                                 # generate every export
 ```
 
 ```cmd
 start.cmd run m00_geography
 start.cmd run m01_procurement --since 2024-01-01 --limit 100
+start.cmd export all
 ```
 
 The scripts run from the repository root regardless of where you invoke them
@@ -55,7 +57,8 @@ Task Scheduler or CI.
 | `data/raw/` | Raw response bytes, addressed by SHA-256 — the audit trail behind every figure |
 | `data/warehouse.db` | The canonical SQLite warehouse |
 | `logs/` | Structured JSON logs, one file per module |
-| `docs/verification/` | Human-review markdown (PDF extraction diffs, document candidates) |
+| `docs/verification/` | Human-review markdown (census value checks, document candidates) |
+| `exports/output/` | Generated exports, each with a `.provenance.json` |
 | `.env` | Configuration and API keys — never committed |
 
 If `.env` is missing, the scripts copy `.env.example`. If neither exists, they
@@ -105,15 +108,89 @@ Each writes to its own tables and can be run independently. Re-runs are
 idempotent (natural-key upserts) and resumable (per-module cursors), so an
 interrupted crawl continues rather than restarting.
 
+Modules join on two stable entities: **authorities** (ONS code, from `m00`)
+and **providers** (from `pipeline/providers.py`). Everything else hangs off
+one or both.
+
 | Module | Source | Evidence |
 | --- | --- | --- |
 | `m00_geography` | ONS Open Geography Portal | Local authority spine, boundaries, reorganisation successors |
 | `m01_procurement` | Find a Tender, Contracts Finder | Contract notices, values, suppliers, direct awards |
-| `m02_tribunals` | GOV.UK employment tribunal decisions | Judgments against providers |
+| `m02_tribunals` | GOV.UK employment tribunal decisions | Judgments against providers (pseudonymised) |
 | `m03_charity_finance` | Charity Commission + filed accounts | Income, wages, employee numbers, agency spend, pay bands |
 | `m04_companies` | Companies House | Group structure, former names, filings, officer churn |
 | `m05_cqc` | CQC public API | Registered locations, ratings, inspection reports |
+| `m06_workforce_census` | NHS Benchmarking Network | Vacancy, turnover, WTE, volunteer and contract-type metrics |
+| `m07_ndtms` | OHID via GOV.UK | Published treatment statistics; LA-level tables where they exist |
+| `m08_pfd_reports` | Courts and Tribunals Judiciary | Coroners' Prevention of Future Deaths reports, workforce concerns |
+| `m09_cdp_documents` | Local authority websites | Combating Drugs Partnership document **candidates** (needs verification) |
+| `m10_committee_papers` | Council committee systems | Committee paper **candidates** (needs verification) |
 | `m11_public_health_grant` | DHSC | Public Health Grant allocations, incl. drug/alcohol ring-fence |
+| `m12_fingertips` | OHID Fingertips | LA-level treatment numbers, completions, waiting times, prevalence |
+
+### Suggested order
+
+`m00` first — everything joins to it. `m03` and `m05` publish company numbers
+that `m04` then uses to confirm corporate identity, so running `m04` again
+after them promotes name-only matches to confirmed ones.
+
+```bash
+./start.sh run m00_geography
+./start.sh run m11_public_health_grant
+./start.sh run m03_charity_finance
+./start.sh run m05_cqc
+./start.sh run m04_companies      # now has cross-referenced identifiers
+./start.sh run all                # everything else
+```
+
+### Modules that need a human
+
+`m06`, `m09` and `m10` produce material for review rather than finished
+evidence:
+
+- **`m06`** writes `docs/verification/census_{year}_tables.md`, pairing every
+  parsed value with the source line it came from. Metrics stay
+  `verified = 0` until you say otherwise.
+- **`m09`** writes `docs/verification/cdp_candidates.md`, grouped by region.
+  Nothing reaches `cdp_documents` unverified.
+- **`m10`** finds committee papers the same way. Nothing reaches
+  `committee_papers` unverified.
+
+`m09` and `m10` are also **coverage-limited**: they need each council's
+publication URL, which cannot be derived, so `pipeline/authority_websites.py`
+holds only entries verified by request. Authorities without one are queued:
+
+```sql
+SELECT COUNT(*) FROM review_queue WHERE item_type = 'authority_website_unknown';
+```
+
+## Exports
+
+```bash
+./start.sh export all        # sheets, geojson, echarts, docs
+./start.sh export sheets     # nine CSV tabs
+./start.sh export geojson    # four Leaflet layers
+./start.sh export echarts    # dashboard series
+./start.sh export docs       # regenerate DATA_DICTIONARY.md
+./start.sh export sheets --push   # also push to Google Sheets (needs credentials)
+```
+
+Output goes to `exports/output/` (gitignored — regenerate any time).
+
+| Target | Output |
+| --- | --- |
+| `sheets` | Nine CSV tabs of human-readable evidence, caveats above the header row |
+| `geojson` | `contracts`, `cqc_locations`, `treatment_numbers`, `pfd_reports` — separate FeatureCollections so a map can toggle them independently |
+| `echarts` | Pre-shaped series, each with a `meta` block carrying source, retrieval date and caveats |
+| `docs` | `docs/DATA_DICTIONARY.md`, generated from the live schema |
+
+**Every export file is written with a companion `.provenance.json`** listing
+contributing tables, source systems, retrieval window and row counts. A test
+asserts none can be produced without one.
+
+The treatment statistics (~40,000 rows) are deliberately *not* a Sheets tab —
+they are map and chart data, and go to the GeoJSON and ECharts targets. A tab
+nobody can scroll is not evidence anyone can check.
 
 ## Data handling
 
@@ -135,7 +212,33 @@ requests avoid re-fetching unchanged documents. The `User-Agent` identifies the
 pipeline and includes `CONTACT_EMAIL`.
 
 See [`docs/CAVEATS.md`](docs/CAVEATS.md) for known limitations that must travel
-with any published figure.
+with any published figure. It leads with the things you must **not** compute —
+no claims-per-employee rate, no dividing treatment numbers by workforce
+figures, no differencing workforce census years.
+
+## Checking what a run actually produced
+
+Nothing is inferred or defaulted. A field that could not be parsed is `NULL`
+with a row in `parse_failures`; anything needing human judgement is in
+`review_queue`. Both are worth reading after a run — an empty cell with a
+logged reason is the correct output, not a failure to hide.
+
+```bash
+sqlite3 data/warehouse.db "SELECT module, reason, COUNT(*) FROM parse_failures GROUP BY 1,2;"
+sqlite3 data/warehouse.db "SELECT module, item_type, COUNT(*) FROM review_queue WHERE status='pending' GROUP BY 1,2;"
+```
+
+Both tables deduplicate on a natural key, so re-running a module does not
+inflate the counts.
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| [`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md) | Every table and column, generated from the live schema — never hand-edited |
+| [`docs/SOURCES.md`](docs/SOURCES.md) | Each source's URL, licence, key requirement and applied rate limit |
+| [`docs/CAVEATS.md`](docs/CAVEATS.md) | Known limitations, and what must not be computed |
+| `docs/verification/` | Per-run review worklists produced by `m06`, `m09` and `m10` |
 
 ## Development
 
