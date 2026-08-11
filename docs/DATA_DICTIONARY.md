@@ -6,7 +6,7 @@
 ./start.sh export docs
 ```
 
-Generated 2026-08-11 07:33 UTC.
+Generated 2026-08-11 23:02 UTC.
 
 `restricted` columns hold personal data. They are excluded from every export by default and `pipeline.exports.guard_columns()` raises if one is referenced.
 
@@ -14,11 +14,16 @@ Generated 2026-08-11 07:33 UTC.
 
 Never exported. Listed here so the boundary is visible, not to invite use.
 
+- `restricted_committee_result_snippets`
+- `restricted_company_insolvency_practitioners`
 - `restricted_company_officers`
 - `restricted_cqc_location_contacts`
+- `restricted_officer_disqualifications`
 - `restricted_pfd_persons`
 - `restricted_pfd_report_text`
 - `restricted_tribunal_parties`
+- `restricted_v_officer_edges`
+- `restricted_v_shared_officers`
 
 ## `authorities`
 
@@ -60,6 +65,28 @@ Which committee system each authority runs, detected from path signatures rather
 | `committee_url` | TEXT | nullable | exportable |
 | `detected_by` | TEXT | nullable | exportable |
 | `detected_at` | TEXT | NOT NULL | exportable |
+| `url_source` | TEXT | nullable | exportable |
+
+## `authority_foi_profiles`
+
+*table* — 315 rows.
+
+One row per English authority, from mySociety's published authority CSV. Their tags carry the GSS code, so this joins to `authorities` exactly. Also the first source in this pipeline of an authoritative website URL for every authority — Modules 9 and 10 fall back to it.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | nullable | exportable |
+| `authority_name` | TEXT | NOT NULL | exportable |
+| `wdtk_body_slug` | TEXT | nullable | exportable |
+| `wdtk_body_url` | TEXT | nullable | exportable |
+| `home_page_url` | TEXT | nullable | exportable |
+| `publication_scheme_url` | TEXT | nullable | exportable |
+| `disclosure_log_url` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `authority_successors`
 
@@ -220,7 +247,7 @@ Feeds Sheets tab(s): 05_Charity_Finance.
 | `meeting_date` | TEXT | nullable | exportable |
 | `agenda_item_title` | TEXT | nullable | exportable |
 | `report_title` | TEXT | nullable | exportable |
-| `matched_term` | TEXT | nullable | exportable |
+| `matched_terms` | TEXT | nullable | exportable |
 | `committee_system` | TEXT | nullable | exportable |
 | `verified` | INTEGER | NOT NULL | exportable |
 | `verified_at` | TEXT | nullable | exportable |
@@ -231,6 +258,9 @@ Feeds Sheets tab(s): 05_Charity_Finance.
 | `http_status` | INTEGER | NOT NULL | exportable |
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
+| `result_type` | TEXT | nullable | exportable |
+| `match_quality` | TEXT | nullable | exportable |
+| `item_reference` | TEXT | nullable | exportable |
 
 ## `committee_papers`
 
@@ -294,6 +324,36 @@ Feeds Sheets tab(s): 04_Providers.
 | `subcategory` | TEXT | nullable | exportable |
 | `description` | TEXT | nullable | exportable |
 | `document_url` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `company_insolvency_case_dates`
+
+*table* — 0 rows.
+
+Case dates, keeping Companies House's own date vocabulary rather than flattening it into columns this pipeline invented. The set of date types varies with the case type ('administration-started-on' and 'administration-ended-on' for one, 'wound-up-on' and 'dissolved-on' for another), and mapping them onto a fixed started/ended pair would mean deciding that an administration ending and a winding-up are the same kind of fact. They are not.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `company_number` | TEXT | NOT NULL | exportable |
+| `case_number` | TEXT | NOT NULL | exportable |
+| `date_type` | TEXT | NOT NULL | exportable |
+| `date_value` | TEXT | nullable | exportable |
+
+## `company_insolvency_cases`
+
+*table* — 0 rows.
+
+One row per insolvency case. A company can have several — Lifeline has two, an administration followed by a creditors' voluntary liquidation, and they are different events with different dates.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `company_number` | TEXT | NOT NULL | exportable |
+| `case_number` | TEXT | NOT NULL | exportable |
+| `case_type` | TEXT | nullable | exportable |
 | `source_url` | TEXT | NOT NULL | exportable |
 | `retrieved_at` | TEXT | NOT NULL | exportable |
 | `http_status` | INTEGER | NOT NULL | exportable |
@@ -483,9 +543,77 @@ One row per published data point. area_code is Fingertips' ONS code, so this joi
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `foi_attachments`
+
+*table* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | NOT NULL | exportable |
+| `request_url` | TEXT | NOT NULL | exportable |
+| `attachment_url` | TEXT | NOT NULL | exportable |
+| `file_name` | TEXT | nullable | exportable |
+| `archived_path` | TEXT | nullable | exportable |
+
+## `foi_request_candidates`
+
+*table* — 850 rows.
+
+Candidates found on a council's own disclosure log. Discovery only: a link whose text matched a search term is not an FOI response about substance misuse until someone opens it. Nothing is promoted without verification, the same discipline as Modules 9 and 10.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | NOT NULL | exportable |
+| `candidate_url` | TEXT | NOT NULL | exportable |
+| `title` | TEXT | nullable | exportable |
+| `matched_term` | TEXT | nullable | exportable |
+| `topic` | TEXT | nullable | exportable |
+| `discovered_at` | TEXT | NOT NULL | exportable |
+| `discovery_source` | TEXT | NOT NULL | exportable |
+| `verified` | INTEGER | NOT NULL | exportable |
+| `verified_at` | TEXT | nullable | exportable |
+| `rejected` | INTEGER | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+| `request_slug` | TEXT | nullable | exportable |
+| `authority_slug` | TEXT | nullable | exportable |
+| `wdtk_status` | TEXT | nullable | exportable |
+| `disclosed` | INTEGER | nullable | exportable |
+| `request_date` | TEXT | nullable | exportable |
+| `last_updated` | TEXT | nullable | exportable |
+| `event_type` | TEXT | nullable | exportable |
+| `event_date` | TEXT | nullable | exportable |
+| `snippet` | TEXT | nullable | exportable |
+
+## `foi_requests`
+
+*table* — 0 rows.
+
+Verified promotions only.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | NOT NULL | exportable |
+| `request_url` | TEXT | NOT NULL | exportable |
+| `subject` | TEXT | nullable | exportable |
+| `request_date` | TEXT | nullable | exportable |
+| `response_date` | TEXT | nullable | exportable |
+| `status` | TEXT | nullable | exportable |
+| `topic` | TEXT | nullable | exportable |
+| `response_text` | TEXT | nullable | exportable |
+| `archived_path` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
 ## `http_cache`
 
-*table* — 783 rows.
+*table* — 1,004 rows.
 
 Constraint 4: conditional requests on re-runs. Keyed by URL so http.py can send If-None-Match / If-Modified-Since without re-fetching unchanged docs.
 
@@ -497,6 +625,51 @@ Constraint 4: conditional requests on re-runs. Keyed by URL so http.py can send 
 | `last_modified` | TEXT | nullable | exportable |
 | `payload_sha256` | TEXT | nullable | exportable |
 | `updated_at` | TEXT | NOT NULL | exportable |
+
+## `la_budget_publications`
+
+*table* — 4 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `publication_slug` | TEXT | NOT NULL | exportable |
+| `document_url` | TEXT | NOT NULL | exportable |
+| `financial_year` | TEXT | NOT NULL | exportable |
+| `document_label` | TEXT | nullable | exportable |
+| `amounts_multiplier` | INTEGER | nullable | exportable |
+| `sheet_name` | TEXT | nullable | exportable |
+| `data_rows` | INTEGER | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `la_revenue_budgets`
+
+*table* — 237,831 rows.
+
+Module 13: local authority revenue budgets (MHCLG). The structured national release, so 150+ council websites do not have to be scraped for the same numbers. Every authority's budgeted revenue expenditure by service line, including the Public Health line, keyed by ONS code — MHCLG publishes the code itself, so this joins to `authorities` without any name matching. SEPARATE FROM THE GRANT. This is what an authority BUDGETED. The public health grant (Module 11) is what it was ALLOCATED. They are different measurements from different departments and are not differenced here: an authority may budget above or below its grant for reasons this pipeline cannot see, and the gap is a finding to investigate rather than a number to publish unexamined. Stored tidy/long because MHCLG's column set (213 columns in 2026-27) changes between years, and a fixed wide table would silently drop whatever moved.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | NOT NULL | exportable |
+| `financial_year` | TEXT | NOT NULL | exportable |
+| `line_code` | TEXT | NOT NULL | exportable |
+| `section` | TEXT | nullable | exportable |
+| `line_number` | TEXT | nullable | exportable |
+| `column_label` | TEXT | nullable | exportable |
+| `amounts_multiplier` | INTEGER | nullable | exportable |
+| `amount` | REAL | nullable | exportable |
+| `value_text` | TEXT | nullable | exportable |
+| `body_type` | TEXT | nullable | exportable |
+| `authority_class` | TEXT | nullable | exportable |
+| `source_document` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `module_cursors`
 
@@ -571,9 +744,50 @@ Records every sheet seen and whether it was LA-level, so the (large) share of th
 | `is_local_authority` | INTEGER | NOT NULL | exportable |
 | `row_count` | INTEGER | nullable | exportable |
 
+## `nhs_job_advert_locations`
+
+*table* — 0 rows.
+
+One advert can name several sites ("Chichester PO19 1XP, CRAWLEY RH10 8GN, Worthing BN11 1UG"). Kept as its own rows rather than a joined string so a location can be counted or matched to an authority later without splitting text back apart. Not matched to an ONS code here: these are free-text place names and postcodes, and guessing an authority from them is the kind of inferred link this pipeline records rather than invents.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `job_reference` | TEXT | NOT NULL | exportable |
+| `location_raw` | TEXT | NOT NULL | exportable |
+
+## `nhs_job_adverts`
+
+*table* — 0 rows.
+
+Module 16: NHS Jobs advertised pay. The only source in this pipeline that carries DIRECT pay evidence. Every other pay figure here is a composite or a proxy: the charity accounts give a wage bill over a headcount (v_wage_per_employee, and read its caveats), the workforce census gives sector aggregates attributable to nobody. An advert states what an employer offers for a named role, in its own words, on a date. WHAT THIS IS NOT.   1. It is not a pay scale. An advertised band is what the employer is      offering a new starter, which is not what incumbent staff are paid and      is not a spine point.   2. It is not a complete picture of a provider's vacancies. NHS Jobs      carries NHS and some commissioned-provider adverts. A charity      advertising only on its own site is invisible here, so every count off      this table is a FLOOR, never a total, and must be presented as one.   3. It is not the result set NHS Jobs returned. The search has no empty      answer: a nonsense employer name comes back "659 jobs found" of      unrelated adverts, and searching "Turning Point" returns West Point      Medical Centre alongside it. Rows here are the adverts whose OWN      employer field matched a known provider name; everything else the      search returned was discarded and counted. See the module docstring. HOURLY AND ANNUAL FIGURES ARE NOT CONVERTED into one another anywhere in this pipeline. salary_period says which the employer published, and an hourly rate multiplied into a year is a number the source never stated and that depends on contracted hours nobody here knows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `job_reference` | TEXT | nullable | exportable |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `provider_match_basis` | TEXT | NOT NULL | exportable |
+| `employer_name_raw` | TEXT | NOT NULL | exportable |
+| `job_title` | TEXT | nullable | exportable |
+| `advert_url` | TEXT | NOT NULL | exportable |
+| `salary_raw` | TEXT | nullable | exportable |
+| `salary_min` | REAL | nullable | exportable |
+| `salary_max` | REAL | nullable | exportable |
+| `salary_period` | TEXT | nullable | exportable |
+| `salary_basis` | TEXT | NOT NULL | exportable |
+| `contract_type` | TEXT | nullable | exportable |
+| `working_pattern` | TEXT | nullable | exportable |
+| `posted_date` | TEXT | nullable | exportable |
+| `closing_date` | TEXT | nullable | exportable |
+| `searched_variant` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
 ## `parse_failures`
 
-*table* — 22 rows.
+*table* — 23 rows.
 
 Constraint 6: fail loudly, never silently guess. A field that could not be parsed is written as NULL and logged here with the raw fragment.
 
@@ -660,6 +874,26 @@ Feeds Sheets tab(s): 08_PFD_Reports.
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `provider_annual_reports`
+
+*table* — 5 rows.
+
+Module 14: provider annual report narrative. Module 3 already downloads and archives each charity's filed accounts, which for these providers ARE the annual report, but it only extracts the staff-costs note. This module reads the narrative around it: what the provider says about recruitment, retention, restructuring, wellbeing, equality and principal risks. It re-reads the PDFs already on disk rather than fetching them again. NOTHING IS SUMMARISED. Passages are stored verbatim with their page number, exactly as PFD matters of concern are. A term index says where to look; a person decides what it means. The disclosure-gap table is the point of the module as much as the passages. A provider writing at length about retention while publishing no retention figure is itself evidence — but see the wording of `search_terms`: this records that no passage matched those terms, which is weaker than "the provider does not disclose it" and must be read that way.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `financial_year_end` | TEXT | NOT NULL | exportable |
+| `charity_number` | TEXT | nullable | exportable |
+| `document_url` | TEXT | NOT NULL | exportable |
+| `archived_path` | TEXT | nullable | exportable |
+| `page_count` | INTEGER | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
 ## `provider_identifiers`
 
 *table* — 11 rows.
@@ -674,6 +908,46 @@ External identifiers for a provider. `status` distinguishes an identifier assert
 | `role` | TEXT | nullable | exportable |
 | `status` | TEXT | NOT NULL | exportable |
 | `discovered_by` | TEXT | nullable | exportable |
+
+## `provider_report_disclosure`
+
+*table* — 60 rows.
+
+What a report did and did not appear to cover. `matched = 0` means no passage matched `search_terms` — NOT that the provider discloses nothing on the subject. A figure given only in a table, or described in wording the terms do not cover, would read the same way. Treat a gap as a prompt to look, not as a finding in itself.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `financial_year_end` | TEXT | NOT NULL | exportable |
+| `topic` | TEXT | NOT NULL | exportable |
+| `matched` | INTEGER | NOT NULL | exportable |
+| `pages_matched` | INTEGER | NOT NULL | exportable |
+| `search_terms` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `provider_report_passages`
+
+*table* — 64 rows.
+
+One row per (report, topic, page) where the topic's terms appear. The passage is the verbatim page text around the match.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `financial_year_end` | TEXT | NOT NULL | exportable |
+| `topic` | TEXT | NOT NULL | exportable |
+| `page_number` | INTEGER | NOT NULL | exportable |
+| `matched_term` | TEXT | NOT NULL | exportable |
+| `passage_text` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `providers`
 
@@ -714,6 +988,39 @@ Feeds Sheets tab(s): 02_Public_Health_Grant.
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `restricted_committee_result_snippets`
+
+*table* — 0 rows.
+
+The matched text ModernGov prints under each hit. It is the single most useful thing for a reviewer deciding whether a candidate is relevant — and it routinely names officers by name and job title ("Presented by <officer>, Head of Health Improvement"). Public role or not, that is personal data, so it lives here rather than in committee_paper_candidates, which is exportable. Same rule as restricted_pfd_report_text.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `authority_ons_code` | TEXT | NOT NULL | restricted |
+| `document_url` | TEXT | NOT NULL | restricted |
+| `matched_term` | TEXT | NOT NULL | restricted |
+| `snippet_text` | TEXT | nullable | restricted |
+| `source_url` | TEXT | NOT NULL | restricted |
+| `retrieved_at` | TEXT | NOT NULL | restricted |
+| `http_status` | INTEGER | NOT NULL | restricted |
+| `source_system` | TEXT | NOT NULL | restricted |
+| `payload_sha256` | TEXT | NOT NULL | restricted |
+
+## `restricted_company_insolvency_practitioners`
+
+*table* — 0 rows.
+
+RESTRICTED: named individuals. Insolvency practitioners are licensed professionals acting as statutory office-holders and their names are on the public register — but a pay campaign has no use for them, and the cheapest way to be sure a name is never exported is not to put it in an exportable table. Their firm addresses are not stored at all: they add nothing here, and an address that serves no evidential purpose is a personal-data footprint with no argument behind it.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `company_number` | TEXT | NOT NULL | restricted |
+| `case_number` | TEXT | NOT NULL | restricted |
+| `practitioner_name` | TEXT | NOT NULL | restricted |
+| `role` | TEXT | nullable | restricted |
+| `appointed_on` | TEXT | nullable | restricted |
+| `ceased_to_act_on` | TEXT | nullable | restricted |
+
 ## `restricted_company_officers`
 
 *table* — 265 rows.
@@ -747,6 +1054,31 @@ RESTRICTED: CQC embeds named registered managers inside each location's regulate
 | `person_name` | TEXT | nullable | restricted |
 | `person_role` | TEXT | nullable | restricted |
 | `regulated_activity` | TEXT | nullable | restricted |
+
+## `restricted_officer_disqualifications`
+
+*table* — 0 rows.
+
+RESTRICTED: disqualified directors. READ THIS BEFORE USING THE TABLE. Companies House publishes no link from an officer's appointment to a disqualification, so the only route is to search the register by name. A name match is not an identity match — that is the lesson m04 already learned from FORWARD TRUST LIMITED — and getting it wrong here does not mis-attribute a contract, it says a named person was banned from being a director when they were not. So nothing reaches this table on a name alone. A row is written only where the register's record corroborates on BOTH the name and the month and year of birth that Companies House publishes for the serving director, or where the person numbers match outright. Everything weaker goes to review_queue as a candidate and is never stored as a fact. Expect this table to be empty, and that is the point. Acting as a director while disqualified is a criminal offence, so a serving director of a large registered charity being on this register would be extraordinary. An empty table is a checkable negative; it is not evidence that the check was skipped.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `company_number` | TEXT | NOT NULL | restricted |
+| `officer_ref` | TEXT | NOT NULL | restricted |
+| `officer_name` | TEXT | nullable | restricted |
+| `case_identifier` | TEXT | NOT NULL | restricted |
+| `disqualification_type` | TEXT | nullable | restricted |
+| `disqualified_from` | TEXT | nullable | restricted |
+| `disqualified_until` | TEXT | nullable | restricted |
+| `reason_act` | TEXT | nullable | restricted |
+| `reason_description` | TEXT | nullable | restricted |
+| `disqualified_company_names` | TEXT | nullable | restricted |
+| `match_basis` | TEXT | NOT NULL | restricted |
+| `source_url` | TEXT | NOT NULL | restricted |
+| `retrieved_at` | TEXT | NOT NULL | restricted |
+| `http_status` | INTEGER | NOT NULL | restricted |
+| `source_system` | TEXT | NOT NULL | restricted |
+| `payload_sha256` | TEXT | NOT NULL | restricted |
 
 ## `restricted_pfd_persons`
 
@@ -784,9 +1116,26 @@ RESTRICTED: excluded from every export by default (see pipeline/exports).
 | `page_title_raw` | TEXT | nullable | restricted |
 | `source_slug` | TEXT | nullable | restricted |
 
+## `review_decisions`
+
+*table* — 0 rows.
+
+A record of every human decision taken on a review-queue item. `review_queue.status` has always been the *current* state of an item, and until now nothing ever moved it off 'pending': the queue was written by modules and read by people, with the deciding done in someone's head. The reviewer UI (pipeline/web/) writes decisions back, so the queue has to be able to say who decided what, when, and on what basis. A status column alone cannot. Two things live here that `review_queue` has nowhere to put:   * History. An item can go pending -> approved -> pending -> rejected; a     decision taken in error is revertible, and the revert is itself a     decision worth keeping. Only the latest state lands on     `review_queue.status`, and every step is a row here.   * The context as it read at the time. `record_review_item()` refreshes     `context_json` whenever a module re-observes a *pending* item, so an     item reverted to pending and then re-run can have its context rewritten     underneath a decision that was already taken against the old text. The     snapshot is what the reviewer was actually looking at. Deciding is deliberately NOT promotion. Nothing here moves a value into a canonical table: what "approved" means for an unmatched buyer name (bind it to an authority) and for a PFD report whose concerns are PDF-only (nothing — it is an acknowledgement) are different operations, and neither exists yet. This table records the judgement so that acting on it is not also the work of remembering it. See README "Reviewing what a run produced".
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `review_item_id` | INTEGER | NOT NULL | exportable |
+| `decision` | TEXT | NOT NULL | exportable |
+| `status_before` | TEXT | NOT NULL | exportable |
+| `note` | TEXT | nullable | exportable |
+| `decided_by` | TEXT | NOT NULL | exportable |
+| `decided_at` | TEXT | NOT NULL | exportable |
+| `context_json` | TEXT | nullable | exportable |
+
 ## `review_queue`
 
-*table* — 2,049 rows.
+*table* — 2,172 rows.
 
 Anything that requires human judgement before it can be promoted into a canonical table (unmatched buyer names, unverified CDP/committee document candidates, charities whose accounts don't parse cleanly, etc).
 
@@ -803,7 +1152,7 @@ Anything that requires human judgement before it can be promoted into a canonica
 
 ## `schema_migrations`
 
-*table* — 16 rows.
+*table* — 26 rows.
 
 Core infrastructure tables shared by every module. Applied automatically by pipeline.db.apply_migrations before any module runs.
 
@@ -949,6 +1298,40 @@ Module 6: National Drug and Alcohol Treatment and Recovery Services Workforce Ce
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `restricted_v_officer_edges`
+
+*view* — 265 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `source_id` | TEXT | nullable | restricted |
+| `relationship` |  | nullable | restricted |
+| `target_id` | TEXT | nullable | restricted |
+| `target_label` | TEXT | nullable | restricted |
+| `provider_key` | TEXT | nullable | restricted |
+| `officer_role` | TEXT | nullable | restricted |
+| `appointed_on` | TEXT | nullable | restricted |
+| `resigned_on` | TEXT | nullable | restricted |
+| `source_url` | TEXT | nullable | restricted |
+| `retrieved_at` | TEXT | nullable | restricted |
+
+## `restricted_v_shared_officers`
+
+*view* — 29 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `officer_name` | TEXT | nullable | restricted |
+| `company_number_a` | TEXT | nullable | restricted |
+| `company_number_b` | TEXT | nullable | restricted |
+| `company_name_a` | TEXT | nullable | restricted |
+| `company_name_b` | TEXT | nullable | restricted |
+| `provider_key_a` | TEXT | nullable | restricted |
+| `provider_key_b` | TEXT | nullable | restricted |
+| `basis` |  | nullable | restricted |
+| `source_url` | TEXT | nullable | restricted |
+| `retrieved_at` | TEXT | nullable | restricted |
+
 ## `v_company_officer_changes`
 
 *view* — 9 rows.
@@ -961,6 +1344,32 @@ Module 6: National Drug and Alcohol Treatment and Recovery Services Workforce Ce
 | `officers_resigned` |  | nullable | exportable |
 | `earliest_appointment` |  | nullable | exportable |
 | `latest_change` |  | nullable | exportable |
+
+## `v_entity_edge_confidence`
+
+*view* — 9 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `relationship` |  | nullable | exportable |
+| `basis` | TEXT | nullable | exportable |
+| `edges` |  | nullable | exportable |
+
+## `v_entity_edges`
+
+*view* — 262 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `source_type` |  | nullable | exportable |
+| `source_id` | TEXT | nullable | exportable |
+| `relationship` |  | nullable | exportable |
+| `target_type` |  | nullable | exportable |
+| `target_id` | TEXT | nullable | exportable |
+| `target_label` | TEXT | nullable | exportable |
+| `basis` | TEXT | nullable | exportable |
+| `source_url` | TEXT | nullable | exportable |
+| `retrieved_at` | TEXT | nullable | exportable |
 
 ## `v_fingertips_la_latest`
 
@@ -982,6 +1391,71 @@ Module 6: National Drug and Alcohol Treatment and Recovery Services Workforce Ce
 | `count_numerator` | REAL | nullable | exportable |
 | `denominator` | REAL | nullable | exportable |
 | `value_note` | TEXT | nullable | exportable |
+
+## `v_la_public_health_budget`
+
+*view* — 4,936 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | nullable | exportable |
+| `authority_name` | TEXT | nullable | exportable |
+| `region` | TEXT | nullable | exportable |
+| `financial_year` | TEXT | nullable | exportable |
+| `line_code` | TEXT | nullable | exportable |
+| `column_label` | TEXT | nullable | exportable |
+| `budget_gbp` | REAL | nullable | exportable |
+| `basis_note` |  | nullable | exportable |
+
+## `v_nhs_repeat_advertised_roles`
+
+*view* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | nullable | exportable |
+| `employer_name_raw` | TEXT | nullable | exportable |
+| `job_title_normalised` |  | nullable | exportable |
+| `advert_count` |  | nullable | exportable |
+| `first_posted_date` |  | nullable | exportable |
+| `last_posted_date` |  | nullable | exportable |
+| `lowest_advertised` |  | nullable | exportable |
+| `highest_advertised` |  | nullable | exportable |
+| `distinct_salary_periods` |  | nullable | exportable |
+| `job_references` |  | nullable | exportable |
+
+## `v_provider_disclosure_gaps`
+
+*view* — 24 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | nullable | exportable |
+| `provider_name` | TEXT | nullable | exportable |
+| `financial_year_end` | TEXT | nullable | exportable |
+| `topic` | TEXT | nullable | exportable |
+| `search_terms` | TEXT | nullable | exportable |
+| `caveat` |  | nullable | exportable |
+
+## `v_provider_viability`
+
+*view* — 9 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | nullable | exportable |
+| `company_number` | TEXT | nullable | exportable |
+| `company_name` | TEXT | nullable | exportable |
+| `company_status` | TEXT | nullable | exportable |
+| `date_of_cessation` | TEXT | nullable | exportable |
+| `match_basis` | TEXT | nullable | exportable |
+| `insolvency_cases` |  | nullable | exportable |
+| `insolvency_case_types` |  | nullable | exportable |
+| `first_insolvency_date` |  | nullable | exportable |
+| `last_insolvency_date` |  | nullable | exportable |
+| `officers_active` |  | nullable | exportable |
+| `officers_resigned` |  | nullable | exportable |
+| `viability_flag` |  | nullable | exportable |
 
 ## `v_wage_per_employee`
 
