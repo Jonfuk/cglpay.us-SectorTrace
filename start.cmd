@@ -11,7 +11,7 @@ REM
 REM   start.cmd                     -^> --help
 REM   start.cmd list-modules
 REM
-REM   Collect ^(14 modules; run m00_geography first - everything joins to it^):
+REM   Collect ^(15 modules; run m00_geography first - everything joins to it^):
 REM   start.cmd run m00_geography
 REM   start.cmd run all
 REM   start.cmd run m01_procurement --since 2024-01-01 --limit 100
