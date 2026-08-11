@@ -19,11 +19,53 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_connection(settings: Settings | None = None) -> sqlite3.Connection:
+# A writer that has to wait for another writer should wait, not fail. The
+# default 5s is not enough for this warehouse: a single m13 commit writes tens
+# of thousands of budget rows, and anything queued behind it would raise
+# "database is locked" part-way through a crawl that has already made the
+# requests. Waiting costs time; failing costs the run.
+BUSY_TIMEOUT_MS = 120_000
+
+
+def get_connection(settings: Settings | None = None,
+                    check_same_thread: bool = True) -> sqlite3.Connection:
+    """A warehouse connection in WAL mode.
+
+    WAL matters for two reasons, only one of which is about concurrency:
+
+      * readers do not block the writer and the writer does not block
+        readers, so a long m13 commit no longer stops everything else — under
+        the default rollback journal a writer takes an exclusive lock on the
+        whole file;
+      * a crash mid-commit rolls back cleanly rather than leaving a hot
+        journal beside the database.
+
+    `check_same_thread=False` is for the fetch pools in the council-walking
+    modules, whose worker threads read and write the HTTP cache. Pass it only
+    where access is actually serialised — SQLite is safe across threads, but
+    Python's cursor and transaction state is not.
+    """
     settings = settings or get_settings()
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(settings.database_path)
+    conn = sqlite3.connect(settings.database_path, timeout=BUSY_TIMEOUT_MS / 1000,
+                            check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
+
+    # WAL is a persistent property of the database file, so this is a no-op
+    # after the first connection ever made to it. It cannot be set on some
+    # network filesystems; the mode is read back rather than assumed, and a
+    # refusal is surfaced instead of silently leaving the warehouse in a mode
+    # the caller did not ask for.
+    mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+    if mode.lower() != "wal":
+        import structlog
+
+        structlog.get_logger().warning(
+            "db.wal_unavailable", journal_mode=mode,
+            database_path=str(settings.database_path),
+            note="concurrent access will serialise on a whole-file lock")
+
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
