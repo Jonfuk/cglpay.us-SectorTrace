@@ -245,7 +245,15 @@ def test_workers_on_the_same_host_still_queue(tmp_path):
     double its request rate.
     """
     HOST_CLOCK.reset()
-    settings = _settings(tmp_path, default_rate_limit_seconds=0.15)
+    interval = 0.3
+    # Windows' timer granularity is ~16ms and time.sleep can wake early, so a
+    # measured gap is the real one plus or minus scheduling jitter. The margin
+    # is generous relative to the interval rather than tight, because a flaky
+    # politeness test gets muted and then it is protecting nothing. A genuine
+    # regression here — two workers ignoring each other — halves the gap, and
+    # no tolerance this side of interval/2 would hide that.
+    tolerance = 0.05
+    settings = _settings(tmp_path, default_rate_limit_seconds=interval)
     stamps: list[float] = []
     lock = threading.Lock()
 
@@ -259,7 +267,7 @@ def test_workers_on_the_same_host_still_queue(tmp_path):
 
     stamps.sort()
     gaps = [b - a for a, b in zip(stamps, stamps[1:])]
-    assert all(gap >= 0.15 - 0.02 for gap in gaps), \
+    assert all(gap >= interval - tolerance for gap in gaps), \
         f"parallel workers exceeded the per-host rate: {gaps}"
 
 

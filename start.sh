@@ -17,6 +17,12 @@
 #   ./start.sh run m01_procurement --since 2024-01-01 --limit 100
 #   ./start.sh run m03_charity_finance --dry-run
 #
+#   `run all` groups modules into dependency waves. By default each wave runs
+#   one module at a time; --jobs runs a wave's modules together, which is safe
+#   because they mostly target different APIs and the per-host rate limit is
+#   enforced across the whole process:
+#   ./start.sh run all --jobs 4
+#
 #   Export (each file gets a companion .provenance.json):
 #   ./start.sh export all          # sheets, geojson, echarts, docs
 #   ./start.sh export sheets --push

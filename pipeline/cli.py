@@ -241,7 +241,19 @@ def run(
             conn.close()
             raise typer.Exit(code=1)
         targets = [(name, MODULE_REGISTRY[name]) for name in order]
-        typer.echo(f"Run order ({len(targets)} modules): {' -> '.join(order)}")
+        waves = resolve_run_waves(order)
+        ui.heading(f"Run order — {len(targets)} modules in {len(waves)} waves")
+        for index, wave in enumerate(waves, start=1):
+            width = max(1, min(jobs, len(wave)))
+            shape = f"{width} at a time" if width > 1 else "one at a time"
+            ui.info(f"  [pipeline.muted]wave {index}[/] ({shape}): "
+                     f"[pipeline.module]{', '.join(wave)}[/]")
+        if jobs == 1 and any(len(wave) > 1 for wave in waves):
+            # The waves exist either way — they are what orders the run. Saying
+            # so avoids the reasonable reading that printing waves means the
+            # run is already using them for concurrency.
+            ui.muted("  running serially; --jobs N runs each wave's modules "
+                      "at once (different APIs, same per-host rate limit)")
     elif module in MODULE_REGISTRY:
         targets = [(module, MODULE_REGISTRY[module])]
         # A single module still runs, but say what it will be working without.

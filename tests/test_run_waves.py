@@ -307,3 +307,47 @@ def test_jobs_below_one_is_rejected_by_the_option(tmp_path, monkeypatch):
 
     result = CliRunner().invoke(cli_module.app, ["run", "all", "--jobs", "0"])
     assert result.exit_code != 0
+
+
+# --- discoverability ------------------------------------------------------------------
+
+def test_both_start_scripts_document_jobs():
+    """The scripts pass every argument through, so --jobs already works from
+    them. What was missing was any way to find that out.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    for script in ("start.sh", "start.cmd"):
+        text = (root / script).read_text(encoding="utf-8")
+        assert "--jobs" in text, f"{script} never mentions --jobs"
+
+
+def test_a_serial_run_all_says_the_waves_are_not_being_used_concurrently(
+        tmp_path, monkeypatch):
+    """Printing waves could reasonably be read as "this run is parallel".
+    With the default --jobs 1 it is not, and it says so.
+    """
+    from typer.testing import CliRunner
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    for name in list(MODULE_REGISTRY):
+        monkeypatch.setitem(MODULE_REGISTRY, name, lambda ctx: None)
+
+    output = CliRunner().invoke(cli_module.app, ["run", "all"]).output
+    assert "one at a time" in output
+    assert "--jobs" in output, "a serial run never mentions how to parallelise it"
+
+
+def test_a_parallel_run_all_does_not_print_the_serial_hint(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    for name in list(MODULE_REGISTRY):
+        monkeypatch.setitem(MODULE_REGISTRY, name, lambda ctx: None)
+
+    output = CliRunner().invoke(cli_module.app, ["run", "all", "--jobs", "4"]).output
+    assert "4 at a time" in output
+    assert "running serially" not in output

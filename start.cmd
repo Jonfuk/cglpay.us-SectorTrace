@@ -19,6 +19,12 @@ REM   start.cmd run all
 REM   start.cmd run m01_procurement --since 2024-01-01 --limit 100
 REM   start.cmd run m03_charity_finance --dry-run
 REM
+REM   "run all" groups modules into dependency waves. By default each wave runs
+REM   one module at a time; --jobs runs a wave's modules together, which is safe
+REM   because they mostly target different APIs and the per-host rate limit is
+REM   enforced across the whole process:
+REM   start.cmd run all --jobs 4
+REM
 REM   Export ^(each file gets a companion .provenance.json^):
 REM   start.cmd export all          - sheets, geojson, echarts, docs
 REM   start.cmd export sheets --push
