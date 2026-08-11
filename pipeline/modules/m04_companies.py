@@ -642,7 +642,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m04_companies"
     conn = ctx.conn
     api_key = ctx.settings.require_companies_house_key()
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     companies_written = 0
     officers_written = 0

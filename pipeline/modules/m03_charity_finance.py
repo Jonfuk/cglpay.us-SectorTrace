@@ -355,7 +355,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m03_charity_finance"
     conn = ctx.conn
     api_key = ctx.settings.require_charity_commission_key()
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     targets = _target_charities(conn)
     if not targets:

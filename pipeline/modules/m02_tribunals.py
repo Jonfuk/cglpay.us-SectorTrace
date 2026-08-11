@@ -253,7 +253,7 @@ def _region_for_prefix(conn, office_prefix: str) -> str | None:
 def run(ctx: ModuleContext) -> None:
     module_name = "m02_tribunals"
     conn = ctx.conn
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     seen_cases: set[str] = set()
     unmapped_prefixes: set[str] = set()

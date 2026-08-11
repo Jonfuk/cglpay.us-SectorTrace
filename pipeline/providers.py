@@ -59,9 +59,32 @@ def seed_rows() -> tuple[list[dict], list[dict]]:
     return providers, identifiers
 
 
-def seed_providers(conn) -> None:
+def seed_providers(conn, commit: bool = True) -> None:
     """Idempotently seed the provider reference tables. Safe to call at the
     start of any module that needs provider_key to resolve.
+
+    COMMITS BY DEFAULT, and that is the whole point of the argument.
+
+    SQLite allows one writer at a time. Python's sqlite3 opens a transaction on
+    the first write and holds it until commit, so a module that seeded here and
+    then went off to fetch held the database's only write slot for every second
+    of its crawl. Serially that is invisible. Under `run all --jobs N` every
+    module in a wave seeds within milliseconds of starting, one of them wins
+    the slot, and the rest sit on the busy handler until it expires — which is
+    a `run all --jobs 4` reporting "OperationalError: database is locked"
+    against twelve modules that had each burned two minutes waiting, after
+    making no requests at all.
+
+    These rows are reference data built from `pipeline/keywords.py`, not
+    fetched evidence: identical on every run, and nothing a module does can
+    make them wrong. Committing them immediately costs nothing and hands the
+    write slot straight back.
+
+    `commit=False` is for `--dry-run`, where the caller rolls the whole
+    transaction back and a run that promised to write nothing must write
+    nothing. A dry run with `--jobs` can therefore still contend — it is the
+    one case where the promise and the concurrency pull in opposite directions,
+    and the promise wins.
     """
     from pipeline import db
 
@@ -71,6 +94,8 @@ def seed_providers(conn) -> None:
     for row in identifiers:
         db.upsert(conn, "provider_identifiers", row,
                    natural_key=["provider_key", "scheme", "identifier"])
+    if commit:
+        conn.commit()
 
 
 def normalise_identifier(scheme: str, identifier: str) -> str:

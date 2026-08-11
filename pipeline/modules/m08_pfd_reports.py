@@ -298,7 +298,7 @@ def _provenance(result) -> dict:
 def run(ctx: ModuleContext) -> None:
     module_name = "m08_pfd_reports"
     conn = ctx.conn
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     reports_written = 0
     recipient_mentions = 0

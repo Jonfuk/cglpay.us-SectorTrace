@@ -169,7 +169,7 @@ def _archived_reports(conn) -> list:
 def run(ctx: ModuleContext) -> None:
     module_name = "m14_annual_reports"
     conn = ctx.conn
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     reports = _archived_reports(conn)
     if not reports:

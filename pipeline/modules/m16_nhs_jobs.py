@@ -507,7 +507,7 @@ def _provenance(result) -> dict:
 def run(ctx: ModuleContext) -> None:
     module_name = "m16_nhs_jobs"
     conn = ctx.conn
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
 
     adverts_written = 0
     discarded_unmatched = 0

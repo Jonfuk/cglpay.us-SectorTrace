@@ -415,3 +415,68 @@ def test_a_failing_modules_task_is_also_removed(prepared, monkeypatch):
         monkeypatch.setitem(MODULE_REGISTRY, "a_boom", boom)
         cli_module._run_waves([["a_boom"]], 1, prepared, None, False, None, bar)
         assert [t.description for t in bar.tasks] == ["all modules"]
+
+
+# --- the whole CLI path, with modules that actually write ------------------------
+#
+# Every other test here replaces modules with `lambda ctx: None`, which is why
+# none of them could catch the failure that mattered: `run all --jobs 4`
+# reporting "database is locked" against twelve of seventeen modules. Stubs
+# that write nothing never contend for the write slot.
+
+def test_a_parallel_wave_of_writing_modules_all_commit(tmp_path, monkeypatch):
+    """The real _run_waves, with modules that seed providers and write.
+
+    Reproduces the shape of the failing run: one module whose own work takes a
+    while, and a wave of others starting at the same moment. Before the fix,
+    the provider seed each of them wrote on startup was left uncommitted, so
+    the first module to open a transaction held the database's only write slot
+    across its whole run and the rest died on the busy handler.
+
+    Given a busy timeout of two seconds rather than the real two minutes, and
+    a slow module that outlasts it. Without that this test has no teeth: eight
+    modules waiting politely for a second and a half all succeed against a
+    120-second timeout whether the bug is present or not — which is exactly
+    why the original failure needed a four-hour run to show itself.
+    """
+    import time
+
+    from pipeline import db, providers
+    from pipeline import console as ui
+
+    settings = _settings(tmp_path)
+    setup = db.get_connection(settings)
+    db.apply_migrations(setup, settings.migrations_dir)
+    setup.commit()
+    setup.close()
+
+    def make(name, hold):
+        def module(ctx):
+            providers.seed_providers(ctx.conn, commit=not ctx.dry_run)
+            time.sleep(hold)
+            ctx.conn.execute(
+                "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                "VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
+                (name, "wave", name, "2026-01-01"))
+        return module
+
+    names = [f"m{i:02d}_writer" for i in range(8)]
+    for index, name in enumerate(names):
+        monkeypatch.setitem(MODULE_REGISTRY, name, make(name, 5.0 if index == 0 else 0.1))
+
+    monkeypatch.setattr(db, "BUSY_TIMEOUT_MS", 2_000)
+    with ui.progress() as bar:
+        summary = cli_module._run_waves([names], 8, settings, None, False, None, bar)
+
+    failed = [row for row in summary if row["status"] == "failed"]
+    assert failed == [], (
+        f"{len(failed)} of {len(names)} modules in one wave failed: "
+        f"{[(r['module'], repr(r.get('error'))) for r in failed[:3]]}")
+
+    check = db.get_connection(settings)
+    try:
+        written = check.execute(
+            "SELECT COUNT(*) c FROM review_queue WHERE item_type='wave'").fetchone()["c"]
+    finally:
+        check.close()
+    assert written == len(names), "a module reported success without its row landing"

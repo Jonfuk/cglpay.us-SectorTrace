@@ -262,6 +262,15 @@ def run(ctx: ModuleContext) -> None:
                     year_row_count += 1
 
             total_rows += year_row_count
+            # Committed per publication, not once at the end. SQLite allows one
+            # writer, and a transaction left open spans every fetch that
+            # follows it — so a module that wrote its first row early and
+            # committed only on the way out held the warehouse's only write
+            # slot for its entire run. Serially that is invisible; under
+            # `run all --jobs N` it is every other module in the wave failing
+            # with "database is locked" after waiting out the busy timeout.
+            if not ctx.dry_run:
+                conn.commit()
             log.info("phg.publication_processed", year=pub["year_start"], rows=year_row_count)
 
         log.info("phg.run_complete", total_rows=total_rows)

@@ -188,6 +188,113 @@ def test_concurrent_opens_of_a_brand_new_file_never_raise(settings):
     assert not errors, f"opening connections concurrently failed: {errors}"
 
 
+# --- a whole wave of writers, which is what `run all --jobs N` actually is -------
+#
+# Everything above tests TWO writers, and two writers were always fine. The
+# failure was thirteen. A `run all --jobs 4` reported
+# "OperationalError: database is locked" against twelve of seventeen modules,
+# each after almost exactly BUSY_TIMEOUT_MS, having made no requests at all.
+#
+# The cause was not the timeout being short. Every module opened a write
+# transaction in its first milliseconds — providers.seed_providers writes
+# reference rows — and Python's sqlite3 holds that transaction until commit.
+# One module won the single write slot and kept it across all of its HTTP
+# work; the rest sat on the busy handler until it expired. SQLite's busy
+# handler is a backoff, not a fair queue, so the losers do not take turns.
+
+def _module_shaped_writer(settings, name: str, hold_seconds: float, seed_commits: bool):
+    """One module: seed the provider tables, do some 'fetching', then write."""
+    from pipeline import providers
+
+    conn = db.get_connection(settings)
+    try:
+        providers.seed_providers(conn, commit=seed_commits)
+        time.sleep(hold_seconds)          # stands in for rate-limited HTTP
+        conn.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
+            (name, "x", name, "2026-01-01"))
+        conn.commit()
+        return None
+    except sqlite3.OperationalError as exc:
+        return exc
+    finally:
+        conn.close()
+
+
+def _run_a_wave(settings, seed_commits: bool, width: int = 12):
+    from concurrent.futures import ThreadPoolExecutor
+
+    setup = db.get_connection(settings)
+    db.apply_migrations(setup, settings.migrations_dir)
+    setup.commit()
+    setup.close()
+
+    # One module whose own first commit is far away — m11 and m13 are shaped
+    # like this — and eleven ordinary ones starting at the same moment.
+    plan = [("slow", 2.5)] + [(f"m{i:02d}", 0.2) for i in range(width - 1)]
+    with ThreadPoolExecutor(max_workers=width) as pool:
+        futures = [pool.submit(_module_shaped_writer, settings, name, hold, seed_commits)
+                    for name, hold in plan]
+        return [f.result() for f in futures]
+
+
+def test_seeding_providers_does_not_hold_the_write_slot(settings):
+    """The regression, at the size it actually happened.
+
+    Twelve modules starting together must all get their work written. Before
+    the fix, whichever one won the write slot kept it across its fetches and
+    the other eleven failed.
+    """
+    errors = [e for e in _run_a_wave(settings, seed_commits=True) if e is not None]
+    assert errors == [], (
+        f"{len(errors)} of 12 concurrent modules could not write: {errors[:2]}")
+
+
+def test_the_regression_reproduces_when_the_seed_is_left_uncommitted(settings):
+    """A guard on the guard. If this stops failing, the test above has stopped
+    proving anything and something else is protecting the run.
+
+    Deliberately given a busy timeout of a few seconds rather than the real
+    two minutes — the point is that writers are starved, not how long they are
+    willing to wait for it.
+    """
+    original = db.BUSY_TIMEOUT_MS
+    db.BUSY_TIMEOUT_MS = 3_000
+    try:
+        errors = [e for e in _run_a_wave(settings, seed_commits=False) if e is not None]
+    finally:
+        db.BUSY_TIMEOUT_MS = original
+
+    assert errors, (
+        "holding the provider seed open across a wave no longer starves anyone — "
+        "if that is a real improvement, delete this test and say why")
+    assert all("locked" in str(e) for e in errors)
+
+
+def test_every_module_commits_its_provider_seed(settings):
+    """The fix has to be in every module, not most of them. A module that
+    seeds without committing reintroduces the stampede on its own.
+    """
+    import inspect
+    import re as _re
+
+    from pipeline.registry import MODULE_REGISTRY, discover_modules
+
+    discover_modules()
+    offenders = []
+    for name, fn in MODULE_REGISTRY.items():
+        if not _re.match(r"^m\d{2}_[a-z_]+$", name):
+            continue
+        source = inspect.getsource(fn)
+        if "seed_providers(" not in source:
+            continue
+        if "commit=" not in source:
+            offenders.append(name)
+    assert offenders == [], (
+        f"these modules seed the provider tables without committing: {offenders}")
+
+
 def test_cross_thread_access_is_opt_in(settings):
     """The fetch pools need it; nothing else should get it by accident,
     because SQLite being thread-safe does not make Python's transaction state

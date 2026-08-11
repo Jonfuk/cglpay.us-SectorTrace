@@ -212,7 +212,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m05_cqc"
     conn = ctx.conn
     key = ctx.settings.require_cqc_key()
-    providers.seed_providers(conn)
+    providers.seed_providers(conn, commit=not ctx.dry_run)
     authority_lookup = _build_authority_lookup(conn)
 
     provider_rows = 0
