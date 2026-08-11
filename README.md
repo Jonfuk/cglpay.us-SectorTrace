@@ -263,7 +263,7 @@ inflate the counts.
 ## Development
 
 ```bash
-uv run python -m pytest              # full suite
+uv run python -m pytest                  # full suite (offline, fixture-backed)
 uv run python -m pytest -m integration   # live-source smoke tests (skipped by default)
 ```
 
@@ -271,3 +271,32 @@ Parsers are tested against fixtures in `tests/fixtures/` captured from real
 responses. Fixtures containing personal data are anonymised: the underlying
 judgments are public record, but this repository is public and the pipeline
 treats claimant names as restricted.
+
+### Live smoke tests
+
+Fixtures cannot notice the failure this project is most exposed to: a source
+quietly changing shape. `tests/test_integration_smoke.py` runs every module
+against its real source with a small `--limit` and asks three things:
+
+1. does it run without raising?
+2. did it write anything?
+3. do the rows carry **evidence**, not just provenance and NULLs?
+
+The third is the one that matters. A parser whose column headings no longer
+match writes a row per record with every value NULL, logs a pile of
+`parse_failures`, and exits zero — which looks like a successful run. Each
+module declares the columns that go blank when that happens.
+
+The modules share one temporary warehouse and run in dependency order, so `m04`
+sees the company numbers `m03`/`m05` publish and `m09`/`m10` see the websites
+`m15` registers. Where a small `--limit` leaves a downstream module nothing to
+work on, it skips with a reason naming the upstream table rather than passing
+over zero rows. Modules whose credentials are absent skip by name.
+
+These make real requests at the normal one-per-two-seconds-per-host rate, and
+the run takes a while (`m05` alone pages the full CQC provider index before it
+can filter). Do not run them in a loop. A final test sweeps the working
+warehouse — not a temporary one — for any row that lost its provenance.
+
+The coverage guards run offline with the default suite: a new module without a
+smoke spec, or a spec naming a column that does not exist, fails immediately.
