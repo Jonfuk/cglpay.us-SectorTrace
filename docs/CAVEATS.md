@@ -158,6 +158,12 @@ schema has no provider column for this reason.
   detected and then recorded as `committee_system_unsupported`; no adapter
   exists. Do not read the absence of candidates for a CMIS council as an
   absence of papers.
+- **Audit terms are qualified, not bare.** "internal audit public health"
+  rather than "internal audit", because the bare term returns the audit
+  committee's entire history on every council. A review worklist nobody can
+  triage is worse than not searching — the same lesson as m14 and m15.
+  "public interest report" is searched unqualified because it is rare and
+  always serious: the auditor is formally telling the public something.
 - Search results are capped at three pages (30 hits) per term per council. A
   council with more matches than that is truncated, not exhausted.
 - `matched_terms` lists every configured term that found the document, sorted.

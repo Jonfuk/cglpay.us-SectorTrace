@@ -54,6 +54,21 @@ SUPPLIER_NAME_VARIANTS: dict[str, list[str]] = {
 TRIBUNAL_RESPONDENT_VARIANTS: list[str] = SUPPLIER_NAME_VARIANTS["change_grow_live"]
 
 # Search terms for council committee papers (Module 10).
+#
+# Two groups. The first is the subject: papers about the services themselves.
+# The second is audit and assurance — internal audit reports, external audit
+# findings and Public Interest Reports go to the same committees and are
+# indexed by the same ModernGov search, so they cost new search terms rather
+# than a new module.
+#
+# Audit terms are deliberately paired with a subject word where the bare term
+# would match everything a council does ("internal audit" alone returns the
+# audit committee's entire history). The same lesson as m14 and m15: a bare
+# term that matches thousands of irrelevant papers produces a review worklist
+# nobody can triage, which is worse than not searching.
+#
+# Every term costs 300 councils x up to 3 result pages, so this list is not
+# free to extend — see MAX_RESULT_PAGES in m10.
 COMMITTEE_SEARCH_TERMS: list[str] = [
     "drug and alcohol",
     "substance misuse",
@@ -61,6 +76,12 @@ COMMITTEE_SEARCH_TERMS: list[str] = [
     "TUPE",
     "public health grant",
     "treatment and recovery",
+    # Audit and assurance. A Public Interest Report is rare and always
+    # serious — the auditor is formally telling the council something the
+    # public needs to know — so it is worth searching unqualified.
+    "public interest report",
+    "internal audit public health",
+    "audit substance misuse",
 ]
 
 # PFD report categories of interest (Module 8).
