@@ -135,17 +135,45 @@ schema has no provider column for this reason.
 
 ### CDP documents and committee papers (Modules 9, 10)
 
-- **Coverage is 1 of 153 authorities.** Both modules need each council's
-  publication URL, which cannot be derived — council hostnames are genuinely
-  unpredictable. The registry holds only entries verified by request; the other
-  152 authorities are in `review_queue`. This is the binding limitation on both
-  modules.
+- **Coverage is bounded by the committee URL, which cannot be derived** —
+  council hostnames are genuinely unpredictable. Three sources, in precedence
+  order: the hand-verified registry in `pipeline/authority_websites.py`; a
+  committee-system link on the council's own home page, where the target then
+  answers a ModernGov signature path; and otherwise nothing, recorded as
+  `committee_url_unknown`. Councils that link their committee system only from
+  a second-level navigation page are not found, and are countable in
+  `review_queue` rather than silently absent.
+- `authority_committee_systems.url_source` says which of those it was.
+  `homepage_link` is weaker evidence than `registry`: the council published the
+  link and the target answered, but nobody has confirmed it is the right
+  system for that authority.
 - Nothing is promoted without human verification. A candidate is a URL that
   looked right, which is not the same as a document that is what it claims.
-- **ModernGov's document search cannot be driven by a GET request.** It answers
-  with a 302; it is an ASP.NET form needing a POST with viewstate, which is not
-  implemented. Affected authorities are recorded as
-  `moderngov_search_requires_post` rather than reported as searched.
+- `match_quality` is **ModernGov's own three-star ranking**, not a relevance
+  score this pipeline computed. It ranks textual match against the search term,
+  which is not the same as relevance to drug and alcohol services: an
+  "excellent match" for `public health grant` is frequently a COVID grant
+  report.
+- **Only ModernGov is searchable.** CMIS and other committee systems are
+  detected and then recorded as `committee_system_unsupported`; no adapter
+  exists. Do not read the absence of candidates for a CMIS council as an
+  absence of papers.
+- Search results are capped at three pages (30 hits) per term per council. A
+  council with more matches than that is truncated, not exhausted.
+- `matched_terms` lists every configured term that found the document, sorted.
+  It is not a relevance score and the number of terms is not a strength
+  measure — "drug and alcohol" and "treatment and recovery" both match most
+  substance misuse papers, so two terms is the common case rather than a
+  strong signal.
+- A council behind bot protection answers 403. That is recorded as
+  `committee_search_blocked`, and is not the same fact as
+  `committee_search_no_matches`, which is ModernGov itself reporting no hits.
+- Earlier versions of this file recorded that ModernGov's document search
+  "needs a POST with viewstate". That was wrong — it was inferred from two
+  failing GETs against the wrong endpoints rather than read off the form,
+  which has no viewstate field. The search is a plain GET on
+  `/ieSearchResults2.aspx`. Both faults produced the same symptom: a council
+  that looked like it published nothing.
 
 ### Public Health Grant (Module 11)
 

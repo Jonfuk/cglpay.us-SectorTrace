@@ -46,6 +46,22 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_system="moderngov",
         verified_on="2026-08-11",
     ),
+    "E08000034": AuthorityWebsite(
+        ons_code="E08000034",
+        name="Kirklees",
+        base_url="https://www.kirklees.gov.uk",
+        committee_url="https://democracy.kirklees.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-11",
+    ),
+    "E06000005": AuthorityWebsite(
+        ons_code="E06000005",
+        name="Darlington",
+        base_url="https://www.darlington.gov.uk",
+        committee_url="https://democracy.darlington.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-11",
+    ),
 }
 
 # Path signatures used to identify a committee system from its root URL.
@@ -53,6 +69,21 @@ SYSTEM_SIGNATURES: dict[str, list[str]] = {
     "moderngov": ["/mgWhatsNew.aspx", "/ieDocHome.aspx"],
     "cmis": ["/CMIS5/Meetings.aspx", "/cmis5/Meetings.aspx"],
 }
+
+# Paths that only a committee system serves, used to recognise one in a link
+# published on a council's own home page. Matching a link is not enough on its
+# own — Module 10 then probes SYSTEM_SIGNATURES against the host it points at,
+# so a URL is only accepted when the council links it *and* it answers.
+COMMITTEE_LINK_SIGNATURES: tuple[str, ...] = (
+    "mgwhatsnew.aspx",
+    "iedochome.aspx",
+    "ielistmeetings.aspx",
+    "iedocsearch.aspx",
+    "mglistcommittees.aspx",
+    "mgcommitteedetails.aspx",
+    "mgcalendarmonthview.aspx",
+    "/cmis5/",
+)
 
 
 def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:

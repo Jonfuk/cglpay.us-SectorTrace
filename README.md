@@ -178,11 +178,25 @@ evidence:
 
 `m09` and `m10` are also **coverage-limited**: they need each council's
 publication URL, which cannot be derived, so `pipeline/authority_websites.py`
-holds only entries verified by request. Authorities without one are queued:
+holds only entries verified by request. `m10` will additionally accept a
+committee-system link published on the council's own home page, provided the
+target then answers a ModernGov signature path — two confirmations from the
+source, recorded as `url_source = 'homepage_link'` so it stays distinguishable
+from a hand-verified entry. Authorities with neither are queued:
 
 ```sql
 SELECT COUNT(*) FROM review_queue WHERE item_type = 'authority_website_unknown';
+SELECT COUNT(*) FROM review_queue WHERE item_type = 'committee_url_unknown';
 ```
+
+`m10` searches ModernGov systems for real (a GET on `/ieSearchResults2.aspx`).
+Other committee systems are detected and then recorded as
+`committee_system_unsupported` — no adapter exists, so their absence of
+candidates is an absence of coverage, not an absence of papers. Four review
+item types keep those apart: `committee_search_no_matches` (the system
+searched and reported nothing), `committee_search_blocked` (403, usually bot
+protection), `moderngov_results_unrecognised` (the page is no longer the shape
+the parser understands) and `committee_system_unsupported`.
 
 ## Exports
 
