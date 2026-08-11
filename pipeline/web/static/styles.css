@@ -230,6 +230,61 @@ details.history summary { cursor: pointer; font-size: 12.5px; color: var(--muted
 
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 
+/* --- loading ------------------------------------------------------------- */
+
+/* A page that has issued a request and shows nothing looks identical to a
+   page that is broken. The schema call alone reads 64 tables. */
+.busybar {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  background: transparent; z-index: 100; overflow: hidden;
+}
+.busybar-run {
+  width: 40%; height: 100%; background: var(--accent);
+  animation: busyslide 1.1s ease-in-out infinite;
+}
+@keyframes busyslide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .busybar-run { animation: none; width: 100%; opacity: 0.5; }
+}
+
+.skeleton {
+  background: var(--line); border-radius: 4px; height: 12px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.skel-item {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+
+/* --- dense review rows --------------------------------------------------- */
+
+/* The queue is thousands of rows and two item types are 72% of it. Cards are
+   right for reading one item; this is right for clearing four hundred. */
+.densewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+table.dense { font-size: 12.5px; }
+table.dense td { vertical-align: middle; white-space: nowrap; }
+table.dense td.raw {
+  font-family: var(--mono); max-width: 520px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+table.dense tr.focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.dense .btn { padding: 1px 8px; font-size: 12px; }
+table.dense td.act { white-space: nowrap; }
+
+.matchbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  background: var(--pending-bg); color: var(--pending);
+  border: 1px solid var(--pending); border-radius: 8px;
+  padding: 10px 12px; margin-top: 10px;
+}
+.matchbar input { flex: 1; min-width: 180px; background: var(--panel); color: var(--ink); }
+.matchbar #match-summary { font-weight: 600; }
+
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);

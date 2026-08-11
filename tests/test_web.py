@@ -209,6 +209,85 @@ def test_a_decision_needs_a_reviewer_and_a_known_decision(seeded):
         review.decide(seeded, list(range(review.MAX_BATCH + 1)), "approved", decided_by="Jon")
 
 
+def test_deciding_a_filtered_set_needs_the_count_the_page_was_showing(seeded):
+    """The guard that replaces the batch cap.
+
+    If the set moved under the reviewer — someone else decided some, or a
+    module added more — the count no longer matches and nothing happens.
+    """
+    with pytest.raises(review.DecisionError, match="not the 5"):
+        review.decide_matching(seeded, decision="approved", decided_by="Jon",
+                                confirm_count=5, module="m01_procurement")
+
+    assert seeded.execute(
+        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0] == 3
+
+    result = review.decide_matching(seeded, decision="approved", decided_by="Jon",
+                                     confirm_count=2, module="m01_procurement")
+    assert result["matched"] == 2
+    assert len(result["updated"]) == 2
+    # Only the filtered module moved.
+    assert seeded.execute(
+        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0] == 1
+
+
+def test_deciding_a_filtered_set_writes_the_same_audit_trail(seeded):
+    review.decide_matching(seeded, decision="rejected", decided_by="Sam",
+                            confirm_count=2, module="m01_procurement",
+                            note="not English authorities")
+    rows = seeded.execute(
+        "SELECT decision, decided_by, note, status_before FROM review_decisions").fetchall()
+    assert len(rows) == 2
+    assert {r["decision"] for r in rows} == {"rejected"}
+    assert {r["decided_by"] for r in rows} == {"Sam"}
+    assert {r["status_before"] for r in rows} == {"pending"}
+
+
+def test_an_unfiltered_bulk_decision_is_refused(seeded):
+    """"Everything, unfiltered" is never a deliberate click, and it is the one
+    mistake with no way back short of reading the audit trail."""
+    with pytest.raises(review.DecisionError, match="entire queue"):
+        review.decide_matching(seeded, decision="approved", decided_by="Jon",
+                                confirm_count=3, status="all")
+
+
+def test_the_bulk_filter_matches_exactly_what_the_list_shows(seeded, settings):
+    """The set decided and the set displayed come from one predicate.
+
+    Two copies of this filter that drift apart is a bulk action deciding items
+    the reviewer was never shown, so it is pinned rather than assumed.
+    """
+    ro = queries.readonly_connection(settings)
+    for filters in [
+        {"module": "m01_procurement"},
+        {"item_type": "unmatched_buyer_name"},
+        {"search": "Barsetshire"},
+        {"status": "pending", "module": "m04_companies"},
+    ]:
+        shown = queries.review_items(ro, limit=queries.MAX_PAGE_SIZE, **filters)
+        clause, params = queries.review_filter_sql(
+            filters.get("status", "pending"), filters.get("module"),
+            filters.get("item_type"), filters.get("search"))
+        matched = ro.execute(
+            f"SELECT q.id FROM review_queue q{clause}", params).fetchall()
+        assert {row["id"] for row in shown["items"]} == {r["id"] for r in matched}
+    ro.close()
+
+
+def test_bulk_decide_over_http(client, seeded):
+    response = client.post("/api/review/decide-matching", json={
+        "decision": "approved", "decided_by": "Jon",
+        "confirm_count": 2, "module": "m01_procurement"})
+    assert response.status_code == 200
+    assert response.json()["matched"] == 2
+
+    stale = client.post("/api/review/decide-matching", json={
+        "decision": "approved", "decided_by": "Jon",
+        "confirm_count": 99, "module": "m04_companies"})
+    assert stale.status_code == 400
+    assert "not the 99" in stale.json()["error"]
+
+
 def test_a_decided_item_is_not_reopened_by_a_later_run(seeded):
     """The guarantee that makes deciding worth doing at all.
 

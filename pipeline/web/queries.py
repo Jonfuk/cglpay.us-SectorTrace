@@ -379,23 +379,21 @@ def review_facets(conn: sqlite3.Connection) -> dict:
     }
 
 
-def review_items(
-    conn: sqlite3.Connection,
-    *,
+def review_filter_sql(
     status: str | None = "pending",
     module: str | None = None,
     item_type: str | None = None,
     search: str | None = None,
-    limit: int = DEFAULT_PAGE_SIZE,
-    offset: int = 0,
-    oldest_first: bool = True,
-) -> dict:
-    """A page of the queue, each item carrying its latest decision.
+) -> tuple[str, dict]:
+    """The WHERE clause behind every review-queue screen, as (clause, params).
 
-    The latest decision travels with the item because a queue that shows only
-    a status cannot answer the question that follows every status: on what
-    grounds? Showing "rejected — Jon, 'duplicate of E06000001'" in the list is
-    the difference between an audit trail and a flag.
+    Extracted rather than repeated because "approve everything matching this
+    filter" and "show me everything matching this filter" have to mean the
+    same set of rows. Two copies of this predicate that drift apart is a bulk
+    action deciding items the reviewer was never shown — the one bug in this
+    whole feature that would be silent, unbounded and unrecoverable.
+
+    Rows are aliased `q`, matching the queries that join decisions onto them.
     """
     where, params = [], {}
     if status and status != "all":
@@ -416,7 +414,28 @@ def review_items(
             "(q.raw_value LIKE :q ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE :q ESCAPE '\\')"
         )
 
-    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    return (f" WHERE {' AND '.join(where)}" if where else ""), params
+
+
+def review_items(
+    conn: sqlite3.Connection,
+    *,
+    status: str | None = "pending",
+    module: str | None = None,
+    item_type: str | None = None,
+    search: str | None = None,
+    limit: int = DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+    oldest_first: bool = True,
+) -> dict:
+    """A page of the queue, each item carrying its latest decision.
+
+    The latest decision travels with the item because a queue that shows only
+    a status cannot answer the question that follows every status: on what
+    grounds? Showing "rejected — Jon, 'duplicate of E06000001'" in the list is
+    the difference between an audit trail and a flag.
+    """
+    clause, params = review_filter_sql(status, module, item_type, search)
     total = _run(conn, f"SELECT COUNT(*) AS n FROM review_queue q{clause}", params)[0]["n"]
 
     limit = max(1, min(int(limit), MAX_PAGE_SIZE))

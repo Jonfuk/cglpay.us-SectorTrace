@@ -336,6 +336,7 @@ class Handler(BaseHTTPRequestHandler):
     def _post_routes(self) -> dict[str, Callable[[dict], Any]]:
         return {
             "/api/review/decide": self._decide,
+            "/api/review/decide-matching": self._decide_matching,
             "/api/query": self._query,
         }
 
@@ -363,6 +364,33 @@ class Handler(BaseHTTPRequestHandler):
             decision=result["decision"], decided_by=result["decided_by"],
             updated=len(result["updated"]), unchanged=len(result["unchanged"]),
             missing=len(result["missing"]),
+        )
+        return result
+
+    def _decide_matching(self, body: dict) -> Any:
+        """Decide a whole filtered set. The count the page was showing is sent
+        with it and checked against the database inside the transaction."""
+        conn = db.get_connection(self.settings)
+        try:
+            result = review.decide_matching(
+                conn,
+                decision=str(body.get("decision", "")),
+                decided_by=str(body.get("decided_by", "")),
+                confirm_count=body.get("confirm_count"),
+                note=body.get("note"),
+                status=(body.get("status") or "pending"),
+                module=(body.get("module") or None),
+                item_type=(body.get("item_type") or None),
+                search=(body.get("search") or None),
+            )
+        finally:
+            conn.close()
+
+        log.info(
+            "web.review_decision_bulk",
+            decision=result["decision"], decided_by=result["decided_by"],
+            matched=result["matched"], updated=len(result["updated"]),
+            module=body.get("module"), item_type=body.get("item_type"),
         )
         return result
 

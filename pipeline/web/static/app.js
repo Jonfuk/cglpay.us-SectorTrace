@@ -67,8 +67,23 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => { box.hidden = true; }, isError ? 9000 : 4000);
 }
 
+/* A request counter rather than a boolean: several calls overlap (facets and
+ * items always go together), and a boolean would clear the indicator when the
+ * first of them returned while the page was still waiting on the rest. */
+let inFlight = 0;
+function setBusy(delta) {
+  inFlight = Math.max(0, inFlight + delta);
+  $('#busybar').hidden = inFlight === 0;
+}
+
 async function api(path, options) {
-  const response = await fetch(path, options);
+  setBusy(1);
+  let response;
+  try {
+    response = await fetch(path, options);
+  } finally {
+    setBusy(-1);
+  }
   let payload = null;
   try { payload = await response.json(); } catch (e) { /* non-JSON error page */ }
   if (!response.ok) {
@@ -78,6 +93,15 @@ async function api(path, options) {
     throw error;
   }
   return payload;
+}
+
+/** Placeholder rows while a page loads. Height-matched to the real thing so
+ *  the list does not jump when it arrives. */
+function skeletonList(count) {
+  return Array.from({ length: count }, () => el('div', { class: 'skel-item' },
+    el('div', { class: 'skeleton', style: 'width: 30%' }),
+    el('div', { class: 'skeleton', style: 'width: 75%' }),
+    el('div', { class: 'skeleton', style: 'width: 55%' })));
 }
 
 const post = (path, body) => api(path, {
@@ -103,10 +127,66 @@ function showTab(name) {
     const button = document.querySelector(`.tab[data-tab="${tab}"]`);
     button.setAttribute('aria-selected', String(tab === name));
   }
-  if (location.hash.slice(1).split('?')[0] !== name) history.replaceState(null, '', `#${name}`);
+  syncUrl();
   if (name === 'overview') loadOverview();
   if (name === 'review') loadReview();
   if (name === 'database') loadSchema();
+}
+
+/* The review filters live in the URL, so a worklist is a link. "m10's unknown
+ * committee URLs" is a thing worth sending to someone, or keeping in a
+ * bookmark, and re-selecting four dropdowns every time is how a queue stops
+ * getting looked at. */
+function syncUrl() {
+  const params = new URLSearchParams();
+  if (currentTab === 'review') {
+    const filters = {
+      status: $('#f-status').value,
+      module: $('#f-module').value,
+      item_type: $('#f-type').value,
+      q: $('#f-search').value.trim(),
+      limit: $('#f-limit').value,
+    };
+    // Defaults are omitted, so an untouched review tab is just "#review".
+    if (filters.status !== 'pending') params.set('status', filters.status);
+    if (filters.module) params.set('module', filters.module);
+    if (filters.item_type) params.set('item_type', filters.item_type);
+    if (filters.q) params.set('q', filters.q);
+    if (filters.limit !== '50') params.set('limit', filters.limit);
+    if (!$('#f-oldest').checked) params.set('newest_first', '1');
+    if (reviewState.offset) params.set('offset', String(reviewState.offset));
+  }
+  const query = params.toString();
+  const target = `#${currentTab}${query ? `?${query}` : ''}`;
+  if (location.hash !== target) history.replaceState(null, '', target);
+}
+
+function parseHash() {
+  const raw = location.hash.slice(1);
+  const [tab, query] = raw.split('?');
+  return { tab: tab || 'overview', params: new URLSearchParams(query || '') };
+}
+
+/** Push URL parameters into the filter controls. Returns true if the review
+ *  tab's controls changed, so the caller knows whether a reload is due. */
+function applyUrlFilters(params) {
+  const before = JSON.stringify([$('#f-status').value, $('#f-module').value,
+    $('#f-type').value, $('#f-search').value, $('#f-limit').value,
+    $('#f-oldest').checked, reviewState.offset]);
+
+  $('#f-status').value = params.get('status') || 'pending';
+  $('#f-module').value = params.get('module') || '';
+  populateItemTypes($('#f-module').value);
+  $('#f-type').value = params.get('item_type') || '';
+  $('#f-search').value = params.get('q') || '';
+  $('#f-limit').value = params.get('limit') || '50';
+  $('#f-oldest').checked = params.get('newest_first') !== '1';
+  reviewState.offset = Number(params.get('offset') || 0) || 0;
+
+  const after = JSON.stringify([$('#f-status').value, $('#f-module').value,
+    $('#f-type').value, $('#f-search').value, $('#f-limit').value,
+    $('#f-oldest').checked, reviewState.offset]);
+  return before !== after;
 }
 
 // --- reviewer identity ------------------------------------------------------
@@ -252,23 +332,29 @@ async function loadFacets() {
   populateItemTypes(previous);
 }
 
-async function loadReview() {
+async function loadReview(keepFocus) {
   if (!reviewState.facets) await loadFacets();
+
+  const previousFocus = keepFocus ? reviewState.focus : 0;
+  // Skeletons sized to the page being requested, so the list does not
+  // collapse to nothing and jump back when the rows arrive.
+  replace($('#review-list'), skeletonList(Math.min(Number($('#f-limit').value) || 50, 8)));
+
   let data;
   try { data = await api(`/api/review?${reviewQuery()}`); }
-  catch (e) { return toast(e.message, true); }
+  catch (e) {
+    replace($('#review-list'), el('div', { class: 'empty', text: e.message }));
+    return toast(e.message, true);
+  }
 
   reviewState.items = data.items;
   reviewState.total = data.total;
-  reviewState.focus = data.items.length ? 0 : -1;
+  reviewState.focus = data.items.length
+    ? Math.max(0, Math.min(previousFocus, data.items.length - 1)) : -1;
 
-  const from = data.total ? data.offset + 1 : 0;
-  const to = Math.min(data.offset + data.limit, data.total);
-  $('#review-count').textContent = `${num(from)}–${num(to)} of ${num(data.total)}`;
-
-  replace($('#review-list'), data.items.length
-    ? data.items.map(renderItem)
-    : el('div', { class: 'empty', text: 'Nothing matches these filters.' }));
+  renderList();
+  renderCounts();
+  syncUrl();
 
   renderPager($('#review-pager'), data.offset, data.limit, data.total, (offset) => {
     reviewState.offset = offset;
@@ -279,6 +365,82 @@ async function loadReview() {
   $('#select-page').checked = false;
   updateBulkBar();
   renderFocus();
+}
+
+function renderList() {
+  const items = reviewState.items;
+  if (!items.length) {
+    return replace($('#review-list'),
+      el('div', { class: 'empty', text: 'Nothing matches these filters.' }));
+  }
+  replace($('#review-list'), dense() ? renderDense(items) : items.map(renderItem));
+}
+
+function dense() {
+  return $('#f-dense').checked;
+}
+
+function renderCounts() {
+  const offset = reviewState.offset;
+  const limit = Number($('#f-limit').value) || 50;
+  const total = reviewState.total;
+  const from = total ? offset + 1 : 0;
+  const to = Math.min(offset + reviewState.items.length, total);
+  $('#review-count').textContent = `${num(from)}–${num(to)} of ${num(total)}`;
+
+  // "Approve all matching" only offers itself when a filter is narrowing the
+  // queue and there is more than one page of it — the case the per-page
+  // checkboxes handle badly.
+  const filtered = $('#f-module').value || $('#f-type').value
+    || $('#f-search').value.trim() || $('#f-status').value !== 'all';
+  const worthIt = filtered && total > reviewState.items.length && total > 0;
+  $('#matchbar').hidden = !worthIt;
+  if (worthIt) {
+    $('#match-summary').textContent =
+      `${num(total)} items match this filter, across ${num(Math.ceil(total / limit))} pages`;
+  }
+}
+
+/* Dense mode. Two item types are 72% of this queue and they are homogeneous —
+ * one fact about one kind of document, repeated. A card each is the wrong
+ * shape for that; a row each is the right one. */
+function renderDense(items) {
+  const head = el('tr', {},
+    el('th', {}), el('th', { text: '#' }), el('th', { text: 'Module' }),
+    el('th', { text: 'Item type' }), el('th', { text: 'Value' }),
+    el('th', { text: 'Status' }), el('th', { text: 'Seen' }), el('th', {}));
+
+  const rows = items.map((item, index) => {
+    const checkbox = el('input', {
+      type: 'checkbox', 'aria-label': `Select item ${item.id}`,
+      onchange: (e) => {
+        if (e.target.checked) selected.add(item.id); else selected.delete(item.id);
+        updateBulkBar();
+      },
+    });
+    checkbox.checked = selected.has(item.id);
+
+    return el('tr', { dataset: { id: String(item.id) }, onclick: () => {
+      reviewState.focus = index;
+      renderFocus();
+    } },
+      el('td', {}, checkbox),
+      el('td', { class: 'muted', text: `#${item.id}` }),
+      el('td', {}, el('span', { class: 'badge module', text: item.module })),
+      el('td', {}, el('span', { class: 'badge type', text: item.item_type })),
+      el('td', { class: 'raw', title: item.raw_value }, maybeLink(item.raw_value)),
+      el('td', {}, el('span', { class: `badge ${item.status}`, text: item.status })),
+      el('td', { class: 'muted', text: when(item.created_at) }),
+      el('td', { class: 'act' },
+        el('button', { class: 'btn approve', title: 'Approve',
+          onclick: (e) => { e.stopPropagation(); decideItems([item.id], 'approved'); } }, 'A'),
+        ' ',
+        el('button', { class: 'btn reject', title: 'Reject',
+          onclick: (e) => { e.stopPropagation(); decideItems([item.id], 'rejected'); } }, 'R')));
+  });
+
+  return el('div', { class: 'densewrap' },
+    el('table', { class: 'dense' }, el('thead', {}, head), el('tbody', {}, rows)));
 }
 
 function renderItem(item) {
@@ -293,22 +455,7 @@ function renderItem(item) {
 
   const note = el('input', { type: 'text', placeholder: 'note (optional)' });
 
-  const act = async (decision) => {
-    const by = requireReviewer();
-    if (!by) return;
-    try {
-      const result = await post('/api/review/decide', {
-        ids: [item.id], decision, decided_by: by, note: note.value,
-      });
-      if (result.updated.length) {
-        toast(`Item ${item.id} ${decision}.`);
-      } else {
-        toast(`Item ${item.id} was already ${decision}.`);
-      }
-      await loadFacets();
-      await loadReview();
-    } catch (e) { toast(e.message, true); }
-  };
+  const act = (decision) => decideItems([item.id], decision, note.value);
 
   const context = formatContext(item.context_json);
 
@@ -371,34 +518,157 @@ function historyBlock(itemId, count) {
   return details;
 }
 
+/* One decision path for the buttons, the keyboard and the bulk bar.
+ *
+ * The row is updated in place rather than by reloading the list. Clearing a
+ * queue is a rhythm — look, decide, next — and a full refetch between every
+ * item breaks it: the list flashes, scroll position moves, and the row under
+ * the cursor is replaced by a different one just as the next key is pressed.
+ * The response is awaited first, so nothing is shown as decided that was not.
+ */
+async function decideItems(ids, decision, note) {
+  const by = requireReviewer();
+  if (!by) return null;
+
+  let result;
+  try {
+    result = await post('/api/review/decide', { ids, decision, decided_by: by, note });
+  } catch (e) {
+    toast(e.message, true);
+    return null;
+  }
+
+  const statusFilter = $('#f-status').value;
+  // An item that no longer matches the filter leaves the list; one that still
+  // matches (viewing "all", or re-deciding) is re-rendered where it sits.
+  const leaves = statusFilter !== 'all' && statusFilter !== decision;
+
+  for (const id of result.updated) {
+    const index = reviewState.items.findIndex((item) => item.id === id);
+    if (index === -1) continue;
+    if (leaves) {
+      reviewState.items.splice(index, 1);
+      reviewState.total = Math.max(0, reviewState.total - 1);
+      selected.delete(id);
+    } else {
+      Object.assign(reviewState.items[index], {
+        status: decision, last_decision: decision, last_decided_by: by,
+        last_decided_at: new Date().toISOString(), last_note: note || null,
+      });
+    }
+  }
+
+  if (result.updated.length) {
+    // Keep the cursor where it was: with a pending filter the decided row has
+    // gone, so staying put lands on the next one down.
+    reviewState.focus = Math.min(reviewState.focus, reviewState.items.length - 1);
+    renderList();
+    renderCounts();
+    renderFocus();
+    bumpPendingPill(decision, result.updated.length);
+  }
+
+  const noun = result.updated.length === 1 ? 'item' : 'items';
+  if (result.updated.length) {
+    toast(`${num(result.updated.length)} ${noun} ${verbFor(decision)}.`);
+  } else if (result.unchanged.length) {
+    toast(`Already ${decision}; nothing changed.`);
+  }
+
+  // The page empties as items are decided; pull the next one in rather than
+  // leaving a blank list under a pager that says there is more.
+  if (!reviewState.items.length && reviewState.total > 0) {
+    reviewState.offset = Math.max(0, Math.min(reviewState.offset, reviewState.total - 1));
+    await loadReview();
+  }
+  scheduleFacetRefresh();
+  return result;
+}
+
+function verbFor(decision) {
+  return decision === 'pending' ? 'reset to pending' : decision;
+}
+
+/** The header pill, adjusted locally. The authoritative counts come back on
+ *  the next facet refresh; this keeps the number honest in between. */
+function bumpPendingPill(decision, count) {
+  if (!reviewState.facets) return;
+  const statuses = reviewState.facets.statuses;
+  if (decision === 'pending') statuses.pending += count;
+  else if ($('#f-status').value === 'pending') statuses.pending = Math.max(0, statuses.pending - count);
+  $('#pending-pill').textContent = num(statuses.pending);
+}
+
+/* Facet counts feed the dropdown labels, which nobody reads mid-triage.
+ * Refreshing them after every decision doubles the requests for a number that
+ * can be a few seconds stale without costing anything. */
+let facetTimer = null;
+function scheduleFacetRefresh() {
+  clearTimeout(facetTimer);
+  facetTimer = setTimeout(() => loadFacets(), 2000);
+}
+
 function updateBulkBar() {
   const bar = $('#bulkbar');
   bar.hidden = selected.size === 0;
   $('#bulk-count').textContent = `${num(selected.size)} selected`;
 }
 
-async function bulkDecide(decision) {
+/* Deciding a whole filtered set — the 1,067-item case. The count is sent with
+ * it and checked server-side inside the transaction, so if the set moved since
+ * the page loaded, nothing happens. */
+async function decideMatching(decision) {
   const by = requireReviewer();
   if (!by) return;
-  const ids = [...selected];
-  if (!ids.length) return;
 
-  const verb = decision === 'pending' ? 'reset to pending' : decision;
-  if (!confirm(`${verb} ${ids.length} item${ids.length === 1 ? '' : 's'}?`)) return;
+  const total = reviewState.total;
+  const scope = [
+    $('#f-status').value !== 'all' ? `status ${$('#f-status').value}` : null,
+    $('#f-module').value, $('#f-type').value,
+    $('#f-search').value.trim() ? `matching “${$('#f-search').value.trim()}”` : null,
+  ].filter(Boolean).join(' · ');
+
+  const typed = prompt(
+    `${verbFor(decision)} all ${total.toLocaleString('en-GB')} items in:\n\n  ${scope}\n\n`
+    + 'This cannot be undone in bulk. Type the number to confirm:');
+  if (typed === null) return;
+  if (typed.replace(/[,\s]/g, '') !== String(total)) {
+    return toast('That number did not match — nothing was changed.', true);
+  }
 
   try {
-    const result = await post('/api/review/decide', {
-      ids, decision, decided_by: by, note: $('#bulk-note').value,
+    const result = await post('/api/review/decide-matching', {
+      decision, decided_by: by, confirm_count: total,
+      note: $('#match-note').value,
+      status: $('#f-status').value,
+      module: $('#f-module').value,
+      item_type: $('#f-type').value,
+      search: $('#f-search').value.trim(),
     });
-    const parts = [`${num(result.updated.length)} ${verb}`];
-    if (result.unchanged.length) parts.push(`${num(result.unchanged.length)} already ${decision}`);
-    if (result.missing.length) parts.push(`${num(result.missing.length)} no longer exist`);
-    toast(parts.join(', ') + '.');
+    toast(`${num(result.updated.length)} items ${verbFor(decision)}`
+      + (result.unchanged.length ? `, ${num(result.unchanged.length)} already were.` : '.'));
+    $('#match-note').value = '';
     selected.clear();
-    $('#bulk-note').value = '';
+    reviewState.offset = 0;
     await loadFacets();
     await loadReview();
   } catch (e) { toast(e.message, true); }
+}
+
+async function bulkDecide(decision) {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!confirm(`${verbFor(decision)} ${ids.length} item${ids.length === 1 ? '' : 's'}?`)) return;
+
+  const result = await decideItems(ids, decision, $('#bulk-note').value);
+  if (!result) return;
+  if (result.missing.length) {
+    toast(`${num(result.missing.length)} selected item(s) no longer exist.`, true);
+  }
+  selected.clear();
+  $('#bulk-note').value = '';
+  updateBulkBar();
+  $('#select-page').checked = false;
 }
 
 function renderPager(container, offset, limit, total, go) {
@@ -412,8 +682,14 @@ function renderPager(container, offset, limit, total, go) {
 
 // --- keyboard ---------------------------------------------------------------
 
+/** The focusable rows, whichever view is on — cards and dense rows both carry
+ *  data-id, so the keyboard works identically in each. */
+function rowNodes() {
+  return [...document.querySelectorAll('#review-list [data-id]')];
+}
+
 function renderFocus() {
-  document.querySelectorAll('#review-list .item').forEach((node, index) => {
+  rowNodes().forEach((node, index) => {
     node.classList.toggle('focused', index === reviewState.focus);
   });
 }
@@ -426,26 +702,14 @@ function moveFocus(delta) {
   if (!reviewState.items.length) return;
   reviewState.focus = Math.max(0, Math.min(reviewState.items.length - 1, reviewState.focus + delta));
   renderFocus();
-  const node = document.querySelectorAll('#review-list .item')[reviewState.focus];
+  const node = rowNodes()[reviewState.focus];
   if (node) node.scrollIntoView({ block: 'nearest' });
 }
 
 async function decideFocused(decision) {
   const item = focusedItem();
   if (!item) return;
-  const by = requireReviewer();
-  if (!by) return;
-  const index = reviewState.focus;
-  try {
-    await post('/api/review/decide', { ids: [item.id], decision, decided_by: by });
-    toast(`Item ${item.id} ${decision === 'pending' ? 'reset to pending' : decision}.`);
-    await loadFacets();
-    await loadReview();
-    // Keep the cursor where it was. Filtering on pending means the decided
-    // item leaves the list, so staying put lands on the next one.
-    reviewState.focus = Math.min(index, reviewState.items.length - 1);
-    renderFocus();
-  } catch (e) { toast(e.message, true); }
+  await decideItems([item.id], decision);
 }
 
 document.addEventListener('keydown', (event) => {
@@ -470,7 +734,8 @@ document.addEventListener('keydown', (event) => {
       const item = focusedItem();
       if (!item) return;
       if (selected.has(item.id)) selected.delete(item.id); else selected.add(item.id);
-      const box = document.querySelectorAll('#review-list .item input[type=checkbox]')[reviewState.focus];
+      const node = rowNodes()[reviewState.focus];
+      const box = node && node.querySelector('input[type=checkbox]');
       if (box) box.checked = selected.has(item.id);
       updateBulkBar();
     },
@@ -662,20 +927,29 @@ function init() {
     loadReview();
   }, 300));
 
+  $('#f-dense').checked = localStorage.getItem('cglpay.dense') === '1';
+  $('#f-dense').addEventListener('change', (e) => {
+    localStorage.setItem('cglpay.dense', e.target.checked ? '1' : '0');
+    renderList();
+    renderFocus();
+  });
+
   $('#select-page').addEventListener('change', (e) => {
     for (const item of reviewState.items) {
       if (e.target.checked) selected.add(item.id); else selected.delete(item.id);
     }
-    document.querySelectorAll('#review-list .item input[type=checkbox]')
+    document.querySelectorAll('#review-list input[type=checkbox]')
       .forEach((box) => { box.checked = e.target.checked; });
     updateBulkBar();
   });
 
   document.querySelectorAll('[data-bulk]').forEach((button) =>
     button.addEventListener('click', () => bulkDecide(button.dataset.bulk)));
+  document.querySelectorAll('[data-matching]').forEach((button) =>
+    button.addEventListener('click', () => decideMatching(button.dataset.matching)));
   $('#bulk-clear').addEventListener('click', () => {
     selected.clear();
-    document.querySelectorAll('#review-list .item input[type=checkbox]')
+    document.querySelectorAll('#review-list input[type=checkbox]')
       .forEach((box) => { box.checked = false; });
     $('#select-page').checked = false;
     updateBulkBar();
@@ -687,8 +961,25 @@ function init() {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') runSql();
   });
 
-  window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
-  showTab(location.hash.slice(1) || 'overview');
+  // Back/forward and pasted worklist links both arrive here.
+  window.addEventListener('hashchange', async () => {
+    const { tab, params } = parseHash();
+    const changed = applyUrlFilters(params);
+    if (tab !== currentTab) showTab(tab);
+    else if (changed && tab === 'review') loadReview();
+  });
+
+  const opened = parseHash();
+  if (opened.tab === 'review') {
+    // Facets first: the item-type dropdown is built from them, so a link
+    // naming one has nothing to select until they are in.
+    loadFacets().then(() => {
+      applyUrlFilters(opened.params);
+      showTab('review');
+    });
+    return;
+  }
+  showTab(opened.tab);
 }
 
 init();

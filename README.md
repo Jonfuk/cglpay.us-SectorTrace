@@ -351,6 +351,19 @@ Four screens: an overview of what is pending by module and item type; the
 queue itself, filterable and searchable, with approve/reject/reset per item or
 across a selection; a browser for every table and view; and a SQL box.
 
+Three things exist because the queue is thousands of rows and two item types
+are 72% of it:
+
+- **The filters are in the URL.** `#review?module=m10_committee_papers` is a
+  worklist you can bookmark or send to someone.
+- **Dense rows.** A card each is right for reading one item and wrong for
+  clearing four hundred; the toggle switches the list to one row per item.
+- **Deciding a whole filtered set**, without paging through it. The count the
+  page was showing is sent with the request and re-checked inside the
+  transaction that does the work, so if the set moved — someone else decided
+  some, or a module added more — nothing happens. An unfiltered "decide
+  everything" is refused outright.
+
 **Deciding records a judgement — it does not promote anything.** Approving an
 `unmatched_buyer_name` does not bind that name to an authority, and approving
 a `possible_group_company` does not add a company to `companies`. Those are

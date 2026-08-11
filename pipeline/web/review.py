@@ -21,6 +21,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
+from pipeline.web import queries
 from pipeline.web.queries import REVIEW_STATUSES
 
 DECISIONS = REVIEW_STATUSES  # 'approved', 'rejected', and 'pending' as the revert
@@ -98,6 +99,19 @@ def decide(
         )
 
     now = _utcnow()
+    # One transaction for the batch: a bulk decision half-applied is worse
+    # than one refused, because the reviewer's record of what they did is the
+    # screen they were looking at.
+    with conn:
+        result = _apply(conn, ids, decision, decided_by, note, now)
+    return result
+
+
+def _apply(conn: sqlite3.Connection, ids: list[int], decision: str,
+            decided_by: str, note: str | None, now: str) -> dict:
+    """Set the status and write the audit row for each id. Assumes a
+    transaction is already open — both callers need the read of the current
+    status and the write of the new one to be atomic together."""
     placeholders = ", ".join("?" for _ in ids)
     existing = {
         row["id"]: row
@@ -105,38 +119,34 @@ def decide(
             f"SELECT id, status, context_json FROM review_queue WHERE id IN ({placeholders})",
             ids,
         )
-    }
+    } if ids else {}
 
     updated: list[int] = []
     unchanged: list[int] = []
     missing = [item_id for item_id in ids if item_id not in existing]
 
-    # One transaction for the batch: a bulk decision half-applied is worse
-    # than one refused, because the reviewer's record of what they did is the
-    # screen they were looking at.
-    with conn:
-        for item_id in ids:
-            row = existing.get(item_id)
-            if row is None:
-                continue
-            if row["status"] == decision and not note:
-                unchanged.append(item_id)
-                continue
+    for item_id in ids:
+        row = existing.get(item_id)
+        if row is None:
+            continue
+        if row["status"] == decision and not note:
+            unchanged.append(item_id)
+            continue
 
-            conn.execute(
-                "UPDATE review_queue SET status = ?, resolved_at = ? WHERE id = ?",
-                # Back to pending clears resolved_at, so the column keeps
-                # meaning "when this stopped needing a decision" rather than
-                # "when it was last touched".
-                (decision, None if decision == "pending" else now, item_id),
-            )
-            conn.execute(
-                "INSERT INTO review_decisions "
-                "(review_item_id, decision, status_before, note, decided_by, decided_at, context_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (item_id, decision, row["status"], note, decided_by, now, row["context_json"]),
-            )
-            updated.append(item_id)
+        conn.execute(
+            "UPDATE review_queue SET status = ?, resolved_at = ? WHERE id = ?",
+            # Back to pending clears resolved_at, so the column keeps
+            # meaning "when this stopped needing a decision" rather than
+            # "when it was last touched".
+            (decision, None if decision == "pending" else now, item_id),
+        )
+        conn.execute(
+            "INSERT INTO review_decisions "
+            "(review_item_id, decision, status_before, note, decided_by, decided_at, context_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, decision, row["status"], note, decided_by, now, row["context_json"]),
+        )
+        updated.append(item_id)
 
     return {
         "decision": decision,
@@ -147,3 +157,78 @@ def decide(
         "unchanged": unchanged,
         "missing": missing,
     }
+
+
+def decide_matching(
+    conn: sqlite3.Connection,
+    *,
+    decision: str,
+    decided_by: str,
+    confirm_count: int,
+    note: str | None = None,
+    status: str | None = "pending",
+    module: str | None = None,
+    item_type: str | None = None,
+    search: str | None = None,
+) -> dict:
+    """Decide every item matching a filter, without listing the ids.
+
+    The per-item path caps a batch at MAX_BATCH on the grounds that a bulk
+    action should cover what a person has actually looked at. That reasoning
+    does not survive contact with the real queue: `pfd_concerns_in_pdf_only`
+    alone is 1,067 items that are all the same fact about the same kind of
+    document, and forcing them through three pages of checkboxes produces
+    click-fatigue, not scrutiny.
+
+    So this path drops the cap and takes a different guard: the caller states
+    how many rows it expects to affect, and the count is checked inside the
+    transaction that does the work. Get it wrong — because someone else
+    decided some, or a module added more since the page loaded — and nothing
+    happens. That makes "approve everything matching" an assertion about a
+    number the reviewer has seen rather than an open-ended instruction.
+    """
+    if decision not in DECISIONS:
+        raise DecisionError(
+            f"Unknown decision {decision!r}. Use one of: {', '.join(DECISIONS)}.")
+
+    decided_by = (decided_by or "").strip()
+    if not decided_by:
+        raise DecisionError(
+            "A reviewer name is required — a decision nobody is attached to "
+            "cannot be followed up.")
+
+    note = (note or "").strip() or None
+    if note and len(note) > MAX_NOTE_LENGTH:
+        raise DecisionError(f"Note is too long ({MAX_NOTE_LENGTH} characters maximum).")
+
+    try:
+        confirm_count = int(confirm_count)
+    except (TypeError, ValueError):
+        raise DecisionError("confirm_count must be a whole number.") from None
+
+    clause, params = queries.review_filter_sql(status, module, item_type, search)
+    if not clause:
+        # "Everything, unfiltered" is never what someone means to click, and
+        # it is the one mistake with no way back short of the audit trail.
+        raise DecisionError(
+            "Refusing to decide the entire queue at once. Narrow it by status, "
+            "module, item type or search first.")
+
+    now = _utcnow()
+    with conn:
+        ids = [row[0] for row in conn.execute(
+            f"SELECT q.id FROM review_queue q{clause} ORDER BY q.id", params)]
+
+        # Inside the transaction, so the set counted is the set decided.
+        if len(ids) != confirm_count:
+            raise DecisionError(
+                f"This filter matches {len(ids):,} items, not the {confirm_count:,} "
+                "the page was showing. Nothing was changed — reload and check "
+                "before repeating.")
+        if not ids:
+            raise DecisionError("That filter matches nothing.")
+
+        result = _apply(conn, ids, decision, decided_by, note, now)
+
+    result["matched"] = len(ids)
+    return result
