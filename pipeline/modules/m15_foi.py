@@ -162,6 +162,8 @@ def _provenance(result) -> dict:
 @register_module(
     "m15_foi",
     supports_since=False,
+    depends_on=("m00_geography",),
+    depends_note="restricts the register to authorities this pipeline knows",
     since_note="disclosure logs publish whatever is currently listed; candidates carry discovered_at rather than a source date",
 )
 def run(ctx: ModuleContext) -> None:

@@ -166,6 +166,8 @@ def _store_metadata(conn, client, module_name: str) -> None:
 @register_module(
     "m12_fingertips",
     supports_since=False,
+    depends_on=("m00_geography",),
+    depends_note="resolves each indicator row to a known authority",
     since_note="Fingertips returns each indicator's full published series; filtering by year would discard the comparative history the series exists for",
 )
 def run(ctx: ModuleContext) -> None:

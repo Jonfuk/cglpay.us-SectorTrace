@@ -9,7 +9,9 @@
 #   ./start.sh                     -> --help
 #   ./start.sh list-modules
 #
-#   Collect (16 modules; run m00_geography first — everything joins to it):
+#   Collect (16 modules). `run all` resolves dependency order itself and
+#   prints it before starting — m00_geography first, m04 after m03/m05,
+#   m09/m10 after m15:
 #   ./start.sh run m00_geography
 #   ./start.sh run all
 #   ./start.sh run m01_procurement --since 2024-01-01 --limit 100

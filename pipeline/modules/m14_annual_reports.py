@@ -157,7 +157,11 @@ def _archived_reports(conn) -> list:
     """).fetchall()
 
 
-@register_module("m14_annual_reports", supports_since=True)
+@register_module(
+    "m14_annual_reports", supports_since=True,
+    depends_on=("m03_charity_finance",),
+    depends_note="reads the accounts PDFs m03 downloads and archives",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m14_annual_reports"
     conn = ctx.conn

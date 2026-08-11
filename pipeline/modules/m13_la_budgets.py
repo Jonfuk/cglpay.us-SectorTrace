@@ -79,6 +79,8 @@ _BODY_TYPE_BY_PREFIX = {
 
 def classify_body_type(ons_code: str) -> str:
     return _BODY_TYPE_BY_PREFIX.get((ons_code or "")[:3], "other_precepting_body")
+
+
 _MULTIPLIER_RE = re.compile(r"reported in\s*£?\s*(thousand|million)", re.IGNORECASE)
 _APOS = r"[’‘'`´]?"
 _THOUSAND_RE = re.compile(rf"£\s*{_APOS}\s*000|\bin thousands?\b", re.IGNORECASE)
@@ -273,7 +275,11 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
     return sorted(found.values(), key=lambda p: p["financial_year"])
 
 
-@register_module("m13_la_budgets", supports_since=True)
+@register_module(
+    "m13_la_budgets", supports_since=True,
+    depends_on=("m00_geography",),
+    depends_note="the public health budget view joins to authorities",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m13_la_budgets"
     conn = ctx.conn

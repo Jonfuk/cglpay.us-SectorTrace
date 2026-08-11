@@ -5,7 +5,15 @@ import typer
 from pipeline import db
 from pipeline.config import get_settings
 from pipeline.logging_conf import configure_logging
-from pipeline.registry import MODULE_REGISTRY, ModuleContext, discover_modules, module_meta
+from pipeline.registry import (
+    MODULE_REGISTRY,
+    DependencyCycleError,
+    ModuleContext,
+    discover_modules,
+    missing_dependencies,
+    module_meta,
+    resolve_run_order,
+)
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 
@@ -85,9 +93,28 @@ def run(
     discover_modules()
 
     if module == "all":
-        targets = list(MODULE_REGISTRY.items())
+        # Dependency order, not alphabetical. Alphabetical silently produced a
+        # worse run: m04 came before m05 and so missed the company numbers CQC
+        # publishes, and m09/m10 came before m15 and so saw one authority
+        # website instead of every one.
+        try:
+            order = resolve_run_order()
+        except DependencyCycleError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            conn.close()
+            raise typer.Exit(code=1)
+        targets = [(name, MODULE_REGISTRY[name]) for name in order]
+        typer.echo(f"Run order ({len(targets)} modules): {' -> '.join(order)}")
     elif module in MODULE_REGISTRY:
         targets = [(module, MODULE_REGISTRY[module])]
+        # A single module still runs, but say what it will be working without.
+        for name, absent in missing_dependencies([module]).items():
+            meta = module_meta(name)
+            typer.echo(
+                f"note: {name} normally runs after {', '.join(absent)}. "
+                "It will still run, using whatever those modules left behind.", err=True)
+            if meta.depends_note:
+                typer.echo(f"  {meta.depends_note}", err=True)
     else:
         available = ", ".join(sorted(MODULE_REGISTRY)) or "(none registered yet)"
         typer.echo(f"Unknown module {module!r}. Available: {available}", err=True)

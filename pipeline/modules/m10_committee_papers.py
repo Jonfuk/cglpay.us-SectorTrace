@@ -125,6 +125,8 @@ def _provenance(result) -> dict:
 @register_module(
     "m10_committee_papers",
     supports_since=False,
+    depends_on=("m00_geography", "m15_foi",),
+    depends_note="same website registry as m09",
     since_note="committee search returns whatever the system indexes now; candidates carry discovered_at",
 )
 def run(ctx: ModuleContext) -> None:

@@ -192,6 +192,8 @@ def _provenance(result) -> dict:
 @register_module(
     "m09_cdp_documents",
     supports_since=False,
+    depends_on=("m00_geography", "m15_foi",),
+    depends_note="m15 supplies an authoritative website for every authority; without it only the hand-verified handful can be searched",
     since_note="document discovery crawls current pages; candidates carry discovered_at, not a source date",
 )
 def run(ctx: ModuleContext) -> None:

@@ -217,7 +217,11 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
     return sorted(found.values(), key=lambda p: (p["cohort"], p["financial_year"]))
 
 
-@register_module("m07_ndtms", supports_since=True)
+@register_module(
+    "m07_ndtms", supports_since=True,
+    depends_on=("m00_geography",),
+    depends_note="matches published area names against the authorities table",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m07_ndtms"
     conn = ctx.conn

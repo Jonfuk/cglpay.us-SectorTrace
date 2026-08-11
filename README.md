@@ -131,19 +131,36 @@ one or both.
 | `m14_annual_reports` | Provider annual reports | Workforce narrative and disclosure gaps, read from PDFs `m03` already archived |
 | `m15_foi` | mySociety register + council disclosure logs | **Publicly published** FOI evidence, and an authoritative website URL per authority |
 
-### Suggested order
+### Run order
 
-`m00` first — everything joins to it. `m03` and `m05` publish company numbers
-that `m04` then uses to confirm corporate identity, so running `m04` again
-after them promotes name-only matches to confirmed ones.
+`run all` orders modules by what they read, not alphabetically, and prints the
+order it chose before starting:
 
 ```bash
-./start.sh run m00_geography
-./start.sh run m11_public_health_grant
-./start.sh run m03_charity_finance
-./start.sh run m05_cqc
-./start.sh run m04_companies      # now has cross-referenced identifiers
-./start.sh run all                # everything else
+./start.sh run all
+```
+
+Each module declares the modules whose output it uses, and the CLI resolves
+those into a run order (alphabetical among equals, so the sequence is
+deterministic and two logs are comparable). Three orderings matter:
+
+| Module | Runs after | Why |
+| --- | --- | --- |
+| everything | `m00_geography` | every source joins to the authorities table |
+| `m04_companies` | `m03_charity_finance`, `m05_cqc` | both publish company numbers; without them every company name match stays unconfirmed |
+| `m09`, `m10` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched |
+| `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
+
+Alphabetical order breaks the second and third of these. Neither failed
+loudly when it did — `m04` simply confirmed nothing, and `m09`/`m10` searched
+one council instead of 315.
+
+Running a single module still works, and the CLI says what it will be missing:
+
+```console
+$ ./start.sh run m04_companies
+note: m04_companies normally runs after m03_charity_finance, m05_cqc.
+      It will still run, using whatever those modules left behind.
 ```
 
 ### Modules that need a human

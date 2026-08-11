@@ -287,6 +287,8 @@ def _search_candidates(client: PipelineHTTPClient, conn, module_name: str,
 @register_module(
     "m04_companies",
     supports_since=False,
+    depends_on=("m03_charity_finance", "m05_cqc",),
+    depends_note="both publish company numbers into provider_identifiers; without them every name match stays unconfirmed",
     since_note="company profiles and officer lists are current-state snapshots, not a dated stream",
 )
 def run(ctx: ModuleContext) -> None:

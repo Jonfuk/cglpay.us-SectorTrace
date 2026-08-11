@@ -347,7 +347,11 @@ def _walk_and_process(
     return total_matched
 
 
-@register_module("m01_procurement", supports_since=True)
+@register_module(
+    "m01_procurement", supports_since=True,
+    depends_on=("m00_geography",),
+    depends_note="matches free-text buyer names against the authorities table",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m01_procurement"
     conn = ctx.conn

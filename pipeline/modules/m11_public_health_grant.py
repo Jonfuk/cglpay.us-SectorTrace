@@ -160,7 +160,11 @@ def _provenance(result) -> dict:
     }
 
 
-@register_module("m11_public_health_grant", supports_since=True)
+@register_module(
+    "m11_public_health_grant", supports_since=True,
+    depends_on=("m00_geography",),
+    depends_note="allocations are keyed on ONS codes",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m11_public_health_grant"
     conn = ctx.conn

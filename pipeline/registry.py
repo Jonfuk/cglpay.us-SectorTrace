@@ -35,6 +35,14 @@ class ModuleMeta:
     # filtered run over the whole source.
     supports_since: bool = False
     since_note: str = ""
+    # Modules whose output this one reads. `run all` orders on these rather
+    # than running alphabetically, which silently produced worse results:
+    # m04 ran before m05 and so missed the company numbers CQC publishes, and
+    # m09/m10 ran before m15 and so saw one authority website instead of 315.
+    # A missing dependency is not fatal — each module degrades honestly — but
+    # the run is worth less, in ways that look like success.
+    depends_on: tuple[str, ...] = ()
+    depends_note: str = ""
 
 
 @dataclass
@@ -75,12 +83,14 @@ class ModuleContext:
             return False
 
 
-def register_module(name: str, supports_since: bool = False,
-                     since_note: str = "") -> Callable[[ModuleFn], ModuleFn]:
+def register_module(name: str, supports_since: bool = False, since_note: str = "",
+                     depends_on: tuple[str, ...] = (),
+                     depends_note: str = "") -> Callable[[ModuleFn], ModuleFn]:
     def decorator(fn: ModuleFn) -> ModuleFn:
         MODULE_REGISTRY[name] = fn
         MODULE_META[name] = ModuleMeta(
-            name=name, supports_since=supports_since, since_note=since_note)
+            name=name, supports_since=supports_since, since_note=since_note,
+            depends_on=tuple(depends_on), depends_note=depends_note)
         return fn
 
     return decorator
@@ -88,6 +98,57 @@ def register_module(name: str, supports_since: bool = False,
 
 def module_meta(name: str) -> ModuleMeta:
     return MODULE_META.get(name, ModuleMeta(name=name))
+
+
+class DependencyCycleError(RuntimeError):
+    """Declared dependencies form a cycle, so no run order exists."""
+
+
+def resolve_run_order(names: list[str] | None = None) -> list[str]:
+    """Modules in dependency order, alphabetical among equals.
+
+    Alphabetical tie-breaking keeps the order deterministic, so two runs of
+    the same checkout do the same work in the same sequence and a diff of two
+    logs means something.
+
+    Dependencies on modules outside `names` are ignored rather than pulled in:
+    asking for a subset should run that subset, not silently expand it.
+    """
+    selected = list(MODULE_REGISTRY) if names is None else list(names)
+    remaining = set(selected)
+
+    ordered: list[str] = []
+    satisfied: set[str] = set()
+
+    while remaining:
+        ready = sorted(
+            name for name in remaining
+            if all(dep in satisfied or dep not in remaining
+                    for dep in module_meta(name).depends_on)
+        )
+        if not ready:
+            raise DependencyCycleError(
+                "Cannot order modules — declared dependencies form a cycle among: "
+                f"{sorted(remaining)}")
+        for name in ready:
+            ordered.append(name)
+            satisfied.add(name)
+            remaining.discard(name)
+
+    return ordered
+
+
+def missing_dependencies(names: list[str]) -> dict[str, list[str]]:
+    """Declared dependencies not included in the given selection, so the CLI
+    can say what a partial run will be missing rather than quietly degrading.
+    """
+    selection = set(names)
+    out: dict[str, list[str]] = {}
+    for name in names:
+        absent = [d for d in module_meta(name).depends_on if d not in selection]
+        if absent:
+            out[name] = absent
+    return out
 
 
 def discover_modules() -> None:

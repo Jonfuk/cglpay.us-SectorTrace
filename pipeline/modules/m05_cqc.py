@@ -204,6 +204,8 @@ def _store_location(conn, module_name: str, provider_id: str, provider_key: str 
 @register_module(
     "m05_cqc",
     supports_since=False,
+    depends_on=("m00_geography",),
+    depends_note="resolves each location's local authority to an ONS code",
     since_note="CQC publishes current registration state, not a dated stream",
 )
 def run(ctx: ModuleContext) -> None:
