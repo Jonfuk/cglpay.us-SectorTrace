@@ -149,7 +149,7 @@ def run(ctx: ModuleContext) -> None:
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         for authority in authorities:
-            site = website_for(authority["ons_code"])
+            site = website_for(authority["ons_code"], conn)
             if site is None or not site.committee_url:
                 db.record_review_item(
                     conn, module_name, "committee_url_unknown", authority["ons_code"],

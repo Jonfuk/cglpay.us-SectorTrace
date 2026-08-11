@@ -218,7 +218,7 @@ def run(ctx: ModuleContext) -> None:
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         for authority in authorities:
-            site = website_for(authority["ons_code"])
+            site = website_for(authority["ons_code"], conn)
             if site is None:
                 # Not guessed: council hostnames are unpredictable, and an
                 # invented base URL would search the wrong site or silently

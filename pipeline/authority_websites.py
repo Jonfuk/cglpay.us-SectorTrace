@@ -55,8 +55,39 @@ SYSTEM_SIGNATURES: dict[str, list[str]] = {
 }
 
 
-def website_for(ons_code: str) -> AuthorityWebsite | None:
-    return AUTHORITY_WEBSITES.get(ons_code)
+def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
+    """The authority's website, preferring the hand-verified entry above.
+
+    Falls back to `authority_foi_profiles`, which Module 15 populates from
+    mySociety's published authority register. That is a citable source rather
+    than a guess — it carries provenance and covers all 317 English
+    authorities — but it is second in precedence because the entries here were
+    confirmed by an actual request against the specific paths these modules
+    use.
+    """
+    configured = AUTHORITY_WEBSITES.get(ons_code)
+    if configured or conn is None:
+        return configured
+
+    try:
+        row = conn.execute(
+            "SELECT authority_name, home_page_url FROM authority_foi_profiles "
+            "WHERE ons_code = ? AND home_page_url IS NOT NULL", (ons_code,)).fetchone()
+    except Exception:
+        return None
+    if not row or not row["home_page_url"]:
+        return None
+
+    return AuthorityWebsite(
+        ons_code=ons_code,
+        name=row["authority_name"],
+        base_url=row["home_page_url"].rstrip("/"),
+        # No committee URL: mySociety's register does not record one, and
+        # guessing it is what this file exists to avoid.
+        committee_url=None,
+        committee_system=None,
+        verified_on=None,
+    )
 
 
 def configured_ons_codes() -> set[str]:
