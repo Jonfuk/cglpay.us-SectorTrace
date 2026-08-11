@@ -240,6 +240,21 @@ def test_attention_requested_is_now_a_known_state(feed_page):
     assert rec["disclosed"] is False
 
 
+@pytest.mark.parametrize("state", ["attention_requested", "user_withdrawn"])
+def test_states_observed_in_the_first_live_run_are_known(state):
+    """Both were admitted only after appearing in parse_failures from a real
+    fetch, which is the rule this vocabulary documents. Neither means the
+    authority released anything.
+    """
+    assert state in alaveteli.KNOWN_DESCRIBED_STATES
+    assert state not in alaveteli.DISCLOSING_STATES
+    outcome = alaveteli.parse_info_request(
+        {"info_request": {"id": 1, "url_title": "x", "described_state": state}})
+    assert outcome.failures == []
+    assert outcome.record["status"] == state
+    assert outcome.record["disclosed"] is False
+
+
 def test_feed_event_without_a_request_yields_no_record():
     outcome = alaveteli.parse_feed_event({"id": 1, "event_type": "response"})
     assert outcome.record is None

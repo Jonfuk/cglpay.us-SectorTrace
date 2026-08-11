@@ -55,11 +55,14 @@ KNOWN_DESCRIBED_STATES = frozenset({
     "gone_postal",
     "error_message",
     "requires_admin",
-    # Observed in live /feed/search/ output on 2026-08-11, which is the bar
-    # this set documents for admission. It was previously this module's
-    # example of a state that *should* fail — the first real fetch produced
-    # it, which is the mechanism working as intended rather than a surprise.
+    # Both observed in live /feed/search/ output on 2026-08-11, which is the
+    # bar this set documents for admission. `attention_requested` was
+    # previously this module's example of a state that *should* fail, and
+    # `user_withdrawn` was the first full run's only parse failure — the
+    # mechanism working as intended rather than a surprise. Neither discloses
+    # anything, so neither joins DISCLOSING_STATES.
     "attention_requested",
+    "user_withdrawn",
 })
 
 # Event `variety` values, from the same source.
