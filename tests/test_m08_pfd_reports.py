@@ -249,6 +249,58 @@ def test_coroner_name_is_exportable():
     guard_columns("pfd_reports", ["report_ref", "coroner_name", "coroner_area"])
 
 
+def test_cross_report_redaction_removes_third_party_names(conn):
+    """A coroner's concerns can name someone who is a *different* report's
+    deceased. Per-report redaction cannot see that, and a live run left six
+    such names in a public column.
+    """
+    conn.execute(
+        "INSERT INTO pfd_reports (report_ref, report_url, matters_of_concern, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('A', 'u', 'The earlier death of Kristopher Tilbury was not reviewed.', "
+        "'u','t',200,'s','h')")
+    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) "
+                  "VALUES ('A', 'Someone Else')")
+    # Kristopher Tilbury is the deceased of a different report
+    conn.execute(
+        "INSERT INTO pfd_reports (report_ref, report_url, source_url, retrieved_at, "
+        "http_status, source_system, payload_sha256) VALUES ('B','u','u','t',200,'s','h')")
+    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) "
+                  "VALUES ('B', 'Kristopher Tilbury')")
+
+    changed = pfd.redact_known_names_across_reports(conn)
+    assert changed == 1
+    row = conn.execute("SELECT matters_of_concern FROM pfd_reports WHERE report_ref='A'").fetchone()
+    assert "Kristopher Tilbury" not in row["matters_of_concern"]
+    assert "[name redacted]" in row["matters_of_concern"]
+
+
+def test_cross_report_redaction_leaves_coroner_names_alone(conn):
+    """A coroner may share a name with someone's deceased. Coroners are
+    public officials and must not be redacted.
+    """
+    conn.execute(
+        "INSERT INTO pfd_reports (report_ref, report_url, coroner_name, matters_of_concern, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('A','u','Michael Spencer','Nothing sensitive here.','u','t',200,'s','h')")
+    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) "
+                  "VALUES ('A', 'Michael Spencer')")
+
+    pfd.redact_known_names_across_reports(conn)
+    row = conn.execute("SELECT coroner_name FROM pfd_reports WHERE report_ref='A'").fetchone()
+    assert row["coroner_name"] == "Michael Spencer"
+
+
+def test_cross_report_redaction_ignores_placeholders(conn):
+    conn.execute(
+        "INSERT INTO pfd_reports (report_ref, report_url, matters_of_concern, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('A','u','The [REDACTED] family raised concerns.','u','t',200,'s','h')")
+    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) "
+                  "VALUES ('A', '[REDACTED]')")
+    assert pfd.redact_known_names_across_reports(conn) == 0
+
+
 def test_restricted_table_is_discoverable_as_restricted(conn):
     from pipeline import db
     assert "restricted_pfd_persons" in db.restricted_tables(conn)

@@ -220,6 +220,47 @@ def find_provider_mentions(text: str) -> list[tuple[str, str]]:
     return sorted(found.items())
 
 
+def redact_known_names_across_reports(conn) -> int:
+    """Second redaction pass over matters_of_concern, using every deceased
+    name in the corpus rather than only the current report's.
+
+    Needed because a coroner's concerns can name a third party — someone who
+    is the subject of a *different* PFD report, or is referenced from another
+    investigation. Per-report redaction cannot see those, and a live run left
+    six such names in a public column.
+
+    Deterministic: the name list comes from the source's own "Deceased name"
+    fields, and matching is exact. Applied only to matters_of_concern —
+    coroner_name is legitimately public and is left alone, even when a
+    coroner shares a name with someone's deceased.
+    """
+    names = [
+        row["deceased_name"].strip()
+        for row in conn.execute(
+            "SELECT deceased_name FROM restricted_pfd_persons WHERE deceased_name IS NOT NULL")
+        if row["deceased_name"]
+        and len(row["deceased_name"].strip()) > 6
+        and row["deceased_name"].strip().lower().strip("[]") not in _NAME_PLACEHOLDERS
+    ]
+    if not names:
+        return 0
+
+    redacted_rows = 0
+    for row in conn.execute(
+            "SELECT report_ref, matters_of_concern FROM pfd_reports "
+            "WHERE matters_of_concern IS NOT NULL").fetchall():
+        original = row["matters_of_concern"]
+        cleaned = original
+        for name in names:
+            if name in cleaned:
+                cleaned = cleaned.replace(name, "[name redacted]")
+        if cleaned != original:
+            conn.execute("UPDATE pfd_reports SET matters_of_concern = ? WHERE report_ref = ?",
+                          (cleaned, row["report_ref"]))
+            redacted_rows += 1
+    return redacted_rows
+
+
 def _provenance(result) -> dict:
     return {
         "source_url": result.url,
@@ -387,5 +428,11 @@ def run(ctx: ModuleContext) -> None:
             if ctx.limit and reports_written >= ctx.limit:
                 break
 
+    # Runs once the whole corpus is present, since it needs every name.
+    cross_redacted = redact_known_names_across_reports(conn)
+    if not ctx.dry_run:
+        conn.commit()
+
     log.info("pfd.run_complete", reports=reports_written,
-              recipient_mentions=recipient_mentions, body_mentions=body_mentions)
+              recipient_mentions=recipient_mentions, body_mentions=body_mentions,
+              cross_report_redactions=cross_redacted)

@@ -9,6 +9,11 @@ data/raw/
 data/warehouse.db
 data/warehouse.db-*
 
+# Generated export payloads — reproducible from the warehouse with
+# `./start.sh export all`, and large. The schema that produces them IS
+# tracked (pipeline/exports/), so the shape is reviewable in code.
+exports/output/
+
 # Anything that could carry restricted_ (personal-data) columns out of the DB
 exports/output/restricted_*
 **/restricted_*.csv
