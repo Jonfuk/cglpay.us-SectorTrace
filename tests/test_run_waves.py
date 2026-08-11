@@ -351,3 +351,67 @@ def test_a_parallel_run_all_does_not_print_the_serial_hint(tmp_path, monkeypatch
     output = CliRunner().invoke(cli_module.app, ["run", "all", "--jobs", "4"]).output
     assert "4 at a time" in output
     assert "running serially" not in output
+
+
+# --- the display is never blank --------------------------------------------------------
+
+def test_a_module_that_reports_no_progress_still_shows_a_bar(prepared, monkeypatch):
+    """The bug as reported: `run all --jobs 8` printed the waves and then
+    showed nothing at all.
+
+    Only m09, m10 and m15 call ctx.track(), and wave 1 is m00, m02, m03, m06
+    and m08 — so the display added no tasks and rendered a blank screen for
+    however long the first wave took. A progress system that shows nothing
+    during the first twenty minutes of a run is not a progress system.
+    """
+    seen: list[list[str]] = []
+
+    def module(ctx):
+        # Snapshot what the display is showing from inside the module.
+        seen.append([t.description for t in bar.tasks])
+
+    with ui.progress() as bar:
+        monkeypatch.setitem(MODULE_REGISTRY, "a_silent", module)
+        cli_module._run_waves([["a_silent"]], 1, prepared, None, False, None, bar)
+
+    assert seen, "the module never ran"
+    assert "a_silent" in seen[0], f"no task for the running module: {seen[0]}"
+    assert "all modules" in seen[0], "no overall task"
+
+
+def test_the_overall_bar_counts_every_module_across_every_wave(prepared, monkeypatch):
+    finished: list[int] = []
+
+    def module(ctx):
+        finished.append(1)
+
+    names = ["a_one", "a_two", "a_three"]
+    with ui.progress() as bar:
+        for name in names:
+            monkeypatch.setitem(MODULE_REGISTRY, name, module)
+        cli_module._run_waves([["a_one", "a_two"], ["a_three"]], 2, prepared,
+                               None, False, None, bar)
+        overall = [t for t in bar.tasks if t.description == "all modules"]
+        assert overall and overall[0].total == 3
+        assert overall[0].completed == 3
+
+
+def test_a_modules_task_is_removed_when_it_finishes(prepared, monkeypatch):
+    """Otherwise a sixteen-module run ends with sixteen dead bars on screen."""
+    def module(ctx):
+        pass
+
+    with ui.progress() as bar:
+        monkeypatch.setitem(MODULE_REGISTRY, "a_done", module)
+        cli_module._run_waves([["a_done"]], 1, prepared, None, False, None, bar)
+        assert [t.description for t in bar.tasks] == ["all modules"]
+
+
+def test_a_failing_modules_task_is_also_removed(prepared, monkeypatch):
+    def boom(ctx):
+        raise RuntimeError("no")
+
+    with ui.progress() as bar:
+        monkeypatch.setitem(MODULE_REGISTRY, "a_boom", boom)
+        cli_module._run_waves([["a_boom"]], 1, prepared, None, False, None, bar)
+        assert [t.description for t in bar.tasks] == ["all modules"]

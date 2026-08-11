@@ -139,6 +139,16 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict
     from pipeline.registry import ModuleContext
 
     started = time.perf_counter()
+    # A task per module, always, with no total. Rich renders that as a pulsing
+    # bar, which is the honest display for work whose size is not known up
+    # front — and it means the screen is never blank.
+    #
+    # This was the failure: only m09, m10 and m15 call ctx.track(), so the
+    # first wave (m00, m02, m03, m06, m08) added no tasks at all and the
+    # display rendered nothing for however long they took. A progress system
+    # that shows nothing during the first twenty minutes of a run is not a
+    # progress system.
+    task = bar.add_task(name, total=None)
     conn = db.get_connection(settings)
     try:
         before = _audit_counts(conn, name)
@@ -168,6 +178,7 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict
         }
     finally:
         conn.close()
+        bar.remove_task(task)
 
 
 def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
@@ -185,6 +196,12 @@ def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limi
     """
     from concurrent.futures import ThreadPoolExecutor
 
+    total_modules = sum(len(wave) for wave in waves)
+    # The one task that outlives every module, so there is always a bar on
+    # screen and the request counter and throughput columns always have
+    # somewhere to render.
+    overall = bar.add_task("all modules", total=total_modules)
+
     summary: list[dict] = []
     for wave in waves:
         width = max(1, min(jobs, len(wave)))
@@ -192,6 +209,7 @@ def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limi
             for name in wave:
                 summary.append(_execute_module(
                     name, MODULE_REGISTRY[name], settings, since, dry_run, limit, bar))
+                bar.advance(overall)
             continue
 
         bar.console.print(
@@ -203,7 +221,9 @@ def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limi
                         for name in wave]
             # Collected in submission order, so the summary reads the same way
             # twice regardless of which API answered first.
-            summary.extend(future.result() for future in futures)
+            for future in futures:
+                summary.append(future.result())
+                bar.advance(overall)
     return summary
 
 
