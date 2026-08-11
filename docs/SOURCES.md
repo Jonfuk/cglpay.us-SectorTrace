@@ -179,6 +179,74 @@ contact email from `.env`, so any operator can reach the person running it.
 
 ---
 
+## Viability checks
+
+Probed live on 2026-08-11 with the pipeline's own User-Agent, one request
+each. Reachability is not the same as buildability — the notes say which.
+
+### NHS Jobs — VIABLE, highest value of the candidates
+
+| | |
+| --- | --- |
+| Endpoint | `https://www.jobs.nhs.uk/candidate/search/results?keyword=…` |
+| Result | 200, 84 KB, server-rendered HTML, 10 adverts per page, **salary present in the markup** |
+| robots.txt | Serves an HTML shell rather than rules — no directives to honour, but worth re-checking before a real crawl |
+| Licence | Crown copyright; advert content is the employer's |
+
+Advertised pay bands are **direct pay evidence**, not a proxy and not a
+composite — the only candidate of which that is true. Vacancy duration and
+re-advertisement are the empirical form of "we cannot recruit at this rate",
+which the annual workforce census cannot show.
+
+Note the coverage limit before anyone leans on it: NHS Jobs carries NHS and
+some commissioned-provider adverts. A charity provider advertising only on
+its own site is invisible here, so counts are a floor, never a total.
+
+### HSE enforcement — VIABLE
+
+| | |
+| --- | --- |
+| Endpoints | `https://resources.hse.gov.uk/notices/`, `.../convictions/` |
+| Result | Both 200, server-rendered HTML |
+| robots.txt | `resources.hse.gov.uk` serves none (404) — no directives. Note `www.hse.gov.uk` disallows `/data`; that is a different host and does not cover these |
+| Licence | OGL v3.0 |
+
+Buildable. Worth knowing it is a **risk signal about the employer, not about
+pay** — it belongs in the enforcement chronology rather than in any pay
+figure.
+
+### Insolvency — VIABLE, but not by the proposed route
+
+| | |
+| --- | --- |
+| Individual Insolvency Register | 200, but it is a register of **individuals**, not companies — personal data, and the wrong entity for provider viability |
+| The Gazette | **403** on `robots.txt` — bot protection, same posture as WhatDoTheyKnow |
+| Companies House disqualified directors | 200, 60 KB |
+
+The useful route is the one already open: company insolvency status and
+disqualification both come through Companies House, where this pipeline
+already holds a key and a working client (m04). That makes it an **extension
+of m04 rather than a new module** — `company_status` already distinguishes
+liquidation and administration.
+
+### Land Registry — PARTLY VIABLE
+
+| | |
+| --- | --- |
+| Price Paid | 200, **15.7 MB CSV**, no authentication, OGL v3.0 |
+| CCOD / OCOD (corporate ownership) | Landing page 200, but the data itself is behind registration and a licence |
+
+Price Paid is open and buildable. It is also a whole-of-England transaction
+file with no provider dimension — matching it to providers means address
+matching, which is the hard part and the part that produces false links.
+
+Corporate ownership is the dataset that would actually answer "does the
+provider own or lease?", and its licence terms restrict republication. That
+needs reading against the export model **before** any collection, not after.
+
+Neither speaks to pay. Estate intelligence is interesting; it is not evidence
+about what these employers pay, and it should not displace anything that is.
+
 ## Considered and not collected
 
 Sources that were scoped and then deliberately left out. Recorded here so the
