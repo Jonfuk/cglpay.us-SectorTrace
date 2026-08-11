@@ -129,7 +129,7 @@ one or both.
 | `m12_fingertips` | OHID Fingertips | LA-level treatment numbers, completions, waiting times, prevalence |
 | `m13_la_budgets` | MHCLG | Local authority budgeted revenue expenditure, incl. the Public Health line |
 | `m14_annual_reports` | Provider annual reports | Workforce narrative and disclosure gaps, read from PDFs `m03` already archived |
-| `m15_foi` | mySociety register + council disclosure logs | **Publicly published** FOI evidence, and an authoritative website URL per authority |
+| `m15_foi` | mySociety register + WhatDoTheyKnow search feed + council disclosure logs | **Discovery of** publicly published FOI requests (never their response text), and an authoritative website URL per authority |
 
 ### Run order
 

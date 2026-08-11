@@ -8,7 +8,10 @@
 --   2. This module cannot read WhatDoTheyKnow's request pages at all. They
 --      sit behind a Cloudflare bot challenge that returns 403 to any
 --      automated client, which is the site's access control speaking and is
---      not worked around here.
+--      not worked around here. Re-measured 2026-08-11: the JSON read API
+--      (/body/<slug>.json, /list/all.json, /request/<slug>.json) is blocked
+--      the same way and is not an alternative route. See the module
+--      docstring in pipeline/modules/m15_foi.py for the full result table.
 --
 -- What IS collected: the authority register mySociety publishes as a data
 -- file (permitted, and the route they offer), and FOI disclosure logs on

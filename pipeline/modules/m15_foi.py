@@ -1,31 +1,66 @@
 """Module 15 — FOI evidence (discovery).
 
-Publicly published FOI evidence, never "all FOI responses". Two limits stack
-and both belong on anything built from this:
+Publicly published FOI evidence, never "all FOI responses". Three limits
+stack and all three belong on anything built from this:
 
   1. WhatDoTheyKnow only holds requests routed through that platform. The UK
      FOI system is far larger and most requests never appear there.
-  2. This module cannot read WhatDoTheyKnow's request pages. They sit behind
-     a Cloudflare bot challenge that answers any automated client with a 403.
-     That is the site's access control, and it is respected rather than
-     worked around — no user-agent spoofing, no challenge solving. If a full
-     WDTK corpus is wanted, ask mySociety; they offer data access to
-     researchers.
 
-What this does collect, both permitted:
+  2. This module gets *discovery* from WDTK, not full text. The search feed
+     returns a truncated, search-highlighted `snippet` per event and never a
+     message body. Full text lives behind the JSON read API, which is
+     blocked (see below). So this module can tell you a request exists, who
+     it went to, and what state it reached — not what the authority actually
+     said. The snippet is stored in its own column and never in
+     `foi_requests.response_text`.
 
-  * mySociety's published authority CSV, which they serve as a data file.
-    Their tags carry the GSS code, so all 317 English authorities join to
-    `authorities` exactly. This is also the pipeline's first authoritative
-    source of a website URL for every authority — Modules 9 and 10 fall back
-    to it, which lifts their coverage from a hand-verified handful.
+  3. A term match is a candidate, not evidence about substance misuse.
+     Nothing is promoted without a human confirming it.
+
+What this collects:
+
+  * mySociety's published authority CSV, served as a data file. Their tags
+    carry the GSS code, so all 317 English authorities join to `authorities`
+    exactly. This is also the pipeline's first authoritative source of a
+    website URL for every authority — Modules 9 and 10 fall back to it.
+
+  * `/feed/search/<query>.json`, one search per configured term, restricted
+    to authorities this pipeline knows via the GSS tag on the body.
 
   * FOI disclosure logs on councils' own websites, where the polite crawler
     is welcome. Around a third of authorities publish one.
 
-Discovery only. A link whose text matched a search term is a candidate, not
-an FOI response about substance misuse, and nothing is promoted without a
-human confirming it.
+What is blocked, measured 2026-08-11 from this machine with the pipeline's
+own identifying User-Agent, one request each and no retries:
+
+    200  /robots.txt
+    200  /body/all-authorities.csv       (24 MB)
+    200  /feed/search/<query>.json       (application/json, ~70 KB/page)
+    403  /body/<slug>                    5.8 KB text/html challenge
+    403  /body/<slug>.json               ditto
+    403  /list/all.json?page=1           ditto
+    403  /request/<slug>.json            ditto
+
+The 403s are a Cloudflare bot challenge and are respected rather than worked
+around — no user-agent spoofing, no fingerprint impersonation, no challenge
+solving. The published implementations that do get through those paths work
+by defeating the challenge, which is out of scope here. The 403 arrives on
+the first request from a cold client at zero rate, so it is not a volume
+control and no amount of backoff reaches it. Do not spend another afternoon
+on it; ask mySociety instead (docs/mysociety-access-request.md), and note
+that `pipeline/alaveteli.py` already parses the read-API shape for the day
+they say yes.
+
+ON THE FEED AND ROBOTS.TXT. mySociety's robots.txt disallows `*/feed/*` and
+`*/search/*`, so `/feed/search/` is doubly disallowed, and this pipeline
+honours robots.txt everywhere else. It is fetched here under a single
+explicit exception in `Settings.robots_exceptions`, which carries the
+reasoning; each run that uses it logs `http.robots_override` and raises a
+`robots_override_in_use` review item, so the override stays visible in the
+audit trail. This is a judgement call and a reversible one — the access
+request in docs/mysociety-access-request.md is still the right way to put it
+on a permitted footing, and the exception should be removed when they answer
+either way.
 """
 from __future__ import annotations
 
@@ -35,11 +70,11 @@ import io
 import json
 import re
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import structlog
 
-from pipeline import db
+from pipeline import alaveteli, db
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
 from pipeline.registry import ModuleContext, register_module
 
@@ -48,6 +83,15 @@ log = structlog.get_logger()
 SOURCE_SYSTEM = "foi_disclosure"
 WDTK_AUTHORITIES_CSV = "https://www.whatdotheyknow.com/body/all-authorities.csv"
 WDTK_BODY_BASE = "https://www.whatdotheyknow.com/body/"
+WDTK_FEED_SEARCH = "https://www.whatdotheyknow.com/feed/search/{query}.json"
+
+# Pages per search term. Each page is 25 events, so 4 pages is up to 100 per
+# term. A cap rather than "until exhausted" because a broad term like
+# "waiting list" matches tens of thousands of events across all of WDTK, and
+# almost all of them belong to authorities and topics this pipeline does not
+# cover — paginating to the end would be a large amount of traffic for a
+# shrinking yield. Raise it with --limit when a specific term needs depth.
+FEED_PAGES_PER_TERM = 4
 
 # Topic -> search terms, from the brief's FOI corpus list. Terms are matched
 # against link text and URLs on a council's disclosure log.
@@ -149,6 +193,18 @@ def extract_foi_candidates(page_html: str, page_url: str) -> list[dict]:
     return out
 
 
+def feed_search_url(term: str) -> str:
+    """The feed URL for one search term, as a quoted phrase.
+
+    Quoted because Alaveteli treats a bare multi-word query as OR-ish: an
+    unquoted `staffing levels` returns everything matching either word, which
+    for these terms is most of the site. The phrase goes in the *path*, so it
+    is percent-encoded with `quote` and no safe characters — a raw space or
+    quote mark there produces a 404, not a bad search.
+    """
+    return WDTK_FEED_SEARCH.format(query=quote(f'"{term}"', safe=""))
+
+
 def _provenance(result) -> dict:
     return {
         "source_url": result.url,
@@ -157,6 +213,103 @@ def _provenance(result) -> dict:
         "source_system": SOURCE_SYSTEM,
         "payload_sha256": result.payload_sha256,
     }
+
+
+def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: str) -> tuple[int, int]:
+    """Search the WDTK feed for each configured term. Returns (candidates, terms_searched).
+
+    Restricted to authorities this pipeline knows, via the GSS code in the
+    body's tags. A hit against a police force or an NHS trust is dropped —
+    those are real FOI requests but they are not this campaign's
+    commissioning areas, and letting them in would inflate coverage with rows
+    that join to nothing.
+    """
+    pages_per_term = ctx.limit or FEED_PAGES_PER_TERM
+    candidates = 0
+    terms_searched = 0
+
+    for topic, terms in FOI_TOPICS.items():
+        for term in terms:
+            url = feed_search_url(term)
+            terms_searched += 1
+            for page in range(1, pages_per_term + 1):
+                try:
+                    result = client.get(url, params={"page": page})
+                except RobotsDisallowed:
+                    # Reachable only if the Settings.robots_exceptions entry
+                    # has been removed — which is a legitimate end state, so
+                    # it is recorded and the module continues on its other
+                    # sources rather than failing the run.
+                    db.record_review_item(
+                        conn, module_name, "foi_feed_robots_disallowed", url,
+                        json.dumps({"note": "no robots exception configured for the WDTK feed; "
+                                            "disclosure-log collection is unaffected"}))
+                    return candidates, terms_searched
+                except Exception as exc:
+                    db.record_review_item(
+                        conn, module_name, "foi_feed_unreachable", url,
+                        json.dumps({"term": term, "page": page, "error": type(exc).__name__}))
+                    break
+
+                if not result.ok:
+                    db.record_review_item(
+                        conn, module_name, "foi_feed_unavailable", url,
+                        json.dumps({"term": term, "page": page, "status": result.status_code}))
+                    break
+
+                try:
+                    payload = json.loads(result.body.decode("utf-8", errors="replace"))
+                except json.JSONDecodeError:
+                    db.record_review_item(
+                        conn, module_name, "foi_feed_not_json", url,
+                        json.dumps({"term": term, "page": page,
+                                    "content_type": result.content_type}))
+                    break
+
+                records, failures = alaveteli.parse_feed_page(payload)
+                for failure in failures:
+                    db.record_parse_failure(conn, module_name, failure.field_name,
+                                             failure.raw_fragment, failure.reason, result.url)
+
+                provenance = _provenance(result)
+                for rec in records:
+                    ons_code = rec["ons_code"]
+                    if not ons_code or ons_code not in known:
+                        continue
+                    db.upsert(conn, "foi_request_candidates", {
+                        "ons_code": ons_code,
+                        "candidate_url": rec["request_url"],
+                        "title": (rec["subject"] or "")[:300] or None,
+                        "matched_term": term,
+                        "topic": topic,
+                        "request_slug": rec["request_slug"],
+                        "authority_slug": rec["authority_slug"],
+                        "wdtk_status": rec["status"],
+                        "disclosed": None if rec["disclosed"] is None else int(rec["disclosed"]),
+                        "request_date": rec["request_date"],
+                        "last_updated": rec["last_updated"],
+                        "event_type": rec["event_type"],
+                        "event_date": rec["event_date"],
+                        # Deliberately `snippet`, never `response_text`. It is
+                        # a truncated search extract; see migration 0021.
+                        "snippet": rec["snippet"],
+                        "discovered_at": datetime.now(timezone.utc).isoformat(),
+                        "discovery_source": "wdtk_feed_search",
+                        "verified": 0,
+                        "verified_at": None,
+                        "rejected": 0,
+                        **provenance,
+                    }, natural_key=["ons_code", "candidate_url"])
+                    candidates += 1
+
+                if not ctx.dry_run:
+                    conn.commit()
+
+                # A short page is the last page. Alaveteli serves 25 per page.
+                if len(payload) < 25:
+                    break
+
+    return candidates, terms_searched
 
 
 @register_module(
@@ -209,11 +362,11 @@ def run(ctx: ModuleContext) -> None:
             if profile["ons_code"] not in known:
                 continue
             db.record_review_item(
-                conn, module_name, "foi_wdtk_requests_not_retrievable", profile["ons_code"],
+                conn, module_name, "foi_response_text_not_retrievable", profile["ons_code"],
                 json.dumps({"wdtk_body_url": profile["wdtk_body_url"],
-                             "note": "WhatDoTheyKnow request pages answer automated clients with "
-                                      "a Cloudflare 403; per-request ingestion needs permission "
-                                      "from mySociety rather than a workaround"}))
+                             "note": "the WDTK feed gives discovery only (a truncated snippet); "
+                                      "full response text needs /request/<slug>.json, which "
+                                      "answers automated clients with a Cloudflare 403"}))
             if ctx.limit and logs_crawled >= ctx.limit:
                 break
             try:
@@ -255,5 +408,11 @@ def run(ctx: ModuleContext) -> None:
             if not ctx.dry_run:
                 conn.commit()
 
+        # --- WhatDoTheyKnow feed search ---------------------------------------
+        feed_candidates, terms_searched = _collect_feed_candidates(
+            client, conn, known, ctx, module_name)
+        candidates_found += feed_candidates
+
     log.info("foi.run_complete", profiles=profiles_written, disclosure_logs_crawled=logs_crawled,
-              authorities_without_a_disclosure_log=no_log, candidates=candidates_found)
+              authorities_without_a_disclosure_log=no_log, candidates=candidates_found,
+              feed_candidates=feed_candidates, feed_terms_searched=terms_searched)

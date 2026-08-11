@@ -43,6 +43,34 @@ def test_parse_authorities_csv_tolerates_missing_urls():
     assert row["publication_scheme_url"] is None
 
 
+# --- the feed search URL ------------------------------------------------------------
+
+def test_feed_search_url_quotes_the_phrase():
+    """An unquoted multi-word query is OR-ish on Alaveteli and returns most of
+    the site. The quotes must survive into the URL.
+    """
+    url = foi.feed_search_url("staffing levels")
+    assert url.startswith("https://www.whatdotheyknow.com/feed/search/")
+    assert url.endswith(".json")
+    assert "%22staffing%20levels%22" in url
+
+
+def test_feed_search_url_encodes_path_unsafe_characters():
+    """The query sits in the path, not the query string, so a raw space or
+    slash gives a 404 rather than a bad search.
+    """
+    url = foi.feed_search_url("drug/alcohol spend")
+    assert " " not in url
+    assert "%2F" in url
+
+
+@pytest.mark.parametrize("term", [t for terms in foi.FOI_TOPICS.values() for t in terms])
+def test_every_configured_term_builds_a_usable_url(term):
+    url = foi.feed_search_url(term)
+    assert url.count("/feed/search/") == 1
+    assert not url.endswith("/.json")
+
+
 # --- topic matching ---------------------------------------------------------------
 
 @pytest.mark.parametrize("text,topic", [

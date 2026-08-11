@@ -198,6 +198,29 @@ schema has no provider column for this reason.
   intervals. This pipeline stores both as published and does not subtract one
   from the other.
 
+### FOI evidence (Module 15)
+
+- **Discovery only. This module cannot tell you what an authority said.** The
+  WhatDoTheyKnow search feed returns a truncated, search-highlighted snippet
+  per event and never a message body. Full text requires the JSON read API,
+  which returns a Cloudflare 403 to automated clients and is not worked
+  around. Snippets are stored in `foi_request_candidates.snippet` and never in
+  `foi_requests.response_text`. **Do not quote a snippet as an authority's
+  response** — it is a mid-sentence extract chosen by a search engine, not a
+  statement.
+- **A term match is a candidate, not evidence.** Nothing reaches
+  `foi_requests` without a human confirming it, the same discipline as
+  Modules 9 and 10.
+- **Coverage is unknowable.** WhatDoTheyKnow holds only requests routed
+  through that platform; most UK FOI requests never appear there. The feed is
+  additionally capped at 4 pages per search term. Never present a count from
+  this module as "the number of FOI requests about X".
+- **The feed is fetched against mySociety's `robots.txt`,** under an explicit
+  logged exception pending their answer to
+  `docs/mysociety-access-request.md`. Rows collected this way carry
+  `discovery_source = 'wdtk_feed_search'`. If they decline, remove the
+  exception and revisit those rows.
+
 ---
 
 ## Personal data

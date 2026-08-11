@@ -170,12 +170,12 @@ contact email from `.env`, so any operator can reach the person running it.
 
 | | |
 | --- | --- |
-| Sources | mySociety's published authority register (WhatDoTheyKnow); council disclosure logs |
-| Endpoints | mySociety's sanctioned authority CSV; per-council disclosure log pages |
-| Licence | mySociety data under CC BY-SA; council disclosure logs vary, most OGL v3.0 |
+| Sources | mySociety's published authority register (WhatDoTheyKnow); WhatDoTheyKnow search feed; council disclosure logs |
+| Endpoints | `/body/all-authorities.csv`; `/feed/search/<query>.json`; per-council disclosure log pages |
+| Licence | mySociety data under CC BY-SA; FOI responses generally OGL v3.0; council disclosure logs vary |
 | Key | None |
-| Rate limit | Default |
-| Notes | **Publicly published FOI evidence, not all FOI responses.** WhatDoTheyKnow's `/search/` is disallowed by its robots.txt and its site is behind a bot challenge; this module uses the CSV mySociety publish for the purpose instead, which is why it covers 315 authorities rather than one |
+| Rate limit | Default (2s/host), conditional requests |
+| Notes | **Publicly published FOI evidence, and discovery only — not full responses.** The feed returns a truncated search snippet per event and never a message body; full text needs `/request/<slug>.json`, which returns a Cloudflare 403 to automated clients and is not worked around. The feed is fetched under an explicit, logged exception to mySociety's robots.txt (`Settings.robots_exceptions`) — see `docs/mysociety-access-request.md`, which is the outstanding ask to put it on a permitted footing |
 
 ---
 

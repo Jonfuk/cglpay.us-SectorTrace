@@ -6,13 +6,14 @@ directly.
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import robotparser
 from urllib.parse import urlparse
 
 import httpx
@@ -112,31 +113,133 @@ class _RateLimiter:
         self._last_request_at[host] = time.monotonic()
 
 
+class RobotsRules:
+    """robots.txt rule matching with wildcard support, per RFC 9309.
+
+    This does not use `urllib.robotparser`, and that is the whole point.
+    The stdlib parser matches a rule with `path.startswith(rule)`, so it has
+    no support for `*` or `$` — a rule like `Disallow: */feed/*` matches
+    nothing at all, because no real path starts with a literal asterisk. Sites
+    that write their rules that way are silently treated as allow-all.
+
+    That is not a hypothetical. mySociety's robots.txt is written almost
+    entirely in that style (`*/feed/*`, `*/search/*`,
+    `*/request/*/response/*`), so under the stdlib parser this pipeline would
+    have believed it was honouring robots.txt while ignoring every rule on the
+    host. Since "we respect robots.txt" is a claim this project makes in
+    writing and relies on when asking sources for access, it has to be true of
+    the wildcard rules too.
+
+    Matching follows RFC 9309: the most specific rule wins (longest pattern),
+    Allow beats Disallow on a tie, and an empty Disallow value means allow.
+    """
+
+    def __init__(self, text: str, user_agent: str) -> None:
+        self._rules: list[tuple[str, bool, re.Pattern[str]]] = []
+        self._parse(text, user_agent)
+
+    @staticmethod
+    def _token(user_agent: str) -> str:
+        """The product token from a full User-Agent string.
+
+        robots.txt groups name a product token ("googlebot"), not the whole
+        header, so `cglpay-evidence-pipeline/0.1 (+contact: ...)` has to be
+        reduced to `cglpay-evidence-pipeline` before it can match a group.
+        """
+        return user_agent.split("/")[0].strip().lower()
+
+    @staticmethod
+    def _compile(pattern: str) -> re.Pattern[str]:
+        """A robots path pattern as a regex anchored at the start of the path.
+
+        `*` is any sequence; a trailing `$` anchors the end. Everything else is
+        matched literally, so a `.` or `?` in a path cannot act as a
+        metacharacter and quietly widen a rule.
+        """
+        anchored_end = pattern.endswith("$")
+        if anchored_end:
+            pattern = pattern[:-1]
+        regex = "".join(".*" if ch == "*" else re.escape(ch) for ch in pattern)
+        return re.compile(f"^{regex}{'$' if anchored_end else ''}")
+
+    def _parse(self, text: str, user_agent: str) -> None:
+        token = self._token(user_agent)
+        # Collect rules per group first: a specific group for our token
+        # overrides the wildcard group entirely rather than adding to it.
+        groups: dict[str, list[tuple[str, bool]]] = {}
+        current: list[str] = []
+        starting_group = False
+
+        for raw_line in text.splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if not line or ":" not in line:
+                continue
+            field, _, value = line.partition(":")
+            field = field.strip().lower()
+            value = value.strip()
+
+            if field == "user-agent":
+                if not starting_group:
+                    current = []
+                    starting_group = True
+                current.append(value.lower())
+                groups.setdefault(value.lower(), [])
+            elif field in ("allow", "disallow"):
+                starting_group = False
+                for agent in current:
+                    groups.setdefault(agent, []).append((value, field == "allow"))
+
+        selected = groups.get(token)
+        if selected is None:
+            selected = groups.get("*", [])
+
+        for value, is_allow in selected:
+            if not value:
+                # "Disallow:" with no value means allow everything; it carries
+                # no pattern, so it simply contributes no rule.
+                continue
+            self._rules.append((value, is_allow, self._compile(value)))
+
+    def can_fetch(self, url: str) -> bool:
+        parsed = urlparse(url)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        best_len = -1
+        allowed = True
+        for pattern, is_allow, regex in self._rules:
+            if not regex.match(path):
+                continue
+            # Longest pattern wins; Allow wins a tie of equal length.
+            if len(pattern) > best_len or (len(pattern) == best_len and is_allow):
+                best_len = len(pattern)
+                allowed = is_allow
+        return allowed
+
+
 class _RobotsCache:
     def __init__(self, client: httpx.Client, user_agent: str) -> None:
         self._client = client
         self._user_agent = user_agent
-        self._parsers: dict[str, robotparser.RobotFileParser] = {}
+        self._rules: dict[str, RobotsRules] = {}
 
     def can_fetch(self, url: str) -> bool:
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        parser = self._parsers.get(origin)
-        if parser is None:
-            parser = robotparser.RobotFileParser()
+        rules = self._rules.get(origin)
+        if rules is None:
             robots_url = f"{origin}/robots.txt"
             try:
                 resp = self._client.get(robots_url, timeout=10)
-                if resp.status_code == 200:
-                    parser.parse(resp.text.splitlines())
-                else:
-                    # No robots.txt, or it's unreachable in a way that isn't
-                    # a hard block — treat as allow-all per RFC convention.
-                    parser.parse([])
+                # No robots.txt, or unreachable in a way that isn't a hard
+                # block — treat as allow-all per RFC convention.
+                text = resp.text if resp.status_code == 200 else ""
             except httpx.HTTPError:
-                parser.parse([])
-            self._parsers[origin] = parser
-        return parser.can_fetch(self._user_agent, url)
+                text = ""
+            rules = RobotsRules(text, self._user_agent)
+            self._rules[origin] = rules
+        return rules.can_fetch(url)
 
 
 def _find_archived(raw_dir: Path, source_system: str, sha256: str) -> Path | None:
@@ -185,6 +288,7 @@ class PipelineHTTPClient:
         )
         self._rate_limiter = _RateLimiter(self.settings)
         self._robots = _RobotsCache(self._client, self.settings.user_agent)
+        self._overrides_recorded: set[str] = set()
 
     def __enter__(self) -> "PipelineHTTPClient":
         return self
@@ -232,7 +336,24 @@ class PipelineHTTPClient:
         archive: bool = True,
     ) -> FetchResult:
         if not self._robots.can_fetch(url):
-            raise RobotsDisallowed(f"robots.txt disallows fetching {url} as {self.settings.user_agent!r}")
+            # A configured exception does not make the fetch invisible. It is
+            # logged every time and recorded once per (module, prefix) in the
+            # review queue, so an override can never end up being the quiet
+            # default — see Settings.robots_exceptions for the reasoning that
+            # has to accompany each entry.
+            override = self.settings.robots_override_for(url)
+            if override is None:
+                raise RobotsDisallowed(
+                    f"robots.txt disallows fetching {url} as {self.settings.user_agent!r}")
+            log.warning("http.robots_override", url=url, allowed_by=override,
+                        source_system=self.source_system)
+            if self.conn is not None and override not in self._overrides_recorded:
+                self._overrides_recorded.add(override)
+                db.record_review_item(
+                    self.conn, self.source_system, "robots_override_in_use", override,
+                    json.dumps({"note": "robots.txt disallows this prefix; fetched under an "
+                                        "explicit exception in Settings.robots_exceptions",
+                                "user_agent": self.settings.user_agent}))
 
         host = urlparse(url).netloc
         self._rate_limiter.wait(host)

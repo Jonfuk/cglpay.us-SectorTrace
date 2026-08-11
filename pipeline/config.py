@@ -32,6 +32,31 @@ class Settings(BaseSettings):
         "www.contractsfinder.service.gov.uk": 5.0,
     }
 
+    # URL prefixes fetched despite robots.txt disallowing them. Structural
+    # config, deliberately in code and not .env, so that turning one on is a
+    # reviewable diff rather than an invisible local setting.
+    #
+    # THIS IS THE ONE PLACE THIS PIPELINE OVERRIDES A PUBLISHER'S ROBOTS.TXT.
+    # Adding to it is a judgement call about a specific publisher, not a
+    # technical convenience. Every entry must carry the reasoning, and every
+    # use is logged (`http.robots_override`) and raises a review item, so the
+    # override always shows up in the audit trail rather than only here.
+    #
+    # whatdotheyknow.com /feed/ — mySociety's robots.txt disallows `*/feed/*`
+    # and `*/search/*`. The endpoint is unauthenticated, is the documented
+    # route other published FOI clients use, serves this pipeline's real
+    # User-Agent a 200, and returns content that is already public and
+    # reusable under the OGL. It is fetched at the standard 2s/host with
+    # conditional requests, so the load is lower than crawling the equivalent
+    # request pages would be. Set against that: it *is* a disallowed path, and
+    # the ask in docs/mysociety-access-request.md remains the right way to put
+    # this on a permitted footing. Remove this entry the moment they answer —
+    # either because they said yes and it is no longer needed, or because they
+    # said no.
+    robots_exceptions: tuple[str, ...] = (
+        "https://www.whatdotheyknow.com/feed/",
+    )
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"
@@ -65,6 +90,19 @@ class Settings(BaseSettings):
 
     def rate_limit_for_host(self, host: str) -> float:
         return self.rate_limit_overrides.get(host, self.default_rate_limit_seconds)
+
+    def robots_override_for(self, url: str) -> str | None:
+        """The configured prefix permitting `url` past robots.txt, or None.
+
+        Returns the prefix rather than a bool so the caller can name the
+        specific exception in the log and the review item — "we overrode
+        robots" is not auditable, "we overrode robots for
+        https://www.whatdotheyknow.com/feed/" is.
+        """
+        for prefix in self.robots_exceptions:
+            if url.startswith(prefix):
+                return prefix
+        return None
 
     def require_charity_commission_key(self) -> str:
         if not self.charity_commission_api_key:

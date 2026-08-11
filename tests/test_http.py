@@ -7,7 +7,13 @@ import httpx
 import pytest
 
 from pipeline import db
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed, _RateLimiter, _wait_respecting_retry_after
+from pipeline.http import (
+    PipelineHTTPClient,
+    RobotsDisallowed,
+    RobotsRules,
+    _RateLimiter,
+    _wait_respecting_retry_after,
+)
 
 
 def _allow_all_robots(httpx_mock, origin: str = "https://example.com") -> None:
@@ -24,6 +30,139 @@ def test_robots_disallowed_blocks_request(httpx_mock, settings):
     with pytest.raises(RobotsDisallowed):
         client.get("https://example.com/secret")
     client.close()
+
+
+# --- wildcard robots rules ----------------------------------------------------------
+#
+# urllib.robotparser matches with `path.startswith(rule)` and so ignores every
+# `*`-containing rule. These tests exist because that made this pipeline's
+# "we honour robots.txt" claim untrue on any site that writes rules that way,
+# mySociety's among them.
+
+WDTK_ROBOTS = """
+User-agent: *
+Disallow: */search/*
+Disallow: */feed/*
+Allow: */request/*/response/*/attach/*
+Disallow: */request/*/response/*
+Disallow: *?*update_status=1*
+"""
+
+UA = "cglpay-evidence-pipeline/0.1 (+contact: x@y.uk; purpose: testing)"
+
+
+@pytest.mark.parametrize("url,allowed", [
+    ("https://www.whatdotheyknow.com/feed/search/x.json", False),
+    ("https://www.whatdotheyknow.com/search/foo", False),
+    ("https://www.whatdotheyknow.com/request/abc/response/1", False),
+    # More specific Allow beats the Disallow above it.
+    ("https://www.whatdotheyknow.com/request/abc/response/1/attach/2.pdf", True),
+    ("https://www.whatdotheyknow.com/body/all-authorities.csv", True),
+    ("https://www.whatdotheyknow.com/request/abc", True),
+    # A wildcard rule that matches on the query string, not the path.
+    ("https://www.whatdotheyknow.com/request/abc?update_status=1", False),
+])
+def test_wildcard_rules_are_honoured(url, allowed):
+    assert RobotsRules(WDTK_ROBOTS, UA).can_fetch(url) is allowed
+
+
+def test_stdlib_parser_would_have_missed_these():
+    """Pins the reason this class exists. If a future Python implements
+    wildcards in robotparser, this test fails and the class can be revisited.
+    """
+    from urllib import robotparser
+    p = robotparser.RobotFileParser()
+    p.parse(WDTK_ROBOTS.splitlines())
+    url = "https://www.whatdotheyknow.com/feed/search/x.json"
+    assert p.can_fetch(UA, url) is True
+    assert RobotsRules(WDTK_ROBOTS, UA).can_fetch(url) is False
+
+
+def test_a_group_naming_our_token_overrides_the_wildcard_group():
+    text = ("User-agent: *\nDisallow: /\n\n"
+            "User-agent: cglpay-evidence-pipeline\nDisallow: /private\n")
+    rules = RobotsRules(text, UA)
+    assert rules.can_fetch("https://x.com/anything") is True
+    assert rules.can_fetch("https://x.com/private") is False
+
+
+def test_empty_disallow_means_allow_all():
+    assert RobotsRules("User-agent: *\nDisallow:\n", UA).can_fetch("https://x.com/a") is True
+
+
+def test_dollar_anchors_the_end_of_the_path():
+    rules = RobotsRules("User-agent: *\nDisallow: /*.pdf$\n", UA)
+    assert rules.can_fetch("https://x.com/a/b.pdf") is False
+    assert rules.can_fetch("https://x.com/a/b.pdf.html") is True
+
+
+def test_path_metacharacters_are_matched_literally():
+    """A '.' in a rule must not act as a regex wildcard and widen the block."""
+    rules = RobotsRules("User-agent: *\nDisallow: /a.b\n", UA)
+    assert rules.can_fetch("https://x.com/a.b") is False
+    assert rules.can_fetch("https://x.com/axb") is True
+
+
+def test_missing_robots_txt_allows_everything():
+    assert RobotsRules("", UA).can_fetch("https://x.com/anything") is True
+
+
+def test_configured_exception_allows_a_disallowed_path(httpx_mock, settings, conn):
+    """The one sanctioned way past robots.txt. It must be prefix-scoped: an
+    exception for /feed/ must not open the rest of the host.
+    """
+    settings.robots_exceptions = ("https://example.com/feed/",)
+    httpx_mock.add_response(
+        url="https://example.com/robots.txt", status_code=200,
+        text="User-agent: *\nDisallow: */feed/*\nDisallow: /secret\n")
+    httpx_mock.add_response(url="https://example.com/feed/search.json",
+                             status_code=200, content=b"[]")
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    assert client.get("https://example.com/feed/search.json").ok
+    with pytest.raises(RobotsDisallowed):
+        client.get("https://example.com/secret")
+    client.close()
+
+
+def test_robots_override_is_recorded_for_review(httpx_mock, settings, conn):
+    """An override that left no trace would be indistinguishable from the
+    pipeline simply not honouring robots.txt.
+    """
+    settings.robots_exceptions = ("https://example.com/feed/",)
+    httpx_mock.add_response(
+        url="https://example.com/robots.txt", status_code=200,
+        text="User-agent: *\nDisallow: */feed/*\n")
+    for _ in range(2):
+        httpx_mock.add_response(url="https://example.com/feed/search.json",
+                                 status_code=200, content=b"[]")
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    client.get("https://example.com/feed/search.json")
+    client.get("https://example.com/feed/search.json")
+    client.close()
+
+    rows = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'robots_override_in_use'").fetchall()
+    assert len(rows) == 1, "the override should be recorded once per run, not once per request"
+    assert rows[0]["raw_value"] == "https://example.com/feed/"
+
+
+def test_no_exceptions_means_robots_is_absolute(settings):
+    """Guards the default. If this list is ever empty-by-accident the rest of
+    the pipeline's robots handling is unchanged, which is the intent.
+    """
+    settings.robots_exceptions = ()
+    assert settings.robots_override_for("https://www.whatdotheyknow.com/feed/x.json") is None
+
+
+def test_shipped_exception_covers_only_the_wdtk_feed(settings):
+    for url in ("https://www.whatdotheyknow.com/request/x.json",
+                 "https://www.whatdotheyknow.com/body/x.json",
+                 "https://example.com/feed/x.json"):
+        assert settings.robots_override_for(url) is None
+    assert settings.robots_override_for(
+        "https://www.whatdotheyknow.com/feed/search/x.json") == "https://www.whatdotheyknow.com/feed/"
 
 
 def test_get_captures_provenance_and_archives_body(httpx_mock, settings):
