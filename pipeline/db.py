@@ -244,8 +244,16 @@ def rows_missing_provenance(conn: sqlite3.Connection, table: str) -> list[sqlite
 
 
 def restricted_tables(conn: sqlite3.Connection) -> list[str]:
+    """Every restricted_ table AND view.
+
+    Views matter as much as tables and were previously invisible here: this
+    filtered on type='table', so a restricted_ view — a personal-data query
+    saved under a name — would have passed assert_no_restricted_tables
+    untouched. The entity graph is built from views, several of which name
+    company officers, so the gap had to close before they landed.
+    """
     rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name LIKE ?",
         (f"{RESTRICTED_PREFIX}%",),
     ).fetchall()
     return [r["name"] for r in rows]
