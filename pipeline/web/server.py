@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -374,6 +375,42 @@ class Handler(BaseHTTPRequestHandler):
             return queries.run_select(conn, sql, limit=int(body.get("limit") or queries.MAX_PAGE_SIZE))
         finally:
             conn.close()
+
+
+def local_addresses() -> list[str]:
+    """This machine's own IPv4 addresses, best-effort, for printing URLs that
+    another device on the network can actually type.
+
+    Link-local (169.254.x) addresses are dropped: Windows keeps one on every
+    idle adapter — Bluetooth, unused Ethernet ports, the VPN's spare
+    interfaces — and none of them is reachable from anything. What is left can
+    still include a VPN address alongside the real LAN one, so these are
+    offered as a list rather than guessed between.
+    """
+    candidates: list[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if address.startswith(("127.", "169.254.")):
+                continue
+            if address not in candidates:
+                candidates.append(address)
+    except OSError:
+        # No DNS for the local hostname. Not worth failing a server start over.
+        pass
+    return candidates
+
+
+def reachable_urls(host: str, port: int) -> list[str]:
+    """The URLs this server can be reached on, most useful first.
+
+    A wildcard bind is the case worth handling: "listening on 0.0.0.0" tells
+    nobody what to type into a phone.
+    """
+    if host in ("0.0.0.0", "::", ""):
+        return [f"http://127.0.0.1:{port}"] + [
+            f"http://{address}:{port}" for address in local_addresses()]
+    return [f"http://{host}:{port}"]
 
 
 def build_server(settings: Settings | None = None, host: str = "127.0.0.1",

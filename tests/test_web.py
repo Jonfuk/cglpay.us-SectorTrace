@@ -19,7 +19,7 @@ import pytest
 
 from pipeline import db
 from pipeline.web import queries, review
-from pipeline.web.server import build_server
+from pipeline.web.server import build_server, local_addresses, reachable_urls
 
 
 @pytest.fixture
@@ -278,6 +278,57 @@ def client(seeded, settings):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_a_wildcard_bind_reports_addresses_other_machines_can_use():
+    """"Listening on 0.0.0.0" is true and useless from another device."""
+    urls = reachable_urls("0.0.0.0", 1801)
+    assert urls[0] == "http://127.0.0.1:1801"
+    assert urls == [f"http://{a}:1801" for a in ["127.0.0.1", *local_addresses()]]
+    # A specific bind is reported as itself, not expanded.
+    assert reachable_urls("127.0.0.1", 1801) == ["http://127.0.0.1:1801"]
+    assert reachable_urls("10.2.0.90", 8080) == ["http://10.2.0.90:8080"]
+
+
+def test_local_addresses_excludes_the_unreachable_ones():
+    """Windows keeps a 169.254 link-local address on every idle adapter —
+    Bluetooth, unused Ethernet, spare VPN interfaces. None is reachable, and
+    printing them as ways in would send someone chasing a dead address."""
+    for address in local_addresses():
+        assert not address.startswith("127.")
+        assert not address.startswith("169.254.")
+
+
+def test_binding_a_wildcard_serves_requests(seeded, settings):
+    """The LAN case, exercised over a real socket rather than assumed."""
+    server = build_server(settings, host="0.0.0.0", port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        with httpx.Client(timeout=10.0) as http:
+            assert http.get(f"http://127.0.0.1:{port}/api/overview").status_code == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_write_from_a_non_loopback_origin_is_allowed_when_it_matches_the_host(client, seeded):
+    """The CSRF guard compares Origin against the Host actually used, so
+    reaching the UI on a LAN address works — the check is same-origin, not
+    same-as-localhost. Getting this wrong would make every decision fail with
+    a 403 for everyone except the machine running the server.
+    """
+    item_id = ids_for(seeded, "Ambridge BC")
+    host = str(client.base_url.netloc, "utf-8") if isinstance(
+        client.base_url.netloc, bytes) else str(client.base_url.netloc)
+    response = client.post(
+        "/api/review/decide",
+        json={"ids": [item_id], "decision": "approved", "decided_by": "Jon"},
+        headers={"Origin": f"http://{host}"},
+    )
+    assert response.status_code == 200
 
 
 def test_serves_the_page_and_its_assets(client):

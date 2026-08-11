@@ -85,7 +85,8 @@ def web(
     host: str = typer.Option(
         # No em dash: Typer writes help straight to a console that is cp1252
         # on Windows, where it arrives as a replacement character.
-        "127.0.0.1", help="Address to bind. Loopback by default; see the warning it prints."),
+        "0.0.0.0", help="Address to bind. Every interface by default; "
+                         "pass 127.0.0.1 for this machine only."),
     open_browser: bool = typer.Option(
         True, "--open/--no-open", help="Open the UI in a browser once it is listening"),
 ) -> None:
@@ -94,10 +95,14 @@ def web(
     Reading is done on a read-only connection, so nothing the browser or the
     SQL box does can modify the warehouse. The only writes are review
     decisions, and each one records who made it and when.
+
+    Binds every interface, so other machines on the network can reach it.
+    There is no authentication and the warehouse holds personal data in
+    restricted_ tables: --host 127.0.0.1 restricts it to this machine.
     """
     import webbrowser
 
-    from pipeline.web.server import build_server
+    from pipeline.web.server import build_server, reachable_urls
 
     configure_logging("web")
     settings = get_settings()
@@ -121,21 +126,29 @@ def web(
         ui.muted("  Another copy may already be running. Use --port to pick a different one.")
         raise typer.Exit(code=1)
 
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{server.server_address[1]}"
-    ui.heading(f"Review UI on {url}")
+    urls = reachable_urls(host, server.server_address[1])
+    ui.heading(f"Review UI on {urls[0]}")
+    for other in urls[1:]:
+        # The addresses another device on the network can actually type.
+        # "listening on 0.0.0.0" is true and useless from a phone.
+        ui.info(f"  also on [pipeline.module]{other}[/]")
     ui.info(f"  warehouse: [pipeline.muted]{settings.database_path}[/]")
     ui.info(f"  {pending:,} item(s) pending review")
     if host not in ("127.0.0.1", "localhost", "::1"):
-        # Worth interrupting for. There is no login on this server, and the
-        # warehouse holds restricted_ tables of personal data — company
-        # officers, CQC contacts, named individuals from PFD reports.
-        ui.warn(f"  bound to {host}, which is reachable from other machines. "
-                 "There is no authentication, and the warehouse contains "
-                 "personal data in restricted_ tables.")
+        # Stated every time, not once in a doc. There is no login on this
+        # server, and the warehouse holds restricted_ tables of personal data
+        # — company officers, CQC contacts, named individuals from PFD
+        # reports. Anyone who can reach the port can read all of it and can
+        # decide review items.
+        ui.warn(f"  bound to {host}: anyone who can reach this machine can "
+                 "read the warehouse and decide review items. There is no "
+                 "authentication. Use --host 127.0.0.1 for this machine only.")
     ui.muted("  Ctrl-C to stop.")
 
     if open_browser:
-        webbrowser.open(url)
+        # Loopback for the local browser regardless of bind: it is the address
+        # that always resolves on the machine actually running the server.
+        webbrowser.open(f"http://127.0.0.1:{server.server_address[1]}")
 
     try:
         server.serve_forever()

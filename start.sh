@@ -28,9 +28,11 @@
 #   ./start.sh export sheets --push
 #
 #   Review. Browse the warehouse and approve/reject review-queue items in a
-#   browser, on http://127.0.0.1:1801. Reading is done on a read-only
-#   connection; the only writes are the decisions themselves:
+#   browser, on port 1801. Reading is done on a read-only connection; the only
+#   writes are the decisions themselves. It listens on every interface so
+#   other machines on the network can reach it, and there is no login:
 #   ./start.sh web
+#   ./start.sh web --host 127.0.0.1    # this machine only
 #   ./start.sh web --port 8080 --no-open
 #
 # m06, m09 and m10 produce review worklists in docs/verification/ rather than

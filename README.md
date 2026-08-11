@@ -335,9 +335,13 @@ its own ends up, and it does not empty itself. The web UI reads the warehouse
 and writes decisions back:
 
 ```bash
-./start.sh web                 # http://127.0.0.1:1801
+./start.sh web                 # port 1801, every interface
+./start.sh web --host 127.0.0.1 # this machine only
 ./start.sh web --port 8080 --no-open
 ```
+
+It binds every interface, so another machine on the network reaches it at
+`http://<this-machine>:1801` — the addresses to use are printed at startup.
 
 ```cmd
 start.cmd web
@@ -366,10 +370,13 @@ Three things are worth knowing before pointing anyone else at it:
   opened `mode=ro` with `query_only`, so nothing typed into either can modify
   the warehouse. Decisions go through a separate writable connection that
   touches two tables and nothing else.
-- **There is no authentication.** It binds to `127.0.0.1` for that reason.
-  `--host` will widen it and warns when it does; the warehouse holds
-  `restricted_` tables of personal data, so a wider bind is a decision about
-  the network you are on.
+- **There is no authentication, and it listens on every interface.** Anyone
+  who can reach the port can read the whole warehouse — including the
+  `restricted_` tables of personal data — and can approve or reject items
+  under whatever name they type. It is built for a LAN you control; it is not
+  safe on an untrusted network and must never be port-forwarded. `--host
+  127.0.0.1` restricts it to the machine running it, and the warning prints
+  on every start that does not.
 - **`restricted_` tables need a second click.** Opening one in the browser
   returns a refusal until you confirm. That is a guard against opening one by
   accident — the SQL box reads them like any other table, as does `sqlite3`.

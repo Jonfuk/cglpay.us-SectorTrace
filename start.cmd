@@ -30,9 +30,11 @@ REM   start.cmd export all          - sheets, geojson, echarts, docs
 REM   start.cmd export sheets --push
 REM
 REM   Review. Browse the warehouse and approve/reject review-queue items in a
-REM   browser, on http://127.0.0.1:1801. Reading is done on a read-only
-REM   connection; the only writes are the decisions themselves:
+REM   browser, on port 1801. Reading is done on a read-only connection; the
+REM   only writes are the decisions themselves. It listens on every interface
+REM   so other machines on the network can reach it, and there is no login:
 REM   start.cmd web
+REM   start.cmd web --host 127.0.0.1    - this machine only
 REM   start.cmd web --port 8080 --no-open
 REM
 REM m06, m09 and m10 produce review worklists in docs\verification\ rather than
