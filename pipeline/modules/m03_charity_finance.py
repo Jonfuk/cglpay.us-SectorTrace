@@ -35,7 +35,7 @@ from datetime import date
 import pdfplumber
 import structlog
 
-from pipeline import db, providers
+from pipeline import db, pdftext, providers
 from pipeline.charity_accounts_config import AccountsProfile, profile_for
 from pipeline.http import PipelineHTTPClient
 from pipeline.registry import ModuleContext, register_module
@@ -169,35 +169,47 @@ def extract_pay_bands(page_text: str) -> tuple[list[dict], int | None]:
     return bands, total
 
 
-def find_staff_costs_pages(pdf: "pdfplumber.PDF", profile: AccountsProfile) -> list[tuple[int, str]]:
-    """Locate the staff-costs note.
+def find_staff_costs_pages(pages: list[str], profile: AccountsProfile) -> list[tuple[int, str]]:
+    """Locate the staff-costs note in already-extracted page text.
 
     Returns EVERY matching page, not just the first: the note routinely runs
     across a spread (CGL's 2025 accounts put the staff-costs table on one
     page and the employee-numbers table on the next), and reading only the
     first page silently loses whichever figures live on the second.
+
+    Takes text rather than a pdfplumber.PDF so the expensive extraction
+    happens once, in pipeline/pdftext.py, and is shared with m14 — which was
+    re-extracting the same archived files at 16–23 seconds each.
     """
     matches: list[tuple[int, str]] = []
-    for i, page in enumerate(pdf.pages):
-        text = page.extract_text() or ""
-        low = text.lower()
+    for i, text in enumerate(pages):
+        low = (text or "").lower()
         for group in profile.locator_keywords:
             if all(k.lower() in low for k in group):
-                matches.append((i, text))
+                matches.append((i, text or ""))
                 break
     return matches
 
 
-def extract_accounts_figures(pdf_bytes: bytes, profile: AccountsProfile) -> dict:
+def extract_accounts_figures(pdf_bytes: bytes, profile: AccountsProfile,
+                              settings=None, sha256: str | None = None) -> dict:
     """Pull staff-cost figures out of a filed accounts PDF.
 
     Thin wrapper: locates the note's pages and delegates to
     extract_figures_from_text, which holds all the parsing logic and is
     testable against a text fixture without shipping a multi-megabyte PDF.
+
+    Pass `settings` and `sha256` to route extraction through the shared page
+    cache; without them it extracts directly, which is what the unit tests do.
     """
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        page_count = len(pdf.pages)
-        located = find_staff_costs_pages(pdf, profile)
+    if settings is not None and sha256:
+        pages = pdftext.page_texts(settings, SOURCE_ACCOUNTS, sha256, pdf_bytes)
+    else:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+
+    page_count = len(pages)
+    located = find_staff_costs_pages(pages, profile)
 
     if not located:
         return {"page_count": page_count,
@@ -442,7 +454,9 @@ def run(ctx: ModuleContext) -> None:
                         continue
 
                     try:
-                        figures = extract_accounts_figures(pdf_result.body, profile)
+                        figures = extract_accounts_figures(
+                            pdf_result.body, profile, settings=ctx.settings,
+                            sha256=pdf_result.payload_sha256)
                     except Exception as exc:  # a malformed PDF must not kill the run
                         db.record_review_item(conn, module_name, "accounts_pdf_unreadable",
                                                doc["document_url"],

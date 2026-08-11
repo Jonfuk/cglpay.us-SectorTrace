@@ -33,15 +33,19 @@ import json
 import re
 from pathlib import Path
 
-import pdfplumber
 import structlog
 
-from pipeline import db, providers
+from pipeline import db, pdftext, providers
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
 
 SOURCE_SYSTEM = "provider_annual_reports"
+
+# The archive m03 wrote these PDFs into. The page-text cache is keyed by
+# source system and payload hash, so m14 must look under m03's namespace
+# to find what m03 already extracted.
+M03_SOURCE_SYSTEM = "charity_commission_filed_accounts"
 
 # Topic -> terms searched for.
 #
@@ -203,8 +207,11 @@ def run(ctx: ModuleContext) -> None:
             continue
 
         try:
-            with pdfplumber.open(archived) as pdf:
-                pages = [(i, page.extract_text() or "") for i, page in enumerate(pdf.pages)]
+            # m03 already extracted this exact file to find the staff-costs
+            # note. Keyed on the payload hash it recorded, so a hit is
+            # provably the same bytes rather than probably the same file.
+            pages = pdftext.numbered_pages(
+                ctx.settings, M03_SOURCE_SYSTEM, row["payload_sha256"], archived)
         except Exception as exc:
             db.record_review_item(
                 conn, module_name, "annual_report_unreadable", row["document_url"],
