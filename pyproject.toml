@@ -23,9 +23,18 @@ dependencies = [
 pipeline = "pipeline.cli:app"
 
 [project.optional-dependencies]
-tables = [
-    "camelot-py[cv]>=0.11",
-]
+# There was a `tables` extra here pinning camelot-py[cv], added at scaffold
+# time in case PDF table extraction needed more than pdfplumber. Nothing ever
+# imported it. Removed rather than left in place: an extra nobody installs is
+# a claim about how this pipeline reads PDFs that is not true of any line of
+# it, and camelot brings Ghostscript and OpenCV with it.
+#
+# Every PDF parser here reads text (pdfplumber's extract_text) and locates
+# values by position and pattern, tested against documents captured from the
+# real sources -- the DHSC grant tables, the charity accounts staff-costs
+# note, the MHCLG budget returns. Switching to lattice/stream table detection
+# would be a rewrite of those parsers, not a drop-in, and it would have to
+# earn its way in against fixtures that currently pass.
 sheets = [
     "gspread>=6.0",
     "google-auth>=2.28",
