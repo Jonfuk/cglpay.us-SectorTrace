@@ -23,10 +23,16 @@ def guard_not_restricted(table_or_column_name: str) -> None:
 # one is ever added, rather than leaking it because the prefix check passed.
 PERSONAL_DATA_COLUMNS: set[str] = {
     "claimant_name_raw",
-    "page_title_raw",  # tribunal page titles embed the claimant's name
-    "coroner_name",
+    # Tribunal and PFD page titles embed the claimant's / deceased's name.
+    "page_title_raw",
     "deceased_name",
+    "officer_name",
+    "person_name",
 }
+# Deliberately NOT listed: coroner_name. A coroner is a public official named
+# on the face of a published report, acting in that capacity, and the brief
+# lists coroner name among the fields to capture — blocking it would make the
+# field pointless rather than safer.
 
 
 def guard_columns(table: str, column_names: list[str]) -> None:
