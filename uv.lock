@@ -1531,16 +1531,18 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-httpx" },
-]
 sheets = [
     { name = "google-auth" },
     { name = "gspread" },
 ]
 tables = [
     { name = "camelot-py" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-httpx" },
 ]
 
 [package.metadata]
@@ -1553,15 +1555,19 @@ requires-dist = [
     { name = "pdfplumber", specifier = ">=0.11" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "pydantic-settings", specifier = ">=2.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.30" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "tenacity", specifier = ">=8.2" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["tables", "sheets", "dev"]
+provides-extras = ["tables", "sheets"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-httpx", specifier = ">=0.30" },
+]
 
 [[package]]
 name = "tabulate"
