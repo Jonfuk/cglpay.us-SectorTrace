@@ -73,6 +73,12 @@ class ModuleContext:
         """Iterate `items`, advancing a progress bar if one is displayed."""
         return self.progress.track(items, description, total=total)
 
+    def phase(self, text: str) -> None:
+        """Say what this module is doing, for work that has no countable
+        units yet. Write-only, like track().
+        """
+        self.progress.phase(text)
+
     def since_date(self) -> date | None:
         """`since` as a date, or None. Raises on an unparseable value rather
         than silently processing everything.

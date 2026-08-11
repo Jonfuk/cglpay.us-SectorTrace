@@ -48,8 +48,10 @@ from rich.theme import Theme
 T = TypeVar("T")
 
 # Wide enough for the longest module name (m11_public_health_grant is 23)
-# plus the two-space indent a sub-task carries.
-DESCRIPTION_WIDTH = 25
+# plus a short phase label after it. Bounded, because this was the one
+# unbounded column and the reason the whole line wrapped; the width test
+# renders the worst case at 80-200 columns and asserts it still fits.
+DESCRIPTION_WIDTH = 36
 
 # Below this, the estimated-remaining column is dropped so the rest of the
 # line still fits on one row. Wrapping makes a progress display unreadable.
@@ -274,9 +276,25 @@ class ProgressReporter:
     module collects.
     """
 
-    def __init__(self, bar: Progress | None = None, parent_description: str = "") -> None:
+    def __init__(self, bar: Progress | None = None, parent_description: str = "",
+                  task_id=None) -> None:
         self._bar = bar
         self._parent = parent_description
+        self._task_id = task_id
+
+    def phase(self, text: str) -> None:
+        """Say what the module is doing right now.
+
+        Most modules do substantial work before their counted loop starts —
+        m00 downloads every boundary file, m03 walks the register, m05 pages
+        the entire CQC provider index. During that stretch the bar showed
+        "0/?" and nothing else, which is the same "is it working or is it
+        stuck?" question the display exists to answer.
+        """
+        if self._bar is None or self._task_id is None:
+            return
+        label = f"{self._parent} - {text}" if self._parent else text
+        self._bar.update(self._task_id, description=label)
 
     def track(self, items: Iterable[T], description: str,
                total: int | None = None) -> Iterator[T]:

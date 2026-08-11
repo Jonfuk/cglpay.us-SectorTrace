@@ -369,6 +369,7 @@ def run(ctx: ModuleContext) -> None:
     with PipelineHTTPClient(SOURCE_API, settings=ctx.settings, conn=conn) as api_client:
         headers = {"Ocp-Apim-Subscription-Key": api_key}
 
+        ctx.phase("reading register")
         for provider_key, charity_number in ctx.track(targets, "charities"):
             details = api_client.get(f"{API_BASE}/allcharitydetailsV2/{charity_number}/0", headers=headers)
             if not details.ok:

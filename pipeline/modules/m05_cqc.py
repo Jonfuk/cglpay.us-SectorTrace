@@ -222,6 +222,10 @@ def run(ctx: ModuleContext) -> None:
         headers = {"Ocp-Apim-Subscription-Key": key}
         client.set_default_headers(headers)
 
+        # The longest silent stretch in the pipeline: the CQC API has no
+        # name filter, so the whole ~64k-row provider index is paged before
+        # anything can be matched.
+        ctx.phase("paging provider index")
         index = _fetch_provider_index(client, conn, module_name)
         log.info("cqc.index_fetched", providers=len(index))
 

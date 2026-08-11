@@ -376,6 +376,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m00_geography"
     conn = ctx.conn
 
+    ctx.phase("finding layers")
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         cty_series = _discover_boundary_series(client, "Counties and Unitary Authorities", "BGC")
         lad_series = _discover_boundary_series(client, "Local Authority Districts", "BGC")

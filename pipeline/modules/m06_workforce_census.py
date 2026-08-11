@@ -283,6 +283,7 @@ def run(ctx: ModuleContext) -> None:
 
     reports: dict[int, dict] = {}
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
+        ctx.phase("finding reports")
         for landing in LANDING_PAGES:
             page = client.get(landing)
             if not page.ok:

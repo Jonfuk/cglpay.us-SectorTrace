@@ -155,7 +155,8 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict
         changes_before = conn.total_changes
         ctx = ModuleContext(conn=conn, settings=settings, since=since,
                              dry_run=dry_run, limit=limit,
-                             progress=ui.ProgressReporter(bar, parent_description=name))
+                             progress=ui.ProgressReporter(bar, parent_description=name,
+                                                          task_id=task))
         try:
             fn(ctx)
         except Exception as exc:

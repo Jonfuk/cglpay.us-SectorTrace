@@ -113,3 +113,41 @@ def test_each_module_takes_exactly_a_context(name):
     """
     parameters = list(inspect.signature(MODULE_REGISTRY[name]).parameters)
     assert parameters == ["ctx"], f"{name} takes {parameters}, not (ctx)"
+
+
+# --- saying what is happening before the counted loop starts ---------------------------
+
+def test_phase_is_write_only_and_safe_without_a_display():
+    """Like track(): a module must behave identically whether or not anything
+    is watching.
+    """
+    from pipeline.registry import ModuleContext
+
+    ctx = ModuleContext(conn=None, settings=None, since=None, dry_run=False, limit=None)
+    ctx.phase("doing something")   # must not raise
+
+
+def test_phase_relabels_the_modules_own_bar():
+    from pipeline.console import ProgressReporter, progress
+
+    with progress() as bar:
+        task = bar.add_task("m05_cqc", total=None)
+        ProgressReporter(bar, parent_description="m05_cqc", task_id=task).phase(
+            "paging the provider index")
+        labels = [t.description for t in bar.tasks]
+        # ASCII separator: the console is reconfigured to UTF-8, but a middle
+        # dot is not worth depending on that holding.
+        assert "m05_cqc - paging the provider index" in labels
+
+
+def test_the_slowest_modules_say_what_they_are_doing():
+    """A module whose counted loop starts a minute in showed a bare "0/?"
+    until then — the same "working or stuck?" question the display exists to
+    answer. These are the ones with the longest silent stretches.
+    """
+    import inspect
+
+    for name in ("m00_geography", "m02_tribunals", "m03_charity_finance",
+                 "m05_cqc", "m06_workforce_census", "m08_pfd_reports"):
+        source = inspect.getsource(MODULE_REGISTRY[name])
+        assert "ctx.phase(" in source, f"{name} is silent before its counted loop"

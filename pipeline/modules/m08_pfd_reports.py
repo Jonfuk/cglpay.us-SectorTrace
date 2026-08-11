@@ -306,6 +306,7 @@ def run(ctx: ModuleContext) -> None:
     seen_refs: set[str] = set()
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
+        ctx.phase("listing categories")
         for category_id, category_name in ctx.track(
                 list(TARGET_CATEGORY_IDS.items()), "PFD categories"):
             page = 1

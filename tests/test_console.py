@@ -251,7 +251,9 @@ def test_the_progress_line_never_wraps(width, monkeypatch):
 def test_the_description_column_is_bounded():
     """It was the one unbounded column, and the reason the line wrapped."""
     assert ui.DESCRIPTION_WIDTH >= len("m11_public_health_grant")
-    assert ui.DESCRIPTION_WIDTH <= 30
+    # Room for a short phase label after the module name, and no more: the
+    # ceiling is what keeps test_the_progress_line_never_wraps satisfiable.
+    assert ui.DESCRIPTION_WIDTH <= 40
 
 
 def test_a_sub_task_is_indented_not_prefixed_with_its_module():
