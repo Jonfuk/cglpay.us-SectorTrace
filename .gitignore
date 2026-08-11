@@ -31,3 +31,6 @@ __pycache__/
 
 # uv
 .uv/
+
+# Local Claude Code state (machine-specific permission rules and paths)
+.claude/
