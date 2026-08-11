@@ -66,8 +66,23 @@ def test_the_spinner_is_ascii():
 def test_progress_columns_include_a_rate_only_when_asked():
     """Remaining-time estimates are honest for a fixed list of councils and
     misleading for anything paced by an external API's Retry-After.
+
+    Asserted on a wide console, because the column is also the first thing
+    dropped when the terminal is too narrow to fit everything on one row.
     """
+    from rich.console import Console
+
+    ui.reset_console()
+    ui._console = Console(theme=ui.THEME, width=200, force_terminal=True)
     assert len(ui._columns(show_rate=True)) == len(ui._columns(show_rate=False)) + 1
+
+
+def test_a_narrow_terminal_drops_the_estimate_before_it_wraps():
+    from rich.console import Console
+
+    ui.reset_console()
+    ui._console = Console(theme=ui.THEME, width=80, force_terminal=True)
+    assert len(ui._columns(show_rate=True)) == len(ui._columns(show_rate=False))
 
 
 # --- when nothing is watching ---------------------------------------------------------
@@ -191,3 +206,62 @@ def test_summary_renders_without_optional_keys():
         ui.run_summary([{"module": "m13_la_budgets", "status": "failed"}]))
     assert "m13_la_budgets" in output.getvalue()
     assert "failed" in output.getvalue()
+
+
+# --- the line must fit on one row ------------------------------------------------------
+
+@pytest.mark.parametrize("width", [80, 100, 120, 140, 200])
+def test_the_progress_line_never_wraps(width, monkeypatch):
+    """Measured, not eyeballed. Three separate attempts at this wrapped on a
+    real terminal — the throughput column spilling onto its own lines makes
+    the display unreadable, which is worse than showing less.
+    """
+    from rich.console import Console
+
+    from pipeline import http
+    from pipeline.meters import DISK, NETWORK, reset_all
+
+    monkeypatch.setattr("sys.stdout", _Utf8Stdout())
+    ui.reset_console()
+    ui._console = Console(theme=ui.THEME, width=width, force_terminal=True)
+
+    # Worst case: the longest module name, a sub-task label, and figures wide
+    # enough to need every character.
+    NETWORK.add(5 * 1024 ** 3)
+    DISK.add(3 * 1024 ** 3)
+    for _ in range(3):
+        http.REQUESTS.record("h.example.com", not_modified=True)
+
+    try:
+        with ui.progress() as bar:
+            bar.add_task("all modules", total=16, run_level=True)
+            bar.add_task("m11_public_health_grant", total=None)
+            bar.add_task("  budget publications", total=400)
+            rendered = ui.console().render_lines(bar.get_renderable(), pad=False)
+        for line in rendered:
+            printable = sum(len(segment.text) for segment in line)
+            assert printable <= width, (
+                f"progress line is {printable} chars at width {width}")
+    finally:
+        reset_all()
+        http.REQUESTS.reset()
+        ui.reset_console()
+
+
+def test_the_description_column_is_bounded():
+    """It was the one unbounded column, and the reason the line wrapped."""
+    assert ui.DESCRIPTION_WIDTH >= len("m11_public_health_grant")
+    assert ui.DESCRIPTION_WIDTH <= 30
+
+
+def test_a_sub_task_is_indented_not_prefixed_with_its_module():
+    """Repeating a 23-character module name on every sub-task was most of
+    what made the line too long — and the module's own bar is right above it.
+    """
+    with ui.progress() as bar:
+        reporter = ui.ProgressReporter(bar, parent_description="m11_public_health_grant")
+        iterator = reporter.track([1, 2], "publications")
+        next(iterator)
+        labels = [t.description for t in bar.tasks]
+        assert "  publications" in labels
+        assert not any("m11_public_health_grant publications" == label for label in labels)

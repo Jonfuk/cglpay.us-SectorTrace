@@ -41,11 +41,19 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-from rich.table import Table
+from rich.table import Column, Table
 from rich.text import Text
 from rich.theme import Theme
 
 T = TypeVar("T")
+
+# Wide enough for the longest module name (m11_public_health_grant is 23)
+# plus the two-space indent a sub-task carries.
+DESCRIPTION_WIDTH = 25
+
+# Below this, the estimated-remaining column is dropped so the rest of the
+# line still fits on one row. Wrapping makes a progress display unreadable.
+REMAINING_MIN_WIDTH = 118
 
 # Named styles rather than colours at the call site, so the palette is one
 # edit and the meaning is legible in the code that uses it.
@@ -158,6 +166,14 @@ class RequestCountColumn(ProgressColumn):
     def render(self, task) -> Text:
         from pipeline.http import REQUESTS
 
+        # Run-level bar only. These are whole-run figures, and repeating them
+        # on every module's line both said the same thing several times and
+        # pushed the line past the terminal width -- a module description like
+        # "m11_public_health_grant grant publications" is 42 characters before
+        # anything else is drawn.
+        if not task.fields.get("run_level"):
+            return Text("", style="pipeline.muted")
+
         total = REQUESTS.total
         if not total:
             return Text("", style="pipeline.muted")
@@ -179,18 +195,32 @@ class ThroughputColumn(ProgressColumn):
     throttled rather than ambiguously stuck.
     """
 
-    def render(self, task) -> Text:
-        from pipeline.meters import DISK, NETWORK, compact_rate
+    # Totals need ~16 more columns than rates alone.
+    TOTALS_MIN_WIDTH = 105
 
+    def render(self, task) -> Text:
+        from pipeline.meters import DISK, NETWORK, compact_rate, compact_total
+
+        if not task.fields.get("run_level"):
+            return Text("", style="pipeline.muted")
         if not (NETWORK.total or DISK.total):
             return Text("", style="pipeline.muted")
-        # Compact by necessity: the full "151.4 KiB/s", doubled, pushed the
-        # progress line past 80 columns and wrapped it into an unreadable
-        # mess. Run totals go in the end-of-run summary instead, where there
-        # is room for them.
-        return Text(f"net {compact_rate(NETWORK.rate())}  "
-                     f"dsk {compact_rate(DISK.rate())}",
-                     style="pipeline.muted")
+
+        # Rate then running total: "how fast now" and "how much so far",
+        # which answer different questions. The total is the politeness
+        # number — what this run has asked of public sources.
+        #
+        # Bounding the description column got the line under control at normal
+        # widths, but eight columns of data still cannot fit in 80. Below the
+        # threshold the totals drop rather than the line wrapping: a wrapped
+        # progress display is unreadable, and the totals are in the
+        # end-of-run summary either way.
+        rates = f"net {compact_rate(NETWORK.rate())}"
+        disk = f"dsk {compact_rate(DISK.rate())}"
+        if console().width >= self.TOTALS_MIN_WIDTH:
+            rates += f" {compact_total(NETWORK.total)}"
+            disk += f" {compact_total(DISK.total)}"
+        return Text(f"{rates}  {disk}", style="pipeline.muted")
 
 
 def _columns(show_rate: bool) -> list:
@@ -199,8 +229,18 @@ def _columns(show_rate: bool) -> list:
     # is what CI and a Linux terminal see too.
     columns = [
         SpinnerColumn(spinner_name="line", style="pipeline.source"),
-        TextColumn("[pipeline.module]{task.description}[/]"),
-        BarColumn(bar_width=None, complete_style="pipeline.ok",
+        # Fixed width, ellipsised. The description was the one unbounded
+        # column, and "m11_public_health_grant grant publications" (42 chars)
+        # wrapped the whole line. Bounding it here means the run-level figures
+        # always fit, rather than being hidden on a narrow terminal.
+        TextColumn("[pipeline.module]{task.description}[/]",
+                    table_column=Column(width=DESCRIPTION_WIDTH, no_wrap=True,
+                                         overflow="ellipsis")),
+        # Fixed, not bar_width=None. A flexible bar expands greedily and Rich
+        # then squeezes whatever follows it, so the throughput column wrapped
+        # onto its own lines no matter how short the descriptions got. With
+        # every column a known width the total is predictable.
+        BarColumn(bar_width=16, complete_style="pipeline.ok",
                    finished_style="pipeline.ok", pulse_style="pipeline.source"),
         MofNCompleteColumn(),
         TaskProgressColumn(),
@@ -208,10 +248,11 @@ def _columns(show_rate: bool) -> list:
         ThroughputColumn(),
         TimeElapsedColumn(),
     ]
-    if show_rate:
+    if show_rate and console().width >= REMAINING_MIN_WIDTH:
         # Remaining-time estimates are honest for a fixed list of councils and
         # actively misleading for anything paced by an external API's
-        # Retry-After, so callers opt in.
+        # Retry-After — so they are the first thing dropped when the terminal
+        # is too narrow to show everything at once.
         columns.append(TimeRemainingColumn())
     return columns
 
@@ -254,7 +295,10 @@ class ProgressReporter:
             except TypeError:
                 total = None
 
-        label = f"{self._parent} {description}".strip()
+        # Indented, not prefixed with the module name. The module's own bar
+        # is directly above, and repeating a 23-character name on every
+        # sub-task was most of what made the line too long.
+        label = f"  {description}" if self._parent else description
         task = self._bar.add_task(label, total=total)
         try:
             for item in items:

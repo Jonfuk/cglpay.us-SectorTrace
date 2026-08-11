@@ -106,6 +106,20 @@ def compact_rate(bytes_per_second: float) -> str:
     return f"{int(bytes_per_second):5d}B/s"
 
 
+def compact_total(count: float) -> str:
+    """A cumulative total sized to sit next to a rate on the progress line.
+
+    Same fixed width as compact_rate for the same reason: a column that
+    changes width as the number crosses a unit boundary makes the whole line
+    jitter, which is worse than the information is useful.
+    """
+    value = float(count)
+    for unit, size in (("G", 1024 ** 3), ("M", 1024 ** 2), ("K", 1024)):
+        if value >= size:
+            return f"{value / size:5.1f}{unit}"
+    return f"{int(value):5d}B"
+
+
 def reset_all() -> None:
     NETWORK.reset()
     DISK.reset()

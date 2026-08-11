@@ -131,18 +131,25 @@ def test_the_counter_is_thread_safe():
     http.REQUESTS.reset()
 
 
+class _RunLevelTask:
+    """The one bar that carries whole-run figures; every other renders empty."""
+
+    fields = {"run_level": True}
+
+
 def test_the_column_renders_the_live_total():
     from pipeline.console import RequestCountColumn
 
     http.REQUESTS.reset()
     column = RequestCountColumn()
-    assert column.render(None).plain == "", "an idle run should not show a zero"
+    task = _RunLevelTask()
+    assert column.render(task).plain == "", "an idle run should not show a zero"
 
     http.REQUESTS.record("h.example.com", not_modified=False)
-    assert "1 req" in column.render(None).plain
+    assert "1 req" in column.render(task).plain
 
     http.REQUESTS.record("h.example.com", not_modified=True)
-    rendered = column.render(None).plain
+    rendered = column.render(task).plain
     assert "2 req" in rendered
     assert "1 cached" in rendered, "conditional requests are worth showing"
     http.REQUESTS.reset()

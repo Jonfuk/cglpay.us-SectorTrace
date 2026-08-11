@@ -200,7 +200,7 @@ def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limi
     # The one task that outlives every module, so there is always a bar on
     # screen and the request counter and throughput columns always have
     # somewhere to render.
-    overall = bar.add_task("all modules", total=total_modules)
+    overall = bar.add_task("all modules", total=total_modules, run_level=True)
 
     summary: list[dict] = []
     for wave in waves:

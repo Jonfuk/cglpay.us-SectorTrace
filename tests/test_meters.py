@@ -108,11 +108,69 @@ def test_a_rate_is_labelled_as_a_rate():
     assert compact_rate(204.4 * 1024).endswith("/s")
 
 
+class _Task:
+    """Stands in for a rich Task. `run_level` marks the one bar that carries
+    whole-run figures; every other bar renders them empty.
+    """
+
+    def __init__(self, run_level: bool = True):
+        self.fields = {"run_level": run_level} if run_level else {}
+
+
 def test_the_column_is_silent_before_anything_moves():
     from pipeline.console import ThroughputColumn
 
     reset_all()
-    assert ThroughputColumn().render(None).plain == ""
+    assert ThroughputColumn().render(_Task()).plain == ""
     NETWORK.add(1024)
-    assert "net" in ThroughputColumn().render(None).plain
+    assert "net" in ThroughputColumn().render(_Task()).plain
     reset_all()
+
+
+def test_whole_run_figures_appear_only_on_the_run_level_bar():
+    """Repeating them per module said the same thing several times and pushed
+    the line past the terminal width.
+    """
+    from pipeline.console import RequestCountColumn, ThroughputColumn
+
+    reset_all()
+    NETWORK.add(4096)
+    from pipeline import http
+    http.REQUESTS.record("h.example.com", not_modified=False)
+
+    assert ThroughputColumn().render(_Task(run_level=False)).plain == ""
+    assert RequestCountColumn().render(_Task(run_level=False)).plain == ""
+    assert "net" in ThroughputColumn().render(_Task()).plain
+    assert "req" in RequestCountColumn().render(_Task()).plain
+
+    reset_all()
+    http.REQUESTS.reset()
+
+
+def test_cumulative_totals_show_when_the_terminal_has_room():
+    from rich.console import Console
+
+    from pipeline import console as ui
+    from pipeline.console import ThroughputColumn
+
+    reset_all()
+    NETWORK.add(5 * 1024 * 1024)
+    DISK.add(3 * 1024 * 1024)
+    try:
+        for width, expect_totals in ((130, True), (80, False)):
+            ui.reset_console()
+            ui._console = Console(theme=ui.THEME, width=width, force_terminal=True)
+            rendered = ThroughputColumn().render(_Task()).plain
+            assert ("5.0M" in rendered) is expect_totals, (width, rendered)
+            assert "net" in rendered, "rates must show at every width"
+    finally:
+        ui.reset_console()
+        reset_all()
+
+
+def test_compact_total_is_fixed_width():
+    from pipeline.meters import compact_total
+
+    widths = {len(compact_total(v))
+              for v in (0, 512, 204.4 * 1024, 3.2 * 1024 ** 2, 1.5 * 1024 ** 3)}
+    assert len(widths) == 1, f"inconsistent widths: {widths}"
