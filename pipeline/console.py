@@ -166,6 +166,33 @@ class RequestCountColumn(ProgressColumn):
         return Text(f"{total:,} req{suffix}", style="pipeline.muted")
 
 
+class ThroughputColumn(ProgressColumn):
+    """Live network and disk rates, with run totals.
+
+    Measured inside the pipeline rather than read from the OS, so every byte
+    is attributable to this run — see pipeline/meters.py. The network total is
+    a politeness figure as much as a performance one: it is the answer to "how
+    much traffic did you send us?" if a source ever asks.
+
+    Rendered on every refresh, so a run that is waiting out a rate limit shows
+    an idle network rate against a bar that is still advancing — visibly
+    throttled rather than ambiguously stuck.
+    """
+
+    def render(self, task) -> Text:
+        from pipeline.meters import DISK, NETWORK, compact_rate
+
+        if not (NETWORK.total or DISK.total):
+            return Text("", style="pipeline.muted")
+        # Compact by necessity: the full "151.4 KiB/s", doubled, pushed the
+        # progress line past 80 columns and wrapped it into an unreadable
+        # mess. Run totals go in the end-of-run summary instead, where there
+        # is room for them.
+        return Text(f"net {compact_rate(NETWORK.rate())}  "
+                     f"dsk {compact_rate(DISK.rate())}",
+                     style="pipeline.muted")
+
+
 def _columns(show_rate: bool) -> list:
     # "line" is the ASCII spinner (-\|/). Chosen unconditionally rather than
     # only when the encoding forces it, so what the maintainer sees on Windows
@@ -178,6 +205,7 @@ def _columns(show_rate: bool) -> list:
         MofNCompleteColumn(),
         TaskProgressColumn(),
         RequestCountColumn(),
+        ThroughputColumn(),
         TimeElapsedColumn(),
     ]
     if show_rate:

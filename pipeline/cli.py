@@ -99,8 +99,16 @@ def _audit_counts(conn, module: str) -> dict[str, int]:
 def _print_summary(summary: list[dict], dry_run: bool) -> None:
     if not summary:
         return
+    from pipeline.meters import DISK, NETWORK, human_bytes
+
     ui.console().print()
     ui.console().print(ui.run_summary(summary))
+    if NETWORK.total or DISK.total:
+        # The network figure is worth keeping after the run, not just during
+        # it: it is what this pipeline asked of public sources, which is the
+        # number to quote if one of them ever asks.
+        ui.muted(f"  {human_bytes(NETWORK.total)} downloaded, "
+                  f"{human_bytes(DISK.total)} written to data/")
     if dry_run:
         ui.warn("--dry-run: everything above was rolled back, nothing was written.")
 

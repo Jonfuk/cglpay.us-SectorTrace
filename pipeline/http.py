@@ -27,6 +27,7 @@ from tenacity import (
 )
 
 from pipeline import db
+from pipeline.meters import DISK, NETWORK
 from pipeline.config import Settings, get_settings
 
 log = structlog.get_logger()
@@ -349,6 +350,7 @@ def _archive_raw(raw_dir: Path, source_system: str, sha256: str, content_type: s
     out_path = out_dir / f"{sha256}{ext}"
     if not out_path.exists():
         out_path.write_bytes(body)
+        DISK.add(len(body))
     return out_path
 
 
@@ -470,6 +472,10 @@ class PipelineHTTPClient:
         response = self._do_request("GET", url, params=params, headers=request_headers)
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, response.status_code == 304)
+        # What actually came down the wire. A 304 carries no body, so a
+        # re-run shows near-zero network against real progress -- which is
+        # the conditional-request cache being visible rather than assumed.
+        NETWORK.add(len(response.content or b""))
 
         not_modified = response.status_code == 304
         archived_path = None

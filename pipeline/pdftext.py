@@ -29,6 +29,8 @@ from pathlib import Path
 
 import structlog
 
+from pipeline.meters import DISK
+
 log = structlog.get_logger()
 
 
@@ -59,7 +61,9 @@ def _write_cached(path: Path, pages: list[str]) -> None:
         # Write-then-rename, so an interrupted run cannot leave a half-written
         # cache file that a later run would read as a short document.
         temporary = path.with_suffix(".json.partial")
-        temporary.write_text(json.dumps(pages), encoding="utf-8")
+        payload = json.dumps(pages)
+        temporary.write_text(payload, encoding="utf-8")
+        DISK.add(len(payload.encode("utf-8")))
         temporary.replace(path)
     except OSError as exc:      # pragma: no cover - disk full, permissions
         log.warning("pdftext.cache_write_failed", path=str(path), error=str(exc))
