@@ -79,6 +79,72 @@ def export(
     conn.close()
 
 
+@app.command()
+def web(
+    port: int = typer.Option(1801, help="Port to listen on"),
+    host: str = typer.Option(
+        # No em dash: Typer writes help straight to a console that is cp1252
+        # on Windows, where it arrives as a replacement character.
+        "127.0.0.1", help="Address to bind. Loopback by default; see the warning it prints."),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open the UI in a browser once it is listening"),
+) -> None:
+    """Browse the warehouse and decide review-queue items in a browser.
+
+    Reading is done on a read-only connection, so nothing the browser or the
+    SQL box does can modify the warehouse. The only writes are review
+    decisions, and each one records who made it and when.
+    """
+    import webbrowser
+
+    from pipeline.web.server import build_server
+
+    configure_logging("web")
+    settings = get_settings()
+
+    # Migrations first, on a writable connection: the decisions table arrives
+    # in 0026 and the UI would otherwise fail on a warehouse built before it.
+    # It also restores the -shm file a read-only connection cannot create for
+    # itself, which is what the browsing connections need.
+    conn = db.get_connection(settings)
+    applied = db.apply_migrations(conn)
+    if applied:
+        typer.echo(f"Applied migrations: {', '.join(applied)}")
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0]
+    conn.close()
+
+    try:
+        server = build_server(settings, host, port)
+    except OSError as exc:
+        ui.error(f"Cannot listen on {host}:{port} — {exc}")
+        ui.muted("  Another copy may already be running. Use --port to pick a different one.")
+        raise typer.Exit(code=1)
+
+    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{server.server_address[1]}"
+    ui.heading(f"Review UI on {url}")
+    ui.info(f"  warehouse: [pipeline.muted]{settings.database_path}[/]")
+    ui.info(f"  {pending:,} item(s) pending review")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        # Worth interrupting for. There is no login on this server, and the
+        # warehouse holds restricted_ tables of personal data — company
+        # officers, CQC contacts, named individuals from PFD reports.
+        ui.warn(f"  bound to {host}, which is reachable from other machines. "
+                 "There is no authentication, and the warehouse contains "
+                 "personal data in restricted_ tables.")
+    ui.muted("  Ctrl-C to stop.")
+
+    if open_browser:
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        ui.muted("\n  stopped.")
+    finally:
+        server.server_close()
+
+
 def _audit_counts(conn, module: str) -> dict[str, int]:
     """Review items and parse failures already recorded for this module.
 

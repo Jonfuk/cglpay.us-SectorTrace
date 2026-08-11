@@ -27,6 +27,12 @@
 #   ./start.sh export all          # sheets, geojson, echarts, docs
 #   ./start.sh export sheets --push
 #
+#   Review. Browse the warehouse and approve/reject review-queue items in a
+#   browser, on http://127.0.0.1:1801. Reading is done on a read-only
+#   connection; the only writes are the decisions themselves:
+#   ./start.sh web
+#   ./start.sh web --port 8080 --no-open
+#
 # m06, m09 and m10 produce review worklists in docs/verification/ rather than
 # finished evidence — nothing they find is promoted without human confirmation.
 #

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<!--
+  The whole UI: three tabs over a JSON API, no build step and no external
+  requests. Fonts, styles and script are local, because a review tool that
+  needs the internet to render is one that stops working in the places this
+  pipeline is most likely to be run from.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence pipeline — review</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128203;</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <strong>Evidence pipeline</strong>
+    <span class="muted" id="db-path" title="Warehouse being read"></span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" data-tab="overview" role="tab">Overview</button>
+    <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
+    <button class="tab" data-tab="database" role="tab">Database</button>
+    <button class="tab" data-tab="sql" role="tab">SQL</button>
+  </nav>
+  <label class="reviewer">
+    <span>Reviewer</span>
+    <input id="reviewer" type="text" placeholder="your name" autocomplete="name">
+  </label>
+</header>
+
+<div id="toast" class="toast" hidden></div>
+
+<main>
+
+  <!-- Overview ------------------------------------------------------------->
+  <section id="tab-overview" class="tabpanel">
+    <div class="cards" id="overview-cards"></div>
+
+    <div class="split">
+      <div class="panel">
+        <h2>Pending by module and item type</h2>
+        <p class="muted small">
+          Click a row to open it in the review queue. Counts deduplicate on
+          (module, item type, raw value), so a re-run does not inflate them.
+        </p>
+        <div id="overview-types"></div>
+      </div>
+      <div class="panel">
+        <h2>Recent decisions</h2>
+        <div id="overview-decisions"></div>
+        <h2>Parse failures</h2>
+        <p class="muted small">
+          Not decidable. A parse failure is a bug report about a parser in this
+          pipeline, not a judgement call — an empty cell with a logged reason
+          is the correct output.
+        </p>
+        <div id="overview-failures"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Review queue ---------------------------------------------------------->
+  <section id="tab-review" class="tabpanel">
+    <div class="filters">
+      <label>Status
+        <select id="f-status">
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All</option>
+        </select>
+      </label>
+      <label>Module <select id="f-module"><option value="">All modules</option></select></label>
+      <label>Item type <select id="f-type"><option value="">All types</option></select></label>
+      <label class="grow">Search
+        <input id="f-search" type="search" placeholder="raw value or context…">
+      </label>
+      <label>Per page
+        <select id="f-limit">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select>
+      </label>
+      <label>Oldest first <input id="f-oldest" type="checkbox" checked></label>
+    </div>
+
+    <div class="bulkbar" id="bulkbar" hidden>
+      <span id="bulk-count"></span>
+      <input id="bulk-note" type="text" placeholder="note (optional, applies to all selected)">
+      <button class="btn approve" data-bulk="approved">Approve selected</button>
+      <button class="btn reject" data-bulk="rejected">Reject selected</button>
+      <button class="btn" data-bulk="pending">Reset to pending</button>
+      <button class="btn ghost" id="bulk-clear">Clear selection</button>
+    </div>
+
+    <div class="listhead">
+      <label class="selectall"><input type="checkbox" id="select-page"> Select page</label>
+      <span id="review-count" class="muted"></span>
+      <span class="spacer"></span>
+      <span class="muted small">
+        Deciding records a judgement. It does not promote anything into a canonical table.
+      </span>
+    </div>
+
+    <div id="review-list"></div>
+    <div class="pager" id="review-pager"></div>
+    <p class="muted small keys">
+      Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>r</kbd> reject ·
+      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search
+    </p>
+  </section>
+
+  <!-- Database browser ------------------------------------------------------>
+  <section id="tab-database" class="tabpanel">
+    <div class="browser">
+      <aside class="sidebar">
+        <input id="obj-filter" type="search" placeholder="filter tables…">
+        <div id="object-list"></div>
+      </aside>
+      <div class="tablearea">
+        <div class="tablehead" id="table-head"></div>
+        <div class="tablewrap"><table id="data-table"></table></div>
+        <div class="pager" id="table-pager"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SQL ------------------------------------------------------------------->
+  <section id="tab-sql" class="tabpanel">
+    <div class="panel">
+      <h2>Read-only SQL</h2>
+      <p class="muted small">
+        Runs on a connection opened <code>mode=ro</code> with
+        <code>query_only</code>, so nothing typed here can modify the
+        warehouse. One statement at a time; results are capped at 500 rows and
+        queries are stopped after 20 seconds.
+        <strong>This reads <code>restricted_</code> tables like any other</strong>
+        — the confirmation in the browser tab guards against opening one by
+        accident, not against asking for it.
+      </p>
+      <textarea id="sql-input" rows="6" spellcheck="false"
+        placeholder="SELECT module, item_type, COUNT(*) FROM review_queue WHERE status='pending' GROUP BY 1,2 ORDER BY 3 DESC"></textarea>
+      <div class="row">
+        <button class="btn primary" id="sql-run">Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
+        <span id="sql-status" class="muted"></span>
+      </div>
+      <div class="tablewrap"><table id="sql-table"></table></div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

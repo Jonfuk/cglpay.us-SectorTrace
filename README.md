@@ -38,6 +38,7 @@ arguments they show the help menu.
 ./start.sh run m02_tribunals --limit 5                # smoke test
 ./start.sh run m03_charity_finance --dry-run          # fetch/parse, write nothing
 ./start.sh export all                                 # generate every export
+./start.sh web                                        # browse the warehouse, clear the review queue
 ```
 
 ```cmd
@@ -326,6 +327,52 @@ sqlite3 data/warehouse.db "SELECT module, item_type, COUNT(*) FROM review_queue 
 
 Both tables deduplicate on a natural key, so re-running a module does not
 inflate the counts.
+
+## The review UI
+
+`review_queue` is where every judgement call the pipeline refused to make on
+its own ends up, and it does not empty itself. The web UI reads the warehouse
+and writes decisions back:
+
+```bash
+./start.sh web                 # http://127.0.0.1:1801
+./start.sh web --port 8080 --no-open
+```
+
+```cmd
+start.cmd web
+```
+
+Four screens: an overview of what is pending by module and item type; the
+queue itself, filterable and searchable, with approve/reject/reset per item or
+across a selection; a browser for every table and view; and a SQL box.
+
+**Deciding records a judgement — it does not promote anything.** Approving an
+`unmatched_buyer_name` does not bind that name to an authority, and approving
+a `possible_group_company` does not add a company to `companies`. Those are
+per-module operations with their own evidence thresholds, and the UI does not
+invent a generic one. What it guarantees is that the judgement is kept: every
+decision writes a row to `review_decisions` recording who made it, when, what
+the status was before, any note, and the item's context as it read at the
+time. An item can be reset to pending, and that reset is recorded too.
+
+A decided item stays decided. `record_review_item()` only refreshes an item
+that is still pending, so a later run of the same module will not reopen it or
+overwrite the context a decision was taken against.
+
+Three things are worth knowing before pointing anyone else at it:
+
+- **Reading cannot write.** The browser and the SQL box run on a connection
+  opened `mode=ro` with `query_only`, so nothing typed into either can modify
+  the warehouse. Decisions go through a separate writable connection that
+  touches two tables and nothing else.
+- **There is no authentication.** It binds to `127.0.0.1` for that reason.
+  `--host` will widen it and warns when it does; the warehouse holds
+  `restricted_` tables of personal data, so a wider bind is a decision about
+  the network you are on.
+- **`restricted_` tables need a second click.** Opening one in the browser
+  returns a refusal until you confirm. That is a guard against opening one by
+  accident — the SQL box reads them like any other table, as does `sqlite3`.
 
 ## Documentation
 
