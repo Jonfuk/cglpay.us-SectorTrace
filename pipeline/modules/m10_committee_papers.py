@@ -76,6 +76,7 @@ from __future__ import annotations
 import html as html_lib
 import json
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import quote, urljoin, urlparse
 
@@ -87,8 +88,9 @@ from pipeline.authority_websites import (
     SYSTEM_SIGNATURES,
     website_for,
 )
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed
+from pipeline.http import RobotsDisallowed
 from pipeline.keywords import COMMITTEE_SEARCH_TERMS
+from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -380,47 +382,70 @@ def _provenance(result) -> dict:
     }
 
 
-def _resolve_committee_url(client, conn, module_name: str, authority, site) -> tuple[str | None, str]:
-    """(committee_url, url_source).
+@dataclass
+class AuthorityFindings:
+    """Everything one authority's fetching produced, and nothing written yet.
 
-    Registry first. Failing that, read the council's own home page and take
-    any committee-system link it publishes — the caller then probes it, so a
-    link that does not answer is not accepted.
+    Workers run on a thread pool and must not touch the module's connection,
+    so what they would have written is carried back here and written by the
+    main thread. That is not only a threading concession: it separates what
+    the source said from what we recorded, which is the distinction this
+    pipeline is organised around anyway.
+    """
+
+    ons_code: str
+    name: str
+    committee_url: str | None = None
+    url_source: str = "none"
+    system: str = "unknown"
+    signature: str | None = None
+    candidates: list[dict] = field(default_factory=list)
+    review_items: list[tuple[str, str, dict]] = field(default_factory=list)
+    parse_failures: list[tuple[str, str, str, str]] = field(default_factory=list)
+    searched: bool = False
+    searched_cleanly: bool = True
+    unreadable: bool = False
+
+    def flag(self, item_type: str, raw_value: str, context: dict) -> None:
+        self.review_items.append((item_type, raw_value, context))
+
+
+def _discover_committee_url(client, findings: AuthorityFindings, site) -> None:
+    """Registry first, then a committee-system link on the council's own home
+    page. The caller probes whatever comes back, so a link that does not
+    answer is not accepted.
     """
     if site is not None and site.committee_url:
-        return site.committee_url, "registry"
+        findings.committee_url, findings.url_source = site.committee_url, "registry"
+        return
     if site is None or not site.base_url:
-        return None, "none"
+        return
 
     try:
         result = client.get(site.base_url)
     except RobotsDisallowed:
-        db.record_review_item(conn, module_name, "committee_homepage_robots_disallowed",
-                               site.base_url, json.dumps({"authority": authority["name"]}))
-        return None, "none"
+        findings.flag("committee_homepage_robots_disallowed", site.base_url,
+                       {"authority": findings.name})
+        return
     if not result.ok:
-        db.record_review_item(
-            conn, module_name, "committee_homepage_unavailable", site.base_url,
-            json.dumps({"authority": authority["name"], "status": result.status_code}))
-        return None, "none"
+        findings.flag("committee_homepage_unavailable", site.base_url,
+                       {"authority": findings.name, "status": result.status_code})
+        return
 
     links = committee_links_on_page(result.body.decode("utf-8", errors="replace"), result.url)
-    if not links:
-        return None, "none"
-    return links[0], "homepage_link"
+    if links:
+        findings.committee_url, findings.url_source = links[0], "homepage_link"
 
 
-def _search_moderngov(client, conn, module_name: str, authority, committee_url: str,
-                       system: str, dry_run: bool) -> tuple[int, bool, bool]:
-    """(distinct_candidates, searched_cleanly, any_page_unreadable).
+def _search_moderngov(client, findings: AuthorityFindings) -> None:
+    """Every configured term against one ModernGov instance.
 
-    Counted as distinct documents, not upserts: one paper is routinely found
-    by three of the six search terms, and reporting 600 where the table holds
-    191 is the kind of number that ends up in a campaign document.
+    Fetches and parses only. Candidates carry the term that found them and
+    their snippet; the main thread merges terms across candidates and splits
+    the snippet off to the restricted table.
     """
-    documents: set[str] = set()
-    searched_cleanly = True
-    unreadable = False
+    committee_url = findings.committee_url
+    assert committee_url is not None
 
     for term in COMMITTEE_SEARCH_TERMS:
         url = build_moderngov_search_url(committee_url, term)
@@ -428,79 +453,154 @@ def _search_moderngov(client, conn, module_name: str, authority, committee_url: 
             try:
                 result = client.get(url)
             except RobotsDisallowed:
-                db.record_review_item(conn, module_name, "committee_search_robots_disallowed",
-                                       url, json.dumps({"authority": authority["name"]}))
-                searched_cleanly = False
+                findings.flag("committee_search_robots_disallowed", url,
+                               {"authority": findings.name})
+                findings.searched_cleanly = False
                 break
             if not result.ok:
                 # 403 is common: several councils sit behind bot protection
                 # that refuses this User-Agent. Recorded, because a blocked
                 # council must not look like a council with nothing to find.
-                db.record_review_item(
-                    conn, module_name, "committee_search_blocked", url,
-                    json.dumps({"authority": authority["name"], "term": term,
-                                 "status": result.status_code}))
-                searched_cleanly = False
+                findings.flag("committee_search_blocked", url,
+                               {"authority": findings.name, "term": term,
+                                "status": result.status_code})
+                findings.searched_cleanly = False
                 break
 
             page_html = result.body.decode("utf-8", errors="replace")
             rows = parse_moderngov_results(page_html, result.url, term)
 
             if not rows and not has_no_results(page_html):
-                # Neither hits nor ModernGov's own "no results" message: the
+                # Neither hits nor ModernGov's own no-results message: the
                 # page is not the shape this adapter understands, and saying
                 # so is the whole point of the check.
-                db.record_review_item(
-                    conn, module_name, "moderngov_results_unrecognised", result.url,
-                    json.dumps({"authority": authority["name"], "term": term,
-                                 "note": "page carried neither result blocks nor a "
-                                          "'No results found' message"}))
-                unreadable = True
+                findings.flag("moderngov_results_unrecognised", result.url,
+                               {"authority": findings.name, "term": term,
+                                "note": "page carried neither result blocks nor a "
+                                         "no-results message"})
+                findings.unreadable = True
                 break
 
             provenance = _provenance(result)
             for row in rows:
-                snippet = row.pop("snippet", None)
                 meeting_date_raw = row.pop("meeting_date_raw", None)
-                term_found = row.pop("matched_term")
                 if meeting_date_raw and row["meeting_date"] is None:
-                    db.record_parse_failure(
-                        conn, module_name, "meeting_date", meeting_date_raw,
-                        "meeting heading date is not DD/MM/YYYY", source_url=result.url)
-
-                terms = merge_matched_terms(
-                    conn, authority["ons_code"], row["document_url"], term_found)
-                db.upsert(conn, "committee_paper_candidates", {
-                    "authority_ons_code": authority["ons_code"],
-                    **row,
-                    "matched_terms": terms,
-                    "committee_system": system,
-                    "verified": 0,
-                    "verified_at": None,
-                    "rejected": 0,
-                    "discovered_at": datetime.now(timezone.utc).isoformat(),
-                    **provenance,
-                }, natural_key=["authority_ons_code", "document_url"])
-                documents.add(row["document_url"])
-
-                if snippet:
-                    db.upsert(conn, "restricted_committee_result_snippets", {
-                        "authority_ons_code": authority["ons_code"],
-                        "document_url": row["document_url"],
-                        "matched_term": term,
-                        "snippet_text": snippet,
-                        **provenance,
-                    }, natural_key=["authority_ons_code", "document_url", "matched_term"])
+                    findings.parse_failures.append(
+                        ("meeting_date", meeting_date_raw,
+                         "meeting heading date is not DD/MM/YYYY", result.url))
+                findings.candidates.append({**row, **provenance})
 
             following = next_result_page_url(page_html, result.url)
             if not following:
                 break
             url = following
 
-        if not dry_run:
-            conn.commit()
 
-    return len(documents), searched_cleanly, unreadable
+def collect_authority(unit, client) -> AuthorityFindings:
+    """One authority's entire fetch workload. Runs on a pool thread."""
+    authority, site = unit
+    findings = AuthorityFindings(ons_code=authority["ons_code"], name=authority["name"])
+
+    _discover_committee_url(client, findings, site)
+    if not findings.committee_url:
+        findings.flag("committee_url_unknown", findings.ons_code,
+                       {"authority": findings.name,
+                        "note": "no verified entry in pipeline/authority_websites.py "
+                                 "and no committee-system link on the council's home "
+                                 "page; add a verified committee_url"})
+        return findings
+
+    def probe(path: str) -> bool:
+        try:
+            result = client.get(
+                urljoin(findings.committee_url.rstrip("/") + "/", path.lstrip("/")))
+        except RobotsDisallowed:
+            return False
+        return result.ok
+
+    findings.system, findings.signature = detect_committee_system(probe)
+
+    if findings.system != "moderngov":
+        # Null adapter: CMIS and Democracy search interfaces are not
+        # implemented, and an unknown system cannot be searched at all.
+        # Recorded rather than skipped silently.
+        findings.flag("committee_system_unsupported", findings.ons_code,
+                       {"authority": findings.name, "system": findings.system,
+                        "committee_url": findings.committee_url,
+                        "note": "no adapter for this system; search manually or add one"})
+        return findings
+
+    findings.searched = True
+    _search_moderngov(client, findings)
+
+    if not findings.candidates and findings.searched_cleanly and not findings.unreadable:
+        # Every term returned ModernGov's own no-results message. Worth
+        # recording as a fact about the council rather than leaving it as an
+        # absence indistinguishable from a failure.
+        findings.flag("committee_search_no_matches", findings.ons_code,
+                       {"authority": findings.name,
+                        "committee_url": findings.committee_url,
+                        "terms": COMMITTEE_SEARCH_TERMS,
+                        "note": "search ran and the system reported no matches for any term"})
+    return findings
+
+
+def write_findings(conn, module_name: str, findings: AuthorityFindings) -> int:
+    """Everything one authority found, written on the module's connection.
+
+    Single-threaded by design, so the CLI's commit-per-module and
+    roll-back-on-failure semantics are exactly what they were before the
+    fetching was parallelised. Returns the number of distinct documents.
+    """
+    for item_type, raw_value, context in findings.review_items:
+        db.record_review_item(conn, module_name, item_type, raw_value, json.dumps(context))
+    for field_name, raw, reason, source_url in findings.parse_failures:
+        db.record_parse_failure(conn, module_name, field_name, raw, reason,
+                                 source_url=source_url)
+
+    if findings.committee_url:
+        db.upsert(conn, "authority_committee_systems", {
+            "ons_code": findings.ons_code,
+            "committee_system": findings.system,
+            "committee_url": findings.committee_url,
+            "detected_by": findings.signature,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+            "url_source": findings.url_source,
+        }, natural_key=["ons_code"])
+
+    documents: set[str] = set()
+    for candidate in findings.candidates:
+        row = dict(candidate)
+        snippet = row.pop("snippet", None)
+        term = row.pop("matched_term")
+
+        db.upsert(conn, "committee_paper_candidates", {
+            "authority_ons_code": findings.ons_code,
+            **row,
+            "matched_terms": merge_matched_terms(
+                conn, findings.ons_code, row["document_url"], term),
+            "committee_system": findings.system,
+            "verified": 0,
+            "verified_at": None,
+            "rejected": 0,
+            "discovered_at": datetime.now(timezone.utc).isoformat(),
+        }, natural_key=["authority_ons_code", "document_url"])
+        documents.add(row["document_url"])
+
+        if snippet:
+            db.upsert(conn, "restricted_committee_result_snippets", {
+                "authority_ons_code": findings.ons_code,
+                "document_url": row["document_url"],
+                "matched_term": term,
+                "snippet_text": snippet,
+                "source_url": row["source_url"],
+                "retrieved_at": row["retrieved_at"],
+                "http_status": row["http_status"],
+                "source_system": row["source_system"],
+                "payload_sha256": row["payload_sha256"],
+            }, natural_key=["authority_ons_code", "document_url", "matched_term"])
+
+    return len(documents)
 
 
 @register_module(
@@ -526,82 +626,45 @@ def run(ctx: ModuleContext) -> None:
     if ctx.limit:
         authorities = authorities[:ctx.limit]
 
-    searched = 0
-    unconfigured = 0
-    unknown_system = 0
-    discovered = 0
-    candidates = 0
+    # website_for reads authority_foi_profiles, so it happens here on the
+    # module's connection rather than inside a worker.
+    units = [(authority, website_for(authority["ons_code"], conn))
+             for authority in authorities]
 
-    with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
-        for authority in authorities:
-            site = website_for(authority["ons_code"], conn)
-            committee_url, url_source = _resolve_committee_url(
-                client, conn, module_name, authority, site)
+    searched = unconfigured = unknown_system = discovered = candidates = 0
+    workers = worker_count(ctx.settings, ctx.limit)
 
-            if not committee_url:
-                db.record_review_item(
-                    conn, module_name, "committee_url_unknown", authority["ons_code"],
-                    json.dumps({"authority": authority["name"],
-                                 "note": "no verified entry in pipeline/authority_websites.py "
-                                          "and no committee-system link on the council's home "
-                                          "page; add a verified committee_url"}))
-                unconfigured += 1
-                continue
-
-            if url_source == "homepage_link":
-                discovered += 1
-
-            def probe(path: str) -> bool:
-                try:
-                    result = client.get(urljoin(committee_url.rstrip("/") + "/", path.lstrip("/")))
-                except RobotsDisallowed:
-                    return False
-                return result.ok
-
-            system, signature = detect_committee_system(probe)
-            db.upsert(conn, "authority_committee_systems", {
-                "ons_code": authority["ons_code"],
-                "committee_system": system,
-                "committee_url": committee_url,
-                "detected_by": signature,
-                "detected_at": datetime.now(timezone.utc).isoformat(),
-                "url_source": url_source,
-            }, natural_key=["ons_code"])
-
-            if system != "moderngov":
-                # Null adapter: CMIS and Democracy search interfaces are not
-                # implemented, and an unknown system cannot be searched at
-                # all. Recorded rather than skipped silently.
-                db.record_review_item(
-                    conn, module_name, "committee_system_unsupported", authority["ons_code"],
-                    json.dumps({"authority": authority["name"], "system": system,
-                                 "committee_url": committee_url,
-                                 "note": "no adapter for this system; search manually or add one"}))
-                unknown_system += 1
-                if not ctx.dry_run:
-                    conn.commit()
-                continue
-
-            searched += 1
-            written, searched_cleanly, unreadable = _search_moderngov(
-                client, conn, module_name, authority, committee_url, system, ctx.dry_run)
-            candidates += written
-
-            if written == 0 and searched_cleanly and not unreadable:
-                # Every term returned ModernGov's own "no results" message.
-                # Worth recording as a fact about the council rather than
-                # leaving it as an absence indistinguishable from a failure.
-                db.record_review_item(
-                    conn, module_name, "committee_search_no_matches", authority["ons_code"],
-                    json.dumps({"authority": authority["name"],
-                                 "committee_url": committee_url,
-                                 "terms": COMMITTEE_SEARCH_TERMS,
-                                 "note": "search ran and the system reported no matches "
-                                          "for any term"}))
-
+    for outcome in fetch_in_parallel(units, collect_authority,
+                                      source_system=SOURCE_SYSTEM, settings=ctx.settings,
+                                      max_workers=workers, cache_conn=conn):
+        authority, _site = outcome.unit
+        if not outcome.ok:
+            # One council with a broken TLS chain costs one council. Before
+            # the pool, an unexpected exception aborted the whole module.
+            db.record_review_item(
+                conn, module_name, "committee_collection_failed", authority["ons_code"],
+                json.dumps({"authority": authority["name"],
+                             "error": f"{type(outcome.error).__name__}: {outcome.error}"}))
             if not ctx.dry_run:
                 conn.commit()
+            continue
+
+        findings = outcome.value
+        candidates += write_findings(conn, module_name, findings)
+
+        if not findings.committee_url:
+            unconfigured += 1
+        elif findings.url_source == "homepage_link":
+            discovered += 1
+        if findings.searched:
+            searched += 1
+        elif findings.committee_url:
+            unknown_system += 1
+
+        if not ctx.dry_run:
+            conn.commit()
 
     log.info("committee.run_complete", authorities_searched=searched,
               authorities_unconfigured=unconfigured, unsupported_systems=unknown_system,
-              committee_urls_discovered=discovered, candidates=candidates)
+              committee_urls_discovered=discovered, candidates=candidates,
+              fetch_workers=workers)

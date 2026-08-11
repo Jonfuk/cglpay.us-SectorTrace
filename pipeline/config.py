@@ -57,6 +57,13 @@ class Settings(BaseSettings):
         "https://www.whatdotheyknow.com/feed/",
     )
 
+    # How many hosts the council-walking modules (m09, m10, m15) read at once.
+    # Not a rate limit and no substitute for one: the per-host interval is
+    # enforced process-wide by pipeline.http.HOST_CLOCK, so workers that land
+    # on the same host queue behind each other. This only decides how many
+    # *different* councils are in flight. 1 restores fully serial collection.
+    max_fetch_workers: int = 8
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"

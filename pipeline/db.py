@@ -51,12 +51,25 @@ def get_connection(settings: Settings | None = None,
                             check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
 
-    # WAL is a persistent property of the database file, so this is a no-op
-    # after the first connection ever made to it. It cannot be set on some
-    # network filesystems; the mode is read back rather than assumed, and a
-    # refusal is surfaced instead of silently leaving the warehouse in a mode
-    # the caller did not ask for.
-    mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+    # WAL is a persistent property of the database file, so switching it is a
+    # once-in-the-file's-life operation. Read the current mode first and only
+    # write when it differs: changing journal_mode takes an exclusive lock and
+    # returns SQLITE_BUSY *without consulting the busy handler*, so several
+    # connections opening at once — which is exactly what the fetch pool
+    # does — would race and some would fail outright. Reading is lock-free.
+    #
+    # It also cannot be set on some network filesystems. The mode is read back
+    # rather than assumed, so a refusal is surfaced instead of silently
+    # leaving the warehouse in a mode the caller did not ask for.
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if mode.lower() != "wal":
+        try:
+            mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        except sqlite3.OperationalError:
+            # Another connection is mid-switch. Re-read rather than fail: by
+            # now it is very likely WAL, and if it is not, the check below
+            # reports it.
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     if mode.lower() != "wal":
         import structlog
 

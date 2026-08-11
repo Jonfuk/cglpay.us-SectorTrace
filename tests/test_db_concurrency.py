@@ -119,6 +119,75 @@ def test_a_second_writer_waits_rather_than_failing(settings):
         holder.close()
 
 
+def test_many_connections_can_open_a_fresh_warehouse_at_once(settings):
+    """The fetch pool opens one connection per worker thread.
+
+    Changing journal_mode takes an exclusive lock and returns SQLITE_BUSY
+    *without consulting the busy handler*, so issuing the WAL pragma
+    unconditionally made eight threads race and two lose. Reading the mode
+    first is lock-free, and the write only ever happens once in the file's
+    life.
+    """
+    # The real sequence: the CLI opens the module's connection first, so the
+    # file is already WAL by the time any worker starts. SQLite cannot flip an
+    # already-open database to WAL, so this ordering is not incidental.
+    module_conn = db.get_connection(settings)
+    assert module_conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+    errors: list[Exception] = []
+    modes: list[str] = []
+    lock = threading.Lock()
+    ready = threading.Barrier(8)
+
+    def open_one():
+        try:
+            ready.wait(timeout=10)
+            conn = db.get_connection(settings, check_same_thread=False)
+            with lock:
+                modes.append(conn.execute("PRAGMA journal_mode").fetchone()[0].lower())
+            conn.close()
+        except Exception as exc:      # pragma: no cover - the regression
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=open_one) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    module_conn.close()
+
+    assert not errors, f"opening connections concurrently failed: {errors}"
+    assert modes == ["wal"] * 8
+
+
+def test_concurrent_opens_of_a_brand_new_file_never_raise(settings):
+    """Belt and braces for the case the pool should never hit — no connection
+    open yet, eight arriving together. SQLite may refuse to flip the mode
+    while others hold the file open, and that is its right; what it must not
+    do is fail the open. The mode is reported, not asserted.
+    """
+    errors: list[Exception] = []
+    lock = threading.Lock()
+    ready = threading.Barrier(8)
+
+    def open_one():
+        try:
+            ready.wait(timeout=10)
+            db.get_connection(settings, check_same_thread=False).close()
+        except Exception as exc:      # pragma: no cover - the regression
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=open_one) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert not errors, f"opening connections concurrently failed: {errors}"
+
+
 def test_cross_thread_access_is_opt_in(settings):
     """The fetch pools need it; nothing else should get it by accident,
     because SQLite being thread-safe does not make Python's transaction state

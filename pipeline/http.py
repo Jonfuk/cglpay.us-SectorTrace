@@ -338,6 +338,12 @@ class PipelineHTTPClient:
         self._robots = _RobotsCache(self._client, self.settings.user_agent)
         self._overrides_recorded: set[str] = set()
 
+        # Set by the fetch pool. Reads of the conditional-request cache are
+        # always safe (WAL readers never block); writes are the problem, and
+        # are buffered here for the main thread to flush.
+        self.defer_cache_writes = False
+        self.pending_cache_writes: list[dict] = []
+
     def __enter__(self) -> "PipelineHTTPClient":
         return self
 
@@ -459,14 +465,24 @@ class PipelineHTTPClient:
                 )
 
         if self.conn is not None:
-            db.set_http_cache(
-                self.conn,
+            entry = dict(
                 url=request_url,
                 host=host,
                 etag=response.headers.get("etag"),
                 last_modified=response.headers.get("last-modified"),
                 payload_sha256=sha256,
             )
+            if self.defer_cache_writes:
+                # A worker thread must not write here. SQLite allows one
+                # writer, and the module's main thread holds that slot while
+                # it commits an authority's evidence — so a cache write from
+                # a pool thread would block for the whole busy_timeout, over
+                # and over. These are flushed by the main thread once the
+                # pool has finished; the cache is a fetch optimisation, so
+                # losing it to a crash costs a re-validation, not evidence.
+                self.pending_cache_writes.append(entry)
+            else:
+                db.set_http_cache(self.conn, **entry)
 
         return FetchResult(
             url=request_url,
