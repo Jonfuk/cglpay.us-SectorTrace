@@ -208,3 +208,88 @@ def test_website_for_returns_none_when_neither_source_has_it(conn):
 def test_website_for_without_a_connection_still_works():
     assert authority_websites.website_for("E10000016") is not None
     assert authority_websites.website_for("E08000012") is None
+
+
+# --- disclosure log crawling (runs on the fetch pool) -------------------------------
+
+class _StubResult:
+    def __init__(self, body: bytes, url: str, status_code: int = 200):
+        self.body, self.url, self.status_code = body, url, status_code
+        self.payload_sha256 = "sha"
+        from datetime import datetime, timezone
+        self.retrieved_at = datetime(2026, 8, 11, tzinfo=timezone.utc)
+
+    @property
+    def ok(self):
+        return bool(self.body) and self.status_code < 400
+
+
+class _StubClient:
+    """Stands in for a pool worker's client. The point of the fetch/write
+    split is that a worker needs nothing but this.
+    """
+
+    def __init__(self, result=None, raises=None):
+        self._result, self._raises = result, raises
+        self.requested: list[str] = []
+
+    def get(self, url, **_kwargs):
+        self.requested.append(url)
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+_PROFILE = {"ons_code": "E08000012", "disclosure_log_url": "https://liverpool.gov.uk/dl",
+            "wdtk_body_url": "https://www.whatdotheyknow.com/body/liverpool"}
+
+_LOG_HTML = (
+    '<a href="/foi/2024-001-drug-and-alcohol-service-staffing">'
+    'FOI 2024/001 drug and alcohol service staffing levels</a>'
+    '<a href="/bins">Bin collections</a>'
+)
+
+
+def test_a_worker_returns_candidates_without_touching_the_database():
+    client = _StubClient(_StubResult(_LOG_HTML.encode(), "https://liverpool.gov.uk/dl"))
+    candidates, review_items = foi.crawl_disclosure_log(_PROFILE, client)
+
+    assert review_items == []
+    assert candidates, "the disclosure log yielded nothing"
+    assert all(c["source_url"] and c["retrieved_at"] and c["payload_sha256"]
+               for c in candidates), "candidates lost their provenance"
+    assert not any("/bins" in c["candidate_url"] for c in candidates)
+
+
+def test_an_unavailable_log_is_reported_not_counted_as_crawled():
+    """A council whose log 404s must not look like a council with no FOI
+    requests about drug and alcohol services.
+    """
+    client = _StubClient(_StubResult(b"", "https://liverpool.gov.uk/dl", status_code=404))
+    candidates, review_items = foi.crawl_disclosure_log(_PROFILE, client)
+
+    assert candidates == []
+    assert [item[0] for item in review_items] == ["foi_log_unavailable"]
+    assert review_items[0][2]["status"] == 404
+
+
+def test_a_robots_disallowed_log_is_reported():
+    from pipeline.http import RobotsDisallowed
+
+    client = _StubClient(raises=RobotsDisallowed("no"))
+    candidates, review_items = foi.crawl_disclosure_log(_PROFILE, client)
+
+    assert candidates == []
+    assert [item[0] for item in review_items] == ["foi_log_robots_disallowed"]
+
+
+def test_an_unexpected_error_propagates_to_the_pool():
+    """Anything other than robots or a bad status is the pool's to catch, so
+    it lands on the Outcome and is recorded as foi_log_unreachable rather
+    than being swallowed here.
+    """
+    import httpx
+
+    client = _StubClient(raises=httpx.ConnectError("dns"))
+    with pytest.raises(httpx.ConnectError):
+        foi.crawl_disclosure_log(_PROFILE, client)

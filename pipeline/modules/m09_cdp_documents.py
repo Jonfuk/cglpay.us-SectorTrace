@@ -31,7 +31,8 @@ import structlog
 
 from pipeline import db
 from pipeline.authority_websites import website_for
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed
+from pipeline.http import RobotsDisallowed
+from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -189,6 +190,48 @@ def _provenance(result) -> dict:
     }
 
 
+def crawl_authority(unit, client) -> tuple[list[dict], list[tuple[str, str, dict]]]:
+    """One authority's candidate paths. Runs on a pool thread.
+
+    Fetches and parses only: it returns (candidates, review_items) and the
+    main thread writes both. Nothing here touches the module's connection.
+    """
+    authority, site = unit
+    candidates: list[dict] = []
+    review_items: list[tuple[str, str, dict]] = []
+
+    if site is None:
+        # Not guessed: council hostnames are unpredictable, and an invented
+        # base URL would search the wrong site or silently find nothing while
+        # appearing to have worked.
+        review_items.append((
+            "authority_website_unknown", authority["ons_code"],
+            {"authority": authority["name"],
+             "note": "add a verified entry to pipeline/authority_websites.py "
+                      "so this authority can be searched"}))
+        return candidates, review_items
+
+    for path in CANDIDATE_PATHS:
+        url = urljoin(site.base_url, path)
+        try:
+            result = client.get(url)
+        except RobotsDisallowed:
+            review_items.append(("cdp_path_robots_disallowed", url,
+                                  {"authority": authority["name"]}))
+            continue
+        if not result.ok:
+            continue
+
+        page_html = result.body.decode("utf-8", errors="replace")
+        provenance = _provenance(result)
+        for candidate in extract_candidates(page_html, result.url):
+            candidates.append({**candidate,
+                                "discovery_method": f"path_crawl:{path}",
+                                **provenance})
+
+    return candidates, review_items
+
+
 @register_module(
     "m09_cdp_documents",
     supports_since=False,
@@ -214,54 +257,54 @@ def run(ctx: ModuleContext) -> None:
     if ctx.limit:
         authorities = authorities[:ctx.limit]
 
+    # website_for reads authority_foi_profiles, so it happens on the module's
+    # connection rather than inside a worker.
+    units = [(authority, website_for(authority["ons_code"], conn))
+             for authority in authorities]
+
     searched = 0
     unconfigured = 0
     candidates_found = 0
+    workers = worker_count(ctx.settings, ctx.limit)
 
-    with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
-        for authority in authorities:
-            site = website_for(authority["ons_code"], conn)
-            if site is None:
-                # Not guessed: council hostnames are unpredictable, and an
-                # invented base URL would search the wrong site or silently
-                # find nothing while appearing to have worked.
-                db.record_review_item(
-                    conn, module_name, "authority_website_unknown", authority["ons_code"],
-                    json.dumps({"authority": authority["name"],
-                                 "note": "add a verified entry to pipeline/authority_websites.py "
-                                          "so this authority can be searched"}))
-                unconfigured += 1
-                continue
-
-            searched += 1
-            for path in CANDIDATE_PATHS:
-                url = urljoin(site.base_url, path)
-                try:
-                    result = client.get(url)
-                except RobotsDisallowed:
-                    db.record_review_item(conn, module_name, "cdp_path_robots_disallowed", url,
-                                           json.dumps({"authority": authority["name"]}))
-                    continue
-                if not result.ok:
-                    continue
-
-                page_html = result.body.decode("utf-8", errors="replace")
-                provenance = _provenance(result)
-                for candidate in extract_candidates(page_html, result.url):
-                    db.upsert(conn, "cdp_document_candidates", {
-                        "authority_ons_code": authority["ons_code"],
-                        **candidate,
-                        "discovered_at": datetime.now(timezone.utc).isoformat(),
-                        "discovery_method": f"path_crawl:{path}",
-                        "verified": 0,
-                        "verified_at": None,
-                        "rejected": 0,
-                        **provenance,
-                    }, natural_key=["authority_ons_code", "candidate_url"])
-                    candidates_found += 1
-
+    for outcome in fetch_in_parallel(units, crawl_authority,
+                                      source_system=SOURCE_SYSTEM, settings=ctx.settings,
+                                      max_workers=workers, cache_conn=conn):
+        authority, site = outcome.unit
+        if not outcome.ok:
+            # One council with a broken TLS chain costs one council, not the
+            # crawl. Recorded, because a failure that leaves no trace is
+            # indistinguishable from a council with nothing to publish.
+            db.record_review_item(
+                conn, module_name, "cdp_collection_failed", authority["ons_code"],
+                json.dumps({"authority": authority["name"],
+                             "error": f"{type(outcome.error).__name__}: {outcome.error}"}))
             if not ctx.dry_run:
                 conn.commit()
+            continue
+
+        candidates, review_items = outcome.value
+        for item_type, raw_value, context in review_items:
+            db.record_review_item(conn, module_name, item_type, raw_value, json.dumps(context))
+
+        if site is None:
+            unconfigured += 1
+        else:
+            searched += 1
+
+        for candidate in candidates:
+            db.upsert(conn, "cdp_document_candidates", {
+                "authority_ons_code": authority["ons_code"],
+                **candidate,
+                "discovered_at": datetime.now(timezone.utc).isoformat(),
+                "verified": 0,
+                "verified_at": None,
+                "rejected": 0,
+            }, natural_key=["authority_ons_code", "candidate_url"])
+            candidates_found += 1
+
+        if not ctx.dry_run:
+            conn.commit()
 
     rows = [dict(r) for r in conn.execute(
         "SELECT c.authority_ons_code, a.name AS authority_name, a.region, c.candidate_url, "

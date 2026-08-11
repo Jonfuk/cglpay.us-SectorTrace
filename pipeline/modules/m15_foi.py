@@ -76,6 +76,7 @@ import structlog
 
 from pipeline import alaveteli, db
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
+from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -319,6 +320,28 @@ def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: st
     depends_note="restricts the register to authorities this pipeline knows",
     since_note="disclosure logs publish whatever is currently listed; candidates carry discovered_at rather than a source date",
 )
+def crawl_disclosure_log(profile, client) -> tuple[list[dict], list[tuple[str, str, dict]]]:
+    """One council's disclosure log. Runs on a pool thread.
+
+    Fetches and parses only, returning (candidates, review_items) for the main
+    thread to write. A non-empty review_items means the log was not read, so
+    the caller must not count it as crawled.
+    """
+    url = profile["disclosure_log_url"]
+    try:
+        page = client.get(url)
+    except RobotsDisallowed:
+        return [], [("foi_log_robots_disallowed", url, {"ons_code": profile["ons_code"]})]
+    if not page.ok:
+        return [], [("foi_log_unavailable", url,
+                     {"ons_code": profile["ons_code"], "status": page.status_code})]
+
+    provenance = _provenance(page)
+    candidates = [{**candidate, **provenance} for candidate in extract_foi_candidates(
+        page.body.decode("utf-8", errors="replace"), page.url)]
+    return candidates, []
+
+
 def run(ctx: ModuleContext) -> None:
     module_name = "m15_foi"
     conn = ctx.conn
@@ -356,43 +379,45 @@ def run(ctx: ModuleContext) -> None:
                   with_disclosure_log=sum(1 for p in profiles if p["disclosure_log_url"]))
 
         # --- disclosure logs on councils' own sites --------------------------
-        targets = [p for p in profiles if p["disclosure_log_url"]]
-        no_log = len(profiles) - len(targets)
-        for profile in targets:
-            if profile["ons_code"] not in known:
-                continue
+        targets = [p for p in profiles
+                   if p["disclosure_log_url"] and p["ons_code"] in known]
+        no_log = len(profiles) - len([p for p in profiles if p["disclosure_log_url"]])
+        if ctx.limit:
+            targets = targets[:ctx.limit]
+
+        # Each council is a different host, so these were 300 unrelated sites
+        # read strictly one after another at one request every two seconds.
+        # The per-host interval is enforced process-wide, so fetching them
+        # concurrently changes nothing any single council experiences.
+        workers = worker_count(ctx.settings, ctx.limit)
+        for outcome in fetch_in_parallel(targets, crawl_disclosure_log,
+                                          source_system=SOURCE_SYSTEM, settings=ctx.settings,
+                                          max_workers=workers, cache_conn=conn):
+            profile = outcome.unit
             db.record_review_item(
                 conn, module_name, "foi_response_text_not_retrievable", profile["ons_code"],
                 json.dumps({"wdtk_body_url": profile["wdtk_body_url"],
                              "note": "the WDTK feed gives discovery only (a truncated snippet); "
                                       "full response text needs /request/<slug>.json, which "
                                       "answers automated clients with a Cloudflare 403"}))
-            if ctx.limit and logs_crawled >= ctx.limit:
-                break
-            try:
-                page = client.get(profile["disclosure_log_url"])
-            except RobotsDisallowed:
-                db.record_review_item(conn, module_name, "foi_log_robots_disallowed",
-                                       profile["disclosure_log_url"],
-                                       json.dumps({"ons_code": profile["ons_code"]}))
-                continue
-            except Exception as exc:
-                db.record_review_item(conn, module_name, "foi_log_unreachable",
-                                       profile["disclosure_log_url"],
-                                       json.dumps({"ons_code": profile["ons_code"],
-                                                    "error": f"{type(exc).__name__}"}))
-                continue
-            if not page.ok:
-                db.record_review_item(conn, module_name, "foi_log_unavailable",
-                                       profile["disclosure_log_url"],
-                                       json.dumps({"ons_code": profile["ons_code"],
-                                                    "status": page.status_code}))
+
+            if not outcome.ok:
+                db.record_review_item(
+                    conn, module_name, "foi_log_unreachable", profile["disclosure_log_url"],
+                    json.dumps({"ons_code": profile["ons_code"],
+                                 "error": f"{type(outcome.error).__name__}"}))
+                if not ctx.dry_run:
+                    conn.commit()
                 continue
 
-            logs_crawled += 1
-            log_provenance = _provenance(page)
-            for candidate in extract_foi_candidates(
-                    page.body.decode("utf-8", errors="replace"), page.url):
+            candidates, review_items = outcome.value
+            for item_type, raw_value, context in review_items:
+                db.record_review_item(conn, module_name, item_type, raw_value,
+                                       json.dumps(context))
+            if not review_items:
+                logs_crawled += 1
+
+            for candidate in candidates:
                 db.upsert(conn, "foi_request_candidates", {
                     "ons_code": profile["ons_code"],
                     **candidate,
@@ -401,7 +426,6 @@ def run(ctx: ModuleContext) -> None:
                     "verified": 0,
                     "verified_at": None,
                     "rejected": 0,
-                    **log_provenance,
                 }, natural_key=["ons_code", "candidate_url"])
                 candidates_found += 1
 

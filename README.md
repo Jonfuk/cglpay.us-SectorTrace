@@ -245,6 +245,33 @@ per host (default one per 2 seconds), `Retry-After` is honoured, and conditional
 requests avoid re-fetching unchanged documents. The `User-Agent` identifies the
 pipeline and includes `CONTACT_EMAIL`.
 
+The per-host interval is enforced **process-wide**, not per HTTP client, so it
+holds no matter how many modules or threads are running. It used to live on
+each client, which made it a description of the schedule rather than a
+guarantee.
+
+### Fetching several councils at once
+
+`m09`, `m10` and `m15` each visit a few hundred *different* councils. Serially
+that is hours of waiting between hosts that have never heard of each other, so
+they fetch concurrently:
+
+```bash
+MAX_FETCH_WORKERS=8    # default; set 1 for fully serial collection
+```
+
+This is not a rate limit and does not replace one. It only decides how many
+**different** councils are in flight — workers that land on the same host queue
+behind each other on the shared clock, so no council sees a faster request rate
+than it would have. Measured on the three verified ModernGov councils, `m10`
+produced identical output (191 candidates, 124 snippets, zero review items,
+zero parse failures) in 64s against 156s serial.
+
+Workers fetch and parse; the **main thread does all the writing**, so
+commit-per-module and rollback-on-failure are unchanged. A council that fails
+now costs one council rather than aborting the module, and is recorded rather
+than passing as a council with nothing to publish.
+
 See [`docs/CAVEATS.md`](docs/CAVEATS.md) for known limitations that must travel
 with any published figure. It leads with the things you must **not** compute —
 no claims-per-employee rate, no dividing treatment numbers by workforce
