@@ -367,7 +367,11 @@ def _snapshot_and_vintage_as_of(series: list[Vintage], snapshots: dict[str, dict
     return snapshots[v.vintage_label], v
 
 
-@register_module("m00_geography")
+@register_module(
+    "m00_geography",
+    supports_since=False,
+    since_note="reference geography: fetches the current ONS vintages plus reorganisation history, which is not a date-filterable stream",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m00_geography"
     conn = ctx.conn

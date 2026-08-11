@@ -189,7 +189,11 @@ def _provenance(result) -> dict:
     }
 
 
-@register_module("m09_cdp_documents")
+@register_module(
+    "m09_cdp_documents",
+    supports_since=False,
+    since_note="document discovery crawls current pages; candidates carry discovered_at, not a source date",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m09_cdp_documents"
     conn = ctx.conn

@@ -217,7 +217,7 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
     return sorted(found.values(), key=lambda p: (p["cohort"], p["financial_year"]))
 
 
-@register_module("m07_ndtms")
+@register_module("m07_ndtms", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m07_ndtms"
     conn = ctx.conn
@@ -240,7 +240,10 @@ def run(ctx: ModuleContext) -> None:
         if ctx.limit:
             publications = publications[-ctx.limit:]
 
+        since_year = ctx.since_year()
         for pub in publications:
+            if since_year and int(pub["financial_year"][:4]) < since_year:
+                continue
             content = client.get(f"{GOVUK_CONTENT_BASE}{pub['publication_slug']}")
             if not content.ok:
                 db.record_review_item(conn, module_name, "ndtms_publication_unavailable",

@@ -347,7 +347,7 @@ def _walk_and_process(
     return total_matched
 
 
-@register_module("m01_procurement")
+@register_module("m01_procurement", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m01_procurement"
     conn = ctx.conn

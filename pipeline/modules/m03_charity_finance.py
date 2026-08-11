@@ -338,7 +338,7 @@ def _target_charities(conn) -> list[tuple[str, str]]:
     return [(r["provider_key"], r["identifier"]) for r in rows]
 
 
-@register_module("m03_charity_finance")
+@register_module("m03_charity_finance", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m03_charity_finance"
     conn = ctx.conn
@@ -384,6 +384,8 @@ def run(ctx: ModuleContext) -> None:
             else:
                 for row in json.loads(history.body):
                     period_end = (row.get("financial_period_end_date") or "")[:10]
+                    if ctx.is_before_since(period_end):
+                        continue
                     if not period_end:
                         db.record_parse_failure(conn, module_name, "financial_period_end_date",
                                                  json.dumps(row)[:300], "missing period end date",

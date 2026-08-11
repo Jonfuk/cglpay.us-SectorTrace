@@ -249,7 +249,7 @@ def _region_for_prefix(conn, office_prefix: str) -> str | None:
     return row["region"] if row else None
 
 
-@register_module("m02_tribunals")
+@register_module("m02_tribunals", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m02_tribunals"
     conn = ctx.conn
@@ -295,6 +295,9 @@ def run(ctx: ModuleContext) -> None:
                                      "note": "respondent did not match any known provider name variant"}),
                     )
                     skipped_unmatched += 1
+                    continue
+
+                if ctx.is_before_since(row.get("tribunal_decision_decision_date")):
                     continue
 
                 if match_basis == "component":

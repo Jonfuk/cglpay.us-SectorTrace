@@ -5,7 +5,7 @@ import typer
 from pipeline import db
 from pipeline.config import get_settings
 from pipeline.logging_conf import configure_logging
-from pipeline.registry import MODULE_REGISTRY, ModuleContext, discover_modules
+from pipeline.registry import MODULE_REGISTRY, ModuleContext, discover_modules, module_meta
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 
@@ -94,6 +94,28 @@ def run(
         raise typer.Exit(code=1)
 
     ctx = ModuleContext(conn=conn, settings=settings, since=since, dry_run=dry_run, limit=limit)
+
+    if since:
+        # Validate once, up front, rather than letting each module discover a
+        # bad value part-way through a long crawl.
+        try:
+            ctx.since_date()
+        except ValueError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            conn.close()
+            raise typer.Exit(code=1)
+
+        ignoring = [name for name, _ in targets if not module_meta(name).supports_since]
+        if ignoring:
+            typer.echo(
+                f"warning: --since has no effect on {', '.join(ignoring)} — "
+                "those modules do not filter by date and will process their full source.",
+                err=True)
+            for name in ignoring:
+                note = module_meta(name).since_note
+                if note:
+                    typer.echo(f"  {name}: {note}", err=True)
+
     for name, fn in targets:
         typer.echo(f"--- running {name} ---")
         try:

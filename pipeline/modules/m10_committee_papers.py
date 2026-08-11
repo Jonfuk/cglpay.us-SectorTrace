@@ -122,7 +122,11 @@ def _provenance(result) -> dict:
     }
 
 
-@register_module("m10_committee_papers")
+@register_module(
+    "m10_committee_papers",
+    supports_since=False,
+    since_note="committee search returns whatever the system indexes now; candidates carry discovered_at",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m10_committee_papers"
     conn = ctx.conn

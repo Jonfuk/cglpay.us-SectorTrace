@@ -160,7 +160,7 @@ def _provenance(result) -> dict:
     }
 
 
-@register_module("m11_public_health_grant")
+@register_module("m11_public_health_grant", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m11_public_health_grant"
     conn = ctx.conn
@@ -175,7 +175,10 @@ def run(ctx: ModuleContext) -> None:
         log.info("phg.discovered_publications", years=[p["year_start"] for p in publications])
 
         total_rows = 0
+        since_year = ctx.since_year()
         for pub in publications:
+            if since_year and pub["year_start"] < since_year:
+                continue
             content_result = client.get(f"{GOVUK_CONTENT_BASE}{pub['link']}")
             if not content_result.ok:
                 db.record_parse_failure(conn, module_name, "publication", pub["link"],

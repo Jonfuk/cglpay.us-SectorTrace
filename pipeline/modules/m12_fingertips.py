@@ -163,7 +163,11 @@ def _store_metadata(conn, client, module_name: str) -> None:
         }, natural_key=["indicator_id"])
 
 
-@register_module("m12_fingertips")
+@register_module(
+    "m12_fingertips",
+    supports_since=False,
+    since_note="Fingertips returns each indicator's full published series; filtering by year would discard the comparative history the series exists for",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m12_fingertips"
     conn = ctx.conn

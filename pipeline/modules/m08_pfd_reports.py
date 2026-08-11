@@ -261,6 +261,29 @@ def redact_known_names_across_reports(conn) -> int:
     return redacted_rows
 
 
+def _is_before_since_ddmmyyyy(ctx, report_date: str | None) -> bool:
+    """PFD headers give the report date as DD/MM/YYYY, not ISO.
+
+    Passing that to the shared ISO helper would never parse, so it would
+    always return False and `--since` would filter nothing while appearing to
+    work. Unparseable or missing dates are still kept — dropping a report
+    because its date could not be read would lose evidence.
+    """
+    boundary = ctx.since_date()
+    if boundary is None or not report_date:
+        return False
+    m = re.match(r"\s*(\d{1,2})/(\d{1,2})/(\d{4})", report_date)
+    if not m:
+        return False
+    from datetime import date as _date
+
+    try:
+        parsed = _date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return False
+    return parsed < boundary
+
+
 def _provenance(result) -> dict:
     return {
         "source_url": result.url,
@@ -271,7 +294,7 @@ def _provenance(result) -> dict:
     }
 
 
-@register_module("m08_pfd_reports")
+@register_module("m08_pfd_reports", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m08_pfd_reports"
     conn = ctx.conn
@@ -327,6 +350,8 @@ def run(ctx: ModuleContext) -> None:
                         continue
                     if report_ref in seen_refs:
                         continue  # a report can carry more than one category
+                    if _is_before_since_ddmmyyyy(ctx, fields.get("report_date")):
+                        continue
                     seen_refs.add(report_ref)
 
                     deceased_name = fields.get("deceased_name")

@@ -274,7 +274,7 @@ def render_verification_markdown(census_year: int, document_url: str, metrics: l
     return "\n".join(lines)
 
 
-@register_module("m06_workforce_census")
+@register_module("m06_workforce_census", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m06_workforce_census"
     conn = ctx.conn
@@ -300,7 +300,10 @@ def run(ctx: ModuleContext) -> None:
         log.info("census.reports_discovered", years=sorted(reports))
 
         metrics_written = 0
+        since_year = ctx.since_year()
         for year in sorted(reports):
+            if since_year and year < since_year:
+                continue
             document_url = reports[year]["document_url"]
             pdf_result = client.get(document_url)
             if not pdf_result.ok:

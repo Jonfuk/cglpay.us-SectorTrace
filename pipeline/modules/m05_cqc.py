@@ -201,7 +201,11 @@ def _store_location(conn, module_name: str, provider_id: str, provider_key: str 
             }, natural_key=["location_id", "contact_ref"])
 
 
-@register_module("m05_cqc")
+@register_module(
+    "m05_cqc",
+    supports_since=False,
+    since_note="CQC publishes current registration state, not a dated stream",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m05_cqc"
     conn = ctx.conn
