@@ -1,7 +1,12 @@
 # Access request to mySociety (WhatDoTheyKnow)
 
-Status: **not yet sent** — drafted 2026-08-11, revised the same day (see
-"What changed" below). **Send this before the next full collection run.**
+Status: **sent 2026-08-11**, by email. Drafted and revised the same day (see
+"What changed" below). No reply yet.
+
+> **Deadline: 2026-09-10.** If there is no reply by then, remove the
+> `https://www.whatdotheyknow.com/feed/` entry from
+> `Settings.robots_exceptions` — see "If they do not reply". Silence is not
+> consent, and the collection is running in the meantime.
 
 ## Why this exists
 
@@ -53,15 +58,20 @@ would have misrepresented the position. Two discoveries, in order:
   matching), so the exclusion is now genuinely enforced and the exception is
   a real, deliberate, single-line override rather than an accident.
 
-## Where to send it
+## Where it went
 
-Use the **WhatDoTheyKnow contact form** at
-<https://www.whatdotheyknow.com/help/contact> rather than
-`hello@mysociety.org` — the form routes to the volunteers who can actually
-action an allowlist. (`data.mysociety.org` is their bulk-data front door if
-they'd rather hand over an extract.)
+Sent by email on 2026-08-11.
 
-## Draft
+The original suggestion here was the **WhatDoTheyKnow contact form** at
+<https://www.whatdotheyknow.com/help/contact>, on the reasoning that it
+routes to the volunteers who can actually action an allowlist. Kept on record
+because it is the fallback if the email goes unanswered: chasing via the form
+before the 2026-09-10 deadline is worth one attempt, since a mail to a
+general address is easier to lose than a form submission that lands in the
+support queue. (`data.mysociety.org` is their bulk-data front door if they
+would rather hand over an extract.)
+
+## Draft (as sent)
 
 > **Subject:** Request to allowlist a research crawler / bulk data access — substance misuse sector FOI corpus
 >
@@ -166,7 +176,16 @@ state plainly that the FOI evidence is discovery-only.
 
 ## If they do not reply
 
-Set a date now rather than letting silence become the answer. Silence is not
-consent, and "we asked and they never replied" is a much weaker position than
-"we asked, waited, heard nothing, and turned it off." Suggested: remove the
-exception after 30 days without a reply.
+Silence is not consent, and "we asked and they never replied" is a much
+weaker position in a pay dispute than "we asked, waited, heard nothing, and
+turned it off."
+
+**On 2026-09-10 — 30 days after sending — remove the
+`https://www.whatdotheyknow.com/feed/` entry from
+`Settings.robots_exceptions`**, exactly as under "If they say no", and record
+here that it was removed for non-reply rather than refusal. The distinction
+matters: non-reply leaves the door open to ask again, a refusal does not.
+
+Update the status line at the top of this file whenever any of this changes.
+An access request whose recorded state has drifted from reality is worse than
+none, because the next person reads it and believes it.
