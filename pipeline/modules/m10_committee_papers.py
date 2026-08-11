@@ -634,9 +634,10 @@ def run(ctx: ModuleContext) -> None:
     searched = unconfigured = unknown_system = discovered = candidates = 0
     workers = worker_count(ctx.settings, ctx.limit)
 
-    for outcome in fetch_in_parallel(units, collect_authority,
-                                      source_system=SOURCE_SYSTEM, settings=ctx.settings,
-                                      max_workers=workers, cache_conn=conn):
+    stream = fetch_in_parallel(units, collect_authority,
+                                source_system=SOURCE_SYSTEM, settings=ctx.settings,
+                                max_workers=workers, cache_conn=conn)
+    for outcome in ctx.track(stream, "councils", total=len(units)):
         authority, _site = outcome.unit
         if not outcome.ok:
             # One council with a broken TLS chain costs one council. Before

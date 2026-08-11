@@ -390,9 +390,10 @@ def run(ctx: ModuleContext) -> None:
         # The per-host interval is enforced process-wide, so fetching them
         # concurrently changes nothing any single council experiences.
         workers = worker_count(ctx.settings, ctx.limit)
-        for outcome in fetch_in_parallel(targets, crawl_disclosure_log,
-                                          source_system=SOURCE_SYSTEM, settings=ctx.settings,
-                                          max_workers=workers, cache_conn=conn):
+        stream = fetch_in_parallel(targets, crawl_disclosure_log,
+                                    source_system=SOURCE_SYSTEM, settings=ctx.settings,
+                                    max_workers=workers, cache_conn=conn)
+        for outcome in ctx.track(stream, "disclosure logs", total=len(targets)):
             profile = outcome.unit
             db.record_review_item(
                 conn, module_name, "foi_response_text_not_retrievable", profile["ons_code"],

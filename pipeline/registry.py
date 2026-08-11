@@ -13,11 +13,23 @@ import pkgutil
 from dataclasses import dataclass, field
 from datetime import date
 from sqlite3 import Connection
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from pipeline.config import Settings
 
 ModuleFn = Callable[["ModuleContext"], None]
+
+if TYPE_CHECKING:   # pragma: no cover
+    from pipeline.console import ProgressReporter
+
+
+def _null_reporter() -> "ProgressReporter":
+    """Imported lazily so registry.py stays importable without rich — module
+    discovery must not depend on the terminal layer.
+    """
+    from pipeline.console import NULL_REPORTER
+
+    return NULL_REPORTER
 
 MODULE_REGISTRY: dict[str, ModuleFn] = {}
 
@@ -52,6 +64,14 @@ class ModuleContext:
     since: str | None
     dry_run: bool
     limit: int | None
+    # Write-only. A module reports progress through this and collects exactly
+    # the same evidence whether or not anything is displaying it — the default
+    # reporter is a no-op, so `ctx.track(...)` is a plain loop under cron.
+    progress: "ProgressReporter" = field(default_factory=lambda: _null_reporter())
+
+    def track(self, items, description: str, total: int | None = None):
+        """Iterate `items`, advancing a progress bar if one is displayed."""
+        return self.progress.track(items, description, total=total)
 
     def since_date(self) -> date | None:
         """`since` as a date, or None. Raises on an unparseable value rather
