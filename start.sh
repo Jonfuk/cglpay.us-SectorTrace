@@ -9,7 +9,7 @@
 #   ./start.sh                     -> --help
 #   ./start.sh list-modules
 #
-#   Collect (13 modules; run m00_geography first — everything joins to it):
+#   Collect (14 modules; run m00_geography first — everything joins to it):
 #   ./start.sh run m00_geography
 #   ./start.sh run all
 #   ./start.sh run m01_procurement --since 2024-01-01 --limit 100

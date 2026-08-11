@@ -127,6 +127,7 @@ one or both.
 | `m10_committee_papers` | Council committee systems | Committee paper **candidates** (needs verification) |
 | `m11_public_health_grant` | DHSC | Public Health Grant allocations, incl. drug/alcohol ring-fence |
 | `m12_fingertips` | OHID Fingertips | LA-level treatment numbers, completions, waiting times, prevalence |
+| `m13_la_budgets` | MHCLG | Local authority budgeted revenue expenditure, incl. the Public Health line |
 
 ### Suggested order
 
