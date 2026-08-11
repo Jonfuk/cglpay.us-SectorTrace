@@ -306,7 +306,8 @@ def run(ctx: ModuleContext) -> None:
     seen_refs: set[str] = set()
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
-        for category_id, category_name in TARGET_CATEGORY_IDS.items():
+        for category_id, category_name in ctx.track(
+                list(TARGET_CATEGORY_IDS.items()), "PFD categories"):
             page = 1
             while True:
                 result = client.get(f"{API_BASE}/pfd", params={

@@ -367,7 +367,7 @@ def run(ctx: ModuleContext) -> None:
         ("cf", SOURCE_CF, CF_URL, ("publishedFrom", "publishedTo")),
     ]
 
-    for source_key, source_system, base_url, date_params in sources:
+    for source_key, source_system, base_url, date_params in ctx.track(sources, "sources"):
         cursor_key = f"{module_name}:{source_key}"
         resume_url, window_from = _resolve_start(conn, cursor_key, ctx.since, WINDOW_START)
         with PipelineHTTPClient(source_system, settings=ctx.settings, conn=conn) as client:

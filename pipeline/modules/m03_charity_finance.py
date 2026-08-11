@@ -369,7 +369,7 @@ def run(ctx: ModuleContext) -> None:
     with PipelineHTTPClient(SOURCE_API, settings=ctx.settings, conn=conn) as api_client:
         headers = {"Ocp-Apim-Subscription-Key": api_key}
 
-        for provider_key, charity_number in targets:
+        for provider_key, charity_number in ctx.track(targets, "charities"):
             details = api_client.get(f"{API_BASE}/allcharitydetailsV2/{charity_number}/0", headers=headers)
             if not details.ok:
                 db.record_review_item(conn, module_name, "charity_details_unavailable", charity_number,

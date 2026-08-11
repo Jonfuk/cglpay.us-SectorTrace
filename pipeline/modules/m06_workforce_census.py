@@ -301,7 +301,7 @@ def run(ctx: ModuleContext) -> None:
 
         metrics_written = 0
         since_year = ctx.since_year()
-        for year in sorted(reports):
+        for year in ctx.track(sorted(reports), "census years"):
             if since_year and year < since_year:
                 continue
             document_url = reports[year]["document_url"]

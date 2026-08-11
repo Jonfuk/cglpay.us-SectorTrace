@@ -313,13 +313,6 @@ def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: st
     return candidates, terms_searched
 
 
-@register_module(
-    "m15_foi",
-    supports_since=False,
-    depends_on=("m00_geography",),
-    depends_note="restricts the register to authorities this pipeline knows",
-    since_note="disclosure logs publish whatever is currently listed; candidates carry discovered_at rather than a source date",
-)
 def crawl_disclosure_log(profile, client) -> tuple[list[dict], list[tuple[str, str, dict]]]:
     """One council's disclosure log. Runs on a pool thread.
 
@@ -342,6 +335,13 @@ def crawl_disclosure_log(profile, client) -> tuple[list[dict], list[tuple[str, s
     return candidates, []
 
 
+@register_module(
+    "m15_foi",
+    supports_since=False,
+    depends_on=("m00_geography",),
+    depends_note="restricts the register to authorities this pipeline knows",
+    since_note="disclosure logs publish whatever is currently listed; candidates carry discovered_at rather than a source date",
+)
 def run(ctx: ModuleContext) -> None:
     module_name = "m15_foi"
     conn = ctx.conn

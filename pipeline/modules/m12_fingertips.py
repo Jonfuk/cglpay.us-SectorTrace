@@ -190,7 +190,7 @@ def run(ctx: ModuleContext) -> None:
         if not ctx.dry_run:
             conn.commit()
 
-        for indicator_id in indicator_ids:
+        for indicator_id in ctx.track(indicator_ids, "indicators"):
             for area_type_id in area_type_ids_for(indicator_id):
                 result = client.get(DATA_URL, params={
                     "indicator_ids": indicator_id,

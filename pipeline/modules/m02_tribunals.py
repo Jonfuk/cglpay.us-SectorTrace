@@ -262,7 +262,8 @@ def run(ctx: ModuleContext) -> None:
     skipped_unmatched = 0
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
-        for variant in SUPPLIER_NAME_VARIANTS["change_grow_live"]:
+        for variant in ctx.track(
+                SUPPLIER_NAME_VARIANTS["change_grow_live"], "name variants"):
             hits = _search_decisions(client, variant, ctx.limit)
             log.info("tribunals.searched", variant=variant, hits=len(hits))
 

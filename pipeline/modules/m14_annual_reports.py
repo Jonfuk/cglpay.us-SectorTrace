@@ -184,7 +184,7 @@ def run(ctx: ModuleContext) -> None:
     passages_written = 0
     gaps_recorded = 0
 
-    for row in reports:
+    for row in ctx.track(reports, "annual reports"):
         if ctx.is_before_since(row["financial_year_end"]):
             continue
 

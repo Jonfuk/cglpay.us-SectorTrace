@@ -245,7 +245,7 @@ def run(ctx: ModuleContext) -> None:
             matched = matched[:ctx.limit]
         log.info("cqc.providers_matched", count=len(matched))
 
-        for provider_id, provider_key in matched:
+        for provider_id, provider_key in ctx.track(matched, "CQC providers"):
             detail = client.get(f"{API_BASE}/providers/{provider_id}")
             if not detail.ok:
                 db.record_review_item(conn, module_name, "cqc_provider_unavailable", provider_id,

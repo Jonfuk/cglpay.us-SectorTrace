@@ -321,7 +321,7 @@ def run(ctx: ModuleContext) -> None:
                       note="no seeded company numbers and no exact name matches")
             return
 
-        for provider_key, company_number, match_basis in targets:
+        for provider_key, company_number, match_basis in ctx.track(targets, "companies"):
             data = _fetch_company(client, conn, module_name, company_number, provider_key, match_basis)
             if data is None:
                 continue

@@ -485,7 +485,7 @@ def run(ctx: ModuleContext) -> None:
         geometries.update(_fetch_geometry_by_codes(client, latest_cty.service_url, cty_code_field, cty_codes))
         geometries.update(_fetch_geometry_by_codes(client, latest_lad.service_url, lad_code_field, lad_codes))
 
-        for code, entry in current_rows.items():
+        for code, entry in ctx.track(list(current_rows.items()), "authorities"):
             vintage: Vintage = entry["vintage"]
             geom = geometries.get(code)
             db.upsert(conn, "authorities", {

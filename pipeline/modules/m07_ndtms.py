@@ -245,7 +245,7 @@ def run(ctx: ModuleContext) -> None:
             publications = publications[-ctx.limit:]
 
         since_year = ctx.since_year()
-        for pub in publications:
+        for pub in ctx.track(publications, "publications"):
             if since_year and int(pub["financial_year"][:4]) < since_year:
                 continue
             content = client.get(f"{GOVUK_CONTENT_BASE}{pub['publication_slug']}")

@@ -180,7 +180,7 @@ def run(ctx: ModuleContext) -> None:
 
         total_rows = 0
         since_year = ctx.since_year()
-        for pub in publications:
+        for pub in ctx.track(publications, "grant publications"):
             if since_year and pub["year_start"] < since_year:
                 continue
             content_result = client.get(f"{GOVUK_CONTENT_BASE}{pub['link']}")

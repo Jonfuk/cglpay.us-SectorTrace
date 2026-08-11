@@ -299,7 +299,7 @@ def run(ctx: ModuleContext) -> None:
         if ctx.limit:
             publications = publications[-ctx.limit:]
 
-        for pub in publications:
+        for pub in ctx.track(publications, "budget publications"):
             if since_year and int(pub["financial_year"][:4]) < since_year:
                 continue
 
