@@ -364,11 +364,27 @@ are 72% of it:
   some, or a module added more — nothing happens. An unfiltered "decide
   everything" is refused outright.
 
-**Deciding records a judgement — it does not promote anything.** Approving an
-`unmatched_buyer_name` does not bind that name to an authority, and approving
-a `possible_group_company` does not add a company to `companies`. Those are
-per-module operations with their own evidence thresholds, and the UI does not
-invent a generic one. What it guarantees is that the judgement is kept: every
+**For most item types, deciding records a judgement and nothing more.**
+Approving an `unmatched_buyer_name` does not bind that name to an authority,
+and approving a `possible_group_company` does not add a company to
+`companies`. Those are per-module operations with their own evidence
+thresholds, and the UI does not invent a generic one.
+
+**Two item types can be answered rather than just judged.**
+`authority_website_unknown` and `committee_url_unknown` — 304 of the queue —
+both mean "nobody has told this pipeline where this council publishes", which
+a person with a browser can settle in a minute. Those items get a URL field.
+Saving one writes to `authority_url_overrides`, which
+`authority_websites.website_for()` reads ahead of the code registry, so the
+next run of Module 9 or 10 searches an authority it previously skipped.
+
+The URL is fetched by the server before it is stored, through the same client
+the modules use — robots respected, rate limit shared, response archived — and
+what it saw is recorded next to what it was told. A URL that does not answer
+is refused rather than saved: a wrong one does not fail loudly at run time, it
+searches an unreachable site and finds nothing, which looks exactly like a
+council that publishes nothing. Committee systems are identified by probing
+the same signature paths Module 10 uses, not by asking the reviewer. What it guarantees is that the judgement is kept: every
 decision writes a row to `review_decisions` recording who made it, when, what
 the status was before, any note, and the item's context as it read at the
 time. An item can be reset to pending, and that reset is recorded too.

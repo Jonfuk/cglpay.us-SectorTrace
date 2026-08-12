@@ -86,6 +86,7 @@ from pipeline import db
 from pipeline.authority_websites import (
     COMMITTEE_LINK_SIGNATURES,
     SYSTEM_SIGNATURES,
+    detect_committee_system,
     website_for,
 )
 from pipeline.http import RobotsDisallowed
@@ -127,18 +128,6 @@ DOCUMENT_EXTENSIONS = (".pdf", ".doc", ".docx", ".odt")
 
 def _text(raw: str) -> str:
     return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", raw or ""))).strip()
-
-
-def detect_committee_system(probe) -> tuple[str, str | None]:
-    """(system, signature_path). `probe` is called with a path and returns
-    True if it exists. Returns ('unknown', None) when nothing matches — a
-    recorded answer, not a fallback guess.
-    """
-    for system, paths in SYSTEM_SIGNATURES.items():
-        for path in paths:
-            if probe(path):
-                return system, path
-    return "unknown", None
 
 
 def committee_links_on_page(page_html: str, page_url: str) -> list[str]:
@@ -416,7 +405,11 @@ def _discover_committee_url(client, findings: AuthorityFindings, site) -> None:
     answer is not accepted.
     """
     if site is not None and site.committee_url:
-        findings.committee_url, findings.url_source = site.committee_url, "registry"
+        # Say which kind of answer it was. Labelling a reviewer's confirmed
+        # URL 'registry' would make `url_source` — the column that exists to
+        # record how much confidence an entry has earned — a lie.
+        findings.committee_url = site.committee_url
+        findings.url_source = "human_verified" if site.source == "human_verified" else "registry"
         return
     if site is None or not site.base_url:
         return

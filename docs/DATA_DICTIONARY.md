@@ -6,7 +6,7 @@
 ./start.sh export docs
 ```
 
-Generated 2026-08-11 23:02 UTC.
+Generated 2026-08-12 08:09 UTC.
 
 `restricted` columns hold personal data. They are excluded from every export by default and `pipeline.exports.guard_columns()` raises if one is referenced.
 
@@ -109,6 +109,26 @@ Feeds Sheets tab(s): 01_Authorities.
 | `http_status` | INTEGER | NOT NULL | exportable |
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `authority_url_overrides`
+
+*table* — 0 rows.
+
+Authority URLs supplied by a reviewer, for Modules 9 and 10. Those two modules cannot derive where a council publishes: hostnames are genuinely unpredictable (democracy.kent.gov.uk works; the same pattern applied to five other authorities resolved to nothing). Until now the only way to teach them one was to edit pipeline/authority_websites.py, and the 304 items sitting in review_queue as `authority_website_unknown` and `committee_url_unknown` had nowhere to go but a code change. This is that missing destination. `website_for()` reads it ahead of the code registry, so resolving an item in the reviewer takes effect on the next run of m09/m10 without a deploy. It is deliberately NOT `authority_committee_systems`. That table is Module 10's own output — it records what the module found, including URLs it guessed from a homepage link and labelled `homepage_link` precisely so they would not be mistaken for confirmed. Writing human answers into it would mean the module reading its own guesses back as authority on the next run, and would erase the distinction that table exists to preserve. Asserted input and derived output stay in separate tables. Every row is verified by an actual request before it is written, which is the standard the code registry sets ("find the site, confirm it loads"). checked_status is what the server saw when it checked, not a claim by whoever typed the URL.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `ons_code` | TEXT | nullable | exportable |
+| `base_url` | TEXT | nullable | exportable |
+| `committee_url` | TEXT | nullable | exportable |
+| `committee_system` | TEXT | nullable | exportable |
+| `checked_url` | TEXT | nullable | exportable |
+| `checked_status` | INTEGER | nullable | exportable |
+| `checked_at` | TEXT | nullable | exportable |
+| `verified_by` | TEXT | NOT NULL | exportable |
+| `verified_at` | TEXT | NOT NULL | exportable |
+| `note` | TEXT | nullable | exportable |
+| `review_item_id` | INTEGER | nullable | exportable |
 
 ## `cdp_document_candidates`
 
@@ -613,7 +633,7 @@ Verified promotions only.
 
 ## `http_cache`
 
-*table* — 1,004 rows.
+*table* — 1,005 rows.
 
 Constraint 4: conditional requests on re-runs. Keyed by URL so http.py can send If-None-Match / If-Modified-Since without re-fetching unchanged docs.
 
@@ -1152,7 +1172,7 @@ Anything that requires human judgement before it can be promoted into a canonica
 
 ## `schema_migrations`
 
-*table* — 26 rows.
+*table* — 27 rows.
 
 Core infrastructure tables shared by every module. Applied automatically by pipeline.db.apply_migrations before any module runs.
 

@@ -41,7 +41,7 @@ import structlog
 
 from pipeline import db
 from pipeline.config import Settings, get_settings
-from pipeline.web import queries, review
+from pipeline.web import queries, resolve, review
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -231,6 +231,8 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(400, str(exc))
         except review.DecisionError as exc:
             self._fail(400, str(exc))
+        except resolve.ResolveError as exc:
+            self._fail(400, str(exc))
         except (BrokenPipeError, ConnectionResetError):
             # The browser navigated away mid-response. Nothing to report and
             # nowhere to report it to.
@@ -299,7 +301,11 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         if path == "/api/review/facets":
-            return queries.review_facets(conn)
+            return {**queries.review_facets(conn),
+                     "resolvable": resolve.resolvable_types()}
+
+        if path == "/api/overrides":
+            return {"overrides": resolve.overrides(conn)}
 
         match = re.fullmatch(r"/api/review/(\d+)", path)
         if match:
@@ -337,8 +343,39 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "/api/review/decide": self._decide,
             "/api/review/decide-matching": self._decide_matching,
+            "/api/review/resolve": self._resolve,
+            "/api/check-url": self._check_url,
             "/api/query": self._query,
         }
+
+    def _check_url(self, body: dict) -> Any:
+        """Fetch a candidate URL so the reviewer can see what is there before
+        committing to it. Same client, robots and rate limit as a module."""
+        conn = db.get_connection(self.settings)
+        try:
+            return resolve.check_url(str(body.get("url", "")), self.settings, conn)
+        finally:
+            conn.commit()  # the fetch writes the conditional-request cache
+            conn.close()
+
+    def _resolve(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            result = resolve.resolve_authority_url(
+                conn,
+                item_id=int(body.get("id") or 0),
+                url=str(body.get("url", "")),
+                resolved_by=str(body.get("resolved_by", "")),
+                note=body.get("note"),
+                settings=self.settings,
+            )
+        finally:
+            conn.close()
+
+        log.info("web.review_resolved", ons_code=result["ons_code"],
+                  field=result["field"], url=result["url"],
+                  system=result["system"], resolved_by=result["resolved_by"])
+        return result
 
     def _decide(self, body: dict) -> Any:
         ids = body.get("ids")

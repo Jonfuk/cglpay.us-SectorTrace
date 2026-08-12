@@ -15,6 +15,17 @@ Authorities absent from here are written to review_queue by both modules, so
 the coverage gap is always countable. To add one: find the authority's
 committee/democracy site, confirm it loads, and add an entry below.
 
+There are now two ways in, and `website_for()` prefers the other one. A
+reviewer answering an `authority_website_unknown` or `committee_url_unknown`
+item in the web UI writes to `authority_url_overrides`, and the server
+confirms the URL responds before storing it — the same standard this file
+sets, applied at the point the answer is given rather than at the point
+someone gets round to a commit. That table leads because it is specific,
+current and attributed; this file remains the seed, the answer for anything
+nobody has been asked about, and the version-controlled record. An entry
+added here is reviewable in a diff, which an override is not, so a URL worth
+keeping long-term still belongs below.
+
 committee_system values:
   'moderngov' — ModernGov, recognisable by /mgWhatsNew.aspx and /ieDocHome.aspx
   'cmis'      — CMIS, recognisable by /CMIS5/ or /cmis5/ paths
@@ -34,6 +45,13 @@ class AuthorityWebsite:
     committee_url: str | None = None   # committee system root, if different
     committee_system: str | None = None
     verified_on: str | None = None     # ISO date the URLs were last confirmed to load
+    # Where this answer came from, so a module can record it rather than
+    # calling everything it was handed 'registry'. One of:
+    #   'registry'       — the hand-verified table below, committed to git
+    #   'human_verified' — a reviewer answered it in the UI and the server
+    #                      confirmed the URL responded before storing it
+    #   'foi_profile'    — mySociety's authority register, via Module 15
+    source: str = "registry"
 
 
 # Verified by request. Extend deliberately; see module docstring.
@@ -86,16 +104,43 @@ COMMITTEE_LINK_SIGNATURES: tuple[str, ...] = (
 )
 
 
-def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
-    """The authority's website, preferring the hand-verified entry above.
+def detect_committee_system(probe) -> tuple[str, str | None]:
+    """(system, signature_path). `probe` is called with a path and returns
+    True if it exists. Returns ('unknown', None) when nothing matches — a
+    recorded answer, not a fallback guess.
 
-    Falls back to `authority_foi_profiles`, which Module 15 populates from
-    mySociety's published authority register. That is a citable source rather
-    than a guess — it carries provenance and covers all 317 English
-    authorities — but it is second in precedence because the entries here were
-    confirmed by an actual request against the specific paths these modules
-    use.
+    Lives here rather than in Module 10 because the reviewer UI has to
+    identify a system the same way when a human supplies a URL. Two copies of
+    this would let the two disagree about what a council is running.
     """
+    for system, paths in SYSTEM_SIGNATURES.items():
+        for path in paths:
+            if probe(path):
+                return system, path
+    return "unknown", None
+
+
+def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
+    """The authority's website: a reviewer's answer first, then the
+    hand-verified registry, then mySociety.
+
+    `authority_url_overrides` leads because it is the only source that is both
+    specific to these modules' needs and current — a person resolved a queue
+    item for this authority, and the server confirmed the URL responded before
+    storing it. The registry below is the same class of evidence recorded in
+    git; it stays as the seed and as the answer for anything nobody has been
+    asked about.
+
+    `authority_foi_profiles` is last. Module 15 populates it from mySociety's
+    published authority register, which is a citable source rather than a
+    guess — it carries provenance and covers all 317 English authorities — but
+    it is a home page, not a confirmation that these modules' specific paths
+    answer there.
+    """
+    override = _override_for(ons_code, conn)
+    if override:
+        return override
+
     configured = AUTHORITY_WEBSITES.get(ons_code)
     if configured or conn is None:
         return configured
@@ -118,6 +163,48 @@ def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
         committee_url=None,
         committee_system=None,
         verified_on=None,
+        source="foi_profile",
+    )
+
+
+def _override_for(ons_code: str, conn) -> AuthorityWebsite | None:
+    """A reviewer's answer from `authority_url_overrides`, if there is one.
+
+    Tolerates the table being absent so that a warehouse built before
+    migration 0027 still runs — these modules predate the reviewer, and a
+    missing table is "nobody has answered", not an error.
+
+    An override may name only one of the two URLs, since the two queue item
+    types ask for different things. base_url falls back to the registry entry
+    when a reviewer answered only the committee question, so answering one
+    never removes an answer that already existed for the other.
+    """
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT * FROM authority_url_overrides WHERE ons_code = ?", (ons_code,)
+        ).fetchone()
+    except Exception:
+        return None
+    if row is None:
+        return None
+
+    seed = AUTHORITY_WEBSITES.get(ons_code)
+    base_url = row["base_url"] or (seed.base_url if seed else None)
+    if not base_url:
+        # Module 9 cannot search without one, and Module 10 reaches the
+        # committee URL directly, so a committee-only answer is still useful.
+        base_url = row["committee_url"]
+
+    return AuthorityWebsite(
+        ons_code=ons_code,
+        name=(seed.name if seed else ons_code),
+        base_url=base_url,
+        committee_url=row["committee_url"] or (seed.committee_url if seed else None),
+        committee_system=row["committee_system"] or (seed.committee_system if seed else None),
+        verified_on=(row["checked_at"] or row["verified_at"] or "")[:10] or None,
+        source="human_verified",
     )
 
 

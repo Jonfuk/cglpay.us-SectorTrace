@@ -471,6 +471,7 @@ function renderItem(item) {
       `${item.last_decision} by ${item.last_decided_by} on ${when(item.last_decided_at)}`
       + (item.last_note ? ` — “${item.last_note}”` : '')) : null,
     item.decision_count > 1 ? historyBlock(item.id, item.decision_count) : null,
+    resolveForm(item),
     el('div', { class: 'actions' },
       note,
       el('button', { class: 'btn approve', onclick: () => act('approved') }, 'Approve'),
@@ -481,6 +482,64 @@ function renderItem(item) {
 
   return el('div', { class: 'item', dataset: { id: String(item.id) } },
     el('div', {}, checkbox), body);
+}
+
+/* Some items can be answered, not just judged. `authority_website_unknown`
+ * and `committee_url_unknown` both mean "nobody has told the pipeline where
+ * this council publishes", and a person with a browser can settle that in a
+ * minute — so those get a URL field, and answering writes somewhere the
+ * modules read. Every other type gets no form, because inventing one would
+ * promise a resolution that does not exist. */
+function resolveForm(item) {
+  const spec = reviewState.facets && reviewState.facets.resolvable
+    && reviewState.facets.resolvable[item.item_type];
+  if (!spec || item.status !== 'pending') return null;
+
+  const input = el('input', { type: 'url', placeholder: 'https://…',
+    'aria-label': spec.label, class: 'grow' });
+  const status = el('span', { class: 'muted small' });
+
+  const setStatus = (text, kind) => {
+    status.textContent = text;
+    status.className = `small ${kind || 'muted'}`;
+  };
+
+  const check = async () => {
+    if (!input.value.trim()) return setStatus('Enter a URL first.', 'muted');
+    setStatus('checking…');
+    try {
+      const result = await post('/api/check-url', { url: input.value });
+      if (result.error) return setStatus(result.error, 'bad');
+      if (!result.ok) return setStatus(`HTTP ${result.status} — not usable.`, 'bad');
+      setStatus(`HTTP ${result.status} · ${result.system === 'unknown'
+        ? 'no known committee system detected' : `${result.system} detected`}`, 'good');
+    } catch (e) { setStatus(e.message, 'bad'); }
+  };
+
+  const save = async () => {
+    const by = requireReviewer();
+    if (!by) return;
+    setStatus('checking and saving…');
+    try {
+      const result = await post('/api/review/resolve', {
+        id: item.id, url: input.value, resolved_by: by,
+      });
+      toast(`${result.ons_code}: ${result.url} saved — ${result.module} will use it on its next run.`);
+      await loadFacets();
+      await loadReview(true);
+    } catch (e) {
+      setStatus(e.message, 'bad');
+      toast(e.message, true);
+    }
+  };
+
+  return el('div', { class: 'resolve' },
+    el('div', { class: 'muted small', text: spec.help }),
+    el('div', { class: 'actions' },
+      input,
+      el('button', { class: 'btn', onclick: check }, 'Check'),
+      el('button', { class: 'btn primary', onclick: save }, `Save ${spec.label}`)),
+    status);
 }
 
 /** Context comes out of the database as a JSON string. Pretty-print it when it
