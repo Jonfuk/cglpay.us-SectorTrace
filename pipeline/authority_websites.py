@@ -40,8 +40,11 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class AuthorityWebsite:
     ons_code: str
+    # Main council domain, for site-scoped document search. Optional because a
+    # reviewer can answer the committee question without answering this one —
+    # callers that need it must check, as Module 9 and 10 both do.
     name: str
-    base_url: str            # main council domain, for site-scoped document search
+    base_url: str | None
     committee_url: str | None = None   # committee system root, if different
     committee_system: str | None = None
     verified_on: str | None = None     # ISO date the URLs were last confirmed to load
@@ -191,11 +194,15 @@ def _override_for(ons_code: str, conn) -> AuthorityWebsite | None:
         return None
 
     seed = AUTHORITY_WEBSITES.get(ons_code)
+    # No falling back to the committee URL. They are different hosts doing
+    # different jobs: Module 9 searches document paths under the council's own
+    # domain, and running that search against a committee portal returns
+    # nothing while looking like it worked — a council that publishes plenty
+    # recorded as one that publishes none. An answer to the committee question
+    # is not an answer to the website question, so base_url stays empty and
+    # Module 9 keeps raising `authority_website_unknown` until someone answers
+    # that one too.
     base_url = row["base_url"] or (seed.base_url if seed else None)
-    if not base_url:
-        # Module 9 cannot search without one, and Module 10 reaches the
-        # committee URL directly, so a committee-only answer is still useful.
-        base_url = row["committee_url"]
 
     return AuthorityWebsite(
         ons_code=ons_code,

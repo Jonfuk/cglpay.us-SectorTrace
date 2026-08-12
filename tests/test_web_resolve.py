@@ -121,6 +121,27 @@ def test_a_resolved_url_is_what_the_modules_then_see(queued, answering):
     assert site.source == "human_verified"
 
 
+def test_a_committee_answer_is_not_taken_as_a_website_answer(queued, answering):
+    """The two questions are about different hosts.
+
+    A reviewer answering `committee_url_unknown` has said where the committee
+    system is, not where the council publishes documents. Module 9 searching
+    a committee portal for its document paths finds nothing and records the
+    authority as having published nothing — the silent failure this whole
+    registry exists to avoid. So base_url stays empty and Module 9 keeps
+    asking.
+    """
+    resolve.resolve_authority_url(
+        queued, item_for(queued, "committee_url_unknown"),
+        "democracy.barnet.gov.uk", resolved_by="Jon")
+
+    site = website_for("E09000003", queued)
+    assert site.committee_url == "https://democracy.barnet.gov.uk"
+    assert not site.base_url, (
+        "a committee URL was promoted to base_url; Module 9 would search the "
+        "committee portal for council documents")
+
+
 def test_a_website_answer_serves_module_9(queued, answering):
     resolve.resolve_authority_url(
         queued, item_for(queued, "authority_website_unknown"),

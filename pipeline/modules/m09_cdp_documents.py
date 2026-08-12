@@ -200,10 +200,13 @@ def crawl_authority(unit, client) -> tuple[list[dict], list[tuple[str, str, dict
     candidates: list[dict] = []
     review_items: list[tuple[str, str, dict]] = []
 
-    if site is None:
+    if site is None or not site.base_url:
         # Not guessed: council hostnames are unpredictable, and an invented
         # base URL would search the wrong site or silently find nothing while
-        # appearing to have worked.
+        # appearing to have worked. A site with no base_url is an authority
+        # somebody answered the *committee* question for and not this one —
+        # searching its committee portal for these paths is that same silent
+        # failure with an extra step.
         review_items.append((
             "authority_website_unknown", authority["ons_code"],
             {"authority": authority["name"],
@@ -288,7 +291,7 @@ def run(ctx: ModuleContext) -> None:
         for item_type, raw_value, context in review_items:
             db.record_review_item(conn, module_name, item_type, raw_value, json.dumps(context))
 
-        if site is None:
+        if site is None or not site.base_url:
             unconfigured += 1
         else:
             searched += 1
