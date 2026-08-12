@@ -410,12 +410,40 @@ def test_a_write_from_a_non_loopback_origin_is_allowed_when_it_matches_the_host(
     assert response.status_code == 200
 
 
-def test_serves_the_page_and_its_assets(client):
-    page = client.get("/")
+def test_serves_the_operator_page_and_its_assets(client):
+    """The operator UI moved from / to /admin when the public portal took the
+    root. Nothing else about it changed."""
+    page = client.get("/admin/")
     assert page.status_code == 200
     assert "text/html" in page.headers["content-type"]
-    assert client.get("/app.js").status_code == 200
-    assert client.get("/styles.css").status_code == 200
+    assert client.get("/admin").status_code == 200
+    assert client.get("/admin/app.js").status_code == 200
+    assert client.get("/admin/styles.css").status_code == 200
+
+
+def test_the_root_serves_the_public_portal_not_the_operator_ui(client):
+    """Two front ends, one server. The root must not be the review queue —
+    that is the whole reason the operator UI moved."""
+    root = client.get("/").text
+    admin = client.get("/admin/").text
+    assert root != admin
+    assert "SectorTrace" in root
+    # The operator UI's own furniture must not appear on the public page.
+    assert "review-list" not in root
+    assert 'href="/admin"' in root or "/admin" in root
+
+
+def test_vendored_libraries_are_served_and_cacheable(client):
+    """They are the only static files big enough for a cache header to matter,
+    and the only ones that change by someone replacing a file rather than by a
+    module running."""
+    response = client.get("/vendor/echarts.min.js")
+    assert response.status_code == 200
+    assert "max-age" in response.headers["cache-control"]
+    assert "private" in response.headers["cache-control"]
+
+    # Warehouse-backed responses must stay uncacheable.
+    assert client.get("/api/overview").headers["cache-control"] == "no-store"
 
 
 def test_unknown_paths_and_traversal_are_refused(client):

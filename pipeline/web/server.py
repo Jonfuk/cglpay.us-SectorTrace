@@ -41,19 +41,68 @@ import structlog
 
 from pipeline import db
 from pipeline.config import Settings, get_settings
-from pipeline.web import queries, resolve, review
+from pipeline.web import public_export, public_queries, queries, resolve, review
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+PUBLIC_DIR = STATIC_DIR / "public"
 
-# Served by exact name. A dict rather than a directory walk: this is a fixed
-# three-file front end, and matching names against a whitelist means path
-# traversal is not a thing that has to be got right.
-STATIC_FILES = {
-    "/": ("index.html", "text/html; charset=utf-8"),
-    "/index.html": ("index.html", "text/html; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+HTML = "text/html; charset=utf-8"
+JS = "text/javascript; charset=utf-8"
+CSS = "text/css; charset=utf-8"
+
+# Two front ends on one server, each served by exact name from a whitelist.
+#
+# A dict rather than a directory walk, still: matching a request path against
+# known names means path traversal is not a thing that has to be got right,
+# and that property is worth more now that one of the two interfaces is meant
+# to be handed to people outside the team.
+#
+# The operator UI moved from / to /admin when the portal took the root. Its
+# files did not move on disk, so the mapping carries the directory as well as
+# the filename.
+STATIC_FILES: dict[str, tuple[str, str, Path]] = {
+    # Public evidence portal.
+    "/": ("index.html", HTML, PUBLIC_DIR),
+    "/index.html": ("index.html", HTML, PUBLIC_DIR),
+    "/app.js": ("app.js", JS, PUBLIC_DIR),
+    "/styles.css": ("styles.css", CSS, PUBLIC_DIR),
+
+    # Operator UI: the review queue and the raw warehouse browser. Unchanged
+    # in every respect except the prefix it answers on.
+    "/admin": ("index.html", HTML, STATIC_DIR),
+    "/admin/": ("index.html", HTML, STATIC_DIR),
+    "/admin/index.html": ("index.html", HTML, STATIC_DIR),
+    "/admin/app.js": ("app.js", JS, STATIC_DIR),
+    "/admin/styles.css": ("styles.css", CSS, STATIC_DIR),
 }
+
+# Portal ES modules, listed rather than globbed for the same reason as above.
+for _module in ("theme", "components", "charts"):
+    STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
+for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers"):
+    STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
+
+# Third-party builds, committed under static/public/vendor. See its README for
+# versions and provenance.
+for _lib, _type in (
+    ("echarts.min.js", JS),
+    ("d3.min.js", JS),
+    ("tabulator.min.js", JS),
+    ("tabulator_midnight.min.css", CSS),
+    ("fuse.min.js", JS),
+    ("date-fns.cdn.min.js", JS),
+):
+    STATIC_FILES[f"/vendor/{_lib}"] = (f"vendor/{_lib}", _type, PUBLIC_DIR)
+
+# Assets that are large and change only when a source publisher releases new
+# ones. These get a cache lifetime; everything else stays no-store.
+CACHEABLE_PREFIXES = ("/vendor/",)
+ASSET_MAX_AGE = 86_400
+
+# Portal answers change only when a module runs, which is hours apart at best.
+# Five minutes keeps chart interaction from re-querying the warehouse for
+# numbers it already has, without anyone waiting long to see a fresh run.
+PUBLIC_MAX_AGE = 300
 
 MAX_BODY_BYTES = 256 * 1024
 
@@ -120,16 +169,25 @@ class Handler(BaseHTTPRequestHandler):
         """
         log.debug("web.request", client=self.address_string(), message=format % args)
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str,
+               max_age: int | None = None) -> None:
         self._responded = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         if self.close_connection:
             self.send_header("Connection", "close")
-        # Nothing here is cacheable: the whole point is the current state of
-        # the queue, and a stale page would show decisions that are not there.
-        self.send_header("Cache-Control", "no-store")
+        # Warehouse data is not cacheable: the point of the operator UI is the
+        # current state of the queue, and a stale page would show decisions
+        # that are not there. Vendored libraries and boundary geometry are the
+        # exception — they change when someone replaces a file, not when a
+        # module runs — and they are the only things large enough to be worth
+        # a round trip. `private` because this server has no authentication
+        # and nothing it serves should be held by a shared proxy.
+        if max_age:
+            self.send_header("Cache-Control", f"max-age={max_age}, private")
+        else:
+            self.send_header("Cache-Control", "no-store")
         # The API is same-origin only. No CORS headers are ever sent, so a
         # cross-origin page cannot read a reply even if it manages to send a
         # request.
@@ -138,9 +196,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_json(self, payload: Any, status: int = 200) -> None:
+    def _send_json(self, payload: Any, status: int = 200,
+                    max_age: int | None = None) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
-        self._send(status, body, "application/json; charset=utf-8")
+        self._send(status, body, "application/json; charset=utf-8", max_age=max_age)
 
     def _discard_body(self) -> None:
         """Read and throw away a request body that was refused unread.
@@ -233,6 +292,8 @@ class Handler(BaseHTTPRequestHandler):
             self._fail(400, str(exc))
         except resolve.ResolveError as exc:
             self._fail(400, str(exc))
+        except public_export.ExportError as exc:
+            self._fail(400, str(exc))
         except (BrokenPipeError, ConnectionResetError):
             # The browser navigated away mid-response. Nothing to report and
             # nowhere to report it to.
@@ -257,11 +318,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(status, message.encode("utf-8"), "text/plain; charset=utf-8")
 
     def _serve_static(self, path: str) -> None:
-        filename, content_type = STATIC_FILES[path]
-        file_path = STATIC_DIR / filename
+        filename, content_type, directory = STATIC_FILES[path]
+        file_path = directory / filename
         if not file_path.is_file():
             raise ApiError(f"Missing UI asset {filename}", status=500)
-        self._send(200, file_path.read_bytes(), content_type)
+        cache = ASSET_MAX_AGE if path.startswith(CACHEABLE_PREFIXES) else None
+        self._send(200, file_path.read_bytes(), content_type, max_age=cache)
 
     def _serve_api(self, path: str, params: dict[str, list[str]]) -> None:
         if self.command == "POST":
@@ -275,9 +337,61 @@ class Handler(BaseHTTPRequestHandler):
 
         conn = queries.readonly_connection(self.settings)
         try:
-            self._send_json(self._get(path, params, conn))
+            if path == "/api/v1/export":
+                return self._export(params, conn)
+            # Portal answers change only when a module runs, so a short cache
+            # keeps chart interactions from re-querying the warehouse for the
+            # same numbers. Operator answers stay no-store: the review queue
+            # changes as you work on it.
+            max_age = PUBLIC_MAX_AGE if path.startswith("/api/v1/") else None
+            self._send_json(self._get(path, params, conn), max_age=max_age)
         finally:
             conn.close()
+
+    def _export(self, params: dict[str, list[str]], conn) -> None:
+        """A section's data as CSV or JSON, with its provenance attached.
+
+        The provenance travels in the file, not beside it. An exported CSV
+        gets separated from any accompanying note within about a day of
+        leaving here, so the filters that produced it and the corpus it came
+        from are written into the download itself.
+        """
+        endpoint = _str(params, "endpoint") or "summary"
+        fmt = (_str(params, "format") or "csv").lower()
+        if fmt not in ("csv", "json"):
+            raise ApiError(f"format must be csv or json, got {fmt!r}.")
+
+        payload = self._public_api(f"/api/v1/{endpoint}", params, conn)
+        rows, label = public_export.rows_for(endpoint, payload)
+        provenance = public_export.provenance(
+            endpoint, {k: v[0] for k, v in params.items()
+                        if k not in ("endpoint", "format")})
+
+        stamp = provenance["exported_at"][:10].replace("-", "")
+        parts = [p for p in (_str(params, "provider_key"), _str(params, "metric")) if p]
+        name = "_".join(["sectorTrace", label, *parts, stamp])
+
+        if fmt == "json":
+            body = json.dumps({"_provenance": provenance, label: rows},
+                               indent=2, default=str).encode("utf-8")
+            content_type = "application/json; charset=utf-8"
+        else:
+            body = public_export.to_csv(rows, provenance).encode("utf-8")
+            content_type = "text/csv; charset=utf-8"
+
+        self._responded = True
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{name}.{fmt}"')
+        self.send_header("X-Provenance", json.dumps(provenance, default=str))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     # --- read routes ----------------------------------------------------------
 
@@ -334,6 +448,63 @@ class Handler(BaseHTTPRequestHandler):
                 descending=_str(params, "dir").lower() == "desc",
                 search=_str(params, "q") or None,
             )
+
+        if path.startswith("/api/v1/"):
+            return self._public_api(path, params, conn)
+
+        raise ApiError(f"No route for GET {path}", status=404)
+
+    # --- public portal API ----------------------------------------------------
+
+    def _public_api(self, path: str, params: dict[str, list[str]], conn) -> Any:
+        """Read-only, no personal data, everything caveated.
+
+        Separate from the operator routes above because the audience is
+        different: these answers are meant to be published, and every function
+        behind them declares the tables it reads so the no-restricted_
+        guarantee is enforced rather than asserted.
+        """
+        route = path[len("/api/v1/"):].rstrip("/")
+
+        if route == "summary":
+            return public_queries.summary(conn)
+        if route == "providers":
+            return {"providers": public_queries.providers(conn)}
+        if route == "authorities":
+            return {"authorities": public_queries.authorities(conn)}
+        if route == "contracts":
+            return public_queries.contracts(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                buyer_ons_code=_str(params, "buyer_ons_code") or None,
+                year_from=_str(params, "year_from") or None,
+                year_to=_str(params, "year_to") or None,
+                psr_only=_flag(params, "psr_only"),
+                limit=_int(params, "limit", 500))
+        if route == "pay":
+            return public_queries.pay(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                year_from=_str(params, "year_from") or None,
+                year_to=_str(params, "year_to") or None)
+        if route == "geography":
+            metric = _str(params, "metric") or "grant_total"
+            return {**public_queries.geography(
+                        conn, metric=metric, year=_str(params, "year") or None),
+                     "available_years": public_queries.geography_years(conn, metric)}
+        if route == "boundaries":
+            return public_queries.boundaries(conn)
+        if route == "fingertips":
+            return public_queries.fingertips(
+                conn,
+                indicator_id=_str(params, "indicator_id") or None,
+                topic=_str(params, "topic") or None,
+                ons_code=_str(params, "ons_code") or None,
+                substance=_str(params, "substance") or None)
+
+        match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
+        if match:
+            return public_queries.provider_timeline(conn, match.group(1))
 
         raise ApiError(f"No route for GET {path}", status=404)
 

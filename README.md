@@ -328,6 +328,57 @@ sqlite3 data/warehouse.db "SELECT module, item_type, COUNT(*) FROM review_queue 
 Both tables deduplicate on a natural key, so re-running a module does not
 inflate the counts.
 
+## The evidence portal
+
+`./start.sh web` serves two interfaces from one process. The public evidence
+portal is at `/`, and the operator tools — the review queue and the raw
+warehouse browser — moved to `/admin`, linked from the portal's header.
+
+The portal is built for people who need to read this evidence rather than run
+the pipeline: union researchers, journalists, public health analysts. Six
+sections — overview, pay evidence, contracts, geography, treatment demand, and
+a page per provider — over a read-only `/api/v1/` API.
+
+Three properties it is built around:
+
+- **No figure without its caveat.** The caveat text travels with the number in
+  the API payload, from the same `_note` columns the exports use, so a chart
+  cannot render without it. Figures with a documented way of being misread —
+  the indicative wage, the workforce census, grant versus budget — carry a
+  caveat that cannot be dismissed rather than one behind a click.
+- **No personal data, enforced rather than intended.** Every function in
+  `pipeline/web/public_queries.py` declares the tables it reads and they are
+  checked against the same guard the export layer uses for constraint 3. A
+  test asserts the guard actually refuses a `restricted_` table, so the other
+  tests are worth something.
+- **Everything is citable.** Each chart has a provenance drawer with source
+  URL, retrieval time and payload hash, and each section exports CSV or JSON
+  with that provenance written *into* the file — a CSV gets separated from any
+  accompanying note within a day of leaving the server.
+
+Where the warehouse does not support a figure, the portal says so instead of
+drawing it. Two examples from the current corpus, both decided by measuring
+the data on each request rather than by a hardcoded rule:
+
+- **Contract value has no headline total.** A handful of cross-government
+  framework notices carry ceilings in the tens of billions — 130 notices above
+  £1bn account for 99.7% of the total — so the sum describes those frameworks
+  rather than this sector. The page leads with the median notice and shows the
+  concentration. A corpus without that problem gets its total back.
+- **Workforce census figures are shown as awaiting verification**, because
+  every one of them is `verified = 0` and `docs/CAVEATS.md` says to filter on
+  that before publishing.
+
+The boundary geometry for the map comes from `authorities.geometry_geojson`,
+which `m00_geography` already collected with provenance, rather than from a
+separately fetched boundary file that could disagree with the ONS codes every
+other figure is joined on.
+
+Third-party JavaScript is committed under
+`pipeline/web/static/public/vendor/` with its versions and sources recorded,
+so the portal renders wherever the pipeline runs rather than only where there
+is internet.
+
 ## The review UI
 
 `review_queue` is where every judgement call the pipeline refused to make on
@@ -335,7 +386,7 @@ its own ends up, and it does not empty itself. The web UI reads the warehouse
 and writes decisions back:
 
 ```bash
-./start.sh web                 # port 1801, every interface
+./start.sh web                 # portal on /, operator tools on /admin
 ./start.sh web --host 127.0.0.1 # this machine only
 ./start.sh web --port 8080 --no-open
 ```

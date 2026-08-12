@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!--
+  SectorTrace — the public evidence portal.
+
+  Served at / by the same process that serves the operator UI at /admin. No
+  build step: ES modules, loaded directly, with the third-party libraries
+  committed under /vendor (see its README for versions and provenance). It
+  makes no external requests, so it works wherever the pipeline works.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SectorTrace — England-wide evidence on substance misuse treatment</title>
+<meta name="description" content="Evidence on the England-wide drug and alcohol treatment sector, assembled from public-domain sources with full provenance.">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/vendor/tabulator_midnight.min.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
+<script src="/vendor/echarts.min.js" defer></script>
+<script src="/vendor/d3.min.js" defer></script>
+<script src="/vendor/tabulator.min.js" defer></script>
+<script src="/vendor/fuse.min.js" defer></script>
+<script src="/vendor/date-fns.cdn.min.js" defer></script>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="#/">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-text">Sector<strong>Trace</strong></span>
+  </a>
+  <nav class="mainnav" aria-label="Sections">
+    <a href="#/" data-route="">Overview</a>
+    <a href="#/pay" data-route="pay">Pay evidence</a>
+    <a href="#/contracts" data-route="contracts">Contracts</a>
+    <a href="#/geography" data-route="geography">Geography</a>
+    <a href="#/treatment" data-route="treatment">Treatment demand</a>
+    <a href="#/providers" data-route="providers">Providers</a>
+  </nav>
+  <a class="adminlink" href="/admin/" title="Pipeline operator tools">Admin &rarr;</a>
+</header>
+
+<div class="filterbar" id="filterbar" hidden>
+  <div class="filter">
+    <label for="f-provider">Provider</label>
+    <div class="typeahead">
+      <input id="f-provider" type="search" placeholder="All providers" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="f-provider-list">
+      <ul id="f-provider-list" class="typeahead-list" role="listbox" hidden></ul>
+    </div>
+  </div>
+  <div class="filter">
+    <label for="f-region">Region</label>
+    <select id="f-region"><option value="">All regions</option></select>
+  </div>
+  <div class="filter">
+    <label for="f-year-from">Years</label>
+    <div class="yearrange">
+      <input id="f-year-from" type="number" inputmode="numeric" placeholder="from" min="2000" max="2100">
+      <span aria-hidden="true">–</span>
+      <input id="f-year-to" type="number" inputmode="numeric" placeholder="to" min="2000" max="2100">
+    </div>
+  </div>
+  <button class="btn ghost" id="f-reset">Reset filters</button>
+  <span class="filter-note" id="filter-note"></span>
+</div>
+
+<div id="busybar" class="busybar" hidden><div class="busybar-run"></div></div>
+
+<main id="main" tabindex="-1"></main>
+
+<footer class="sitefoot">
+  <p>
+    Every figure here comes from a public-domain source and carries its own
+    source URL and retrieval timestamp. Nothing is inferred: a value that could
+    not be parsed is empty with a logged reason, not guessed.
+  </p>
+  <p class="muted">
+    Read the caveats before quoting anything. They lead with the things that
+    must <strong>not</strong> be computed from this data.
+  </p>
+</footer>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
