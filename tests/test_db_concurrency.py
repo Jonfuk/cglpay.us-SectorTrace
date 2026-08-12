@@ -13,6 +13,8 @@ import sqlite3
 import threading
 import time
 
+import pytest
+
 from pipeline import db
 
 
@@ -65,6 +67,210 @@ def test_a_reader_is_not_blocked_by_an_open_write_transaction(settings):
     finally:
         reader.close()
         writer.close()
+
+
+def test_a_writer_is_not_starved_by_writers_that_arrive_after_it(settings):
+    """The failure that took m13 out of wave 2.
+
+    No single holder is slow here: each busy writer holds the slot for about a
+    fiftieth of a second. SQLite's busy handler is a backoff rather than a
+    queue, so before the write slot was serialised in-process a latecomer
+    could lose every race and fail with "database is locked" having written
+    nothing — which is exactly what m13 did while m05, m07, m12 and m15 wrote
+    around it.
+
+    Measured before the fix: starved after 5.53s against a 5s timeout.
+    """
+    starter = db.get_connection(settings)
+    db.apply_migrations(starter, settings.migrations_dir)
+    starter.commit()
+    starter.close()
+
+    stop = threading.Event()
+    errors: list[Exception] = []
+
+    def busy(index: int) -> None:
+        conn = db.get_connection(settings)
+        conn.write_label = f"busy{index}"
+        try:
+            counter = 0
+            while not stop.is_set():
+                conn.execute(
+                    "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                    "VALUES (?, 'x', ?, '2026-01-01')",
+                    (f"busy{index}", f"{index}-{counter}"))
+                time.sleep(0.05)      # as a module does between rows
+                conn.commit()
+                counter += 1
+        except Exception as exc:       # pragma: no cover - the regression
+            errors.append(exc)
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=busy, args=(n,), daemon=True) for n in range(4)]
+    for thread in threads:
+        thread.start()
+    time.sleep(0.5)                    # let them get into their stride
+
+    latecomer = db.get_connection(settings)
+    latecomer.write_label = "latecomer"
+    started = time.monotonic()
+    try:
+        latecomer.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES ('late', 'x', 'y', '2026-01-01')")
+        latecomer.commit()
+        waited = time.monotonic() - started
+    finally:
+        latecomer.close()
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
+
+    assert not errors, f"a busy writer failed: {errors[0]}"
+    # Four writers ahead of it, each holding ~50ms: one pass through the queue.
+    assert waited < 2.0, (
+        f"the latecomer waited {waited:.2f}s behind four writers holding 50ms "
+        "each — it is being passed over rather than queued")
+
+
+def test_the_write_slot_is_released_when_a_connection_is_closed_mid_transaction(settings):
+    """A module that dies holding the slot must not take the run with it."""
+    first = db.get_connection(settings)
+    db.apply_migrations(first, settings.migrations_dir)
+    first.commit()
+
+    first.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                   "VALUES ('m01', 'held', 'v', '2026-01-01')")
+    assert db.WRITE_SLOT.holder is not None
+    first.close()                       # no commit, no rollback
+    assert db.WRITE_SLOT.holder is None
+
+    second = db.get_connection(settings)
+    try:
+        second.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                        "VALUES ('m02', 'after', 'v', '2026-01-01')")
+        second.commit()
+    finally:
+        second.close()
+
+
+def test_the_context_manager_releases_the_write_slot(settings):
+    """`with conn:` must release, not just commit.
+
+    sqlite3.Connection.__exit__ is written in C and commits the transaction
+    without calling the Python-level commit(), so overriding commit() alone
+    leaves the slot held for the life of the connection. apply_migrations uses
+    a `with conn:` per migration file and every review decision uses one, so
+    the first thing the CLI does on every run would have held the write slot
+    for the whole run.
+    """
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                "VALUES ('m01', 'ctx', 'v', '2026-01-01')")
+            assert db.WRITE_SLOT.holder is not None
+        assert db.WRITE_SLOT.holder is None, "`with conn:` committed but kept the slot"
+
+        # And on the failure path.
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                    "VALUES ('m01', 'ctx', 'v2', '2026-01-01')")
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert db.WRITE_SLOT.holder is None, "`with conn:` rolled back but kept the slot"
+    finally:
+        conn.close()
+
+
+def test_migrations_do_not_leave_the_write_slot_held(settings):
+    """The exact sequence the CLI runs: migrate, then let a module write."""
+    first = db.get_connection(settings)
+    db.apply_migrations(first, settings.migrations_dir)
+    assert db.WRITE_SLOT.holder is None, "applying migrations kept the write slot"
+
+    # A module's own connection, in the same thread, as `run` does serially.
+    second = db.get_connection(settings)
+    try:
+        second.execute(
+            "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+            "VALUES ('m01', 'after-migrate', 'v', '2026-01-01')")
+        second.commit()
+    finally:
+        second.close()
+        first.close()
+
+
+def test_two_write_connections_in_one_thread_fail_loudly(settings):
+    """A thread cannot queue behind itself.
+
+    One connection per module is the rule; a second one writing in the same
+    thread would wait for a slot only the first can release. That has to be an
+    error naming the thread, not a run that stops producing output and never
+    ends.
+    """
+    first = db.get_connection(settings)
+    db.apply_migrations(first, settings.migrations_dir)
+    first.commit()
+    second = db.get_connection(settings)
+    try:
+        first.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                       "VALUES ('m01', 'a', 'v', '2026-01-01')")
+        with pytest.raises(sqlite3.OperationalError, match="already holds it on another"):
+            second.execute(
+                "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                "VALUES ('m02', 'b', 'v', '2026-01-01')")
+    finally:
+        second.close()
+        first.rollback()
+        first.close()
+
+
+def test_reads_do_not_take_the_write_slot(settings):
+    """WAL's whole point is that readers do not queue. Serialising them behind
+    the write slot would undo it."""
+    writer = db.get_connection(settings)
+    db.apply_migrations(writer, settings.migrations_dir)
+    writer.commit()
+
+    writer.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                    "VALUES ('m01', 'held', 'v', '2026-01-01')")
+    assert db.WRITE_SLOT.holder is not None       # a write transaction is open
+
+    reader = db.get_connection(settings)
+    try:
+        # Would block forever if a SELECT queued for the write slot.
+        reader.execute("SELECT COUNT(*) FROM review_queue").fetchone()
+    finally:
+        reader.close()
+        writer.rollback()
+        writer.close()
+
+
+@pytest.mark.parametrize("sql, expected", [
+    ("SELECT 1", False),
+    ("  select * from authorities", False),
+    ("PRAGMA journal_mode", False),
+    ("EXPLAIN QUERY PLAN SELECT 1", False),
+    ("WITH x AS (SELECT 1) SELECT * FROM x", False),
+    ("INSERT INTO t VALUES (1)", True),
+    ("update t set a = 1", True),
+    ("DELETE FROM t", True),
+    ("CREATE TABLE t (a)", True),
+    ("WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x", True),
+    ("-- a comment first\nSELECT 1", True),     # unrecognised: treated as a write
+])
+def test_statement_classification(sql, expected):
+    """Anything unrecognised must be treated as a write. Over-acquiring costs
+    concurrency; under-acquiring costs the guarantee."""
+    assert db._is_write(sql) is expected
 
 
 def test_a_second_writer_waits_rather_than_failing(settings):
@@ -251,14 +457,31 @@ def test_seeding_providers_does_not_hold_the_write_slot(settings):
         f"{len(errors)} of 12 concurrent modules could not write: {errors[:2]}")
 
 
-def test_the_regression_reproduces_when_the_seed_is_left_uncommitted(settings):
+def test_the_regression_reproduces_when_the_write_slot_is_not_serialised(settings, monkeypatch):
     """A guard on the guard. If this stops failing, the test above has stopped
     proving anything and something else is protecting the run.
+
+    This used to reproduce the starvation by leaving the provider seed
+    uncommitted, and asserted that doing so still starved a wave. It no longer
+    does, and that is the improvement rather than the test rotting: the write
+    slot is now handed out in arrival order by a process-wide lock, so a
+    module holding a transaction open makes the others *wait* instead of
+    failing. Committing the seed promptly still matters — it decides how long
+    they wait — but it is no longer the only thing standing between a wave and
+    twelve "database is locked" errors.
+
+    So the control now removes the protection rather than the good practice:
+    with the in-process serialisation disabled, the wave falls back to
+    SQLite's busy handler, and the starvation comes straight back.
 
     Deliberately given a busy timeout of a few seconds rather than the real
     two minutes — the point is that writers are starved, not how long they are
     willing to wait for it.
     """
+    monkeypatch.setattr(
+        db.WriteSerialisedConnection, "_acquire_for",
+        lambda self, sql, assume_write=False: None)
+
     original = db.BUSY_TIMEOUT_MS
     db.BUSY_TIMEOUT_MS = 3_000
     try:
@@ -267,9 +490,20 @@ def test_the_regression_reproduces_when_the_seed_is_left_uncommitted(settings):
         db.BUSY_TIMEOUT_MS = original
 
     assert errors, (
-        "holding the provider seed open across a wave no longer starves anyone — "
-        "if that is a real improvement, delete this test and say why")
+        "a wave no longer starves anyone even with the write slot unserialised "
+        "— if that is a real improvement, delete this test and say why")
     assert all("locked" in str(e) for e in errors)
+
+
+def test_the_wave_survives_a_module_that_holds_its_transaction_open(settings):
+    """What the serialisation buys, stated as the outcome rather than the
+    mechanism: a module that writes and then goes off to fetch — m00's shape,
+    and m11's before it — costs the others time and not their work.
+    """
+    errors = [e for e in _run_a_wave(settings, seed_commits=False) if e is not None]
+    assert errors == [], (
+        f"{len(errors)} of 12 modules lost their work to a wave-mate holding a "
+        f"transaction open: {errors[:2]}")
 
 
 def test_every_module_commits_its_provider_seed(settings):

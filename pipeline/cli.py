@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import typer
@@ -228,7 +229,11 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict
     # that shows nothing during the first twenty minutes of a run is not a
     # progress system.
     task = bar.add_task(name, total=None)
+    # Name the thread after the module, so the write slot can say who is
+    # holding it and every log line from a wave is attributable.
+    threading.current_thread().name = name
     conn = db.get_connection(settings)
+    conn.write_label = name
     try:
         before = _audit_counts(conn, name)
         changes_before = conn.total_changes

@@ -6,7 +6,10 @@ module owns; 0002+ are added by m00_geography onward).
 """
 from __future__ import annotations
 
+import re
 import sqlite3
+import threading
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +28,210 @@ def _utcnow() -> str:
 # "database is locked" part-way through a crawl that has already made the
 # requests. Waiting costs time; failing costs the run.
 BUSY_TIMEOUT_MS = 120_000
+
+# How long a module will queue for the write slot before giving up. Generous:
+# the legitimate worst case is one module committing a very large batch (m13
+# writes 237,831 budget rows), and the cost of waiting is time, where the cost
+# of giving up is a crawl that already made every one of its requests. It is
+# not None only because a deadlock should surface as an error naming the
+# holder rather than as a run that never ends.
+WRITE_SLOT_TIMEOUT_SECONDS = 900
+
+
+class _FairWriteLock:
+    """A strictly FIFO lock over the warehouse's single write slot.
+
+    SQLite allows one writer, and its busy handler is a backoff rather than a
+    queue: a blocked writer sleeps, retries, and finds the lock taken again by
+    whichever thread happened to ask at the right moment. Nothing gives the
+    loser a turn. Measured on this codebase, four modules committing every
+    50ms starved a fifth for the whole of its timeout — no single holder held
+    the lock for more than a fiftieth of a second, and the latecomer still
+    failed with "database is locked".
+
+    That is what took m13 out of wave 2 while m05, m07, m12 and m15 wrote
+    around it, and it is made *more* likely by the incremental-commit
+    discipline the modules now follow, because more commits mean more races to
+    lose.
+
+    Handing off in arrival order removes the failure mode rather than making
+    it rarer: every waiter is served, in order, and no module can be passed
+    over twice. Every module in a run is a thread in one process, so a
+    process-wide lock is sufficient — this is not a cross-process guarantee
+    and does not need to be one.
+    """
+
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._waiters: deque[threading.Event] = deque()
+        self._held = False
+        self._owner: int | None = None
+        self.holder: str | None = None
+
+    def acquire(self, holder: str | None = None,
+                 timeout: float = WRITE_SLOT_TIMEOUT_SECONDS) -> None:
+        me = threading.get_ident()
+        with self._guard:
+            if self._held and self._owner == me:
+                # Two connections writing in one thread. Each is its own
+                # transaction, so this cannot be satisfied by re-entering —
+                # the thread would queue behind itself and neither
+                # transaction would ever commit. Better a stack trace naming
+                # the thread than a run that stops with no output.
+                raise sqlite3.OperationalError(
+                    f"{holder or 'this thread'} cannot take the write slot: the "
+                    f"same thread already holds it on another connection "
+                    f"(as {self.holder!r}). Two write transactions in one "
+                    "thread cannot both proceed — use one connection per "
+                    "module, and make sure the first one committed.")
+            if not self._held and not self._waiters:
+                self._held = True
+                self._owner = me
+                self.holder = holder
+                return
+            ticket = threading.Event()
+            self._waiters.append(ticket)
+
+        if not ticket.wait(timeout):
+            with self._guard:
+                # Give up our place, or everyone behind it waits on a ticket
+                # that will never be served.
+                try:
+                    self._waiters.remove(ticket)
+                except ValueError:
+                    # Handed the slot between the timeout and this lock; take
+                    # it rather than losing it.
+                    self._owner = me
+                    self.holder = holder
+                    return
+            raise sqlite3.OperationalError(
+                f"waited {timeout:.0f}s for the warehouse write slot, held by "
+                f"{self.holder or 'another module'}. That is long enough to be "
+                "a stuck writer rather than a busy one.")
+
+        # Handed off directly: the releasing thread left _held set for us.
+        with self._guard:
+            self._owner = me
+            self.holder = holder
+
+    def release(self) -> None:
+        with self._guard:
+            if self._waiters:
+                # Hand the slot to the next in line rather than dropping it,
+                # so an arriving thread cannot barge past a waiter. _owner is
+                # set by the waiter when it wakes.
+                self._owner = None
+                self._waiters.popleft().set()
+            else:
+                self._held = False
+                self._owner = None
+                self.holder = None
+
+
+WRITE_SLOT = _FairWriteLock()
+
+# Statements that do not need the write slot. Anything unrecognised is treated
+# as a write: over-acquiring costs concurrency, under-acquiring costs the
+# guarantee, and only one of those is a bug.
+_READ_PREFIXES = ("select", "pragma", "explain", "analyze", "analyse")
+_WRITE_IN_STATEMENT = re.compile(r"\b(insert|update|delete|replace)\b", re.IGNORECASE)
+
+
+def _is_write(sql: str) -> bool:
+    head = sql.lstrip()[:16].lower()
+    if head.startswith("with"):
+        # A CTE can end in either. `WITH x AS (...) SELECT` is a read;
+        # `WITH x AS (...) INSERT` is not.
+        return bool(_WRITE_IN_STATEMENT.search(sql))
+    return not head.startswith(_READ_PREFIXES)
+
+
+class WriteSerialisedConnection(sqlite3.Connection):
+    """A connection that takes the process-wide write slot for the life of a
+    write transaction.
+
+    The slot is acquired before the first write of a transaction and released
+    on commit, rollback or close, so two modules are never inside a write
+    transaction at the same time and SQLite's unfair busy handler is never
+    consulted. Reads are untouched: WAL readers do not block and do not need
+    the slot.
+
+    This does not shorten how long a module holds the database — a module that
+    writes and then fetches still blocks everything behind it, which is what
+    the per-unit commits in each module are for. It changes who waits and for
+    how long into something predictable, and turns "database is locked" from
+    an outcome into a queue.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._holds_write_slot = False
+        self.write_label: str | None = None
+
+    def _acquire_for(self, sql: str, assume_write: bool = False) -> None:
+        if self._holds_write_slot:
+            return
+        if not assume_write and not _is_write(sql):
+            return
+        WRITE_SLOT.acquire(self.write_label or threading.current_thread().name)
+        self._holds_write_slot = True
+
+    def _release_slot(self) -> None:
+        if self._holds_write_slot:
+            self._holds_write_slot = False
+            WRITE_SLOT.release()
+
+    def execute(self, sql, parameters=(), /):  # type: ignore[override]
+        self._acquire_for(sql)
+        return super().execute(sql, parameters)
+
+    def executemany(self, sql, parameters, /):  # type: ignore[override]
+        self._acquire_for(sql)
+        return super().executemany(sql, parameters)
+
+    def executescript(self, sql_script, /):  # type: ignore[override]
+        # A script commits implicitly before it runs and can contain anything.
+        self._acquire_for(sql_script, assume_write=True)
+        return super().executescript(sql_script)
+
+    def commit(self):
+        try:
+            super().commit()
+        finally:
+            self._release_slot()
+
+    def rollback(self):
+        try:
+            super().rollback()
+        finally:
+            self._release_slot()
+
+    # `with conn:` has to go through the methods above.
+    #
+    # sqlite3.Connection.__exit__ is implemented in C and commits the
+    # transaction directly, without calling the Python-level commit(). An
+    # override of commit() alone is therefore bypassed by every `with conn:`
+    # block in the codebase — apply_migrations uses one per migration file,
+    # and so does every review decision — which committed the data and left
+    # the write slot held for the life of the connection. The next writer in
+    # that thread then queued behind a transaction that had already finished.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        return False        # never swallow, matching sqlite3's own behaviour
+
+    def close(self):
+        try:
+            super().close()
+        finally:
+            # A connection closed mid-transaction rolls back, and the slot has
+            # to come back either way or the run stops.
+            self._release_slot()
 
 
 def get_connection(settings: Settings | None = None,
@@ -48,7 +255,8 @@ def get_connection(settings: Settings | None = None,
     settings = settings or get_settings()
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.database_path, timeout=BUSY_TIMEOUT_MS / 1000,
-                            check_same_thread=check_same_thread)
+                            check_same_thread=check_same_thread,
+                            factory=WriteSerialisedConnection)
     conn.row_factory = sqlite3.Row
 
     # WAL is a persistent property of the database file, so switching it is a

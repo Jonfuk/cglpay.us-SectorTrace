@@ -501,6 +501,26 @@ def run(ctx: ModuleContext) -> None:
 
         log.info("geography.current_authorities_loaded", count=len(current_rows))
 
+        # Hand the write slot back before the historical phase starts.
+        #
+        # SQLite allows one writer, and Python's sqlite3 opens a transaction on
+        # the first write and holds it until commit. Everything below this line
+        # fetches: a snapshot per vintage in both series, then boundary
+        # geometry for every retired and added code at every transition. Those
+        # requests took three minutes on the last full run, and without this
+        # commit all of them happened inside the transaction opened by the
+        # authorities upsert above.
+        #
+        # Serially that is invisible. In a wave it is fatal to everything else:
+        # m00 shares wave 1 with m02, m03, m06, m08 and m16, each of which
+        # seeds provider reference data in its opening lines. They waited out
+        # the full two-minute busy timeout and failed with "database is locked"
+        # having fetched nothing — five modules lost to one module's open
+        # transaction. This is the same fault m11 had, in the one module that
+        # had no commit of its own at all.
+        if not ctx.dry_run:
+            conn.commit()
+
         # --- Historical vintages: detect retirements and resolve successors ---
         # Snapshots are pooled by calendar epoch across both series so a
         # county retiring alongside its districts resolves against
@@ -563,6 +583,13 @@ def run(ctx: ModuleContext) -> None:
                 added_ref[code] = (v, "lad_code" if code[:3] == "E07" else "ctyua_code")
 
             _resolve_successors(conn, client, module_name, retired_ref, added_ref, field_cache, from_label, to_label)
+
+            # One transition is a complete unit of work: the retirements and
+            # the successor rows that explain them. _resolve_successors fetches
+            # geometry for every code involved, so committing per transition
+            # keeps the write slot held for one epoch rather than all of them.
+            if not ctx.dry_run:
+                conn.commit()
 
         total = conn.execute("SELECT COUNT(*) AS n FROM authorities").fetchone()["n"]
         log.info("geography.run_complete", total_authority_rows=total)

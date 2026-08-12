@@ -308,6 +308,33 @@ commit-per-module and rollback-on-failure are unchanged. A council that fails
 now costs one council rather than aborting the module, and is recorded rather
 than passing as a council with nothing to publish.
 
+### The write slot
+
+SQLite allows one writer, and its busy handler is a backoff rather than a
+queue — a blocked writer sleeps, retries, and finds the lock taken again by
+whoever asked at the right moment. Nothing gives the loser a turn. Measured on
+this warehouse, four modules committing every 50ms starved a fifth for the
+whole of its timeout, with no holder ever keeping the lock for more than a
+fiftieth of a second.
+
+Every module in a run is a thread in one process, so the write slot is handed
+out **in arrival order by a process-wide lock** (`pipeline/db.py`). A module
+takes it on the first write of a transaction and releases it on commit,
+rollback or close. Two modules are never inside a write transaction at once,
+SQLite's busy handler is never consulted, and no module can be passed over
+twice. Reads are untouched — WAL readers never queue.
+
+That decides *who waits*. How *long* they wait is still each module's own
+business: a module that writes a row and then goes off to fetch holds the slot
+for the length of its crawl, so every collecting module commits per unit of
+work rather than once on the way out. `tests/test_write_slot_discipline.py`
+checks that across all 17 of them, because both times this went wrong it was
+found by a four-hour run rather than by a test.
+
+The lock is process-wide, not cross-process: running `./start.sh web` and
+`./start.sh run all` at the same time still leaves those two processes
+contending through SQLite, which is what the two-minute busy timeout is for.
+
 See [`docs/CAVEATS.md`](docs/CAVEATS.md) for known limitations that must travel
 with any published figure. It leads with the things you must **not** compute —
 no claims-per-employee rate, no dividing treatment numbers by workforce
