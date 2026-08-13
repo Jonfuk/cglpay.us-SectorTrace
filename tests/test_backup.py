@@ -293,3 +293,66 @@ def test_the_superseded_file_keeps_data_still_in_the_wal(warehouse, settings):
         kept = old.execute(
             "SELECT COUNT(*) FROM review_queue WHERE raw_value = 'kept?'").fetchone()[0]
     assert kept == 1, "the row was committed; the file kept aside must still have it"
+
+
+# --- retention -----------------------------------------------------------------
+
+
+def test_pruning_keeps_the_newest_and_deletes_the_rest(warehouse, settings):
+    made = [backup.create(settings) for _ in range(5)]
+
+    result = backup.prune(settings, keep=2)
+
+    assert len(result["removed"]) == 3
+    assert result["kept"] == 2
+    remaining = {entry["name"] for entry in backup.listing(settings)}
+    assert len(remaining) == 2
+    # The two newest, not any two.
+    from pathlib import Path
+    newest = {Path(m["warehouse"]["backup"]).name for m in made[-2:]}
+    assert remaining == newest
+
+
+def test_a_labelled_backup_is_never_pruned(warehouse, settings):
+    """`--label before-m04-rerun` is somebody saying "I want this moment
+    back". A retention rule that discards it is worse than none."""
+    backup.create(settings, label="before-m04-rerun")
+    for _ in range(4):
+        backup.create(settings)
+
+    result = backup.prune(settings, keep=1)
+
+    names = {entry["name"] for entry in backup.listing(settings)}
+    assert any("before-m04-rerun" in name for name in names)
+    assert result["labelled_kept"] == 1
+    assert len(names) == 2, "one labelled, one automatic"
+
+
+def test_pruning_takes_the_manifest_and_listing_with_it(warehouse, settings):
+    backup.create(settings)
+    backup.create(settings)
+
+    backup.prune(settings, keep=1)
+
+    assert len(list(settings.backup_dir.glob("*.db"))) == 1
+    assert len(list(settings.backup_dir.glob("*.manifest.json"))) == 1
+    assert len(list(settings.backup_dir.glob("*.archive.txt"))) == 1
+
+
+def test_pruning_to_nothing_is_refused(warehouse, settings):
+    backup.create(settings)
+
+    with pytest.raises(backup.BackupError, match="at least 1"):
+        backup.prune(settings, keep=0)
+
+    assert len(backup.listing(settings)) == 1
+
+
+def test_a_dry_prune_deletes_nothing(warehouse, settings):
+    for _ in range(3):
+        backup.create(settings)
+
+    result = backup.prune(settings, keep=1, dry_run=True)
+
+    assert len(result["removed"]) == 2
+    assert len(backup.listing(settings)) == 3

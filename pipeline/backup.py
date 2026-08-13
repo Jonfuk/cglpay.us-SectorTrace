@@ -30,6 +30,7 @@ against the source it came from.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 from contextlib import closing
@@ -314,14 +315,67 @@ def restore(backup: Path, settings: Settings | None = None,
              "superseded": str(superseded) if superseded else None}
 
 
+def prune(settings: Settings | None = None, keep: int = 7,
+           dry_run: bool = False) -> dict:
+    """Delete old automatic backups, keeping the newest `keep` of them.
+
+    **A labelled backup is never deleted.** `--label before-m04-rerun` is
+    somebody saying "I am about to do something and want this moment back", and
+    a retention rule that discards it is worse than no retention rule. Only the
+    unlabelled, timestamp-only ones — the sort a schedule produces — are
+    candidates.
+
+    Each backup's manifest and archive listing go with it: they describe that
+    file and are meaningless without it.
+    """
+    settings = settings or get_settings()
+    if keep < 1:
+        raise BackupError("keep must be at least 1 — pruning to nothing is "
+                           "deleting every backup, which this will not do.")
+
+    automatic, labelled = [], []
+    for entry in listing(settings):
+        path = Path(entry["path"])
+        # warehouse-20260813T131334Z.db is automatic;
+        # warehouse-20260813T131334Z-before-m04-rerun.db is not.
+        stem = path.stem
+        (automatic if re.fullmatch(r"warehouse-\d{8}T\d{6}Z(-\d+)?", stem)
+          else labelled).append(path)
+
+    doomed = automatic[keep:]          # listing() is newest first
+    removed = []
+    for path in doomed:
+        companions = [path, path.with_suffix(".manifest.json"),
+                       path.with_suffix(".archive.txt")]
+        if not dry_run:
+            for companion in companions:
+                companion.unlink(missing_ok=True)
+        removed.append(path.name)
+
+    if removed and not dry_run:
+        log.info("backup.pruned", removed=len(removed), kept=len(automatic) - len(doomed),
+                  labelled_kept=len(labelled))
+    return {"removed": removed, "kept": len(automatic) - len(doomed),
+             "labelled_kept": len(labelled), "dry_run": dry_run}
+
+
 def listing(settings: Settings | None = None) -> list[dict]:
-    """Backups on disk, newest first, with what each one holds."""
+    """Backups on disk, newest first, with what each one holds.
+
+    Ordered by modification time, not by filename. The names look sortable and
+    are not: the uniquifier for two backups inside one second appends `-2`,
+    and `warehouse-…Z.db` sorts *after* `warehouse-…Z-5.db` because `.` is
+    above `-`. So a filename sort put the oldest of a same-second run first
+    and called it newest — which `prune()` would then have kept while deleting
+    the four that came after it.
+    """
     settings = settings or get_settings()
     if not settings.backup_dir.is_dir():
         return []
 
     out = []
-    for path in sorted(settings.backup_dir.glob("warehouse-*.db"), reverse=True):
+    for path in sorted(settings.backup_dir.glob("warehouse-*.db"),
+                        key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True):
         entry = {"path": str(path), "name": path.name,
                   "bytes": path.stat().st_size,
                   "modified": datetime.fromtimestamp(

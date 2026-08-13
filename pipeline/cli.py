@@ -128,6 +128,9 @@ def backup(
                     "in the configured backup_dir."),
     label: str = typer.Option(
         None, help="Appended to the filename, e.g. --label before-m04-rerun"),
+    keep: int = typer.Option(
+        None, help="After backing up, delete all but the newest N automatic "
+                    "backups. A labelled backup is never deleted."),
 ) -> None:
     """Copy the warehouse to a verified snapshot, and inventory the raw archive.
 
@@ -169,6 +172,16 @@ def backup(
                     f"{human_bytes(archive['bytes'])} across "
                     f"{len(archive['sources'])} sources — inventoried, not copied")
     typer.echo(f"  manifest: {Path(warehouse['backup']).with_suffix('.manifest.json')}")
+
+    if keep is not None:
+        try:
+            pruned = backup_module.prune(settings, keep=keep)
+        except backup_module.BackupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from None
+        if pruned["removed"]:
+            typer.echo(f"pruned {len(pruned['removed'])} older backup(s); kept "
+                        f"{pruned['kept']} automatic and {pruned['labelled_kept']} labelled")
 
 
 @app.command()

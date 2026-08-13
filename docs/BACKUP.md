@@ -93,8 +93,32 @@ source that varies its bytes between fetches — a page carrying a generated
 timestamp will archive a new copy every time it is fetched, and is worth
 finding if the archive grows without new evidence appearing.
 
-There is no retention policy and no rotation, for either the archive or
-`data/backups/`. Both accumulate until someone deletes something. At the
-current size that is the right amount of machinery; revisit it when the
-archive is inconveniently large rather than now, and delete backups by hand in
-the meantime — they are timestamped and each carries its own manifest.
+## Retention, and running it without being asked
+
+```bash
+./start.sh backup --keep 7
+```
+
+Backs up, then keeps the newest seven **automatic** backups. A labelled one is
+never pruned: `--label before-m04-rerun` is somebody saying "I am about to do
+something and I want this moment back", and a retention rule that discards it
+is worse than no retention rule. Each pruned backup's manifest and archive
+listing go with it — they describe that file and mean nothing without it.
+
+**Nothing runs this for you, and on 2026-08-13 that mattered.** The
+`authority_url_overrides` table was emptied and 191 verified council URLs went
+with it; the only backup on disk had been taken *after* the loss. A backup you
+have to remember is a backup you take too late. Schedule it:
+
+```bash
+# Linux / macOS — crontab -e
+0 3 * * * cd /path/to/cglpay.us && ./start.sh backup --keep 7
+```
+
+On Windows, Task Scheduler running `start.cmd backup --keep 7` daily does the
+same. Both are safe unattended: the command exits non-zero if the copy cannot
+be verified, and writes nothing over an existing backup.
+
+The raw archive still has no retention policy and accumulates until someone
+deletes something. At its current size that is the right amount of machinery;
+revisit it when it is inconveniently large rather than now.
