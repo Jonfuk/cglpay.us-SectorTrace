@@ -2,8 +2,8 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phases 1–3 are done**; Phases 4–7 are not
-built. Each phase records what changed from the plan as it lands.
+1 skipped, 18 deselected, 422s**). **Phases 1–3 are done, Phase 4 is partly done** (F-01 and U-01 closed; F-03
+and D-04 open); Phases 5–7 are not built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -26,7 +26,7 @@ coverage and polish are pursued only where they cost none of the above.
 
 | | Finding | Why it leads |
 |---|---|---|
-| 1 | **F-01** — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
+| 1 | ~~**F-01**~~ *(closed, Phase 4)* — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
 | 2 | ~~**D-02**~~ *(closed, Phase 1)* — a dry run and a real run were indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
 | 3 | ~~**O-02**~~ *(closed, Phase 3)* — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
 | 4 | **S-01** — `check-url` will fetch any host and report whether it answered *(Phase 5)* | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
@@ -38,7 +38,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### A. Feature and coverage
 
-**F-01 · Candidates never become evidence · L**
+**F-01 · Candidates never become evidence · L — closed in Phase 4**
 - Evidence **[live]**: `cdp_document_candidates` 406 → `cdp_documents` 0; `committee_paper_candidates` 694 → `committee_papers` 0; `foi_request_candidates` 841 → `foi_requests` 0. `verified = 1` count across all candidate tables: **zero**.
 - Costs today: 1,941 collected rows sit outside the evidence base. The only documented promotion path is hand-written SQL ([docs/verification/cdp_candidates.md:7](docs/verification/cdp_candidates.md:7)), and the review UI deliberately does not promote ([README.md:445](README.md:445)).
 - Changes for: the researcher — this is the difference between "we found council papers" and "we can cite one".
@@ -51,7 +51,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Most likely a `--dry-run` (the commit guard at [pipeline/modules/m13_la_budgets.py:391](pipeline/modules/m13_la_budgets.py:391) is correct, and the runner rolls back at [pipeline/runner.py:120](pipeline/runner.py:120)). **Not proven** — see D-02, which is why it cannot be proven.
 - Verified by: a real run writing rows, plus D-02 making the next one self-evident.
 
-**F-03 · Workforce census stays unverified · M**
+**F-03 · Workforce census stays unverified · M — still open; deferred from Phase 4**
 - Evidence **[live]**: `workforce_census_metrics` 68 rows, all `verified = 0`. Portal correctly renders them as awaiting verification ([README.md:396](README.md:396)).
 - Same shape as F-01 — a markdown worklist and manual SQL. Fold into the same promotion mechanism rather than building a second one.
 
@@ -114,7 +114,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### E. Admin UI
 
-**U-01 · No bulk path for the queue's bulk · M** — the operational half of F-01/D-04. Deciding a filtered set exists ([README.md:440](README.md:440)); *answering* one does not.
+**U-01 · No bulk path for the queue's bulk · M — closed in Phase 4** — the operational half of F-01/D-04. Deciding a filtered set exists ([README.md:440](README.md:440)); *answering* one does not.
 
 **U-02 · Job history dies with the process · S — closed in Phase 1**
 - Evidence: [pipeline/web/jobs.py:192](pipeline/web/jobs.py:192) — the registry is in-memory, log lines in a ring buffer.
@@ -303,14 +303,68 @@ Documented in [`docs/BACKUP.md`](BACKUP.md).
    fixture hands out resolves outside the repo, which is the general fix both
    incidents needed.
 
-### Phase 4 — Turn candidates into evidence · L
+### Phase 4 — Turn candidates into evidence · L — **F-01 and U-01 done** (`1b699ff`, `a8b1d4c`); F-03 and D-04 not done
 
-- **Goal:** close the gap between 1,941 collected candidates and zero citable rows.
-- **Delivers:** F-01, F-03, U-01, D-04.
-- **Out of scope:** any automatic promotion; any relevance scoring the pipeline computes itself.
-- **Acceptance:** a reviewer can open a candidate, see the source, and promote it; promotion writes the evidence row *and* a decision record naming who and when; nothing can reach `cdp_documents`, `committee_papers` or `foi_requests` without one; the obsolete `pfd_concerns_in_pdf_only` items are resolved by re-run rather than by hand, or explicitly kept with a reason.
-- **Risk:** **high** — this is the project's central refusal, and a design that makes promotion easy makes it easy to do carelessly. Build the audit trail first and the convenience second.
-- **Commit plan:** schema and promotion plumbing; then the UI; then the m08 re-run that clears the stale items.
+Suite 1303 → **1324 passed**, 1 skipped. The audit trail was built before the
+convenience, as planned.
+
+**Done — F-01, the promotion path:**
+
+- `evidence_promotions` (migration `0030`) records who promoted what, when, on
+  what note, and the candidate as it read at the time.
+- **The guarantee is structural.** Triggers on `cdp_documents`,
+  `committee_papers` and `foi_requests` refuse any insert without a matching
+  promotion row, so it holds for a module, the SQL box, and an author who has
+  not read the file — not only for `promote.py`.
+- **Promotion fetches the document.** A candidate's `payload_sha256` is the
+  hash of the *listing page the link was found on*; putting that on an
+  evidence row would claim the document had been retrieved when it had not.
+  The fetch goes through the same client the modules use, and a URL that does
+  not answer is refused rather than saved.
+- **Per row, attributed, no bulk.** There is no `promote_many` and a test
+  asserts there is not. Rejection *is* bulk — deciding a link is not what it
+  looked like is reachable from the listing, and being wrong leaves a
+  candidate a candidate.
+
+**Done — U-01, the Candidates tab:** counts per kind, filters by authority and
+status, the document URL as the most prominent thing in each row, the
+confirmed-type field beside Promote, and a promotions log. Confidence and
+match quality are displayed and never sorted on, because ordering a worklist
+by ModernGov's textual ranking turns a triage aid into a recommendation.
+
+**Not done — F-03 (workforce census verification).** The promotion mechanism
+covers the three candidate *tables*; the census is a different shape — 68
+metrics with a `verified` flag and a markdown worklist, no URL per row — and
+folding it in properly is its own piece of work rather than a fourth entry in
+`KINDS`. Deferred rather than bodged.
+
+**Not done — D-04, and it is bigger than this plan assumed [live]:**
+
+| | |
+|---|---|
+| PFD reports | 1,539 |
+| …with `matters_of_concern` | 472 |
+| Pending `pfd_concerns_in_pdf_only` | 1,067 |
+| …already answerable from the warehouse | **0** |
+| `pfd_reports` last retrieved | 2026-08-11T17:29, *before* the PDF-reading commits `c17eaf1` and `847a937` |
+| `pfd_documents` rows | 22 |
+
+So the items are exactly as stale as suspected, and **a re-run is necessary
+but not sufficient**. Two things follow:
+
+1. Answering them means fetching ~1,067 PDFs from a single host,
+   `judiciary.uk`, at one request per two seconds — over half an hour of
+   rate-limited waiting before download and text extraction, so realistically
+   one to two hours against one government server. That is a deliberate act to
+   schedule, not a thing to slip into a phase.
+2. **Even then the queue would not clear.** `record_review_item` refreshes a
+   pending item; nothing resolves one. Something has to mark an item answered
+   when the pipeline itself answers it — which is a new concept, distinct from
+   a human decision, and needs designing rather than assuming.
+
+Recommendation: do both in one small phase of their own — the resolution
+concept first, the crawl second, so the crawl's result is visible when it
+lands.
 
 ### Phase 5 — Close the fetcher · M
 
