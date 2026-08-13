@@ -53,8 +53,32 @@ class Settings(BaseSettings):
     # this on a permitted footing. Remove this entry the moment they answer —
     # either because they said yes and it is no longer needed, or because they
     # said no.
+    #
+    # Council sites whose robots.txt disallows the paths Modules 9 and 10
+    # need, audited 2026-08-13 by fetching each with the pipeline's real
+    # User-Agent: every one of these served a robots.txt that refuses the
+    # paths below, and the alternative to overriding is a council recorded as
+    # publishing nothing when it publishes plenty. The override is
+    # prefix-scoped to the specific host, the fetches still run at the
+    # standard 2s/host with conditional requests and the identifying
+    # User-Agent, and every use logs `http.robots_override` and raises a
+    # `robots_override_in_use` review item — the same shape as the mySociety
+    # entry above. These are not 403 bypasses: a server that refuses the
+    # request outright stays refused and is recorded as blocked, which is
+    # different from "publishes nothing". Treat each entry as an access
+    # request pending a reply from the council, and remove it if they say no.
+    #
+    #   liverpool.gov.uk      — m09 base URL. robots.txt refuses automated
+    #                           fetching of the council's own pages.
+    #   democracy.eastsussex.gov.uk — m10 committee portal. robots.txt refuses
+    #                           the ModernGov search paths.
+    #   committees.scilly.gov.uk — m10 committee portal. robots.txt refuses
+    #                           automated access; note the scheme is http.
     robots_exceptions: tuple[str, ...] = (
         "https://www.whatdotheyknow.com/feed/",
+        "https://www.liverpool.gov.uk/",
+        "https://democracy.eastsussex.gov.uk/",
+        "http://committees.scilly.gov.uk/",
     )
 
     # How many hosts the council-walking modules (m09, m10, m15) read at once.

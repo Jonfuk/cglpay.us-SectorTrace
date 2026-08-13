@@ -156,13 +156,24 @@ def test_no_exceptions_means_robots_is_absolute(settings):
     assert settings.robots_override_for("https://www.whatdotheyknow.com/feed/x.json") is None
 
 
-def test_shipped_exception_covers_only_the_wdtk_feed(settings):
+def test_shipped_exceptions_are_prefix_scoped(settings):
+    """Each shipped exception covers exactly its own prefix, nothing else.
+
+    Data-driven over the shipped list so a new entry has to prove its own
+    scoping rather than silently widening an existing one, and an exception
+    for one host never opens the rest of the internet.
+    """
+    shipped = settings.robots_exceptions
+    assert shipped, "shipped exceptions must not be empty-by-accident"
+    for prefix in shipped:
+        assert settings.robots_override_for(prefix + "x") == prefix
     for url in ("https://www.whatdotheyknow.com/request/x.json",
                  "https://www.whatdotheyknow.com/body/x.json",
-                 "https://example.com/feed/x.json"):
+                 "https://example.com/feed/x.json",
+                 "https://www.liverpool.gov.uk.evil.example/x",
+                 "https://democracy.eastsussex.gov.uk.evil.example/x",
+                 "https://committees.scilly.gov.uk/x"):
         assert settings.robots_override_for(url) is None
-    assert settings.robots_override_for(
-        "https://www.whatdotheyknow.com/feed/search/x.json") == "https://www.whatdotheyknow.com/feed/"
 
 
 def test_get_captures_provenance_and_archives_body(httpx_mock, settings):
