@@ -92,6 +92,38 @@ def _names_resolve_somewhere_public(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _get_settings_returns_the_test_settings(settings: Settings, monkeypatch):
+    """`get_settings()` anywhere in the codebase resolves to this test's tmp.
+
+    Three times now the suite has written into the repository because a
+    function took `settings: Settings | None = None`, a test did not pass one,
+    and the default reached back into the checkout: 5 MB of fake module logs
+    into `logs/`, 7.7 MB of backups into `data/backups/`, and a
+    `verified_websites.json` full of Barnet.
+
+    Patching the fixtures one at a time treats the symptom. The cause is that
+    the default is the operator's real configuration, so this makes the
+    default safe instead. Tests that exercise settings resolution itself build
+    their own `Settings` and are unaffected.
+    """
+    import sys
+
+    from pipeline import config
+
+    stub = lambda: settings  # noqa: E731 - a fixture-local alias, not a def
+    monkeypatch.setattr(config, "get_settings", stub)
+    # And every module that did `from pipeline.config import get_settings`,
+    # because that binds the function into the importing module's namespace
+    # and patching `config` alone leaves ten copies of the original behind.
+    # Discovered rather than listed: a new module importing it that way would
+    # otherwise quietly reopen this hole.
+    for name, module in list(sys.modules.items()):
+        if name.startswith("pipeline") and getattr(module, "get_settings", None) is not None:
+            monkeypatch.setattr(module, "get_settings", stub, raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _logs_stay_out_of_the_repo(tmp_path: Path, monkeypatch):
     """No test writes into the operator's `logs/`.
 
@@ -128,6 +160,7 @@ def settings(tmp_path: Path) -> Settings:
         # depositing its own output next to the operator's — which it has now
         # done twice, once into logs/ and once into data/backups/.
         backup_dir=tmp_path / "backups",
+        verified_websites_path=tmp_path / "verified_websites.json",
         # No politeness delay against mocked transports — the rate limiter is
         # exercised directly in test_http.py with its own explicit override.
         default_rate_limit_seconds=0.0,

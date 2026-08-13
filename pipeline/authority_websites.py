@@ -34,7 +34,10 @@ committee_system values:
 """
 from __future__ import annotations
 
+import json
+import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -953,6 +956,108 @@ def detect_committee_system(probe) -> tuple[str, str | None]:
     return "unknown", None
 
 
+# --- answers given in the review UI, kept where the warehouse cannot lose them -
+
+_VERIFIED_LOCK = threading.Lock()
+_VERIFIED_CACHE: dict = {"mtime": None, "path": None, "entries": {}}
+
+
+def verified_websites(settings=None) -> dict[str, AuthorityWebsite]:
+    """URLs a reviewer answered in the UI, read from the tracked JSON file.
+
+    The same evidence as an entry below — the server confirmed the URL
+    responded before it was stored — written somewhere git can see it. The
+    override table remains the live record; this is the copy that survives it.
+    On 2026-08-13 that table was emptied and 191 verified URLs went with it,
+    of which only the ones a document happened to record were recoverable.
+
+    Cached on the file's mtime, because Modules 9 and 10 ask once per
+    authority and there are 347 of them.
+    """
+    from pipeline.config import get_settings
+
+    path = Path((settings or get_settings()).verified_websites_path)
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+
+    with _VERIFIED_LOCK:
+        if _VERIFIED_CACHE["mtime"] == mtime and _VERIFIED_CACHE["path"] == path:
+            return _VERIFIED_CACHE["entries"]
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # A malformed file must not take the modules down: the registry
+            # below and the override table still answer.
+            return {}
+        entries = {
+            code: AuthorityWebsite(
+                ons_code=code,
+                name=item.get("name") or code,
+                base_url=item.get("base_url"),
+                committee_url=item.get("committee_url"),
+                committee_system=item.get("committee_system"),
+                verified_on=item.get("verified_on"),
+                source="human_verified",
+            )
+            for code, item in sorted(raw.get("authorities", {}).items())
+        }
+        _VERIFIED_CACHE.update(mtime=mtime, path=path, entries=entries)
+        return entries
+
+
+def record_verified_website(ons_code: str, name: str | None, field: str, url: str,
+                             committee_system: str | None, verified_by: str,
+                             verified_on: str, settings=None) -> None:
+    """Write one answer into the tracked file, merging with what is there.
+
+    Read-modify-write under a lock. Two reviewers answering at once is not a
+    scenario this project has, and the file is a few hundred short entries.
+
+    Never raises at the caller. A resolution that succeeded must not be
+    reported as failed because a file could not be written — the override is
+    already stored, and the warning says what to do about it.
+    """
+    from pipeline.config import get_settings
+
+    path = Path((settings or get_settings()).verified_websites_path)
+    try:
+        with _VERIFIED_LOCK:
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raw = {}
+            authorities = raw.setdefault("authorities", {})
+            entry = authorities.setdefault(ons_code, {})
+            # Answering one question must not erase the answer to the other,
+            # the same rule the override row follows.
+            entry["name"] = name or entry.get("name") or ons_code
+            entry[field] = url
+            if committee_system:
+                entry["committee_system"] = committee_system
+            entry["verified_on"] = verified_on
+            entry["verified_by"] = verified_by
+            raw["note"] = (
+                "Written by the review UI when a reviewer answers where a "
+                "council publishes, after the server has confirmed the URL "
+                "responds. Tracked in git so an answer outlives the "
+                "warehouse -- see pipeline/authority_websites.py. Safe to "
+                "hand-edit; entries here are read by website_for().")
+            raw["authorities"] = dict(sorted(authorities.items()))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(raw, indent=2, sort_keys=False) + "\n",
+                             encoding="utf-8")
+            _VERIFIED_CACHE.update(mtime=None, path=None, entries={})
+    except OSError as exc:  # pragma: no cover - depends on the filesystem
+        import structlog
+
+        structlog.get_logger().warning(
+            "authority_websites.record_failed", ons_code=ons_code,
+            path=str(path), error=str(exc),
+            note="the override was stored; this answer is not in git")
+
+
 def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
     """The authority's website: a reviewer's answer first, then the
     hand-verified registry, then mySociety.
@@ -973,6 +1078,13 @@ def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
     override = _override_for(ons_code, conn)
     if override:
         return override
+
+    # The reviewer's own answer, from the tracked file, before the seed
+    # registry: it is more specific and more recent, and it is the same class
+    # of evidence recorded in the same place.
+    answered = verified_websites().get(ons_code)
+    if answered:
+        return answered
 
     configured = AUTHORITY_WEBSITES.get(ons_code)
     if configured or conn is None:
@@ -1046,4 +1158,6 @@ def _override_for(ons_code: str, conn) -> AuthorityWebsite | None:
 
 
 def configured_ons_codes() -> set[str]:
-    return set(AUTHORITY_WEBSITES)
+    """Every authority answered in git — the seed registry plus the file the
+    review UI writes. Both are committed, so both count as configured."""
+    return set(AUTHORITY_WEBSITES) | set(verified_websites())

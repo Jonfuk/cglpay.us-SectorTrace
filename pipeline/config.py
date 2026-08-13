@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     # an interrupted rewrite -- and not against losing the disk. Copy one off
     # the machine if that is the risk you are covering.
     backup_dir: Path = REPO_ROOT / "data" / "backups"
+    # Where a URL answered in the review UI is written so it outlives the
+    # warehouse. Inside pipeline/ and tracked in git, unlike everything else
+    # above: that is the whole point of it. See pipeline/authority_websites.py.
+    verified_websites_path: Path = REPO_ROOT / "pipeline" / "verified_websites.json"
 
     charity_commission_api_key: str | None = None
     companies_house_api_key: str | None = None

@@ -76,6 +76,7 @@ def test_the_test_settings_never_write_into_the_repo(settings):
 
     root = REPO_ROOT.resolve()
     for name in ("database_path", "raw_archive_dir", "logs_dir",
-                  "export_output_dir", "backup_dir"):
+                  "export_output_dir", "backup_dir",
+                  "verified_websites_path"):
         resolved = getattr(settings, name).resolve()
         assert not resolved.is_relative_to(root), f"{name} points into the repo"

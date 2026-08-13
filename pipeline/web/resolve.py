@@ -27,6 +27,7 @@ import re
 import sqlite3
 from urllib.parse import urljoin, urlparse
 
+from pipeline import authority_websites
 from pipeline.authority_websites import detect_committee_system
 from pipeline.config import Settings, get_settings
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
@@ -150,6 +151,19 @@ def check_url(url: str, settings: Settings | None = None,
     return result
 
 
+def _authority_name(conn: sqlite3.Connection, ons_code: str) -> str | None:
+    """The authority's name, so the tracked file is readable by a person.
+
+    Best effort: a missing name is cosmetic, and the ONS code is the key.
+    """
+    try:
+        row = conn.execute(
+            "SELECT name FROM authorities WHERE ons_code = ?", (ons_code,)).fetchone()
+    except Exception:
+        return None
+    return row["name"] if row else None
+
+
 def resolve_authority_url(
     conn: sqlite3.Connection,
     item_id: int,
@@ -249,6 +263,28 @@ def resolve_authority_url(
         if note:
             decision_note += f" — {note}"
         decision = _apply(conn, [item_id], "approved", resolved_by, decision_note, now)
+
+    # And again where git can see it. The override row above is the live
+    # record and this is the one that survives it: on 2026-08-13 that table
+    # was emptied and 191 verified URLs went with it, of which only the 105
+    # a verification document happened to record could be recovered.
+    #
+    # Written after the transaction, deliberately. The answer is stored and
+    # the item is decided by this point, so a filesystem that refuses cannot
+    # undo either -- it can only leave this copy missing, which is what the
+    # warning inside says.
+    authority_websites.record_verified_website(
+        ons_code=ons_code,
+        name=_authority_name(conn, ons_code),
+        field=field,
+        url=checked["url"],
+        committee_system=(checked["system"]
+                           if field == "committee_url" and checked["system"] != "unknown"
+                           else None),
+        verified_by=resolved_by,
+        verified_on=now[:10],
+        settings=settings,
+    )
 
     return {
         "ons_code": ons_code,
