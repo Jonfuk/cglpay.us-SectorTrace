@@ -202,6 +202,49 @@ def start_run(registry_of_jobs, settings, body: dict):
     )
 
 
+def start_export(registry_of_jobs, settings, body: dict):
+    """Write an export target, as a job.
+
+    Same job slot as a module run, which is right for a different reason than
+    the integrity check: an export reads the whole warehouse and writes files
+    named after what it found, so running one while a module is rewriting the
+    tables underneath it produces an artefact that matches no moment in time.
+    """
+    from pathlib import Path
+
+    from pipeline.exports import run as export_run
+    from pipeline.web import artefacts
+
+    target = str(body.get("target") or "").strip()
+    if not target:
+        raise JobError(f"Which target? One of {', '.join(export_run.TARGETS)}, or all.")
+
+    try:
+        targets = export_run.resolve_targets(target)
+    except export_run.ExportError as exc:
+        raise JobError(str(exc), status=404) from None
+
+    base = artefacts.export_root(settings)
+    docs_dir = Path(settings.logs_dir).parent / "docs"
+
+    def work() -> list[dict]:
+        conn = db.get_connection(settings)
+        try:
+            db.apply_migrations(conn)
+            # push=False, always. Sending tabs to a shared Google document
+            # needs credentials and someone watching; it stays a CLI flag.
+            results = export_run.run_targets(conn, targets, base, docs_dir,
+                                              settings, push=False)
+            conn.commit()
+        finally:
+            conn.close()
+        return results
+
+    return registry_of_jobs.start(
+        kind="export", label=f"export {target}",
+        args={"target": target}, work=work, thread_names=set())
+
+
 class _LoggingObserver(runner.RunObserver):
     """A run reported through structlog, which the job's handler is capturing.
 

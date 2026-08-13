@@ -248,7 +248,7 @@ def test_the_admin_assets_served_are_the_operator_files(client):
 def test_the_admin_modules_are_served(client):
     """A module that 404s takes the whole import graph with it, and the page
     keeps working well enough that nobody notices the palette is gone."""
-    for name in ("shell", "dom", "theme", "palette", "pipeline", "health"):
+    for name in ("shell", "dom", "theme", "palette", "pipeline", "health", "exports"):
         response = client.get(f"/admin/js/{name}.js")
         assert response.status_code == 200, f"/admin/js/{name}.js is not served"
         assert response.headers["Content-Type"].startswith("text/javascript")

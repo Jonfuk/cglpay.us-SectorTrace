@@ -42,6 +42,7 @@
     <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
     <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
     <button class="tab" data-tab="health" role="tab">Health</button>
+    <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
   </nav>
@@ -235,6 +236,46 @@
         <h2>Most recent</h2>
         <div id="failure-rows"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Exports and overrides ---------------------------------------------------->
+  <!-- Rendered by /admin/js/exports.js. -->
+  <section id="tab-exports" class="tabpanel">
+    <div class="runbar">
+      <span class="muted small">Write</span>
+      <button class="btn" data-export="sheets">Sheets</button>
+      <button class="btn" data-export="geojson">GeoJSON</button>
+      <button class="btn" data-export="echarts">Charts</button>
+      <button class="btn" data-export="docs">Data dictionary</button>
+      <button class="btn primary" data-export="all">Everything</button>
+      <span class="spacer"></span>
+      <span id="export-status" class="muted small"></span>
+    </div>
+    <p class="muted small">
+      Every file is written with a companion <code>.provenance.json</code>.
+      Pushing Sheets tabs to Google stays on the command line: it writes to a
+      shared document and needs credentials and someone watching.
+    </p>
+
+    <div class="panel">
+      <div class="row">
+        <h2 style="margin: 0">Files</h2>
+        <span class="spacer"></span>
+        <span id="export-root" class="muted small mono"></span>
+      </div>
+      <div id="export-files"></div>
+    </div>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>Authority URL overrides</h2>
+      <p class="muted small">
+        Where a council actually publishes, recorded against the name of whoever
+        checked. Written by the review queue when a
+        <code>authority_website_unknown</code> or
+        <code>committee_url_unknown</code> item is resolved.
+      </p>
+      <div id="override-list"></div>
     </div>
   </section>
 

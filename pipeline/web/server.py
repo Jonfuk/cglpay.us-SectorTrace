@@ -43,6 +43,7 @@ from pipeline import db
 from pipeline.config import Settings, get_settings
 from pipeline.web import (
     admin,
+    artefacts,
     health,
     public_export,
     public_queries,
@@ -89,7 +90,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # reloading working review tooling differently buys nothing -- so everything
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
-for _module in ("shell", "dom", "theme", "palette", "pipeline", "health"):
+for _module in ("shell", "dom", "theme", "palette", "pipeline", "health", "exports"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -359,6 +360,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.command not in ("GET", "HEAD"):
             raise ApiError(f"{self.command} is not supported here.", status=405)
 
+        # Before the warehouse is opened: this one serves a file off disk and
+        # has no use for a connection.
+        if path == "/api/admin/exports/file":
+            return self._download_export(params)
+
         conn = queries.readonly_connection(self.settings)
         try:
             if path == "/api/v1/export":
@@ -417,6 +423,43 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _download_export(self, params: dict[str, list[str]]) -> None:
+        """Hand back one export file, streamed.
+
+        The path is not sanitised, it is matched: `artefacts.resolve_for_download`
+        compares it against a listing computed on the spot, so anything that is
+        not a file this server just enumerated is simply not found. See that
+        module for why it is done that way round.
+        """
+        wanted = _str(params, "path")
+        target = artefacts.resolve_for_download(self.settings, wanted)
+        if target is None:
+            raise ApiError(f"No export file {wanted!r}.", status=404)
+
+        size = target.stat().st_size
+        self._responded = True
+        self.send_response(200)
+        self.send_header("Content-Type", artefacts.content_type(target))
+        self.send_header("Content-Length", str(size))
+        # An attachment always. Some of these are 23 MB of GeoJSON, and none of
+        # them is improved by a browser trying to render it in a tab.
+        self.send_header("Content-Disposition",
+                          f'attachment; filename="{target.name}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+
+        if self.command == "HEAD":
+            return
+        with target.open("rb") as handle:
+            while True:
+                chunk = handle.read(artefacts.CHUNK_BYTES)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
     # --- read routes ----------------------------------------------------------
 
     def _get(self, path: str, params: dict[str, list[str]], conn) -> Any:
@@ -463,6 +506,9 @@ class Handler(BaseHTTPRequestHandler):
                 search=_str(params, "q") or None,
                 limit=_int(params, "limit", 100),
                 offset=_int(params, "offset", 0))
+
+        if path == "/api/admin/exports":
+            return artefacts.listing(self.settings)
 
         if path == "/api/admin/jobs":
             running = self.jobs.running()
@@ -578,7 +624,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/query": self._query,
             "/api/admin/run": self._run,
             "/api/admin/check": self._check,
+            "/api/admin/export": self._export_job,
         }
+
+    def _export_job(self, body: dict) -> Any:
+        job = admin.start_export(self.jobs, self.settings, body)
+        return {**job.head(), "log": job.since(-1)[0], "next": job.since(-1)[1]}
 
     def _check(self, body: dict) -> Any:
         """Integrity-check the warehouse, as a job.

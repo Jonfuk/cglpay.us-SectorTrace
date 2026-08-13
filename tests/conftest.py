@@ -29,6 +29,7 @@ def settings(tmp_path: Path) -> Settings:
         raw_archive_dir=tmp_path / "raw",
         migrations_dir=Path(__file__).resolve().parent.parent / "pipeline" / "migrations",
         logs_dir=tmp_path / "logs",
+        export_output_dir=tmp_path / "exports" / "output",
         # No politeness delay against mocked transports — the rate limiter is
         # exercised directly in test_http.py with its own explicit override.
         default_rate_limit_seconds=0.0,

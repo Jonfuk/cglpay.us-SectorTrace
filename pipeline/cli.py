@@ -36,7 +36,10 @@ def list_modules() -> None:
 @app.command()
 def export(
     target: str = typer.Argument(..., help="sheets | geojson | echarts | docs | all"),
-    output_dir: str = typer.Option("exports/output", help="Where to write export files"),
+    output_dir: str = typer.Option(
+        None, help="Where to write export files. Defaults to the configured "
+                    "export_output_dir, which is also the only directory the "
+                    "web UI will serve a download from."),
     push: bool = typer.Option(False, "--push", help="Also push Sheets tabs to Google (needs credentials)"),
 ) -> None:
     """Generate exports. Every file is written with a companion .provenance.json."""
@@ -47,33 +50,25 @@ def export(
     conn = db.get_connection(settings)
     db.apply_migrations(conn)
 
-    from pipeline.exports import docs as docs_export
-    from pipeline.exports import echarts as echarts_export
-    from pipeline.exports import geojson as geojson_export
-    from pipeline.exports import sheets as sheets_export
+    from pipeline.exports import run as export_run
 
-    base = Path(output_dir)
+    base = Path(output_dir) if output_dir else Path(settings.export_output_dir)
     docs_dir = Path(settings.logs_dir).parent / "docs"
-    targets = ["sheets", "geojson", "echarts", "docs"] if target == "all" else [target]
 
-    for name in targets:
-        if name == "sheets":
-            paths = sheets_export.export_sheets(conn, base / "sheets", push, settings)
-            typer.echo(f"sheets: {len(paths)} tabs -> {base / 'sheets'}")
-        elif name == "geojson":
-            paths = geojson_export.export_all(conn, base / "geojson")
-            typer.echo(f"geojson: {len(paths)} layers -> {base / 'geojson'}")
-        elif name == "echarts":
-            paths = echarts_export.export_all(conn, base / "echarts")
-            typer.echo(f"echarts: {len(paths)} charts -> {base / 'echarts'}")
-        elif name == "docs":
-            path = docs_export.write_data_dictionary(conn, settings.migrations_dir, docs_dir)
-            typer.echo(f"docs: wrote {path}")
+    try:
+        targets = export_run.resolve_targets(target)
+        results = export_run.run_targets(conn, targets, base, docs_dir, settings, push)
+    except export_run.ExportError as exc:
+        typer.echo(str(exc), err=True)
+        conn.close()
+        raise typer.Exit(code=1) from None
+
+    for result in results:
+        if result["target"] == "docs":
+            typer.echo(f"docs: wrote {result['paths'][0]}")
         else:
-            typer.echo(f"Unknown export target {name!r}. "
-                        "Use sheets, geojson, echarts, docs or all.", err=True)
-            conn.close()
-            raise typer.Exit(code=1)
+            typer.echo(f"{result['target']}: {result['count']} {result['noun']} "
+                        f"-> {base / result['target']}")
 
     conn.commit()
     conn.close()

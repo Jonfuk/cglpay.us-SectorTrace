@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"
     keywords_path: Path = REPO_ROOT / "pipeline" / "keywords.py"
     logs_dir: Path = REPO_ROOT / "logs"
+    # Where `pipeline export` writes, and the only directory the web UI will
+    # serve a file from. Declared rather than inferred from another path: the
+    # server needs to know it without being told on a command line, and
+    # "wherever the warehouse is, two levels up" is a guess that happens to be
+    # right for this layout and silently wrong for any other.
+    export_output_dir: Path = REPO_ROOT / "exports" / "output"
 
     charity_commission_api_key: str | None = None
     companies_house_api_key: str | None = None

@@ -283,7 +283,33 @@ A "Health" tab answering "is the warehouse fresh, complete, and clean?"
   `pipeline/migrations/`, `PRAGMA integrity_check` behind a button (it can
   take seconds — run it as a job, not inline).
 
-### Phase 4 — exports manager and overrides
+### Phase 4 — exports manager and overrides — **done**
+
+- `pipeline/exports/run.py` holds the target loop, so an export written from
+  the browser is the export `pipeline export` writes. `--push` to Google
+  Sheets stays CLI-only: it writes to a shared document other people read, and
+  needs credentials and someone watching.
+- Exports run as jobs on the same single slot as a module run — an export
+  taken while the tables are being rewritten matches no moment in time.
+- **Downloads are matched, not sanitised.** `pipeline/web/artefacts.py` walks
+  the export directory, and a file is served only if it appears in the listing
+  the server just computed. There is no `..` check to get right; traversal is
+  unrepresentable. Symlinks are resolved before comparison, so a link planted
+  inside the export tree pointing at the warehouse is dropped from the listing
+  and therefore undownloadable. Downloads are streamed — the largest real
+  artefact is 23 MB.
+- Provenance companions travel with the file they describe rather than being
+  listed beside it.
+- `export_output_dir` is now a setting. It was briefly derived from the
+  warehouse's location (`database_path.parent.parent`), which is right for
+  this layout and a guess for any other — and in tests resolved to a directory
+  shared between them. The CLI's `--output-dir` now defaults to the same
+  setting, so what the CLI writes is what the UI lists.
+- Overrides table showing `authority_url_overrides` — where a council actually
+  publishes, against the name of whoever checked. Read-only here: it is
+  written by resolving a review item, which is where the audit trail belongs.
+
+### Phase 4 — original sketch, for reference
 
 - **Exports tab:** trigger `export` targets (sheets/geojson/echarts/docs) as
   background jobs through the same job registry; list `exports/output/`
