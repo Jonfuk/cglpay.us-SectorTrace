@@ -23,6 +23,14 @@ code is written.
 
 ## Part 0 — Read before you form any opinion
 
+**This brief goes stale.** Parallel sessions commit to this checkout
+continuously, and every concrete claim below — what is built, what is
+deliberately absent, what a file is called — was true when it was written and
+may not be now. Verify as you read, and where the tree disagrees with this
+document, **the tree wins**: note the drift in your roadmap so the brief can
+be corrected, and carry on. Nothing here is an instruction to make the code
+match the description.
+
 Read these in full. Do not skim, and do not start proposing until you have:
 
 - `README.md` — the project's own account of what it collects, what it
@@ -43,10 +51,11 @@ Read these in full. Do not skim, and do not start proposing until you have:
 - `docs/CAVEATS.md`, `docs/SOURCES.md`, `docs/DATA_DICTIONARY.md`.
 - `pipeline/` in whatever depth each area needs: `registry.py`, `runner.py`,
   `parallel.py`, `db.py`, `http.py`, `config.py`, `cli.py`, `console.py`,
-  `meters.py`, `exports/`, `web/` (`server.py`, `admin.py`, `queries.py`,
-  `public_queries.py`, `health.py`, `jobs.py`, `resolve.py`, `artefacts.py`),
-  `web/static/` (both the admin bundle and `static/public/`), all 17 modules
-  `m00`–`m16`, and `migrations/0001`–`0027`.
+  `meters.py`, `exports/`, `web/` (`server.py`, `admin.py`, `review.py`,
+  `queries.py`, `public_queries.py`, `public_export.py`, `health.py`,
+  `jobs.py`, `resolve.py`, `artefacts.py`), `web/static/` (both the admin
+  bundle and `static/public/`), all 17 modules `m00`–`m16`, and every file in
+  `pipeline/migrations/`.
 - `tests/` — what is covered, and more importantly what is not.
 - `git log --oneline -40` and the current `git status`/`git diff`. Commit
   messages in this repo say *why*; they are part of the design record.
