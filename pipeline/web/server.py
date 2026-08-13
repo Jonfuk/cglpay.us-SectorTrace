@@ -77,7 +77,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 }
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
-for _module in ("theme", "components", "charts"):
+for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)

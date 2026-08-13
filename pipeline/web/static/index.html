@@ -4,13 +4,17 @@
   requests. Fonts, styles and script are local, because a review tool that
   needs the internet to render is one that stops working in the places this
   pipeline is most likely to be run from.
+
+  Asset paths carry the /admin prefix. They are not decoration: /styles.css
+  and /app.js belong to the public portal, so an unprefixed reference here
+  loads the portal's stylesheet and script into this page.
 -->
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evidence pipeline — review</title>
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/admin/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128203;</text></svg>">
 </head>
 <body>
@@ -162,6 +166,6 @@
 
 </main>
 
-<script src="/app.js"></script>
+<script src="/admin/app.js"></script>
 </body>
 </html>
