@@ -3,15 +3,24 @@
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 1 skipped, 18 deselected, 422s**). **All seven phases have been worked**:
-1–3, 5 and 6 are done; Phase 4 delivered F-01 and U-01 and left F-03 and D-04
-open; Phase 7 measured P-01 and F-04 and left P-03 open. Each phase records
-what changed from the plan as it landed.
+1–3, 5 and 6 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
+(D-04 followed on 2026-08-13); Phase 7 measured P-01 and F-04 and left P-03
+open. Each phase records what changed from the plan as it landed.
 
-**Three findings remain open, and each needs a decision rather than more
-work:** F-03 (census verification is a different shape from candidate
-promotion), D-04 (~1,067 PDFs from one government host, plus a
-resolve-on-re-run concept that does not exist yet), and P-03 (two full
-collections to compare). See the phase notes for what each would take.
+**What is left, as of 2026-08-13.** Everything the audit filed has been
+delivered, measured and declined, or is listed here. None of the five is
+blocked on effort; each needs a decision first.
+
+| | Finding | What it needs |
+|---|---|---|
+| **F-03** | Workforce census stays unverified — 68 metrics, all `verified = 0` | A design. The census is a different shape from candidate promotion: no URL per row, a markdown worklist, and a caveat forbidding cross-year differencing. |
+| **F-05** | Nothing is tracked over time | A decision before a design, and my recommendation is still *not yet* — history invites exactly the differencing `docs/CAVEATS.md` forbids. Add it to one table if one specific claim needs it. |
+| **D-05** | An answer given in the UI has no home outside the warehouse | Making a resolution write a registry-shaped record. 2026-08-13 turned this from a tidiness point into the reason ~86 verified URLs are gone for good. |
+| **D-06** | Nothing takes a backup unless a person remembers | A schedule, or a hook before destructive operations, plus a retention rule. |
+| **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
+
+Also standing, and deliberately: **O-03** is half done — tests no longer write
+into `logs/`, but nothing rotates them.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -87,14 +96,22 @@ Effort: S = under a day, M = a few days, L = a week or more.
 **D-03 · Parse failures are healthy — no action**
 - **[live]** 22 rows: 20 are one m08 reason (`no 'Ref :' field found`), plus one m03 pension-costs line and one m11 amount. That is a source-shape note and two singletons, not a parser problem.
 
-**D-04 · 88% of the queue is three item types, and one may be obsolete · M**
+**D-04 · 88% of the queue is three item types, and one may be obsolete · M — closed 2026-08-13** (`64d309e`, `4d25beb`)
+- **Outcome:** 459 `pfd_concerns_in_pdf_only` closed once m08 had read the PDFs (`pfd_documents` 22 → 2,312), and 53 `committee_url_unknown` closed once the verified URLs were committed to the registry. 608 PFD items remain pending and are *correct* — the PDF was read and still yielded no concerns, which is the source limitation `docs/CAVEATS.md` describes.
+- The missing concept the audit predicted turned out to be the whole job: `review_queue.status` gains `answered`, meaning the pipeline went and got what the item was waiting for. Deliberately not a `review_decision` — see `pipeline/review_sweep.py` and migration `0031`.
+- `unmatched_buyer_name` (2,667) and `possible_group_company` (493) are untouched and still need people. Neither is answerable by anything the pipeline holds.
 - Evidence **[live]**: `unmatched_buyer_name` 2,667, `pfd_concerns_in_pdf_only` 1,067, `possible_group_company` 493, of 4,815 total.
 - `pfd_concerns_in_pdf_only` was filed because the concerns were PDF-only ([docs/CAVEATS.md:159](docs/CAVEATS.md:159)); commits `c17eaf1` and `847a937` taught m08 to read those PDFs. So up to 1,067 items may now be answerable by re-running rather than by a human — but they will not clear themselves, because a decided item stays decided and a pending one is only refreshed ([README.md:470](README.md:470)).
 - Costs today: a queue whose bulk is undecidable one-at-a-time trains its operator to ignore it.
 
-**D-05 · "Approved" on an unknown-URL item does not mean it was answered · S**
-- Evidence **[live]**: 132 `authority_website_unknown` and 53 `committee_url_unknown` are `approved`, while `authority_url_overrides` holds 191 rows. Approval records a judgement; answering writes an override ([README.md:445](README.md:445)). The two counts are close enough to look equivalent and are not.
-- Worth one query to confirm they correspond, and a UI distinction if they do not.
+**D-05 · "Approved" on an unknown-URL item does not mean it was answered · S — still open, and 2026-08-13 made the case for it**
+- Evidence **[live, superseded]**: 132 `authority_website_unknown` and 53 `committee_url_unknown` were `approved` while `authority_url_overrides` held 191 rows. Approval records a judgement; answering writes an override ([README.md:445](README.md:445)).
+- **What happened since:** the override table was emptied and all 191 URLs went with it. The 105 committee URLs were recovered from `docs/verification/issue1_committee_urls.md` into the code registry; the ~86 council base URLs answered in the UI were **not recoverable**, because the answer only ever existed in that table.
+- So the finding is no longer "these two counts might not correspond". It is that **an answer given in the UI has no home outside the warehouse**. The fix is for a resolution to produce a registry-shaped record — a committed entry, or at minimum a line in a verification document — at the moment it is given, rather than relying on somebody later getting round to a commit.
+
+**D-06 · Nothing takes a backup unless a person remembers · S — new, 2026-08-13**
+- Evidence: `pipeline/backup.py` exists and works (Phase 3), and on the day the override table was emptied the only backup on disk had been taken *after* the loss. An earlier one taken the same afternoon was no longer there.
+- A backup you have to remember is a backup you take too late. Worth a scheduled or pre-destructive-operation hook, and a retention rule so that clearing the directory of test debris cannot take the real snapshots with it.
 
 ### C. Pipeline performance
 
@@ -529,8 +546,11 @@ anyone is waiting on.
 
 ## 7. Open questions
 
-1. **Who verifies candidates, and to what standard?** Phase 4 needs the rule before it needs the UI. My recommendation: one named reviewer per row, the same identity `review_decisions` already records, and no bulk promote for anything above a candidate's source page — bulk *reject* is fine. Depends on whether anyone besides you will do it.
+1. **Who verifies candidates, and to what standard?** *Phase 4 built it on the recommendation below; the question of who actually does the verifying is still yours.* My recommendation: one named reviewer per row, the same identity `review_decisions` already records, and no bulk promote for anything above a candidate's source page — bulk *reject* is fine. Depends on whether anyone besides you will do it.
 2. **Do you want history at all (F-05)?** Recommendation: not yet, and not as a general "version every table". If a specific claim needs it — advertised bands over time is the plausible one — add history to that table alone, with a caveat forbidding the differencing the census taught you to forbid.
-3. **Should `m13` be re-run now?** Recommendation: yes, in Phase 1, because an empty budget table is currently indistinguishable from a broken parser and one run settles it.
+3. ~~**Should `m13` be re-run now?**~~ *Settled in Phase 1:* re-run, and it had been a dry run all along. 477,199 rows.
 4. **Retention for `data/raw` (P-02).** Recommendation: keep everything until it hurts, but measure and document the curve now so the decision is not taken in a hurry at 20 GB.
 5. **Is `--jobs 4` worth promoting to default?** Recommendation: only after Phase 7's comparison, and probably not — the current default is the conservative one and the run is not interactive.
+
+6. **Should a review resolution write to the codebase as well as the warehouse (D-05)?** Recommendation: yes. The UI already confirms a URL responds before storing it, which is the same standard `authority_websites.py` sets — so the answer is registry-quality at the moment it is given, and only its filing is not. Losing 86 of them proved the point.
+7. **How often should `pipeline backup` run, and who deletes old ones (D-06)?** Recommendation: before every `run all` and on a daily schedule, keeping the last seven plus any labelled one. The failure was not that backups did not work; it was that the only one on disk had been taken after the damage.
