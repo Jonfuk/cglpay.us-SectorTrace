@@ -123,6 +123,74 @@ PUBLIC_MAX_AGE = 300
 
 MAX_BODY_BYTES = 256 * 1024
 
+# --- Content Security Policy ---------------------------------------------------
+#
+# Not the primary defence and not a substitute for one. Warehouse values reach
+# both pages as text nodes, never as concatenated HTML, and static/app.js
+# throws on an `html:` prop to keep it that way. This is the layer underneath
+# that: if a value ever does reach the parser, the policy decides whether it
+# can then load anything, phone anywhere, or frame this page inside another.
+#
+# `frame-ancestors 'none'` is the part that earns its place today. This server
+# has no authentication by design, so any page on the LAN could otherwise
+# frame /admin and drive it with the operator's own browser.
+#
+# Scripts differ between the two surfaces, which is why the policy is computed
+# per path rather than being one constant:
+#
+#   * The portal has no inline script at all, so it gets `script-src 'self'`
+#     with nothing added.
+#   * The operator UI has exactly one -- the three lines in <head> that apply a
+#     saved theme before the stylesheet paints, which cannot move to a file
+#     without reintroducing the flash it exists to prevent. It is allowed by
+#     hash, read from the file being served, so editing that script without
+#     updating anything here cannot silently leave the page broken: the hash
+#     follows the file, and a test asserts the two agree.
+#
+# `style-src` keeps 'unsafe-inline' on both. The operator UI has five style
+# attributes, and the vendored table and chart libraries set styles at
+# runtime; hashing attribute styles needs 'unsafe-hashes' and buys little.
+# Styles are a defacement vector, not an exfiltration one.
+_CSP_COMMON = (
+    "default-src 'self'",
+    "img-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+)
+
+_INLINE_SCRIPT_RE = re.compile(rb"<script>(.*?)</script>", re.S)
+
+
+def inline_script_hashes(page: Path) -> tuple[str, ...]:
+    """CSP hashes for every inline <script> in a page we serve.
+
+    Read as bytes and hashed as bytes: the browser hashes exactly what is
+    between the tags, and reading in text mode would translate CRLF into LF on
+    Windows and produce a hash that matches nothing.
+    """
+    import base64
+    import hashlib
+
+    try:
+        source = page.read_bytes()
+    except OSError:  # pragma: no cover - a missing page is a 404, not a policy
+        return ()
+    return tuple(
+        "'sha256-" + base64.b64encode(hashlib.sha256(body).digest()).decode() + "'"
+        for body in _INLINE_SCRIPT_RE.findall(source))
+
+
+def content_security_policy(path: str) -> str:
+    """The policy for one response, by which front end it belongs to."""
+    script = ["script-src 'self'"]
+    if path.startswith("/admin"):
+        script.extend(inline_script_hashes(STATIC_DIR / "index.html"))
+    return "; ".join((*_CSP_COMMON, " ".join(script)))
+
 # Below this a response is not worth compressing: the CPU and the round trip
 # through zlib cost more than the bytes saved, and most replies here are a few
 # hundred bytes of JSON.
@@ -177,6 +245,15 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     protocol_version = "HTTP/1.1"
 
+    # A client that opens a connection and then says nothing holds the thread
+    # that accepted it, and ThreadingHTTPServer starts one per connection with
+    # no ceiling. Without this the class attribute is None and the read blocks
+    # forever. Long enough that a phone on a slow LAN finishes its request,
+    # short enough that a stalled one is not permanent. Note this bounds the
+    # *request*: a long-running job is watched by polling, so no response this
+    # server sends is held open for minutes.
+    timeout = 30
+
     # Reset per request in _dispatch. Declared here so the error path is safe
     # even for a request that never reaches it.
     _body_read = False
@@ -203,6 +280,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _accepts_gzip(self) -> bool:
         return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
+    def _send_security_headers(self) -> None:
+        """The same four on every response this server sends.
+
+        On every response rather than only on HTML, because a policy that
+        depends on remembering to add it to the next route added is a policy
+        that will be missing from the next route added. `Referrer-Policy`
+        matters here specifically: warehouse state travels in the URL hash --
+        `#review?module=m10_committee_papers`, `#database?table=...` -- and a
+        link out of the operator UI should not carry the queue someone was
+        clearing into a third party's logs.
+        """
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy",
+                          content_security_policy(urlparse(self.path).path))
+        # Redundant beside frame-ancestors for any browser from the last few
+        # years, and free for anything older.
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
 
     def _send(self, status: int, body: bytes, content_type: str,
                max_age: int | None = None, etag: str | None = None) -> None:
@@ -252,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
         # The API is same-origin only. No CORS headers are ever sent, so a
         # cross-origin page cannot read a reply even if it manages to send a
         # request.
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self._send_security_headers()
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -407,6 +503,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control",
                               f"max-age={cache}, private" if cache else "no-store")
             self.send_header("Vary", "Accept-Encoding")
+            # A 304 tells the browser to reuse what it has, and the policy the
+            # reused copy renders under is the one sent with *this* response.
+            self._send_security_headers()
             if self.close_connection:
                 self.send_header("Connection", "close")
             self.end_headers()
@@ -501,7 +600,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", f'attachment; filename="{name}.{fmt}"')
         self.send_header("X-Provenance", json.dumps(provenance, default=str))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self._send_security_headers()
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()
@@ -531,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Disposition",
                           f'attachment; filename="{target.name}"')
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self._send_security_headers()
         if self.close_connection:
             self.send_header("Connection", "close")
         self.end_headers()

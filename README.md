@@ -497,10 +497,18 @@ Three things are worth knowing before pointing anyone else at it:
 - **There is no authentication, and it listens on every interface.** Anyone
   who can reach the port can read the whole warehouse — including the
   `restricted_` tables of personal data — and can approve or reject items
-  under whatever name they type. It is built for a LAN you control; it is not
-  safe on an untrusted network and must never be port-forwarded. `--host
-  127.0.0.1` restricts it to the machine running it, and the warning prints
-  on every start that does not.
+  under whatever name they type. **They can also start a pipeline run**, which
+  fetches from real public sources under your `CONTACT_EMAIL` and rate limits,
+  **write exports, and download any file in `exports/output/`.** It is built
+  for a LAN you control; it is not safe on an untrusted network and must never
+  be port-forwarded. `--host 127.0.0.1` restricts it to the machine running
+  it, and the warning prints on every start that does not.
+- **What the headers do and do not cover.** Every response carries
+  `Content-Security-Policy`, `X-Frame-Options: DENY`, `Referrer-Policy` and
+  `nosniff`, so no other page on that network can frame `/admin` and drive it
+  with your browser, and neither page can load or contact anything off this
+  server. None of that authenticates anybody: they protect the browser
+  in front of the UI, not the UI itself.
 - **`restricted_` tables need a second click.** Opening one in the browser
   returns a refusal until you confirm. That is a guard against opening one by
   accident — the SQL box reads them like any other table, as does `sqlite3`.

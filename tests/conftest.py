@@ -21,6 +21,29 @@ def _reset_host_clock():
     HOST_CLOCK.reset()
 
 
+@pytest.fixture(autouse=True)
+def _logs_stay_out_of_the_repo(tmp_path: Path, monkeypatch):
+    """No test writes into the operator's `logs/`.
+
+    `configure_logging` resolves its own settings rather than being handed
+    them, so anything that runs the CLI or the server for real -- which is
+    most of the web and CLI suites -- opened a file handler on the repo's
+    logs/ and left it there. The suite was depositing a 5 MB
+    `fake_insert_only_for_tests.log` next to the audit trail of real crawls,
+    which is a good way to stop trusting the directory.
+
+    Tests that need to read what was logged patch this themselves afterwards
+    and are unaffected; this only moves the default.
+    """
+    from pipeline import logging_conf
+
+    monkeypatch.setattr(
+        logging_conf, "get_settings",
+        lambda: Settings(contact_email="test@example.com",
+                          logs_dir=tmp_path / "logs", _env_file=None))
+    yield
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(

@@ -153,3 +153,19 @@ def test_the_column_renders_the_live_total():
     assert "2 req" in rendered
     assert "1 cached" in rendered, "conditional requests are worth showing"
     http.REQUESTS.reset()
+
+
+def test_the_suite_does_not_write_into_the_repos_log_directory(tmp_path):
+    """The conftest autouse fixture, asserted rather than assumed.
+
+    Without it, every test that invokes the CLI or builds a server opens a
+    handler on the operator's real logs/ — where the audit trail of actual
+    crawls lives — and leaves a file named after a fake module in it.
+    """
+    from pipeline import logging_conf
+    from pipeline.config import REPO_ROOT
+
+    resolved = logging_conf.get_settings().logs_dir.resolve()
+
+    assert resolved != (REPO_ROOT / "logs").resolve()
+    assert not resolved.is_relative_to(REPO_ROOT.resolve())
