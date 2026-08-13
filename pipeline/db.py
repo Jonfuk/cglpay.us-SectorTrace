@@ -288,6 +288,24 @@ def get_connection(settings: Settings | None = None,
 
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
+
+    # `synchronous` is deliberately left at SQLite's default of FULL.
+    #
+    # It looks like the obvious lever: every module commits per unit of work,
+    # so the pipeline does a lot of small commits, and each one under FULL is
+    # an fsync. Measured on this machine, 200 commits of 10 rows take 0.189s
+    # under FULL and 0.020s under NORMAL — 9.5x, or about 0.85ms a commit.
+    #
+    # And it does not matter. Commits happen per fetched unit — a page, a
+    # council, a document — so a full collection is on the order of 10,000 of
+    # them, which is about 8 seconds. That same collection makes ~6,300
+    # requests at one per two seconds per host, which is three and a half
+    # hours of deliberate waiting. The saving is 0.07% of a run, bought by
+    # giving up the guarantee that a committed row survives the power going
+    # out mid-crawl.
+    #
+    # Left alone on purpose, and written down so the next person measuring it
+    # gets to the same place faster.
     return conn
 
 
