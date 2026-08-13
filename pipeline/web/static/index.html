@@ -42,6 +42,7 @@
     <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
     <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
     <button class="tab" data-tab="health" role="tab">Health</button>
+    <button class="tab" data-tab="candidates" role="tab">Candidates</button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
@@ -241,6 +242,49 @@
 
   <!-- Exports and overrides ---------------------------------------------------->
   <!-- Rendered by /admin/js/exports.js. -->
+  <section id="tab-candidates" class="tabpanel">
+    <p class="muted small">
+      What Modules 9, 10 and 15 found. None of it is evidence yet: a candidate
+      is a link that <em>looked</em> right, which is not the same as a document
+      that is what it claims. Promoting one fetches the document, archives the
+      bytes and records who decided — so open it first. Confidence and match
+      quality are triage aids, not recommendations; ModernGov ranks text, and
+      an "excellent match" for <code>public health grant</code> is frequently a
+      COVID grant report.
+    </p>
+
+    <div id="candidate-counts" class="chips"></div>
+
+    <div class="runbar">
+      <select id="candidate-status-filter" aria-label="Status">
+        <option value="undecided">Undecided</option>
+        <option value="promoted">Promoted</option>
+        <option value="rejected">Rejected</option>
+        <option value="all">All</option>
+      </select>
+      <select id="candidate-authority" aria-label="Authority">
+        <option value="">All authorities</option>
+      </select>
+      <input id="candidate-search" type="search" placeholder="Search title or URL"
+             autocomplete="off">
+      <span class="spacer"></span>
+      <button class="btn" id="candidate-reject-selected" disabled>Reject selected</button>
+      <span id="candidate-status" class="muted small"></span>
+    </div>
+
+    <div id="candidate-list"></div>
+    <div class="pager" id="candidate-pager"></div>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>Promotions</h2>
+      <p class="muted small">
+        Every candidate that became evidence, and who said so. Kept whether or
+        not the candidate is later reset — the judgement was still taken.
+      </p>
+      <div id="promotion-history"></div>
+    </div>
+  </section>
+
   <section id="tab-exports" class="tabpanel">
     <div class="runbar">
       <span class="muted small">Write</span>

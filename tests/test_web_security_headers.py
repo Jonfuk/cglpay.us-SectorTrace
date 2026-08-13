@@ -108,8 +108,13 @@ def test_the_operator_page_allows_its_theme_guard_by_hash(client):
     source = (server_module.STATIC_DIR / "index.html").read_bytes()
     inline = re.findall(rb"<script>(.*?)</script>", source, re.S)
     assert len(inline) == 1, "the page is expected to have exactly one inline script"
+    # Normalised to LF, which is what an HTML parser hands the script before
+    # the browser hashes it. Hashing the file's raw bytes produces a policy
+    # that blocks the very script it was computed from, on any checkout with
+    # CRLF endings — which on Windows is most of them.
+    normalised = inline[0].replace(b"\r\n", b"\n").replace(b"\r", b"\n")
     expected = "'sha256-" + base64.b64encode(
-        hashlib.sha256(inline[0]).digest()).decode() + "'"
+        hashlib.sha256(normalised).digest()).decode() + "'"
 
     script = directives(client.get("/admin"))["script-src"]
     assert script == f"'self' {expected}"
@@ -158,3 +163,24 @@ def test_a_page_with_no_inline_script_gets_no_hashes(tmp_path):
 
 def test_a_missing_page_is_not_a_policy_error(tmp_path):
     assert server_module.inline_script_hashes(tmp_path / "gone.html") == ()
+
+
+def test_the_hash_survives_windows_line_endings(tmp_path):
+    """The regression that left the operator page's theme guard blocked.
+
+    A browser normalises CRLF to LF while parsing HTML, so the same page saved
+    with either ending has to produce the same hash. A test that recomputes
+    the hash the way the code does agrees with itself and proves nothing —
+    this asserts the two files agree with *each other*, which is the property
+    that was actually broken, and it was found by reading a browser console
+    rather than by any test.
+    """
+    script = "<script>\n  var a = 1;\n</script>"
+    unix = tmp_path / "unix.html"
+    windows = tmp_path / "windows.html"
+    unix.write_bytes(script.encode())
+    windows.write_bytes(script.replace("\n", "\r\n").encode())
+
+    assert server_module.inline_script_hashes(unix), "a hash was found at all"
+    assert (server_module.inline_script_hashes(unix)
+            == server_module.inline_script_hashes(windows))

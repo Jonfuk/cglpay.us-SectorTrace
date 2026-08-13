@@ -39,11 +39,12 @@ from urllib.parse import parse_qs, urlparse
 
 import structlog
 
-from pipeline import db
+from pipeline import db, promote
 from pipeline.config import Settings, get_settings
 from pipeline.web import (
     admin,
     artefacts,
+    candidates,
     health,
     public_export,
     public_queries,
@@ -90,7 +91,8 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # reloading working review tooling differently buys nothing -- so everything
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
-for _module in ("shell", "dom", "theme", "palette", "pipeline", "health", "exports"):
+for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
+                 "exports", "candidates"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -168,9 +170,16 @@ _INLINE_SCRIPT_RE = re.compile(rb"<script>(.*?)</script>", re.S)
 def inline_script_hashes(page: Path) -> tuple[str, ...]:
     """CSP hashes for every inline <script> in a page we serve.
 
-    Read as bytes and hashed as bytes: the browser hashes exactly what is
-    between the tags, and reading in text mode would translate CRLF into LF on
-    Windows and produce a hash that matches nothing.
+    Read as bytes, then normalised to LF before hashing, because that is what
+    the browser hashes. An HTML parser converts CRLF and lone CR to LF while
+    tokenising, so the script text a page executes never contains a CR
+    whatever the file on disk holds -- and on Windows the file frequently
+    does. Hashing the raw bytes produces a policy that blocks the very script
+    it was computed from.
+
+    This is not theoretical and a unit test will not catch it: a test that
+    recomputes the hash the same way agrees with itself no matter which of the
+    two is right. It was found by loading the page and reading the console.
     """
     import base64
     import hashlib
@@ -180,7 +189,9 @@ def inline_script_hashes(page: Path) -> tuple[str, ...]:
     except OSError:  # pragma: no cover - a missing page is a 404, not a policy
         return ()
     return tuple(
-        "'sha256-" + base64.b64encode(hashlib.sha256(body).digest()).decode() + "'"
+        "'sha256-" + base64.b64encode(
+            hashlib.sha256(body.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+            .digest()).decode() + "'"
         for body in _INLINE_SCRIPT_RE.findall(source))
 
 
@@ -696,6 +707,40 @@ class Handler(BaseHTTPRequestHandler):
                 limit=_int(params, "limit", 100),
                 offset=_int(params, "offset", 0))
 
+        if path == "/api/admin/candidates":
+            kind = _str(params, "kind") or "cdp_document"
+            try:
+                return candidates.listing(
+                    conn, kind,
+                    status=_str(params, "status") or "undecided",
+                    authority=_str(params, "authority") or None,
+                    search=_str(params, "q") or None,
+                    offset=_int(params, "offset", 0),
+                    limit=_int(params, "limit", candidates.PAGE))
+            except promote.PromotionError as exc:
+                raise ApiError(str(exc), status=400) from None
+
+        if path == "/api/admin/candidates/counts":
+            return {"kinds": candidates.counts(conn),
+                     "promotions": promote.history(conn, limit=20)}
+
+        if path == "/api/admin/candidates/authorities":
+            try:
+                return {"authorities": candidates.authorities_with_candidates(
+                    conn, _str(params, "kind") or "cdp_document")}
+            except promote.PromotionError as exc:
+                raise ApiError(str(exc), status=400) from None
+
+        if path == "/api/admin/candidates/detail":
+            try:
+                found = candidates.detail(conn, _str(params, "kind") or "",
+                                           _str(params, "url") or "")
+            except promote.PromotionError as exc:
+                raise ApiError(str(exc), status=400) from None
+            if found is None:
+                raise ApiError("No such candidate.", status=404)
+            return found
+
         if path == "/api/admin/exports":
             return artefacts.listing(self.settings)
 
@@ -814,7 +859,68 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/run": self._run,
             "/api/admin/check": self._check,
             "/api/admin/export": self._export_job,
+            "/api/admin/candidates/promote": self._promote,
+            "/api/admin/candidates/reject": self._reject_candidates,
+            "/api/admin/candidates/reset": self._reset_candidate,
         }
+
+    def _promote(self, body: dict) -> Any:
+        """Promote one candidate into the evidence base.
+
+        One, never a list. The act being recorded is that somebody opened the
+        document, and a route that took an array would be a route that made
+        pretending cheap. Bulk rejection has its own endpoint below.
+
+        This fetches the document, so it reaches the open web with the same
+        standing as a module run: robots, the shared rate limit, and the bytes
+        archived under data/raw/.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            result = promote.promote(
+                conn,
+                kind=str(body.get("kind", "")),
+                url=str(body.get("url", "")),
+                promoted_by=str(body.get("promoted_by", "")),
+                fields=body.get("fields") or {},
+                note=body.get("note"),
+                settings=self.settings,
+            )
+        except promote.PromotionError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+        log.info("web.candidate_promoted", kind=result["kind"], url=result["url"],
+                  by=result["promoted_by"], target=result["target_table"])
+        return result
+
+    def _reject_candidates(self, body: dict) -> Any:
+        urls = body.get("urls")
+        if not isinstance(urls, list) or not all(isinstance(u, str) for u in urls):
+            raise ApiError("urls must be a list of strings.", status=400)
+        conn = db.get_connection(self.settings)
+        try:
+            count = promote.reject(conn, kind=str(body.get("kind", "")), urls=urls,
+                                    rejected_by=str(body.get("rejected_by", "")),
+                                    note=body.get("note"))
+        except promote.PromotionError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.candidates_rejected", kind=body.get("kind"), count=count)
+        return {"rejected": count}
+
+    def _reset_candidate(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            promote.reset(conn, kind=str(body.get("kind", "")),
+                           url=str(body.get("url", "")))
+        except promote.PromotionError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        return {"reset": body.get("url")}
 
     def _export_job(self, body: dict) -> Any:
         job = admin.start_export(self.jobs, self.settings, body)
