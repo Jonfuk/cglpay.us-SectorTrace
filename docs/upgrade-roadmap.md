@@ -1,0 +1,259 @@
+# Upgrade roadmap
+
+Status: audit, 2026-08-13. Nothing here is built. Written against commit
+`841bd49` with a clean tree; baseline `uv run python -m pytest` was green
+before any of it (**1215 passed, 1 skipped, 18 deselected, 422s**).
+
+Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
+read-only. Numbers marked **[measured]** were timed here. Everything else is
+inferred from the code and says so.
+
+## 1. What this project optimises for
+
+It optimises for a figure that can still be defended a year later in a room
+where someone disputes it. Every design choice that looks like a limitation —
+`NULL` over a guess, candidates that never auto-promote, no arithmetic across
+evidence layers, no headline contract total — is that same trade taken again:
+a smaller defensible dataset over a larger plausible one. Its second priority
+is that the pipeline stay welcome at its sources, which is why the rate limit
+is process-wide and concurrency only ever spans different hosts. Its third is
+that a human can check any of it, which is what the raw archive, the
+provenance companions, the caveats and the review queue are all for. Speed,
+coverage and polish are pursued only where they cost none of the above.
+
+## 2. Headline
+
+| | Finding | Why it leads |
+|---|---|---|
+| 1 | **F-01** — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
+| 2 | **D-02** — a dry run and a real run are indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
+| 3 | **O-02** — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
+| 4 | **S-01** — `check-url` will fetch any host and report whether it answered | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
+| 5 | **D-01** — this warehouse is one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
+
+## 3. Findings register
+
+Effort: S = under a day, M = a few days, L = a week or more.
+
+### A. Feature and coverage
+
+**F-01 · Candidates never become evidence · L**
+- Evidence **[live]**: `cdp_document_candidates` 406 → `cdp_documents` 0; `committee_paper_candidates` 694 → `committee_papers` 0; `foi_request_candidates` 841 → `foi_requests` 0. `verified = 1` count across all candidate tables: **zero**.
+- Costs today: 1,941 collected rows sit outside the evidence base. The only documented promotion path is hand-written SQL ([docs/verification/cdp_candidates.md:7](docs/verification/cdp_candidates.md:7)), and the review UI deliberately does not promote ([README.md:445](README.md:445)).
+- Changes for: the researcher — this is the difference between "we found council papers" and "we can cite one".
+- Risk: **high**. Promotion is exactly the judgement the project refuses to automate. Any design must keep a human deciding each row and record who and when, like `review_decisions` already does.
+- Depends on: nothing. Verified by: a test that promotion writes both the evidence row and its decision record, and that nothing reaches an evidence table without one.
+
+**F-02 · `m13_la_budgets` has never landed in this warehouse · S**
+- Evidence **[live]**: `la_revenue_budgets` 0 rows, `la_budget_publications` 0 rows, no `module_cursors` entry. [logs/m13_la_budgets.log](logs/m13_la_budgets.log) last line records `budgets.run_complete documents=4 rows=238407`, and four `budgets.sheet_processed` events totalling the same.
+- Costs today: an entire evidence type — what councils budget, against what Module 11 says they were allocated — is absent, and the absence looks identical to a module that ran fine.
+- Most likely a `--dry-run` (the commit guard at [pipeline/modules/m13_la_budgets.py:391](pipeline/modules/m13_la_budgets.py:391) is correct, and the runner rolls back at [pipeline/runner.py:120](pipeline/runner.py:120)). **Not proven** — see D-02, which is why it cannot be proven.
+- Verified by: a real run writing rows, plus D-02 making the next one self-evident.
+
+**F-03 · Workforce census stays unverified · M**
+- Evidence **[live]**: `workforce_census_metrics` 68 rows, all `verified = 0`. Portal correctly renders them as awaiting verification ([README.md:396](README.md:396)).
+- Same shape as F-01 — a markdown worklist and manual SQL. Fold into the same promotion mechanism rather than building a second one.
+
+**F-04 · Resumability is real for one module · S to establish**
+- Evidence **[live]**: `module_cursors` holds 2 rows, both `m01_procurement`. [README.md:108](README.md:108) describes resumable cursors as a property of modules generally.
+- Inferred, not confirmed: the other 16 may re-derive position cheaply or may re-crawl. Worth one pass to find out and then either fix the modules or soften the README.
+
+**F-05 · Nothing is tracked over time · L, and a decision before a design**
+- Evidence: every domain table upserts on a natural key (e.g. [pipeline/modules/m13_la_budgets.py:372](pipeline/modules/m13_la_budgets.py:372)); a re-run overwrites in place.
+- Costs today: the warehouse can say what a CQC rating or advertised band *is*, never that it changed. For a pay campaign, the change is often the claim.
+- Risk: **high** — history multiplies row counts and invites exactly the cross-year differencing [docs/CAVEATS.md:25](docs/CAVEATS.md:25) forbids for the census. See Open questions.
+
+### B. Data quality and provenance
+
+**D-01 · Warehouse is a migration behind · S**
+- Evidence **[live]**: `schema_migrations` holds 27 filenames, newest `0027_authority_url_overrides.sql`; `pipeline/migrations/` holds 28, including `0028_pfd_concerns_source.sql` (added in `847a937`).
+- The health tab was built to make this visible ([docs/admin-ui-plan.md:257](docs/admin-ui-plan.md:257)). The finding is not that it is invisible — it is that the condition is live right now and unremarked, so the panel is either unread or not loud enough.
+
+**D-02 · A dry run leaves no trace that it was one · S**
+- Evidence: [pipeline/runner.py:120](pipeline/runner.py:120) rolls back and returns `status: ok`; no log event carries `dry_run`; `grep -c dry_run logs/m13_la_budgets.log` → 0.
+- Costs today: F-02 cannot be diagnosed from the record. A module reporting `run_complete` with 238,407 rows and an empty table is the single most misleading state this pipeline can be in, and it contradicts the property [README.md:345](README.md:345) claims.
+- Fix is small: log the run parameters at module start and stamp the outcome `dry_run: true`; make the CLI and job summary say "wrote nothing (dry run)".
+- Verified by: a test asserting a dry run's summary and log distinguish it.
+
+**D-03 · Parse failures are healthy — no action**
+- **[live]** 22 rows: 20 are one m08 reason (`no 'Ref :' field found`), plus one m03 pension-costs line and one m11 amount. That is a source-shape note and two singletons, not a parser problem.
+
+**D-04 · 88% of the queue is three item types, and one may be obsolete · M**
+- Evidence **[live]**: `unmatched_buyer_name` 2,667, `pfd_concerns_in_pdf_only` 1,067, `possible_group_company` 493, of 4,815 total.
+- `pfd_concerns_in_pdf_only` was filed because the concerns were PDF-only ([docs/CAVEATS.md:159](docs/CAVEATS.md:159)); commits `c17eaf1` and `847a937` taught m08 to read those PDFs. So up to 1,067 items may now be answerable by re-running rather than by a human — but they will not clear themselves, because a decided item stays decided and a pending one is only refreshed ([README.md:470](README.md:470)).
+- Costs today: a queue whose bulk is undecidable one-at-a-time trains its operator to ignore it.
+
+**D-05 · "Approved" on an unknown-URL item does not mean it was answered · S**
+- Evidence **[live]**: 132 `authority_website_unknown` and 53 `committee_url_unknown` are `approved`, while `authority_url_overrides` holds 191 rows. Approval records a judgement; answering writes an override ([README.md:445](README.md:445)). The two counts are close enough to look equivalent and are not.
+- Worth one query to confirm they correspond, and a UI distinction if they do not.
+
+### C. Pipeline performance
+
+**P-01 · Every commit is an fsync · S to try, MEASURE FIRST**
+- Evidence: [pipeline/db.py:289](pipeline/db.py:289) sets `busy_timeout` and `foreign_keys`; WAL at [pipeline/db.py:272](pipeline/db.py:272). `synchronous` is never set, so it is SQLite's default `FULL`.
+- The project deliberately commits per unit of work ([README.md:326](README.md:326)) — so this is paid on every commit of every module, by design.
+- `synchronous = NORMAL` under WAL is the conventional trade and risks losing the last transactions on power loss, not corruption. For a warehouse that is re-runnable from an archive, that is close to free — but the size of the win is unmeasured. Measure with a fixed-size m01 slice before and after.
+
+**P-02 · The raw archive grows without bound · M**
+- Evidence **[live]**: `data/raw` is **3.6 GB across 6,322 files**; the warehouse it backs is 242.7 MB.
+- It is the audit trail, so deletion is not the answer. Compaction, per-source retention, or simply measuring and documenting the growth curve is.
+
+**P-03 · `--jobs > 1` is still opt-in · M, evidence-gated**
+- `--jobs 1` remains the default ([README.md:198](README.md:198)), with the parallel path covered by [tests/test_parallel.py](tests/test_parallel.py) and [tests/test_run_waves.py](tests/test_run_waves.py) (332 and 482 lines).
+- What would settle it is one full `--jobs 4` run compared against a serial one on row counts, review items and parse failures — not another test.
+
+### D. Web server performance
+
+**P-04 · No read timeout; a stalled client keeps its thread · S**
+- Evidence: [pipeline/web/server.py:882](pipeline/web/server.py:882) builds a `ThreadingHTTPServer` with `daemon_threads = True` and `protocol_version = "HTTP/1.1"`; no `timeout` is set on the handler, so `BaseHTTPRequestHandler.timeout` stays `None`.
+- Thread-per-connection is unbounded. On a trusted LAN this is a nuisance rather than a risk, and one class attribute fixes it.
+
+**P-05 · Phase 5's conclusions still hold — no action**
+- ETag/304 and gzip are in place ([pipeline/web/server.py:406](pipeline/web/server.py:406), [:219](pipeline/web/server.py:219)) with query plans pinned in [tests/test_web_performance.py](tests/test_web_performance.py). The freshness scan remains the shape Phase 5 priced: 20 tables carry `retrieved_at`, the largest 98,588 rows **[live]**. Nothing here to revisit without a cheaper approach than the twenty-table index it already declined.
+
+### E. Admin UI
+
+**U-01 · No bulk path for the queue's bulk · M** — the operational half of F-01/D-04. Deciding a filtered set exists ([README.md:440](README.md:440)); *answering* one does not.
+
+**U-02 · Job history dies with the process · S**
+- Evidence: [pipeline/web/jobs.py:192](pipeline/web/jobs.py:192) — the registry is in-memory, log lines in a ring buffer.
+- After a restart there is no record that a run happened; `logs/` has the lines but nothing ties them to a job. A row per job in the warehouse would close it.
+
+### F. Public portal
+
+**W-01 · No `<noscript>`, and the page is entirely JS-rendered · S**
+- Evidence: [pipeline/web/static/public/index.html](pipeline/web/static/public/index.html) ships a header, nav and filter bar; the sections render from `/api/v1/*`. `grep -c '<noscript>'` → 0.
+- With JS off or broken, a public evidence site meant to be cited shows chrome and nothing else. A `<noscript>` naming the API and the exports is a few lines.
+
+**W-02 · No print stylesheet · S**
+- Evidence: `@media print` appears zero times in either [pipeline/web/static/public/styles.css](pipeline/web/static/public/styles.css) or the admin sheet. This evidence gets printed and taken into rooms; a caveat that does not survive printing is a caveat that got separated from its figure, which is the failure [README.md:381](README.md:381) is written against.
+
+**W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
+
+### G. Operations
+
+**O-01 · No CI · M** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
+
+**O-02 · No backup or restore · M** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
+
+**O-03 · Logs never rotate, and tests write into the real `logs/` · S**
+- Evidence: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` is 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` is 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
+- A test run polluting the operator's log directory is the kind of thing that erodes trust in the directory.
+
+**O-04 · No root `CLAUDE.md` · S** — the conventions are real, enforced and currently learned by reading `docs/admin-ui-plan.md` §2 and this file. Several sessions a day re-derive them.
+
+### H. Security and privacy
+
+**S-01 · `check-url` is an unauthenticated fetcher · M**
+- Evidence: [pipeline/web/resolve.py:75](pipeline/web/resolve.py:75) accepts any `http`/`https` URL whose netloc contains a dot — which admits `192.168.1.1`, `10.0.0.5` and any internal name — and the client follows redirects ([pipeline/http.py:373](pipeline/http.py:373)). The server binds every interface by default ([README.md:483](README.md:483)).
+- It is bounded: robots is respected, the rate limit is shared, and the response is not returned verbatim. What it does return is whether a host answered and what it looked like, which is a port-scan primitive on the operator's LAN.
+- Fix without breaking the feature: refuse non-public IP literals and resolved addresses before fetching, and log refusals. The legitimate input is a council's public website.
+
+**S-02 · No CSP, `X-Frame-Options` or `Referrer-Policy` · S**
+- Evidence: [pipeline/web/server.py:255](pipeline/web/server.py:255) sets `X-Content-Type-Options` and nothing else.
+- DOM discipline is the real XSS defence and it is enforced; this is the cheap second layer, and a `frame-ancestors`/`X-Frame-Options` pair also stops a page on the LAN framing `/admin` and driving it.
+
+**S-03 · The README's security section predates what `/admin` can now do · S**
+- [README.md:483](README.md:483) warns that anyone reachable can read the warehouse and decide items. Since Phases 2–4 they can also start pipeline runs against live sources under this project's contact email, write exports and download files. [docs/admin-ui-plan.md:24](docs/admin-ui-plan.md:24) records that consequence; the README a new operator reads does not.
+
+### I. Testing and developer experience
+
+**T-01 · No lint or typecheck · S** — no ruff, mypy, black or pre-commit in [pyproject.toml](pyproject.toml). With 1,215 passing tests the marginal value is real but modest; the argument for ruff is consistency across concurrent sessions, not defect-finding.
+
+**T-02 · A 7-minute suite is a suite people skip · M** — 422s **[measured]**. Worth profiling for the slow minority before optimising, and `-p no:cacheprovider`/parallelism are cheaper than restructuring.
+
+**T-03 · Per-module coverage is complete — no action.** Every `m00`–`m16` has a matching `tests/test_m*.py`, plus route, guard, concurrency, provenance and portal-isolation suites.
+
+## 4. Quick wins
+
+Small, safe, independently shippable, no dependencies:
+
+| ID | What | Why now |
+|---|---|---|
+| D-02 | Log run parameters and stamp dry runs | Makes F-02 diagnosable instead of mysterious |
+| D-01 | Apply `0028` to the working warehouse | One command; the drift is live |
+| P-04 | `timeout` on the handler | One class attribute |
+| S-02 | CSP, `X-Frame-Options`, `Referrer-Policy` | Three headers next to the one already there |
+| W-01 | `<noscript>` on the portal | A few lines, and it is a public site |
+| O-03 | Point test logging at a temp dir | Stops tests writing 5 MB into `logs/` |
+| S-03 | Bring the README's warning up to date | Text only, and it is currently understated |
+
+## 5. Phases
+
+### Phase 1 — Make a run's outcome unambiguous · S
+
+- **Goal:** never again be unable to tell what a run did.
+- **Delivers:** D-02, D-01, F-02, U-02.
+- **Out of scope:** anything about *what* modules collect.
+- **Acceptance:** a dry run's log and summary both say so; a run records a job row that survives restart; `0028` applied; `m13` re-run for real and `la_revenue_budgets` non-empty, or a recorded reason why not. Tests: dry-run distinguishability, job persistence.
+- **Risk:** low. **Rollback:** revert; the job table is additive.
+- **Commit plan:** one commit for the logging and job record, one for the `m13` outcome.
+
+### Phase 2 — Housekeeping that should not wait · S
+
+- **Goal:** clear the quick wins that need no design.
+- **Delivers:** P-04, S-02, S-03, W-01, W-02, O-03.
+- **Out of scope:** S-01 — it needs a real decision about what to refuse.
+- **Acceptance:** headers asserted in tests; `pytest` leaves `logs/` untouched; portal prints with its caveats intact; `test_portal_isolation.py` green (W-01/W-02 touch the portal, so this phase is portal work and stages those paths deliberately).
+- **Risk:** low, except that W-01/W-02 edit `static/public/**` — permitted here because this is portal work, not admin work leaking into it.
+- **Commit plan:** admin/server changes and portal changes as separate commits.
+
+### Phase 3 — Do not lose what was collected · M
+
+- **Goal:** make the warehouse and archive recoverable.
+- **Delivers:** O-02, P-02.
+- **Out of scope:** offsite or cloud anything — this is a local tool.
+- **Acceptance:** a documented, tested `backup` command producing a consistent copy (`VACUUM INTO` on a live WAL database) and a restore that a test actually performs; archive growth measured and documented in `docs/`.
+- **Risk:** medium — a backup that is silently inconsistent is worse than none, so the test must restore and query, not just check the file exists.
+
+### Phase 4 — Turn candidates into evidence · L
+
+- **Goal:** close the gap between 1,941 collected candidates and zero citable rows.
+- **Delivers:** F-01, F-03, U-01, D-04.
+- **Out of scope:** any automatic promotion; any relevance scoring the pipeline computes itself.
+- **Acceptance:** a reviewer can open a candidate, see the source, and promote it; promotion writes the evidence row *and* a decision record naming who and when; nothing can reach `cdp_documents`, `committee_papers` or `foi_requests` without one; the obsolete `pfd_concerns_in_pdf_only` items are resolved by re-run rather than by hand, or explicitly kept with a reason.
+- **Risk:** **high** — this is the project's central refusal, and a design that makes promotion easy makes it easy to do carelessly. Build the audit trail first and the convenience second.
+- **Commit plan:** schema and promotion plumbing; then the UI; then the m08 re-run that clears the stale items.
+
+### Phase 5 — Close the fetcher · M
+
+- **Goal:** `check-url` cannot be aimed at the operator's own network.
+- **Delivers:** S-01.
+- **Acceptance:** private, loopback, link-local and unspecified addresses refused before any request, including after redirect; refusals logged; a test drives each family; council URLs still resolve.
+- **Risk:** medium — over-refusing breaks a working feature. Refuse on resolved address, not on hostname pattern.
+
+### Phase 6 — CI and conventions · M
+
+- **Goal:** the constraints stop depending on each session re-reading them.
+- **Delivers:** O-01, O-04, T-01, T-02.
+- **Acceptance:** CI runs the offline suite on push; `CLAUDE.md` carries the hard constraints; ruff configured and clean; suite time reported before and after any change made to reduce it.
+- **Risk:** low, but ruff across 37k lines will want a formatting commit kept separate from behaviour.
+
+### Phase 7 — Measured performance · M, gated
+
+- **Goal:** take the two performance levers that are real, having measured them.
+- **Delivers:** P-01, P-03, F-04.
+- **Acceptance:** before/after on the same machine and warehouse for `synchronous = NORMAL`; a `--jobs 4` full run compared with serial on rows, review items and failures; cursor behaviour established per module and the README corrected if it overclaims.
+- **Risk:** low to try, and every part of it may correctly end in "leave it alone" — which Phase 5 of the admin plan already showed is the useful outcome.
+
+## 6. Rejected
+
+| Idea | Why not |
+|---|---|
+| Authentication on `/admin` | Settled project decision. The bind address is the control. |
+| A web framework, ASGI, or a build step | Would buy nothing the stdlib server is failing at, and costs the "renders with the cable unplugged" property. |
+| Auto-promoting high-confidence candidates | `match_quality` is ModernGov's own ranking, not this pipeline's judgement ([docs/CAVEATS.md:185](docs/CAVEATS.md:185)); an "excellent match" for `public health grant` is frequently a COVID grant report. Confidence is a triage aid and must not become a threshold. |
+| Deriving unmet need, caseload-per-worker, or any cross-layer ratio | [docs/CAVEATS.md:14](docs/CAVEATS.md:14) forbids these by name. |
+| SSE or WebSockets for the job log | Polling was chosen deliberately and works; this is a rewrite for no user-visible gain. |
+| `retrieved_at` index across twenty tables for the freshness panel | Priced and declined by Phase 5; paid on every insert by every module for one panel. |
+| Mark-as-noted on `parse_failures` | Declined before, and **[live]** there are 22 failures across three reasons — the grouping answers it. |
+| An ORM, or replacing SQLite | The write-slot discipline is hard-won and specific to this engine. |
+| Full-text search over archived documents | Attractive, but it is a new index over 3.6 GB with its own freshness problem. Revisit after Phase 4 gives it verified documents to search rather than candidates. |
+
+## 7. Open questions
+
+1. **Who verifies candidates, and to what standard?** Phase 4 needs the rule before it needs the UI. My recommendation: one named reviewer per row, the same identity `review_decisions` already records, and no bulk promote for anything above a candidate's source page — bulk *reject* is fine. Depends on whether anyone besides you will do it.
+2. **Do you want history at all (F-05)?** Recommendation: not yet, and not as a general "version every table". If a specific claim needs it — advertised bands over time is the plausible one — add history to that table alone, with a caveat forbidding the differencing the census taught you to forbid.
+3. **Should `m13` be re-run now?** Recommendation: yes, in Phase 1, because an empty budget table is currently indistinguishable from a broken parser and one run settles it.
+4. **Retention for `data/raw` (P-02).** Recommendation: keep everything until it hurts, but measure and document the curve now so the decision is not taken in a hurry at 20 GB.
+5. **Is `--jobs 4` worth promoting to default?** Recommendation: only after Phase 7's comparison, and probably not — the current default is the conservative one and the run is not interactive.
