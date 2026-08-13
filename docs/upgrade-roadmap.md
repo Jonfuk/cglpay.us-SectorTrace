@@ -405,12 +405,57 @@ a resolver without reaching into a shared module. The guard stays *active* in
 every test rather than disabled: names resolve to a public stub, so the code
 still resolves, inspects and decides.
 
-### Phase 6 — CI and conventions · M
+### Phase 6 — CI and conventions · M — **done** (`f1a2dbe`, `6c2a9b7`, `3f1a668`, `3511399`, `8f4ea2e`, `0cc180c`)
 
-- **Goal:** the constraints stop depending on each session re-reading them.
-- **Delivers:** O-01, O-04, T-01, T-02.
-- **Acceptance:** CI runs the offline suite on push; `CLAUDE.md` carries the hard constraints; ruff configured and clean; suite time reported before and after any change made to reduce it.
-- **Risk:** low, but ruff across 37k lines will want a formatting commit kept separate from behaviour.
+Delivered O-01, O-04, T-01, T-02. Suite **1358 passed**, 1 skipped, and CI is
+green on Ubuntu.
+
+- **Ruff**, configured narrowly (`E4`, `E7`, `E9`, `F`, `I`) with four rule
+  families excluded and the reason for each written into `pyproject.toml`.
+  E501 chief among them: the comments here are the documentation, and
+  reflowing prose to satisfy a linter is the tail wagging the dog. 41 real
+  violations fixed — 37 automatically, 7 by hand.
+- **`CLAUDE.md`** carries the ten settled decisions, the house style, and the
+  two rules this repo learned the hard way.
+- **CI** runs the offline suite and ruff on every push, on Ubuntu while
+  development is Windows. The `integration` marker stays deselected — the
+  politeness commitment has no exception for CI.
+- **T-02 [measured]: 400.6s → 145.95s**, same tests. Applying the 30
+  migrations costs 0.31s and the `conn` fixture did it per test; it is now
+  built once per session and copied. The template is checkpointed first,
+  because a copy taken with pages still in the WAL is missing whatever the
+  last migrations added.
+
+**What CI found on its first run — four failures, and none of them what was
+expected:**
+
+1. **`restore` could lose committed data.** It renames `warehouse.db` aside so
+   nothing is thrown away, but sidecars are named after the file rather than
+   carried with it, so `warehouse.db-wal` stayed behind to be deleted. Windows
+   hid it by refusing to rename a file another connection holds open. Fixed by
+   checkpointing before the rename, with a regression test.
+2. **Five `with sqlite3.connect(...)` in `backup.py` never closed.** That form
+   commits on exit and does not close — a leak everywhere, and on Windows an
+   open handle that blocks the rename above.
+3. **The suite depended on the developer's `.env`.** `CONTACT_EMAIL` has no
+   default, and a bare `Settings()` — reached through
+   `db.apply_migrations(conn)` falling back to `get_settings()` — reads the
+   environment and `.env`. Every machine it had ever run on had one, so a
+   fresh checkout failed four tests. Now set in `conftest`, and verified by
+   running the whole suite with `.env` moved out of the way.
+4. **A test whose failure message was empty.** `assert result.exit_code == 0,
+   result.output` says nothing when the failure was an exception, which is
+   exactly when you need it. It now falls back to `result.exception`.
+
+The first three are real defects in code shipped earlier this week, two of
+them in Phase 3. **None was reachable from the machine the code was written
+on**, which is the entire argument for O-01 and better than any of the reasons
+originally given for it.
+
+**Also added, not planned:** a red build now emits `::error::` annotations, so
+the failing test names are readable without a repository token. Raw Actions
+logs are not public; annotations are. A build that is red with no readable
+reason is one people learn to ignore.
 
 ### Phase 7 — Measured performance · M, gated
 
