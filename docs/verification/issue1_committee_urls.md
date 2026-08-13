@@ -385,3 +385,14 @@ RemoteProtocolError.
 | Wirral | `E08000015` | https://democracy.wirral.gov.uk | moderngov |
 | Worthing | `E07000229` | https://democracy.adur-worthing.gov.uk | moderngov |
 | York | `E06000014` | https://democracy.york.gov.uk | moderngov |
+
+## Subsequently verified outside issue #1
+
+The issue-#1 candidate for Herefordshire was not stored. On 2026-08-13, the
+official council homepage linked to the following committee portal. The link
+was fetched and its ModernGov signature was confirmed through the pipeline's
+HTTP client before it was written to `authority_url_overrides`.
+
+| Authority | ONS code | URL | system probed |
+| --- | --- | --- | --- |
+| Herefordshire, County of | `E06000019` | https://councillors.herefordshire.gov.uk | moderngov |
