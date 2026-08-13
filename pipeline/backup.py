@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -114,7 +115,7 @@ def verify_copy(source: Path, copy: Path) -> dict:
     outright or an integrity failure, which are.
     """
     try:
-        with sqlite3.connect(f"file:{copy}?mode=ro", uri=True) as copied:
+        with closing(sqlite3.connect(f"file:{copy}?mode=ro", uri=True)) as copied:
             integrity = copied.execute("PRAGMA integrity_check").fetchone()[0]
             if integrity != "ok":
                 raise BackupError(f"the copy failed its integrity check: {integrity}")
@@ -124,7 +125,7 @@ def verify_copy(source: Path, copy: Path) -> dict:
     except sqlite3.DatabaseError as exc:
         raise BackupError(f"the copy cannot be read as a database: {exc}") from exc
 
-    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as original:
+    with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True)) as original:
         source_counts = table_counts(original)
 
     missing = sorted(set(source_counts) - set(copied_counts))
@@ -252,7 +253,7 @@ def restore(backup: Path, settings: Settings | None = None,
     # answer to the only question being asked here, so both are refusals
     # rather than one refusal and one traceback.
     try:
-        with sqlite3.connect(f"file:{backup}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"file:{backup}?mode=ro", uri=True)) as conn:
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             if integrity != "ok":
                 raise BackupError(
@@ -272,13 +273,31 @@ def restore(backup: Path, settings: Settings | None = None,
             # own read-only connection: this path must not disturb, or hold a
             # handle on, the warehouse it is declining to replace.
             try:
-                with sqlite3.connect(f"file:{target}?mode=ro", uri=True) as existing:
+                with closing(sqlite3.connect(f"file:{target}?mode=ro", uri=True)) as existing:
                     at_stake = f"holding {sum(table_counts(existing).values()):,} rows"
             except sqlite3.DatabaseError:
                 at_stake = "that cannot be read"
             raise BackupError(
                 f"{target} already exists. Restoring would replace a warehouse "
                 f"{at_stake}. Re-run with force to move it aside and continue.")
+        # Fold the WAL into the database file *before* moving it aside.
+        #
+        # The sidecars are named after the file, not carried with it: rename
+        # `warehouse.db` and `warehouse.db-wal` stays behind, about to be
+        # deleted below. Anything committed but not yet checkpointed would go
+        # with it, so the file kept "so nothing is thrown away" could be
+        # missing the most recent thing it was kept for.
+        #
+        # Windows hid this. It refuses to rename a file another connection has
+        # open, so the failure needed a POSIX filesystem and CI to surface it.
+        try:
+            with closing(sqlite3.connect(target)) as live:
+                live.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.DatabaseError as exc:
+            # A warehouse too damaged to checkpoint is exactly one worth
+            # keeping a copy of, so this is a note rather than a refusal.
+            log.warning("backup.checkpoint_failed", target=str(target), error=str(exc))
+
         superseded = target.with_name(f"{target.name}.superseded-{_stamp()}")
         target.rename(superseded)
 

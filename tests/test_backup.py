@@ -265,3 +265,31 @@ def test_an_explicit_destination_is_never_overwritten(warehouse, settings, tmp_p
         backup.create(settings, destination=chosen)
 
     assert chosen.stat().st_size == before
+
+
+def test_the_superseded_file_keeps_data_still_in_the_wal(warehouse, settings):
+    """The sidecars are named after the file, not carried with it.
+
+    Rename warehouse.db and warehouse.db-wal stays behind to be deleted, so
+    anything committed but not yet checkpointed would be lost from the very
+    file that exists to lose nothing. Found by CI on Linux: Windows refuses to
+    rename a file another connection holds open, which hid it.
+    """
+    manifest = backup.create(settings)
+
+    # Committed, and left in the WAL rather than checkpointed.
+    warehouse.execute(
+        "INSERT INTO review_queue (module, item_type, raw_value, context_json, "
+        "status, created_at) VALUES ('m09_cdp_documents', 'late', 'kept?', "
+        "'{}', 'pending', '2026-08-13T00:00:00Z')")
+    warehouse.commit()
+    warehouse.close()
+
+    from pathlib import Path
+
+    result = backup.restore(Path(manifest["warehouse"]["backup"]), settings, force=True)
+
+    with sqlite3.connect(f"file:{result['superseded']}?mode=ro", uri=True) as old:
+        kept = old.execute(
+            "SELECT COUNT(*) FROM review_queue WHERE raw_value = 'kept?'").fetchone()[0]
+    assert kept == 1, "the row was committed; the file kept aside must still have it"
