@@ -23,8 +23,12 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Iterator
 
+import structlog
+
 from pipeline import db
 from pipeline.registry import MODULE_REGISTRY, ModuleContext
+
+log = structlog.get_logger()
 
 
 class RunObserver:
@@ -106,6 +110,14 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
         conn = db.get_connection(settings)
         conn.write_label = name
         try:
+            # What this run was asked to do, in the module's own log, before it
+            # does any of it. A dry run rolls back below and leaves a warehouse
+            # identical to the one it started with, so without this line the
+            # only record of a run that wrote nothing on purpose is
+            # indistinguishable from a parser that silently collected nothing
+            # -- which is the most misleading state this pipeline can be in.
+            log.info("module.starting", module=name, dry_run=dry_run,
+                      since=str(since) if since else None, limit=limit)
             before = audit_counts(conn, name)
             changes_before = conn.total_changes
             ctx = ModuleContext(conn=conn, settings=settings, since=since,
@@ -114,7 +126,9 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
                 fn(ctx)
             except Exception as exc:
                 conn.rollback()
-                return {"module": name, "status": "failed",
+                log.info("module.finished", module=name, status="failed",
+                          dry_run=dry_run, error=f"{type(exc).__name__}: {exc}")
+                return {"module": name, "status": "failed", "dry_run": dry_run,
                          "elapsed": time.perf_counter() - started, "error": exc}
 
             if dry_run:
@@ -123,13 +137,20 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
                 conn.commit()
 
             after = audit_counts(conn, name)
-            return {
-                "module": name, "status": "ok",
+            row = {
+                "module": name, "status": "ok", "dry_run": dry_run,
                 "elapsed": time.perf_counter() - started,
                 "rows": conn.total_changes - changes_before,
                 "review": after["review"] - before["review"],
                 "failures": after["failures"] - before["failures"],
             }
+            # `rows` counts changes this module made. On a dry run they were
+            # made and then rolled back, so the number is what it *would* have
+            # written -- worth reporting, and worth never reporting bare.
+            log.info("module.finished", **{k: v for k, v in row.items()
+                                            if k != "elapsed"},
+                      wrote=not dry_run)
+            return row
         finally:
             conn.close()
             thread.name = previous_name

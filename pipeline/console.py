@@ -336,7 +336,13 @@ NULL_REPORTER = ProgressReporter()
 
 def run_summary(rows: list[dict]) -> Table:
     """The end-of-run table: what ran, how long it took, and what it wrote."""
-    table = Table(title="Run summary", title_style="pipeline.heading",
+    # A dry run fills the rows column with numbers it then threw away. The
+    # count is worth showing -- it is what the run would have written -- but
+    # the header has to say so, because the table outlives the terminal it was
+    # printed in: it gets screenshotted, pasted and read back later.
+    dry = any(row.get("dry_run") for row in rows)
+    table = Table(title="Run summary — dry run, nothing written" if dry else "Run summary",
+                   title_style="pipeline.heading",
                    header_style="pipeline.heading", border_style="pipeline.muted",
                    show_lines=False)
     # Wide enough for the longest module name (m11_public_health_grant), so
@@ -344,7 +350,8 @@ def run_summary(rows: list[dict]) -> Table:
     table.add_column("Module", style="pipeline.module", min_width=23, no_wrap=True)
     table.add_column("Status")
     table.add_column("Elapsed", justify="right")
-    table.add_column("Rows written", justify="right", style="pipeline.count")
+    table.add_column("Rows not written" if dry else "Rows written",
+                      justify="right", style="pipeline.count")
     table.add_column("Review", justify="right")
     table.add_column("Parse failures", justify="right")
 

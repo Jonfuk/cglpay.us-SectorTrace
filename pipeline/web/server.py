@@ -51,7 +51,7 @@ from pipeline.web import (
     resolve,
     review,
 )
-from pipeline.web.jobs import JobError, JobRegistry
+from pipeline.web.jobs import JobError, JobRegistry, JobStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PUBLIC_DIR = STATIC_DIR / "public"
@@ -886,8 +886,13 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     and so the CLI can report the real port before anything blocks.
     """
     settings = settings or get_settings()
+    # The registry is given a store, so the job list opens showing what this
+    # warehouse has been asked to do rather than only what has happened since
+    # the last restart. A run killed by a crash reappears as interrupted.
     server = ThreadingHTTPServer(
-        (host, port), partial(Handler, settings=settings, jobs=JobRegistry()))
+        (host, port),
+        partial(Handler, settings=settings,
+                 jobs=JobRegistry(store=JobStore(settings))))
     # Sockets held by request threads must not keep the process alive after
     # Ctrl-C; a review UI that needs killing twice is a review UI people leave
     # running by accident.

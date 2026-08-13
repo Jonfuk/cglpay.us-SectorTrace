@@ -189,20 +189,120 @@ class ThreadStrategy:
         threading.Thread(target=body, name=f"job-{job.id}", daemon=True).start()
 
 
+class JobStore:
+    """Where the fact of a job outlives the process that ran it.
+
+    Only the fact. The log lines stay in memory and in logs/ -- see
+    migrations/0029_job_runs.sql for why they are not copied here.
+
+    Every method swallows its own errors. Recording history is bookkeeping
+    around running the pipeline, and bookkeeping that can refuse a run is worse
+    than bookkeeping that is occasionally missing a row: a warehouse locked by
+    something else must not be the reason a module cannot start.
+    """
+
+    def __init__(self, settings) -> None:
+        self._settings = settings
+
+    def _write(self, sql: str, params: tuple) -> None:
+        from pipeline import db
+
+        try:
+            conn = db.get_connection(self._settings)
+            conn.write_label = "job-store"
+            try:
+                conn.execute(sql, params)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:  # pragma: no cover - exercised via load()
+            log.warning("web.job_store_write_failed", error=str(exc))
+
+    def create(self, job: Job) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO job_runs "
+            "(id, kind, label, args_json, state, dry_run, started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (job.id, job.kind, job.label, json.dumps(job.args), job.state,
+             1 if job.args.get("dry_run") else 0, job.started_at))
+
+    def finish(self, job: Job) -> None:
+        self._write(
+            "UPDATE job_runs SET state = ?, finished_at = ?, error = ?, "
+            "summary_json = ? WHERE id = ?",
+            (job.state, job.finished_at, job.error,
+             json.dumps(job.summary, default=str) if job.summary else None,
+             job.id))
+
+    def load(self, limit: int = 50) -> list[Job]:
+        """Recent jobs, newest first, with anything left running marked.
+
+        A row still saying 'running' cannot be running: this process has only
+        just started, and the strategy runs jobs in it. That is the whole value
+        of persisting them -- a run killed by a crash or a closed laptop is
+        visible as an interrupted run rather than as nothing at all.
+        """
+        from pipeline import db
+
+        try:
+            conn = db.get_connection(self._settings)
+            try:
+                stale = [r[0] for r in conn.execute(
+                    "SELECT id FROM job_runs WHERE state = 'running'")]
+                if stale:
+                    conn.execute("UPDATE job_runs SET state = 'interrupted' "
+                                  "WHERE state = 'running'")
+                    conn.commit()
+                    log.info("web.jobs_interrupted", jobs=stale)
+                rows = conn.execute(
+                    "SELECT id, kind, label, args_json, state, started_at, "
+                    "       finished_at, error, summary_json "
+                    "FROM job_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            finally:
+                conn.close()
+        except Exception as exc:
+            log.warning("web.job_store_load_failed", error=str(exc))
+            return []
+
+        jobs = []
+        for row in rows:
+            job = Job(id=row[0], kind=row[1], label=row[2],
+                       args=json.loads(row[3]) if row[3] else {},
+                       state=row[4], started_at=row[5])
+            job.finished_at = row[6]
+            job.error = row[7]
+            job.summary = json.loads(row[8]) if row[8] else None
+            # Its lines are not here and saying so is better than an empty log
+            # that reads as a job which printed nothing.
+            job.append("info", "log not retained across restart — see logs/")
+            jobs.append(job)
+        return jobs
+
+
 class JobRegistry:
     """Every job this process has run, and at most one of them running.
 
-    In memory: a job is a thing you watch while it happens, and a server
-    restart is the end of watching. What the run actually produced is in the
-    warehouse and in logs/, both of which outlive this.
+    The log of a job lives here and only here: it is a thing you watch while it
+    happens, and a server restart is the end of watching. The *fact* of a job
+    is handed to a `JobStore` when one is supplied, so what ran last night
+    survives the restart even though its chatter does not.
     """
 
-    def __init__(self, strategy: ThreadStrategy | None = None) -> None:
+    def __init__(self, strategy: ThreadStrategy | None = None,
+                  store: JobStore | None = None) -> None:
         self._strategy = strategy or ThreadStrategy()
         self._lock = threading.Lock()
         self._jobs: dict[int, Job] = {}
         self._running: int | None = None
+        self._store = store
         self._next_id = 1
+        if store is not None:
+            for job in store.load():
+                self._jobs[job.id] = job
+            # Continue the sequence rather than restarting it, so a job id
+            # identifies one job for the life of the warehouse. Restarting at 1
+            # would make `job 3` mean two different runs in the same logs/.
+            self._next_id = max(self._jobs, default=0) + 1
 
     def running(self) -> Job | None:
         """The job holding the slot, if one still is.
@@ -245,10 +345,15 @@ class JobRegistry:
             self._running = job.id
             self._next_id += 1
 
+        if self._store is not None:
+            self._store.create(job)
+
         def done(finished: Job) -> None:
             with self._lock:
                 if self._running == finished.id:
                     self._running = None
+            if self._store is not None:
+                self._store.finish(finished)
 
         job.append("info", f"started: {label}")
         log.info("web.job_started", job=job.id, kind=kind, label=label, **args)
