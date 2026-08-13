@@ -50,7 +50,7 @@ def test_run_commits_module_writes(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
 
     result = CliRunner().invoke(cli_module.app, ["run", "fake_writer_for_tests"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.output or repr(result.exception)
 
     conn = sqlite3.connect(settings.database_path)
     count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone()[0]
@@ -68,7 +68,7 @@ def test_run_dry_run_rolls_back(tmp_path, monkeypatch):
     setup_conn.close()
 
     result = CliRunner().invoke(cli_module.app, ["run", "fake_insert_only_for_tests", "--dry-run"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.output or repr(result.exception)
 
     conn = sqlite3.connect(settings.database_path)
     count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone()[0]
@@ -98,7 +98,7 @@ def test_backup_command_writes_a_verified_copy(tmp_path, monkeypatch):
     conn.close()
 
     result = CliRunner().invoke(cli_module.app, ["backup"])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 0, result.output or repr(result.exception)
     assert "integrity ok" in result.output
 
     made = list((tmp_path / "backups").glob("warehouse-*.db"))

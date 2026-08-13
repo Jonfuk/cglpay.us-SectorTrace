@@ -25,6 +25,23 @@ def _reset_host_clock():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_console():
+    """The Rich console is cached process-wide and binds `sys.stdout` when it
+    is built.
+
+    Whatever stream it captured belongs to whichever test built it — a pytest
+    capture buffer, or a CliRunner's. Reused by a later test, writes go to a
+    stream that is no longer being read, or that is closed, and the failure
+    surfaces as a command that produced no output for no visible reason.
+    """
+    from pipeline import console
+
+    console.reset_console()
+    yield
+    console.reset_console()
+
+
+@pytest.fixture(autouse=True)
 def _names_resolve_somewhere_public(monkeypatch):
     """DNS, stubbed, so the destination guard runs without leaving the machine.
 
