@@ -342,6 +342,9 @@ table.dense td.act { white-space: nowrap; }
 }
 .iconbtn:hover { color: var(--ink); border-color: var(--accent); }
 #theme-toggle { font-size: 14px; }
+/* An <a> wearing .iconbtn: the browser's link defaults would otherwise
+   underline it and colour it as a link inside a row of buttons. */
+.portallink { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* --- timestamps ----------------------------------------------------------- */
 

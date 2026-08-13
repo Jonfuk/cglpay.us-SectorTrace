@@ -18,8 +18,19 @@ import { cycleTheme } from './theme.js';
 const TABS = [
   ['overview', 'Overview'],
   ['review', 'Review queue'],
+  ['candidates', 'Candidates'],
   ['database', 'Database browser'],
   ['sql', 'SQL'],
+];
+
+// The three candidate kinds, so "FOI" reaches the right list rather than the
+// tab it happens to live on. The kind keys are candidates.js's; the event
+// below is how it hears about them, because the palette decides nothing and
+// owns no state of its own.
+const CANDIDATE_KINDS = [
+  ['cdp_document', 'CDP documents'],
+  ['committee_paper', 'Committee papers'],
+  ['foi_request', 'FOI requests'],
 ];
 
 // Facets and the table list change as modules run and items are decided, but
@@ -112,7 +123,21 @@ function buildCommands() {
     { kind: 'Action', label: 'Copy link to this view', detail: location.hash || '#overview', run: copyLink },
     { kind: 'Action', label: 'Set reviewer name', detail: 'decisions are recorded against it',
       run: () => { const box = document.getElementById('reviewer'); if (box) box.focus(); } },
+    // A whole-page navigation, not a hash change: the portal is a different
+    // document served by the same process.
+    { kind: 'Action', label: 'Open the public portal', detail: 'what everyone else sees',
+      run: () => { location.href = '/'; } },
   );
+
+  for (const [kind, label] of CANDIDATE_KINDS) {
+    built.push({
+      kind: 'Candidates', label, detail: 'nothing here is evidence yet',
+      run: () => {
+        go('#candidates');
+        document.dispatchEvent(new CustomEvent('candidates:kind', { detail: { kind } }));
+      },
+    });
+  }
 
   for (const status of ['approved', 'rejected', 'all']) {
     built.push({

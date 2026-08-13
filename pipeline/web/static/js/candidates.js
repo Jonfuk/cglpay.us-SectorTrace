@@ -57,12 +57,50 @@ function reviewerName() {
   return field ? field.value.trim() : '';
 }
 
+/** A link that reopens this tab filtered to one candidate.
+ *
+ * Built out of the kind and search controls rather than a new route: the
+ * search box already matches on URL, so "the candidate I am asking you about"
+ * is a filter this screen can already express. app.js owns the hash and only
+ * writes review and database parameters into it, so these are read on arrival
+ * and never written back — two writers on one hash is how a shared link ends
+ * up pointing somewhere else.
+ */
+function candidateLink(item) {
+  const params = new URLSearchParams({ kind: state.kind, q: item.url });
+  return `${location.origin}${location.pathname}#candidates?${params}`;
+}
+
+function copyText(text) {
+  // navigator.clipboard is undefined on plain http from another machine --
+  // only localhost counts as a secure context -- and this UI is routinely
+  // reached over the LAN.
+  if (!navigator.clipboard) {
+    window.prompt('Copy this link:', text);
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => status('link copied', 'good'),
+    () => window.prompt('Copy this link:', text));
+}
+
 // --- the counts strip ---------------------------------------------------------
 
 async function loadCounts() {
   let data;
   try { data = await api('/api/admin/candidates/counts'); }
   catch (e) { return status(e.message, 'bad'); }
+
+  // The tab strip carries the undecided total the way the review queue does.
+  // A queue you have to open to discover the size of is a queue that gets
+  // opened less often.
+  const undecided = Object.values(data.kinds)
+    .reduce((total, counts) => total + (counts.undecided || 0), 0);
+  const pill = $('candidate-pill');
+  if (pill) {
+    pill.textContent = String(undecided);
+    pill.hidden = undecided === 0;
+  }
 
   const strip = $('candidate-counts');
   strip.replaceChildren(...Object.entries(data.kinds).map(([kind, counts]) =>
@@ -182,6 +220,11 @@ function renderItem(item, requires) {
       // read it is the failure this whole screen is arranged against.
       el('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer',
                  class: 'small mono', text: item.url }),
+      el('span', { class: 'spacer' }),
+      el('button', {
+        class: 'btn ghost', title: 'Copy a link that reopens this list on this candidate',
+        text: 'Link', onclick: () => copyText(candidateLink(item)),
+      }),
     ),
     el('div', { class: 'row' },
       el('span', { class: 'muted small',
@@ -294,6 +337,31 @@ function refresh() {
   loadList();
 }
 
+/** Adopt `kind` and `q` from the hash, if this tab is what the hash names.
+ *  Returns true when something changed, so the caller can avoid a second
+ *  load of the list it was about to load anyway. */
+function applyHash() {
+  const [tab, query] = location.hash.slice(1).split('?');
+  if (tab !== 'candidates' || !query) return false;
+  const params = new URLSearchParams(query);
+  const kind = params.get('kind');
+  const search = params.get('q');
+  let changed = false;
+  if (kind && KIND_LABELS[kind] && kind !== state.kind) {
+    state.kind = kind;
+    state.offset = 0;
+    changed = true;
+  }
+  if (search !== null && search !== state.search) {
+    state.search = search;
+    state.offset = 0;
+    const box = $('candidate-search');
+    if (box) box.value = search;
+    changed = true;
+  }
+  return changed;
+}
+
 export function initCandidates() {
   const panel = $('tab-candidates');
   if (!panel) return;
@@ -323,13 +391,45 @@ export function initCandidates() {
     if (state.selected.size) rejectMany([...state.selected]);
   });
 
-  // The tab strip is app.js's, and it shows panels by id. Loading on first
-  // reveal rather than on page load keeps three queries off the critical path
-  // of a page that usually opens on the queue.
+  // The command palette asks for a kind by name. It sets the hash to reach
+  // this tab and then says which list it meant; it does not reach in and set
+  // state itself.
+  document.addEventListener('candidates:kind', (event) => {
+    const kind = event.detail && event.detail.kind;
+    if (!kind || !KIND_LABELS[kind]) return;
+    state.kind = kind;
+    state.offset = 0;
+    state.authority = '';
+    refresh();
+  });
+
+  // The counts alone run on load, because they fill the tab-strip pill and a
+  // count nobody can see until they open the tab is not a count. The list and
+  // the authority facets still wait for the first reveal — that is the pair
+  // that was worth keeping off the critical path of a page which usually
+  // opens on the queue.
+  loadCounts();
+
+  // The tab strip is app.js's, and it shows panels by id.
   let loaded = false;
+
+  // A pasted candidate link arrives as a hash change, and may arrive before
+  // this tab has ever been revealed — in which case the reveal below loads it.
+  window.addEventListener('hashchange', () => {
+    if (applyHash() && loaded) loadList();
+  });
+
   const observer = new MutationObserver(() => {
-    if (panel.classList.contains('active') && !loaded) { loaded = true; refresh(); }
+    if (panel.classList.contains('active') && !loaded) {
+      loaded = true;
+      applyHash();
+      refresh();
+    }
   });
   observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
-  if (panel.classList.contains('active')) { loaded = true; refresh(); }
+  if (panel.classList.contains('active')) {
+    loaded = true;
+    applyHash();
+    refresh();
+  }
 }
