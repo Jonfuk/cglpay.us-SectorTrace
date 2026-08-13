@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     # *different* councils are in flight. 1 restores fully serial collection.
     max_fetch_workers: int = 8
 
+    # Read scanned PDFs by OCR (m08's paper reports). Off even when the `ocr`
+    # extra is installed, because it is expensive rather than merely slow: a
+    # real report took 14 seconds a page, which puts m08's backlog of scans at
+    # something like ten hours of CPU. Turning it on is a decision about how to
+    # spend an evening, so it is made deliberately and not by having run
+    # `uv sync --extra ocr` at some point.
+    ocr_enabled: bool = False
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"

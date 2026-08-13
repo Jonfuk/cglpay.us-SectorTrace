@@ -31,10 +31,11 @@ from __future__ import annotations
 import html as html_lib
 import json
 import re
+from dataclasses import dataclass, field
 
 import structlog
 
-from pipeline import db, pdftext, providers
+from pipeline import db, ocr, pdftext, providers
 from pipeline.http import PipelineHTTPClient
 from pipeline.keywords import PFD_CONCERN_INDEX_TERMS, SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
@@ -104,7 +105,37 @@ def redact_name(text: str | None, name: str | None) -> str | None:
     for part in parts:
         redacted = re.sub(rf"\b{re.escape(part)}\b", "[name redacted]",
                            redacted, flags=re.IGNORECASE)
+        # Word boundaries are not enough on text that came from OCR, which
+        # loses spaces: a real report produced "MsRichardson died some 9 days
+        # later", where \bRichardson\b does not match because the character
+        # before it is a letter. Longer parts are therefore also removed
+        # without a boundary. The threshold keeps this away from short names
+        # that live inside ordinary words -- "Rose" inside "prose".
+        if len(part) >= _SUBSTRING_REDACTION_MIN:
+            redacted = re.sub(re.escape(part), "[name redacted]",
+                               redacted, flags=re.IGNORECASE)
     return redacted
+
+
+def surviving_name_part(text: str | None, name: str | None) -> str | None:
+    """A part of `name` still present in `text`, or None if it is clean.
+
+    The post-condition, checked rather than assumed. Redaction is a series of
+    substitutions and OCR text defeats the assumptions each one makes, so
+    before anything reaches a public column this asks the only question that
+    matters: is the name still in there? A caller that gets an answer other
+    than None must not publish the text.
+    """
+    if not text or not name:
+        return None
+    if name.strip().lower().strip(".") in _NAME_PLACEHOLDERS:
+        return None
+    haystack = text.lower()
+    for part in re.split(r"\s+", name.strip()):
+        cleaned = part.strip(".,'").lower()
+        if len(cleaned) > 2 and cleaned in haystack:
+            return part
+    return None
 
 _SENT_TO_HEADER_RE = re.compile(
     r"THIS REPORT IS BEING SENT TO\s*:?(.{0,1200}?)(?:\d\.\s*CORONER\b|\bCORONER'?S LEGAL POWERS\b)",
@@ -123,6 +154,11 @@ _MATTERS_RE = re.compile(
 # withheld the name. Treating these as a name to redact would rewrite
 # unrelated text (and produce nested "[name [name redacted]]" markers).
 _NAME_PLACEHOLDERS = {"redacted", "unknown", "not stated", "n/a", "na", "withheld", "anonymised"}
+
+# Name parts at least this long are removed without requiring a word boundary.
+# See redact_name: OCR loses spaces, and a boundary-anchored pattern misses a
+# surname welded to the word before it.
+_SUBSTRING_REDACTION_MIN = 5
 
 _PDF_LINK_RE = re.compile(r'href="([^"]+\.pdf[^"]*)"', re.IGNORECASE)
 
@@ -204,14 +240,29 @@ def extract_matters_of_concern(text: str) -> str | None:
     return section or None
 
 
-def index_concern_terms(matters_text: str) -> dict[str, int]:
+def index_concern_terms(matters_text: str, welded: bool = False) -> dict[str, int]:
     """Count of each watched term in MATTERS OF CONCERN. A finding aid only —
     presence of a word is not a conclusion about the report.
+
+    `welded` drops the leading word boundary, for text that came from OCR,
+    which still runs the occasional pair of words together — "onisown" for "on
+    its own" in a report read during this work. A boundary-anchored search
+    finds a term inside a welded run only if the run happens to begin with it,
+    and the effect is silent: the reports hardest to read become the ones least
+    findable, which is the opposite of what an index is for.
+
+    This mattered far more before the OCR engine was changed, when the
+    recogniser was Chinese-trained and produced whole clauses as one word. It
+    is kept because OCR text is still imperfect, and because the looser match
+    can only over-count — acceptable in a way it would not be elsewhere, since
+    this column is explicitly a way of finding reports to read rather than a
+    measurement of anything.
     """
     counts: dict[str, int] = {}
     text = (matters_text or "").lower()
+    prefix = "" if welded else r"\b"
     for term in PFD_CONCERN_INDEX_TERMS:
-        n = len(re.findall(rf"\b{re.escape(term.lower())}", text))
+        n = len(re.findall(rf"{prefix}{re.escape(term.lower())}", text))
         if n:
             counts[term] = n
     return counts
@@ -297,8 +348,24 @@ def redact_known_names_across_reports(conn) -> int:
     return redacted_rows
 
 
-def fetch_pdf_report(client, settings,
-                      report_url: str) -> tuple[str | None, list[str], str | None, str | None]:
+@dataclass
+class PdfRead:
+    """What came back from trying to read a report's PDF.
+
+    A record rather than a tuple because the interesting cases are the partial
+    ones: no text but a URL worth reporting, text but from OCR and therefore
+    weaker evidence, nothing at all and a reason why.
+    """
+
+    text: str | None = None
+    urls: list[str] = field(default_factory=list)
+    chosen: str | None = None
+    reason: str | None = None
+    # "pdf" for a real text layer, "ocr" for a scan that was read by machine.
+    source: str | None = None
+
+
+def fetch_pdf_report(client, settings, report_url: str) -> PdfRead:
     """The text of a report published only as a PDF.
 
     Roughly two thirds of PFD reports put nothing but a metadata header in the
@@ -312,7 +379,6 @@ def fetch_pdf_report(client, settings,
     the first pass this does nothing, and an interrupted pass resumes where it
     stopped because each page of results commits.
 
-    Returns (pdf_text, every_pdf_url_on_the_page, chosen_pdf_url, reason).
     `reason` is None on success and otherwise names what stopped it, because
     the reports this cannot read are not all the same problem and the review
     item that remains should say which one it hit. Sampling twelve of them
@@ -324,22 +390,23 @@ def fetch_pdf_report(client, settings,
     if not page.ok:
         log.info("pfd.report_page_unavailable", url=report_url,
                   status=page.status_code)
-        return None, [], None, f"report page returned {page.status_code}"
+        return PdfRead(reason=f"report page returned {page.status_code}")
 
     html = page.body.decode("utf-8", "replace")
     urls = [url.replace("&amp;", "&")
              for url in dict.fromkeys(_PDF_LINK_RE.findall(html))]
     chosen = choose_report_pdf(urls)
     if chosen is None:
-        return None, urls, None, (
+        return PdfRead(urls=urls, reason=(
             "no report PDF on the page" if not urls
-            else "the only PDFs on the page are responses, not the report")
+            else "the only PDFs on the page are responses, not the report"))
 
     document = client.get(chosen)
     if not document.ok:
         log.info("pfd.report_pdf_unavailable", url=chosen,
                   status=document.status_code)
-        return None, urls, chosen, f"report PDF returned {document.status_code}"
+        return PdfRead(urls=urls, chosen=chosen,
+                        reason=f"report PDF returned {document.status_code}")
 
     try:
         pages = pdftext.page_texts(settings, SOURCE_SYSTEM,
@@ -348,16 +415,34 @@ def fetch_pdf_report(client, settings,
         # A PDF that pdfplumber cannot open is a source problem, not a reason
         # to abandon the run. The caller falls back to raising the review item.
         log.warning("pfd.pdf_unreadable", url=chosen, error=f"{type(exc).__name__}: {exc}")
-        return None, urls, chosen, f"PDF could not be opened: {type(exc).__name__}"
+        return PdfRead(urls=urls, chosen=chosen,
+                        reason=f"PDF could not be opened: {type(exc).__name__}")
 
     text = "\n".join(page_text for page_text in pages if page_text).strip()
-    if not text:
-        # pdfplumber opened it and every page came back empty: a scan with no
-        # text layer. Reading it needs OCR, which this pipeline does not do.
-        return None, urls, chosen, (
+    if text:
+        return PdfRead(text=text, urls=urls, chosen=chosen, source="pdf")
+
+    # pdfplumber opened it and every page came back empty: the document is a
+    # picture of a document. Reading it needs OCR.
+    if not ocr.enabled(settings):
+        return PdfRead(urls=urls, chosen=chosen, reason=(
             f"the report PDF is a scan with no text layer ({len(pages)} pages); "
-            "extracting it would need OCR")
-    return text, urls, chosen, None
+            + ("OCR is installed but switched off (set OCR_ENABLED)"
+                if ocr.available() else "reading it needs the ocr extra")))
+
+    try:
+        ocr_pages = ocr.page_texts(settings, SOURCE_SYSTEM,
+                                    document.payload_sha256, document.body)
+    except Exception as exc:
+        log.warning("pfd.ocr_failed", url=chosen, error=f"{type(exc).__name__}: {exc}")
+        return PdfRead(urls=urls, chosen=chosen,
+                        reason=f"OCR failed: {type(exc).__name__}")
+
+    ocr_text = "\n".join(page_text for page_text in ocr_pages if page_text).strip()
+    if not ocr_text:
+        return PdfRead(urls=urls, chosen=chosen, reason=(
+            f"OCR read the {len(ocr_pages)}-page scan and found no text on any page"))
+    return PdfRead(text=ocr_text, urls=urls, chosen=chosen, source="ocr")
 
 
 def _already_has_concerns(conn, report_ref: str) -> bool:
@@ -484,13 +569,15 @@ def run(ctx: ModuleContext) -> None:
                     # mentions inside it — come from the document.
                     pdf_urls: list[str] = []
                     pdf_reason: str | None = None
+                    concerns_source = "rest" if matters else None
                     if (matters is None and len(text) < 1500
                             and not _already_has_concerns(conn, report_ref)):
                         ctx.phase(f"reading the PDF for {report_ref}")
-                        pdf_text, pdf_urls, chosen, pdf_reason = fetch_pdf_report(
-                            client, ctx.settings, post.get("link") or "")
-                        pdf_matters = extract_matters_of_concern(pdf_text or "")
-                        if pdf_text and not pdf_matters:
+                        read = fetch_pdf_report(client, ctx.settings,
+                                                 post.get("link") or "")
+                        pdf_urls, pdf_reason = read.urls, read.reason
+                        pdf_matters = extract_matters_of_concern(read.text or "")
+                        if read.text and not pdf_matters:
                             pdf_reason = ("the report PDF was read but has no "
                                            "matters-of-concern section")
 
@@ -505,15 +592,39 @@ def run(ctx: ModuleContext) -> None:
                                 conn, module_name, "deceased_name", report_ref,
                                 "PDF carries matters of concern but the header gave no "
                                 "name to redact against; concerns not stored publicly",
-                                source_url=chosen or "")
+                                source_url=read.chosen or "")
+                            pdf_reason = "no deceased name to redact against"
                             pdf_matters = None
 
-                        if pdf_text:
-                            text = pdf_text
+                        # The post-condition, checked rather than assumed. OCR
+                        # loses spaces, and "MsRichardson" defeated a
+                        # word-boundary redaction on a real report — the
+                        # surname would have gone into a public column. If any
+                        # part of the name is still there after redacting,
+                        # nothing is published and the reason is recorded.
+                        if pdf_matters:
+                            survivor = surviving_name_part(
+                                redact_name(pdf_matters, deceased_name), deceased_name)
+                            if survivor:
+                                db.record_parse_failure(
+                                    conn, module_name, "matters_of_concern", report_ref,
+                                    f"redaction left part of the deceased's name "
+                                    f"({survivor!r}) in the concerns; not stored publicly "
+                                    f"(source={read.source})",
+                                    source_url=read.chosen or "")
+                                log.warning("pfd.redaction_incomplete",
+                                             report_ref=report_ref, source=read.source)
+                                pdf_reason = "redaction could not clear the name"
+                                pdf_matters = None
+
+                        if read.text:
+                            text = read.text
                         if pdf_matters:
                             matters = pdf_matters
+                            concerns_source = read.source
                             log.info("pfd.concerns_from_pdf", report_ref=report_ref,
-                                      url=chosen, chars=len(pdf_matters))
+                                      url=read.chosen, source=read.source,
+                                      chars=len(pdf_matters))
 
                     db.upsert(conn, "pfd_reports", {
                         "report_ref": report_ref,
@@ -525,6 +636,11 @@ def run(ctx: ModuleContext) -> None:
                         # Redacted before it reaches a public column: coroners
                         # name the deceased inside this section fairly often.
                         "matters_of_concern": redact_name(matters, deceased_name),
+                        # Which of the three routes these came from. OCR text
+                        # is legible and not a faithful transcript, and a
+                        # quotation drawn from this column may end up in a
+                        # campaign document.
+                        "concerns_source": concerns_source,
                         **provenance,
                     }, natural_key=["report_ref"])
                     reports_written += 1
@@ -583,7 +699,8 @@ def run(ctx: ModuleContext) -> None:
                                                   "report PDF did not yield the concerns; "
                                                   "see reason"}))
 
-                    for term, occurrences in index_concern_terms(matters or "").items():
+                    for term, occurrences in index_concern_terms(
+                            matters or "", welded=concerns_source == "ocr").items():
                         db.upsert(conn, "pfd_concern_terms", {
                             "report_ref": report_ref, "term": term, "occurrences": occurrences,
                         }, natural_key=["report_ref", "term"])

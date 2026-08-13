@@ -158,15 +158,17 @@ simply not gone and read. So one gets hidden and one gets fixed.
 
 > **Suggestion 6 — fetch the PDF in m08.** *(Built, 2026-08-13.)*
 >
-> **Measured correction to the estimate below.** This does not retire 1,067
-> items. Sampling twelve of them against the live source found **seven whose
-> PDF is a scan with no text layer** — paper, mostly 2014 to 2018 — which needs
-> OCR, not a parser. Five of twelve yielded their concerns, so the realistic
-> figure is **around 445 of 1,067**, and the remaining ~620 stay in the queue
-> carrying a `reason` that says they need OCR rather than a person. That is
-> still the right change: 445 reports gain their matters of concern as
-> evidence, and the residue becomes honestly labelled instead of uniformly
-> mysterious.
+> **Measured correction to the estimate below.** The PDF text layer alone does
+> not retire 1,067 items. Sampling twelve against the live source found
+> **seven whose PDF is a scan with no text layer** — paper, mostly 2014 to
+> 2018. Five of twelve yielded their concerns from the text layer, so that
+> route is worth **around 445 of 1,067**.
+>
+> **OCR covers the rest** (`uv sync --extra ocr`, `OCR_ENABLED=true`), which on
+> the sample would take the total to substantially all of them. It is off by
+> default: about nine seconds a page puts the backlog at several hours of CPU,
+> and that is a choice rather than a side effect of installing a package.
+> Reports it still cannot read keep a `reason` saying why.
 >
 > It is not a download. The PDF link is not in the REST content, so the module
 > has to fetch each report's HTML page and find the PDF href there, then fetch
@@ -230,7 +232,7 @@ Smaller, but they compound over hundreds of items:
 | 1 | Context as fields + derived links (§3) | small | Fixes the stated problem; helps every one of the 4,762 |
 | 2 | Cluster panel (§2) | small | Turns ~2,000 items into ~8 decisions using write machinery that already exists |
 | 3 | Not-decidable grouping (§5, suggestion 5) | small | Removes from view the 25% no human can action |
-| 4 | **m08 fetches the PDF** (§5, suggestion 6) — **built** | medium–large | Extracts the evidence instead of asking about it; ~445 of 1,067 retire, the rest are labelled as needing OCR |
+| 4 | **m08 fetches the PDF, and OCRs the scans** (§5, suggestion 6) — **built** | medium–large | Extracts the evidence instead of asking about it. ~445 from the text layer; OCR reaches the rest when switched on |
 | 5 | Evidence panel (§4, suggestion 3) | medium | Removes the second lookup for the items that remain |
 | 6 | Scored candidates (§4, suggestion 4) | medium | Only worth it after 1–4; the residue is ~182 items |
 | 7 | Flow polish (§6) | small each | Compounding, but pointless before the content is right |

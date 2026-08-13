@@ -44,6 +44,48 @@ sheets = [
     "google-auth>=2.28",
 ]
 
+# Reading PFD reports that were scanned rather than typed. An extra, not a
+# dependency, because it is large and only one module needs it: seven of every
+# twelve reports in m08's backlog are paper scans with no text layer, and the
+# other five -- and every other PDF this pipeline reads -- need nothing here.
+#
+# Without it installed, m08 does exactly what it did before: records a review
+# item saying the report is a scan. `pipeline.ocr.available()` is the only
+# thing that changes, and it is checked rather than assumed.
+#
+# Not pytesseract: Tesseract is a system binary someone has to install by hand
+# on every machine that runs this, and an evidence pipeline that silently skips
+# a thousand documents because a package manager was not run is worse than one
+# that says it cannot read them.
+#
+# Not rapidocr-onnxruntime either, though it was tried first and it bundles its
+# models rather than downloading them, which would have been the better
+# property. Its recogniser is trained on Chinese and it welds English words
+# together on tightly-set lines: a real report came back as
+# "foraperiodofaboutsixmonthsatdoublethestipulatedmaximumdose". That is not
+# cosmetic. The concern-term index is how a reader finds the reports worth
+# reading, and a term buried inside a run-together word is not found. OnnxTR's
+# English recogniser reads the same line as "for a period of about six months
+# at double the stipulated maximum dose", and does it in two thirds of the
+# time.
+#
+# The cost of the choice: OnnxTR downloads its models on first use (about
+# 105 MB, cached under ~/.cache/onnxtr) rather than shipping them in the wheel,
+# so the first OCR run needs the network.
+#
+#   uv sync --extra ocr
+#
+# onnxruntime is pinned below 1.20 because this project targets Python 3.10
+# and 1.20 onwards ships no cp310 wheel. Raise it when requires-python does.
+# `cpu-headless` is OnnxTR's own extra: CPU inference and the headless build
+# of OpenCV. The plain `cpu` extra pulls the desktop OpenCV, whose GUI
+# libraries are of no use to a pipeline and do not exist on a server.
+ocr = [
+    "onnxtr[cpu-headless]>=0.8",
+    "onnxruntime>=1.16,<1.20",
+    "pypdfium2>=4.0",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script

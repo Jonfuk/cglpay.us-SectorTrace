@@ -86,20 +86,21 @@ def test_the_pdf_text_is_read_from_the_report_page(httpx_mock, settings, monkeyp
         "MATTERS OF CONCERN (1) Staffing was short.", "ACTION SHOULD BE TAKEN"])
 
     with PipelineHTTPClient("test", settings=settings) as client:
-        text, urls, chosen, reason = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
 
-    assert "Staffing was short" in text
-    assert chosen.endswith("Report-2026-0285.pdf")
-    assert len(urls) == 2, "both PDFs on the page come back for pfd_documents"
-    assert reason is None
+    assert "Staffing was short" in read.text
+    assert read.chosen.endswith("Report-2026-0285.pdf")
+    assert len(read.urls) == 2, "both PDFs on the page come back for pfd_documents"
+    assert read.reason is None
+    assert read.source == "pdf"
 
 
 def test_an_unreachable_report_page_is_not_an_error(httpx_mock, settings):
     _mock_page_and_pdf(httpx_mock, page_status=404)
     with PipelineHTTPClient("test", settings=settings) as client:
-        text, urls, chosen, reason = pfd.fetch_pdf_report(client, settings, PAGE_URL)
-    assert (text, urls, chosen) == (None, [], None)
-    assert "404" in reason
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+    assert (read.text, read.urls, read.chosen) == (None, [], None)
+    assert "404" in read.reason
 
 
 def test_a_scanned_pdf_says_it_needs_ocr(httpx_mock, settings, monkeypatch):
@@ -110,12 +111,12 @@ def test_a_scanned_pdf_says_it_needs_ocr(httpx_mock, settings, monkeypatch):
     monkeypatch.setattr(pfd.pdftext, "page_texts", lambda *a, **k: ["", "", "", ""])
 
     with PipelineHTTPClient("test", settings=settings) as client:
-        text, _urls, chosen, reason = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
 
-    assert text is None
-    assert chosen is not None
-    assert "no text layer" in reason and "OCR" in reason
-    assert "4 pages" in reason
+    assert read.text is None
+    assert read.chosen is not None
+    assert "no text layer" in read.reason
+    assert "4 pages" in read.reason
 
 
 def test_a_pdf_pdfplumber_cannot_open_does_not_stop_the_run(httpx_mock, settings,
@@ -127,11 +128,11 @@ def test_a_pdf_pdfplumber_cannot_open_does_not_stop_the_run(httpx_mock, settings
 
     monkeypatch.setattr(pfd.pdftext, "page_texts", explode)
     with PipelineHTTPClient("test", settings=settings) as client:
-        text, _urls, chosen, reason = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
 
-    assert text is None
-    assert chosen is not None, "the URL is still reported, so the failure is diagnosable"
-    assert "could not be opened" in reason
+    assert read.text is None
+    assert read.chosen is not None, "the URL is reported, so the failure is diagnosable"
+    assert "could not be opened" in read.reason
 
 
 # --- the whole path, through run() -------------------------------------------------
@@ -286,3 +287,182 @@ def test_an_empty_concerns_column_does_not_count_as_already_held(conn):
         " source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES ('2026-0285','u','   ','u','t',200,'s','h')")
     assert pfd._already_has_concerns(conn, "2026-0285") is False
+
+
+# --- OCR, for the reports that are scans -------------------------------------------
+#
+# Seven of every twelve. The engine is an optional extra and off by default, so
+# these drive the seam rather than the engine: what the module does when OCR is
+# unavailable, when it is switched off, when it succeeds, and -- the one that
+# matters -- when its output defeats the redaction.
+
+
+def _scanned(monkeypatch):
+    """A PDF pdfplumber opens and finds no text in."""
+    monkeypatch.setattr(pfd.pdftext, "page_texts", lambda *a, **k: ["", "", "", ""])
+
+
+def test_a_scan_says_the_extra_is_missing_when_it_is(httpx_mock, settings, monkeypatch):
+    _mock_page_and_pdf(httpx_mock)
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "available", lambda: False)
+
+    with PipelineHTTPClient("test", settings=settings) as client:
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+    assert "needs the ocr extra" in read.reason
+
+
+def test_a_scan_says_ocr_is_installed_but_off(httpx_mock, settings, monkeypatch):
+    """Two switches, and the review item says which one is closed."""
+    _mock_page_and_pdf(httpx_mock)
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "available", lambda: True)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: False)
+
+    with PipelineHTTPClient("test", settings=settings) as client:
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+    assert "switched off" in read.reason
+    assert "OCR_ENABLED" in read.reason
+
+
+def test_ocr_text_is_used_and_marked_as_ocr(httpx_mock, settings, monkeypatch):
+    _mock_page_and_pdf(httpx_mock)
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+    monkeypatch.setattr(pfd.ocr, "page_texts", lambda *a, **k: [
+        "MATTERS OF CONCERN (1) Staffing was short."])
+
+    with PipelineHTTPClient("test", settings=settings) as client:
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+
+    assert "Staffing was short" in read.text
+    assert read.source == "ocr", "so the row can record that this is not a transcript"
+    assert read.reason is None
+
+
+def test_ocr_failing_is_reported_not_raised(httpx_mock, settings, monkeypatch):
+    _mock_page_and_pdf(httpx_mock)
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+
+    def explode(*a, **k):
+        raise RuntimeError("model missing")
+
+    monkeypatch.setattr(pfd.ocr, "page_texts", explode)
+    with PipelineHTTPClient("test", settings=settings) as client:
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+    assert read.text is None
+    assert "OCR failed" in read.reason
+
+
+def test_ocr_that_reads_nothing_says_so(httpx_mock, settings, monkeypatch):
+    _mock_page_and_pdf(httpx_mock)
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+    monkeypatch.setattr(pfd.ocr, "page_texts", lambda *a, **k: ["", ""])
+
+    with PipelineHTTPClient("test", settings=settings) as client:
+        read = pfd.fetch_pdf_report(client, settings, PAGE_URL)
+    assert read.text is None
+    assert "found no text on any page" in read.reason
+
+
+def test_concerns_read_by_ocr_are_recorded_as_ocr(ctx, conn, httpx_mock, monkeypatch):
+    """A quotation from this column may end up in a campaign document, and "a
+    machine read this off a photocopy" is a different claim from "the coroner
+    wrote this"."""
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+    monkeypatch.setattr(pfd.ocr, "page_texts", lambda *a, **k: [
+        "MATTERS OF CONCERN (1) Staffing was short.\n6. ACTION SHOULD BE TAKEN"])
+    _run(ctx, httpx_mock)
+
+    row = conn.execute("SELECT matters_of_concern, concerns_source FROM pfd_reports "
+                        "WHERE report_ref='2026-0285'").fetchone()
+    assert "Staffing was short" in row["matters_of_concern"]
+    assert row["concerns_source"] == "ocr"
+
+
+def test_concerns_read_from_a_text_layer_are_recorded_as_pdf(ctx, conn, httpx_mock,
+                                                              monkeypatch):
+    monkeypatch.setattr(pfd.pdftext, "page_texts", lambda *a, **k: [
+        "MATTERS OF CONCERN (1) Staffing was short.\n6. ACTION SHOULD BE TAKEN"])
+    _run(ctx, httpx_mock)
+    assert conn.execute("SELECT concerns_source FROM pfd_reports "
+                         "WHERE report_ref='2026-0285'").fetchone()[0] == "pdf"
+
+
+# --- the post-condition ---------------------------------------------------------------
+
+
+def test_nothing_is_published_when_the_name_survives_redaction(ctx, conn, httpx_mock,
+                                                                monkeypatch):
+    """The real failure this guards. OCR loses spaces, so a genuine report
+    produced "MsRichardson died some 9 days later" -- no word boundary, so the
+    boundary-anchored redaction missed it and the surname was heading for a
+    public column. Redaction is now checked, not trusted."""
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+    # "Roe" is three characters, below the substring threshold, so welding it
+    # to the previous word defeats every pattern -- exactly the OCR failure.
+    monkeypatch.setattr(pfd.ocr, "page_texts", lambda *a, **k: [
+        "MATTERS OF CONCERN (1) MrRoe waited nine hours.\n6. ACTION SHOULD BE TAKEN"])
+    _run(ctx, httpx_mock)
+
+    row = conn.execute("SELECT matters_of_concern FROM pfd_reports "
+                        "WHERE report_ref='2026-0285'").fetchone()
+    assert not (row["matters_of_concern"] or "").strip(),         "the name was still in there, so nothing is published"
+
+    failure = conn.execute(
+        "SELECT reason FROM parse_failures WHERE field_name='matters_of_concern'"
+    ).fetchone()
+    assert failure is not None and "Roe" in failure["reason"]
+
+
+def test_a_long_surname_welded_to_a_word_is_still_removed(ctx, conn, httpx_mock,
+                                                            monkeypatch):
+    """The common case, and why the substring pass exists: "MsRichardson" has
+    no word boundary but is long enough to remove safely."""
+    _scanned(monkeypatch)
+    monkeypatch.setattr(pfd.ocr, "enabled", lambda s: True)
+    monkeypatch.setattr(pfd.ocr, "page_texts", lambda *a, **k: [
+        "MATTERS OF CONCERN (1) MsRichardson died some 9 days later.\n"
+        "6. ACTION SHOULD BE TAKEN"])
+    _run(ctx, httpx_mock,
+         content=STUB_CONTENT.replace("Alex Roe", "Amanda Richardson"))
+
+    matters = conn.execute("SELECT matters_of_concern FROM pfd_reports "
+                            "WHERE report_ref='2026-0285'").fetchone()["matters_of_concern"]
+    assert matters, "this one is publishable"
+    assert "Richardson" not in matters
+    assert "died some 9 days later" in matters
+
+
+def test_surviving_name_part_finds_a_name_hidden_in_a_word():
+    assert pfd.surviving_name_part("MrRoe waited", "Alex Roe") == "Roe"
+    assert pfd.surviving_name_part("nothing here", "Alex Roe") is None
+    assert pfd.surviving_name_part("the REDACTED family", "REDACTED") is None
+
+
+def test_surviving_name_part_ignores_initials():
+    """A one or two letter part appears inside half the words in English."""
+    assert pfd.surviving_name_part("a nurse recorded it", "A B Roe") is None
+
+
+# --- OCR loses spaces, and the finding aid has to survive it -------------------------
+
+
+def test_watched_terms_are_found_inside_a_run_together_word():
+    """The recogniser welds words on tightly-set lines: a real report gave
+    "foraperiodofaboutsixmonths". Boundary-anchored matching finds a term only
+    when the welded run happens to start with it, so the reports hardest to
+    read become the least findable."""
+    welded = "therewerestaffingshortagesandhighvacancyrates"
+    assert pfd.index_concern_terms(welded) == {}
+    found = pfd.index_concern_terms(welded, welded=True)
+    assert "staffing" in found
+
+
+def test_boundary_matching_is_still_the_default_for_clean_text():
+    assert pfd.index_concern_terms("understaffing was raised") == {}
+    assert "staffing" in pfd.index_concern_terms("staffing was raised")
