@@ -366,12 +366,43 @@ Recommendation: do both in one small phase of their own — the resolution
 concept first, the crawl second, so the crawl's result is visible when it
 lands.
 
-### Phase 5 — Close the fetcher · M
+### Phase 5 — Close the fetcher · M — **done** (`d4ad49e`)
 
-- **Goal:** `check-url` cannot be aimed at the operator's own network.
-- **Delivers:** S-01.
-- **Acceptance:** private, loopback, link-local and unspecified addresses refused before any request, including after redirect; refusals logged; a test drives each family; council URLs still resolve.
-- **Risk:** medium — over-refusing breaks a working feature. Refuse on resolved address, not on hostname pattern.
+Delivered S-01. Suite 1324 → **1357 passed**, 1 skipped. Every acceptance
+criterion met, and the scope grew by one caller on the way.
+
+- **`pipeline/netguard.py`** refuses loopback, private, link-local, multicast,
+  reserved and unspecified addresses, on the **resolved address** rather than
+  the hostname — so `localhost`, `127.0.0.1`, `127.0.0.1.nip.io` and a name
+  whose owner points it inward are one answer, not four rules.
+- **A name resolving to both a public and a private address is refused.**
+  Which one gets connected to is not this code's decision.
+- **Applied as an httpx request hook, so redirects are covered.** A public URL
+  that 302s into private space is a request the caller never made, and it has
+  its own test.
+- **Two callers, not one.** The plan named `check-url`; promotion also fetches,
+  and a candidate URL is a link copied off a council's page, so anyone able to
+  publish there chooses it. Both are guarded.
+- **Off by default for modules**, which fetch addresses found on published
+  pages rather than typed by a person — and switching it on for them would
+  make every offline test do a real DNS lookup.
+- **Council URLs still resolve**, asserted over the real shapes the pipeline
+  fetches (http, odd ports, the WDTK feed) plus the existing
+  `test_web_resolve.py` flow, which now runs with the guard live.
+
+**Documented limits rather than papered over:** the resolve-then-connect gap
+means DNS rebinding is not caught (fixing it means pinning the connection to
+the checked address, a custom transport), and this is not a firewall — it stops
+the pipeline being *used* to reach private space, not the machine from
+reaching it.
+
+**Found on the way:** the first test fixture patched `socket.getaddrinfo`,
+which is the socket module for the whole process — so httpx resolved the test
+server's own `127.0.0.1` to somewhere public and three web tests timed out at
+30 s. `netguard.DEFAULT_RESOLVER` now exists precisely so a test can substitute
+a resolver without reaching into a shared module. The guard stays *active* in
+every test rather than disabled: names resolve to a public stub, so the code
+still resolves, inspects and decides.
 
 ### Phase 6 — CI and conventions · M
 
