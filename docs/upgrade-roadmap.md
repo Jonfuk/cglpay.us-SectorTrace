@@ -2,8 +2,9 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phases 1–3 are done, Phase 4 is partly done** (F-01 and U-01 closed; F-03
-and D-04 open); Phases 5–7 are not built. Each phase records what changed from the plan as it lands.
+1 skipped, 18 deselected, 422s**). **Phases 1–3 and 5 are done, Phase 4 is
+partly done** (F-01 and U-01 closed; F-03 and D-04 open); Phases 6–7 are not
+built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -29,7 +30,7 @@ coverage and polish are pursued only where they cost none of the above.
 | 1 | ~~**F-01**~~ *(closed, Phase 4)* — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
 | 2 | ~~**D-02**~~ *(closed, Phase 1)* — a dry run and a real run were indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
 | 3 | ~~**O-02**~~ *(closed, Phase 3)* — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
-| 4 | **S-01** — `check-url` will fetch any host and report whether it answered *(Phase 5)* | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
+| 4 | ~~**S-01**~~ *(closed, Phase 5)* — `check-url` would fetch any host and report whether it answered | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
 | 5 | ~~**D-01**~~ *(closed, Phase 1)* — this warehouse was one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
 
 ## 3. Findings register
@@ -145,7 +146,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### H. Security and privacy
 
-**S-01 · `check-url` is an unauthenticated fetcher · M**
+**S-01 · `check-url` is an unauthenticated fetcher · M — closed in Phase 5**
 - Evidence: [pipeline/web/resolve.py:75](pipeline/web/resolve.py:75) accepts any `http`/`https` URL whose netloc contains a dot — which admits `192.168.1.1`, `10.0.0.5` and any internal name — and the client follows redirects ([pipeline/http.py:373](pipeline/http.py:373)). The server binds every interface by default ([README.md:483](README.md:483)).
 - It is bounded: robots is respected, the rate limit is shared, and the response is not returned verbatim. What it does return is whether a host answered and what it looked like, which is a port-scan primitive on the operator's LAN.
 - Fix without breaking the feature: refuse non-public IP literals and resolved addresses before fetching, and log refusals. The legitimate input is a council's public website.
