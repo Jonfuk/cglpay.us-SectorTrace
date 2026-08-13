@@ -2,8 +2,8 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phase 1 is done**; Phases 2–7 are not
-built. Each phase records what changed from the plan as it lands.
+1 skipped, 18 deselected, 422s**). **Phases 1 and 2 are done**; Phases 3–7 are
+not built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -29,7 +29,7 @@ coverage and polish are pursued only where they cost none of the above.
 | 1 | **F-01** — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
 | 2 | ~~**D-02**~~ *(closed, Phase 1)* — a dry run and a real run were indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
 | 3 | **O-02** — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
-| 4 | **S-01** — `check-url` will fetch any host and report whether it answered | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
+| 4 | **S-01** — `check-url` will fetch any host and report whether it answered *(Phase 5)* | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
 | 5 | ~~**D-01**~~ *(closed, Phase 1)* — this warehouse was one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
 
 ## 3. Findings register
@@ -105,7 +105,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### D. Web server performance
 
-**P-04 · No read timeout; a stalled client keeps its thread · S**
+**P-04 · No read timeout; a stalled client keeps its thread · S — closed in Phase 2**
 - Evidence: [pipeline/web/server.py:882](pipeline/web/server.py:882) builds a `ThreadingHTTPServer` with `daemon_threads = True` and `protocol_version = "HTTP/1.1"`; no `timeout` is set on the handler, so `BaseHTTPRequestHandler.timeout` stays `None`.
 - Thread-per-connection is unbounded. On a trusted LAN this is a nuisance rather than a risk, and one class attribute fixes it.
 
@@ -122,11 +122,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### F. Public portal
 
-**W-01 · No `<noscript>`, and the page is entirely JS-rendered · S**
+**W-01 · No `<noscript>`, and the page is entirely JS-rendered · S — closed in Phase 2**
 - Evidence: [pipeline/web/static/public/index.html](pipeline/web/static/public/index.html) ships a header, nav and filter bar; the sections render from `/api/v1/*`. `grep -c '<noscript>'` → 0.
 - With JS off or broken, a public evidence site meant to be cited shows chrome and nothing else. A `<noscript>` naming the API and the exports is a few lines.
 
-**W-02 · No print stylesheet · S**
+**W-02 · No print stylesheet · S — closed in Phase 2**
 - Evidence: `@media print` appears zero times in either [pipeline/web/static/public/styles.css](pipeline/web/static/public/styles.css) or the admin sheet. This evidence gets printed and taken into rooms; a caveat that does not survive printing is a caveat that got separated from its figure, which is the failure [README.md:381](README.md:381) is written against.
 
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
@@ -137,7 +137,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **O-02 · No backup or restore · M** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
-**O-03 · Logs never rotate, and tests write into the real `logs/` · S**
+**O-03 · Logs never rotate, and tests write into the real `logs/` · S — half closed in Phase 2** (tests no longer write there; rotation is still absent)
 - Evidence: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` is 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` is 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
 - A test run polluting the operator's log directory is the kind of thing that erodes trust in the directory.
 
@@ -150,11 +150,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - It is bounded: robots is respected, the rate limit is shared, and the response is not returned verbatim. What it does return is whether a host answered and what it looked like, which is a port-scan primitive on the operator's LAN.
 - Fix without breaking the feature: refuse non-public IP literals and resolved addresses before fetching, and log refusals. The legitimate input is a council's public website.
 
-**S-02 · No CSP, `X-Frame-Options` or `Referrer-Policy` · S**
+**S-02 · No CSP, `X-Frame-Options` or `Referrer-Policy` · S — closed in Phase 2**
 - Evidence: [pipeline/web/server.py:255](pipeline/web/server.py:255) sets `X-Content-Type-Options` and nothing else.
 - DOM discipline is the real XSS defence and it is enforced; this is the cheap second layer, and a `frame-ancestors`/`X-Frame-Options` pair also stops a page on the LAN framing `/admin` and driving it.
 
-**S-03 · The README's security section predates what `/admin` can now do · S**
+**S-03 · The README's security section predates what `/admin` can now do · S — closed in Phase 2**
 - [README.md:483](README.md:483) warns that anyone reachable can read the warehouse and decide items. Since Phases 2–4 they can also start pipeline runs against live sources under this project's contact email, write exports and download files. [docs/admin-ui-plan.md:24](docs/admin-ui-plan.md:24) records that consequence; the README a new operator reads does not.
 
 ### I. Testing and developer experience
@@ -220,14 +220,46 @@ found 10, so the earlier `rows=238407` was also a smaller crawl than today's.
 Nothing was lost — but it is a second reason the old log could not be read as
 a measurement of anything.
 
-### Phase 2 — Housekeeping that should not wait · S
+### Phase 2 — Housekeeping that should not wait · S — **done** (`fb238ee`, `530b9cc`)
 
-- **Goal:** clear the quick wins that need no design.
-- **Delivers:** P-04, S-02, S-03, W-01, W-02, O-03.
-- **Out of scope:** S-01 — it needs a real decision about what to refuse.
-- **Acceptance:** headers asserted in tests; `pytest` leaves `logs/` untouched; portal prints with its caveats intact; `test_portal_isolation.py` green (W-01/W-02 touch the portal, so this phase is portal work and stages those paths deliberately).
-- **Risk:** low, except that W-01/W-02 edit `static/public/**` — permitted here because this is portal work, not admin work leaking into it.
-- **Commit plan:** admin/server changes and portal changes as separate commits.
+Delivered P-04, S-02, S-03, W-01, W-02, O-03. Suite 1229 → **1256 passed**, 1
+skipped. Committed as server work and portal work separately, as planned.
+
+- **CSP is computed per surface, not shared.** The portal has no inline script,
+  so it gets `script-src 'self'` with nothing added. The operator page has
+  exactly one — the theme guard that must run before the stylesheet paints —
+  allowed by a hash read from the file being served, so editing that script
+  cannot silently break the page. A test recomputes the hash from the file
+  rather than pinning a literal. `style-src` keeps `'unsafe-inline'` on both:
+  the operator page has five style attributes and the vendored libraries set
+  styles at runtime, and styles are a defacement vector rather than an
+  exfiltration one.
+- **`frame-ancestors 'none'` plus `X-Frame-Options: DENY`** is the part that
+  earns its place today, given no authentication by design.
+- **`Referrer-Policy: same-origin`**, because warehouse state travels in the
+  URL hash — `#review?module=…`, `#database?table=…`.
+- **Verified in a browser, not only in tests.** Both pages were loaded against
+  the real warehouse on a scratch port: no console errors, no CSP violations,
+  charts and tables intact. Header tests cannot tell you a vendored library
+  still works.
+- **Read timeout on the handler** (P-04): 30s, since `ThreadingHTTPServer`
+  starts a thread per connection with no ceiling and the base class blocks on
+  read forever.
+- **`<noscript>`** naming the eight read-only routes, the export endpoint, and
+  the caveats.
+- **Print stylesheet** forcing collapsed caveat bodies open, writing link
+  targets out beside their text, dropping controls and inverting the palette.
+- **The suite stopped writing into `logs/`** (O-03) via an autouse fixture, and
+  the three test-debris files were deleted: 7.2 MB → 2.4 MB of real module
+  logs. A full run now leaves the directory untouched, asserted by a test.
+
+**Found on the way:** the first draft of the `<noscript>` block advertised
+`/api/v1/overview` and `/api/v1/treatment`. Neither has ever existed — the real
+routes are `summary`, `pay`, `contracts`, `providers`, `authorities`,
+`geography`, `boundaries`, `fingertips`. Caught before commit by checking, and
+now pinned by a test that validates every route the page names against the same
+frozen list `test_portal_isolation.py` uses. A published list of endpoints is a
+promise, and a wrong one is worse than none.
 
 ### Phase 3 — Do not lose what was collected · M
 
