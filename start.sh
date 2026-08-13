@@ -35,6 +35,12 @@
 #   ./start.sh web --host 127.0.0.1    # this machine only
 #   ./start.sh web --port 8080 --no-open
 #
+#   OCR. Set OCR_ENABLED=true in .env (or in the environment) and this script
+#   syncs the `ocr` extra as well, so Module 8 can read the two thirds of PFD
+#   reports that are scans rather than text. Left off, those reports are
+#   recorded as unreadable and the extra is not installed:
+#   OCR_ENABLED=true ./start.sh run m08_pfd_reports
+#
 # m06, m09 and m10 produce review worklists in docs/verification/ rather than
 # finished evidence — nothing they find is promoted without human confirmation.
 #
@@ -105,6 +111,15 @@ COMPANIES_HOUSE_API_KEY=
 # Module 5 — CQC public API (subscription key).
 CQC_SUBSCRIPTION_KEY=
 
+# Module 8 — read PFD reports that were scanned rather than typed. Roughly two
+# thirds of the backlog is paper, and without this those reports are recorded
+# as unreadable instead of contributing their matters of concern.
+#
+# Setting this to true makes start.sh install the `ocr` extra as well. It is
+# off by default because it is expensive: about nine seconds a page, and the
+# first run downloads ~105 MB of models to ~/.cache/onnxtr.
+OCR_ENABLED=false
+
 # Exports — PATH to a service-account JSON file, not the JSON itself.
 GOOGLE_SERVICE_ACCOUNT_JSON=
 GOOGLE_SHEETS_SPREADSHEET_ID=
@@ -128,12 +143,48 @@ fi
 ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
 
 # --- dependencies ---------------------------------------------------------------
+# The `ocr` extra is installed only when OCR_ENABLED says it is wanted, and
+# this is not merely an optimisation: `uv sync` removes anything the selected
+# extras do not ask for. Without this check, someone who installed the extra by
+# hand and switched OCR on in .env would have it silently uninstalled by the
+# next run of this script, and m08 would go back to recording scans as
+# unreadable with no indication why.
+#
+# The environment variable wins over .env, matching how pydantic-settings
+# resolves the same setting inside the pipeline.
+ocr_wanted=0
+if [[ -f .env ]] && grep -Eiq '^[[:space:]]*OCR_ENABLED[[:space:]]*=[[:space:]]*(1|true|yes|on)[[:space:]]*$' .env; then
+    ocr_wanted=1
+fi
+if [[ -n "${OCR_ENABLED:-}" ]]; then
+    # `tr` rather than ${var,,}: macOS still ships bash 3.2.
+    case "$(printf '%s' "$OCR_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) ocr_wanted=1 ;;
+        *)             ocr_wanted=0 ;;
+    esac
+fi
+
+sync_args=(--quiet)
+if (( ocr_wanted )); then
+    sync_args+=(--extra ocr)
+fi
+
 info "Syncing dependencies"
-if ! uv sync --quiet; then
+if ! uv sync "${sync_args[@]}"; then
     error "uv sync failed. Run 'uv sync' without --quiet to see the full output."
+    if (( ocr_wanted )); then
+        printf '%s\n' "  OCR_ENABLED is set, so this tried 'uv sync --extra ocr'." >&2
+        printf '%s\n' "  Unset it to start without OCR." >&2
+    fi
     exit 1
 fi
-ok "dependencies in sync"
+if (( ocr_wanted )); then
+    ok "dependencies in sync (including the ocr extra)"
+    warn "OCR is on. The first scanned report downloads ~105 MB of models to ~/.cache/onnxtr,"
+    warn "and reading one takes about nine seconds a page."
+else
+    ok "dependencies in sync"
+fi
 
 # --- run -------------------------------------------------------------------------
 # `exec` replaces this shell so the CLI's exit code and signal handling

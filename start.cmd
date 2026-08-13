@@ -37,6 +37,12 @@ REM   start.cmd web
 REM   start.cmd web --host 127.0.0.1    - this machine only
 REM   start.cmd web --port 8080 --no-open
 REM
+REM   OCR. Set OCR_ENABLED=true in .env ^(or in the environment^) and this script
+REM   syncs the "ocr" extra as well, so Module 8 can read the two thirds of PFD
+REM   reports that are scans rather than text. Left off, those reports are
+REM   recorded as unreadable and the extra is not installed:
+REM   set OCR_ENABLED=true ^&^& start.cmd run m08_pfd_reports
+REM
 REM m06, m09 and m10 produce review worklists in docs\verification\ rather than
 REM finished evidence - nothing they find is promoted without human confirmation.
 REM ---------------------------------------------------------------------------
@@ -95,6 +101,14 @@ if exist ".env" (
         >>".env" echo # Module 5 - CQC public API ^(subscription key^).
         >>".env" echo CQC_SUBSCRIPTION_KEY=
         >>".env" echo.
+        >>".env" echo # Module 8 - read PFD reports that were scanned rather than typed.
+        >>".env" echo # Roughly two thirds of the backlog is paper, and without this those
+        >>".env" echo # reports are recorded as unreadable instead of contributing their
+        >>".env" echo # matters of concern. Setting this true also makes start.cmd install
+        >>".env" echo # the "ocr" extra. Off by default: about nine seconds a page, and the
+        >>".env" echo # first run downloads ~105 MB of models.
+        >>".env" echo OCR_ENABLED=false
+        >>".env" echo.
         >>".env" echo # Exports - PATH to a service-account JSON file, not the JSON itself.
         >>".env" echo GOOGLE_SERVICE_ACCOUNT_JSON=
         >>".env" echo GOOGLE_SHEETS_SPREADSHEET_ID=
@@ -120,14 +134,46 @@ if errorlevel 1 (
 echo   ok uv found
 
 REM --- dependencies --------------------------------------------------------------
+REM The "ocr" extra is installed only when OCR_ENABLED asks for it, and this is
+REM not merely an optimisation: uv sync removes anything the selected extras do
+REM not ask for. Without this check, someone who installed the extra by hand
+REM and switched OCR on in .env would have it silently uninstalled by the next
+REM run of this script, and Module 8 would go back to recording scans as
+REM unreadable with no indication why.
+REM
+REM The environment variable wins over .env, matching how pydantic-settings
+REM resolves the same setting inside the pipeline.
+set "OCR_EXTRA="
+if defined OCR_ENABLED (
+    for %%V in (1 true yes on) do (
+        if /i "%OCR_ENABLED%"=="%%V" set "OCR_EXTRA=--extra ocr"
+    )
+) else (
+    if exist ".env" (
+        for %%V in (1 true yes on) do (
+            findstr /i /r /c:"^ *OCR_ENABLED *= *%%V *$" ".env" >nul 2>nul && set "OCR_EXTRA=--extra ocr"
+        )
+    )
+)
+
 echo ==^> Syncing dependencies
-uv sync --quiet
+uv sync --quiet %OCR_EXTRA%
 if errorlevel 1 (
     echo error: uv sync failed. Run "uv sync" without --quiet to see the full output. 1>&2
+    if defined OCR_EXTRA (
+        echo   OCR_ENABLED is set, so this tried "uv sync --extra ocr". 1>&2
+        echo   Unset it to start without OCR. 1>&2
+    )
     popd
     exit /b 1
 )
-echo   ok dependencies in sync
+if defined OCR_EXTRA (
+    echo   ok dependencies in sync ^(including the ocr extra^)
+    echo   ! OCR is on. The first scanned report downloads ~105 MB of models, 1>&2
+    echo   ! and reading one takes about nine seconds a page. 1>&2
+) else (
+    echo   ok dependencies in sync
+)
 
 REM --- run -------------------------------------------------------------------------
 REM Batch has no exec, so the CLI's exit code is captured and re-raised after
