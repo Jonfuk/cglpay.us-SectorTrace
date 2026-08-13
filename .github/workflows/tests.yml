@@ -1,0 +1,44 @@
+name: tests
+
+# The offline suite, on every push and pull request. Nothing here reaches a
+# real source: the `integration` marker is deselected by default in
+# pyproject.toml, and it stays that way — this pipeline's politeness
+# commitment does not have an exception for CI, and a workflow that crawls
+# public bodies on every push would be exactly that.
+on:
+  push:
+  pull_request:
+
+# A second push while the first is still running supersedes it. Several
+# sessions commit to this repo in a day.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Ubuntu, while development is on Windows. That is deliberate: every path
+    # in this project is already `Path`-based and the suite has never been run
+    # anywhere else, so the first thing this will tell us is whether that is
+    # true. If it turns out not to be, that is the finding.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check pipeline tests
+
+      - name: Tests
+        # -q because the interesting output is the failures. The suite is
+        # ~2.5 minutes; there is no need to split or parallelise it yet.
+        run: uv run python -m pytest -q
