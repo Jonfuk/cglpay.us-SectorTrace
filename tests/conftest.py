@@ -25,6 +25,26 @@ def _reset_host_clock():
 
 
 @pytest.fixture(autouse=True)
+def _contact_email_is_always_set(monkeypatch):
+    """The one setting with no default, present for every test.
+
+    `CONTACT_EMAIL` is required — the pipeline refuses to start without it,
+    because it goes in the User-Agent of every request. Most code takes its
+    settings from a fixture, but not all of it: `db.apply_migrations(conn)`
+    with no directory falls back to `get_settings()`, and a bare `Settings()`
+    reads the environment and `.env`.
+
+    On a developer's machine `.env` exists, so this was invisible. On a fresh
+    checkout — CI, a new contributor, a clean container — four tests failed
+    with a pydantic validation error, and the suite was quietly depending on
+    an untracked file. Setting it here is what makes the suite hermetic;
+    tests that care about the value pass their own settings.
+    """
+    monkeypatch.setenv("CONTACT_EMAIL", "test@example.com")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _fresh_console():
     """The Rich console is cached process-wide and binds `sys.stdout` when it
     is built.
