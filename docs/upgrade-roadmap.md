@@ -2,8 +2,8 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phases 1 and 2 are done**; Phases 3–7 are
-not built. Each phase records what changed from the plan as it lands.
+1 skipped, 18 deselected, 422s**). **Phases 1–3 are done**; Phases 4–7 are not
+built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -28,7 +28,7 @@ coverage and polish are pursued only where they cost none of the above.
 |---|---|---|
 | 1 | **F-01** — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
 | 2 | ~~**D-02**~~ *(closed, Phase 1)* — a dry run and a real run were indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
-| 3 | **O-02** — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
+| 3 | ~~**O-02**~~ *(closed, Phase 3)* — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
 | 4 | **S-01** — `check-url` will fetch any host and report whether it answered *(Phase 5)* | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
 | 5 | ~~**D-01**~~ *(closed, Phase 1)* — this warehouse was one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
 
@@ -95,7 +95,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - The project deliberately commits per unit of work ([README.md:326](README.md:326)) — so this is paid on every commit of every module, by design.
 - `synchronous = NORMAL` under WAL is the conventional trade and risks losing the last transactions on power loss, not corruption. For a warehouse that is re-runnable from an archive, that is close to free — but the size of the win is unmeasured. Measure with a fixed-size m01 slice before and after.
 
-**P-02 · The raw archive grows without bound · M**
+**P-02 · The raw archive grows without bound · M — measured and documented in Phase 3**
 - Evidence **[live]**: `data/raw` is **3.6 GB across 6,322 files**; the warehouse it backs is 242.7 MB.
 - It is the audit trail, so deletion is not the answer. Compaction, per-source retention, or simply measuring and documenting the growth curve is.
 
@@ -135,7 +135,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **O-01 · No CI · M** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
 
-**O-02 · No backup or restore · M** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
+**O-02 · No backup or restore · M — closed in Phase 3** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
 **O-03 · Logs never rotate, and tests write into the real `logs/` · S — half closed in Phase 2** (tests no longer write there; rotation is still absent)
 - Evidence: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` is 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` is 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
@@ -261,13 +261,47 @@ now pinned by a test that validates every route the page names against the same
 frozen list `test_portal_isolation.py` uses. A published list of endpoints is a
 promise, and a wrong one is worse than none.
 
-### Phase 3 — Do not lose what was collected · M
+### Phase 3 — Do not lose what was collected · M — **done** (`7baaf55`)
 
-- **Goal:** make the warehouse and archive recoverable.
-- **Delivers:** O-02, P-02.
-- **Out of scope:** offsite or cloud anything — this is a local tool.
-- **Acceptance:** a documented, tested `backup` command producing a consistent copy (`VACUUM INTO` on a live WAL database) and a restore that a test actually performs; archive growth measured and documented in `docs/`.
-- **Risk:** medium — a backup that is silently inconsistent is worse than none, so the test must restore and query, not just check the file exists.
+Delivered O-02 and P-02. Suite 1256 → **1279 passed**, 1 skipped.
+Documented in [`docs/BACKUP.md`](BACKUP.md).
+
+- **`pipeline backup`** copies with `VACUUM INTO` — a read transaction, so the
+  snapshot is consistent while a module commits, with no WAL sidecar to forget
+  — then reopens the copy, integrity-checks it and compares it table by table
+  against its source before calling it a backup. A count that moved *while*
+  copying is reported, not raised on: the warehouse is live.
+- **First real backup [measured]:** 645,482 rows, 66 tables, 473.5 MiB from a
+  483.8 MiB source, `integrity ok`, 30 seconds.
+- **`pipeline restore`** refuses a backup that fails integrity or cannot be
+  read as a database, requires `--force` over an existing warehouse, never
+  deletes what it replaces, and clears stale WAL/shm sidecars first.
+- **The archive is inventoried, not copied.** Content-addressing means a
+  listing of names and sizes answers "what did I lose", and every surviving
+  file verifies against its own filename. `missing_from_archive()` is that
+  question as a function.
+- **P-02 measured [live]:** 6,344 files, 3.50 GiB, 23 sources — and
+  `find_a_tender` alone is 3.14 GiB of it, at ~1 MiB per paged JSON response.
+  Growth is driven by *changed* documents rather than by runs, since
+  `pipeline/http.py` checks for an existing copy by hash before archiving. No
+  retention policy, deliberately: at this size that is the right amount of
+  machinery.
+
+**Found on the way — three, two of them mine:**
+
+1. A corrupt backup raised `sqlite3.DatabaseError` rather than a refusal, so
+   `pipeline restore` would have shown a traceback where it should say why it
+   stopped. Caught by the corrupt-file test, fixed in both `restore` and
+   `verify_copy`.
+2. Two backups inside one second collided on a second-resolution filename.
+   Generated names now take the next free suffix; an explicit path someone
+   typed is still refused, which is the opposite rule on purpose.
+3. **The test suite wrote 7.7 MB of backups into the repo's `data/backups/`**
+   before `backup_dir` was added to the test settings — the same failure as
+   O-03's logs, from the same cause: a `Settings` default that reaches back
+   into the repository. There is now a test asserting every writable path the
+   fixture hands out resolves outside the repo, which is the general fix both
+   incidents needed.
 
 ### Phase 4 — Turn candidates into evidence · L
 
