@@ -323,7 +323,42 @@ A "Health" tab answering "is the warehouse fresh, complete, and clean?"
   overrides (`buyer_name_overrides.py`, `authority_websites.py`) read-only
   with a note that those change via commit, not via UI.
 
-### Phase 5 — performance and polish
+### Phase 5 — performance and polish — **done**
+
+Measured before changing anything. The result was mostly "leave it alone",
+which is the useful outcome of an audit.
+
+- **The coverage aggregates were already indexed** — 45–117 ms against tables
+  of 98,588 rows, all on covering indexes. No migration needed, and
+  `tests/test_web_performance.py` now asserts the query plans so a future
+  schema change that drops one is caught rather than felt.
+- **Freshness scans, and stays scanning.** `COUNT + MAX + MIN` over
+  `retrieved_at` is 1.6 s on contracts: SQLite answers MAX from an index in
+  one seek only when it is the sole aggregate. Fixing it would mean a
+  `retrieved_at` index on twenty tables, paid on every insert by every module,
+  for one panel. Moved to its own route instead so nothing waits for it.
+- **ETag / 304** on static assets, keyed on mtime and size (weak tags — an
+  mtime cannot promise byte equality). Verified revalidating in a browser.
+- **gzip** above 4 KB for text types, with `Vary: Accept-Encoding`. The
+  coverage matrix goes from 33 KB to 3.8 KB on the wire. Downloads are left
+  alone: they are streamed, and buffering 23 MB to compress it is the wrong
+  trade.
+- **Jump links** in the table browser: a value in a column that names a row
+  elsewhere (`buyer_ons_code`, `provider_key`, `company_number`, …) links to
+  that table pre-filtered, and the table search is now in the URL, so the
+  destination is linkable too.
+- **SQL tab**: fifty-entry history in `localStorage`, an `EXPLAIN QUERY PLAN`
+  button that does not pollute the history, and client-side CSV of the
+  current result.
+- **Undo** on the last review decision, offered in the toast for 15 seconds
+  and grouped by previous status so a mixed bulk decision is restored
+  correctly. The undo is itself a recorded decision — `review_decisions` keeps
+  the mistake and the correction, verified end to end.
+
+Not done, and not missed: schema-aware SQL autocomplete, hide/show columns,
+the long-value cell drawer, copy-row-as-JSON, and saved filter presets. Each
+is a feature rather than a fix, and the palette plus the URL-linkable filters
+already cover most of what presets were for.
 
 Server:
 

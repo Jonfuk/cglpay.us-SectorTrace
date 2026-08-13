@@ -123,6 +123,18 @@ PUBLIC_MAX_AGE = 300
 
 MAX_BODY_BYTES = 256 * 1024
 
+# Below this a response is not worth compressing: the CPU and the round trip
+# through zlib cost more than the bytes saved, and most replies here are a few
+# hundred bytes of JSON.
+GZIP_MIN_BYTES = 4 * 1024
+
+# Only text. Compressing an already-compressed payload makes it bigger, and
+# nothing here serves images.
+GZIP_TYPES = {
+    "application/json", "application/geo+json", "text/html", "text/css",
+    "text/javascript", "text/csv", "text/plain", "text/markdown",
+}
+
 log = structlog.get_logger()
 
 
@@ -189,12 +201,41 @@ class Handler(BaseHTTPRequestHandler):
         """
         log.debug("web.request", client=self.address_string(), message=format % args)
 
+    def _accepts_gzip(self) -> bool:
+        return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
     def _send(self, status: int, body: bytes, content_type: str,
-               max_age: int | None = None) -> None:
+               max_age: int | None = None, etag: str | None = None) -> None:
         self._responded = True
+
+        # Compressed above a threshold, and only for things that compress. The
+        # payloads that matter are the coverage matrix, a page of a wide table
+        # and app.js -- all text, all several times smaller gzipped. Below the
+        # threshold the round trip through zlib costs more than the bytes it
+        # saves, and on loopback none of this matters at all: it is for the
+        # phone on the other side of the LAN, which is a supported way to reach
+        # this server.
+        encoding = None
+        if (len(body) >= GZIP_MIN_BYTES and self._accepts_gzip()
+                and content_type.split(";")[0].strip() in GZIP_TYPES):
+            import gzip
+
+            compressed = gzip.compress(body, compresslevel=6)
+            # Only if it actually helped. Some payloads are already entropy.
+            if len(compressed) < len(body):
+                body = compressed
+                encoding = "gzip"
+
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+        # Whether or not this particular response was compressed: a cache that
+        # keeps one must not serve it to a client that cannot read it.
+        self.send_header("Vary", "Accept-Encoding")
+        if etag:
+            self.send_header("ETag", etag)
         if self.close_connection:
             self.send_header("Connection", "close")
         # Warehouse data is not cacheable: the point of the operator UI is the
@@ -347,8 +388,52 @@ class Handler(BaseHTTPRequestHandler):
         file_path = directory / filename
         if not file_path.is_file():
             raise ApiError(f"Missing UI asset {filename}", status=500)
+
+        # Size and modification time, which change together whenever a file is
+        # edited. Not a hash of the content: these are read on every request,
+        # and hashing 23 MB of vendored ECharts to save sending it is the wrong
+        # trade. Weak ("W/") because the byte-for-byte guarantee a strong tag
+        # implies is not one an mtime can make.
+        stat = file_path.stat()
+        etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
         cache = ASSET_MAX_AGE if path.startswith(CACHEABLE_PREFIXES) else None
-        self._send(200, file_path.read_bytes(), content_type, max_age=cache)
+
+        if self._matches_etag(etag):
+            # 304 carries no body, and must repeat the headers a cache needs to
+            # keep using what it already has.
+            self._responded = True
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control",
+                              f"max-age={cache}, private" if cache else "no-store")
+            self.send_header("Vary", "Accept-Encoding")
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            return
+
+        self._send(200, file_path.read_bytes(), content_type, max_age=cache, etag=etag)
+
+    def _matches_etag(self, etag: str) -> bool:
+        """Whether the client already holds this version.
+
+        `If-None-Match` may carry several tags, and a weak tag compares by its
+        opaque part -- the W/ prefix is about what the tag promises, not about
+        which resource it names.
+        """
+        header = self.headers.get("If-None-Match")
+        if not header:
+            return False
+        mine = etag[2:] if etag.startswith("W/") else etag
+        for candidate in header.split(","):
+            candidate = candidate.strip()
+            if candidate == "*":
+                return True
+            if candidate.startswith("W/"):
+                candidate = candidate[2:]
+            if candidate == mine:
+                return True
+        return False
 
     def _serve_api(self, path: str, params: dict[str, list[str]]) -> None:
         if self.command == "POST":
@@ -495,6 +580,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/health":
             return health.health(conn, self.settings)
+
+        if path == "/api/admin/freshness":
+            # Its own route because it is seconds of table scans; see
+            # health.freshness for why that is not fixed with an index.
+            return {"freshness": health.freshness(conn)}
 
         if path == "/api/admin/coverage":
             return health.coverage(conn, tier=_str(params, "tier") or "upper")

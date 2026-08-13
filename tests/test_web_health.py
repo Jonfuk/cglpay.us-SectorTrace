@@ -196,7 +196,7 @@ def test_an_unapplied_migration_is_visible(client, conn, settings):
 def test_freshness_reads_the_rows_not_the_cursor(client, geography):
     """A module that ran this morning and fetched nothing leaves a fresh
     cursor and stale evidence. The rows know when they were retrieved."""
-    payload = client.get("/api/admin/health").json()["freshness"]
+    payload = client.get("/api/admin/freshness").json()["freshness"]
     authorities = next(row for row in payload if row["table"] == "authorities")
 
     assert authorities["rows"] == 4
@@ -209,7 +209,7 @@ def test_freshness_does_not_read_personal_data_tables(client, conn):
     conn.execute("INSERT INTO restricted_people (retrieved_at) VALUES ('2026-01-01')")
     conn.commit()
 
-    tables = {row["table"] for row in client.get("/api/admin/health").json()["freshness"]}
+    tables = {row["table"] for row in client.get("/api/admin/freshness").json()["freshness"]}
     assert "restricted_people" not in tables
 
 

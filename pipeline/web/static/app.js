@@ -99,13 +99,25 @@ function maybeLink(value) {
 }
 
 let toastTimer = null;
-function toast(message, isError) {
+function toast(message, isError, action) {
   const box = $('#toast');
-  box.textContent = message;
   box.className = isError ? 'toast error' : 'toast';
   box.hidden = false;
+
+  const children = [document.createTextNode(message)];
+  if (action) {
+    children.push(el('button', {
+      class: 'btn ghost toast-action',
+      onclick: () => { box.hidden = true; action.run(); },
+    }, action.label));
+  }
+  box.replaceChildren(...children);
+
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { box.hidden = true; }, isError ? 9000 : 4000);
+  // An offered undo that vanishes in four seconds is not an offer. Long enough
+  // to notice a mistake and reach the mouse.
+  const life = action ? 15000 : (isError ? 9000 : 4000);
+  toastTimer = setTimeout(() => { box.hidden = true; }, life);
 }
 
 /* A request counter rather than a boolean: several calls overlap (facets and
@@ -176,8 +188,11 @@ function showTab(name) {
   if (name === 'overview') loadOverview();
   if (name === 'review') loadReview();
   if (name === 'database') {
-    loadSchema();
-    if (browserState.current) loadTable();
+    // Schema first, then rows. The cells decide whether a value is a jump to
+    // another table by looking that table up in the object list, so rendering
+    // before it arrives silently produces a page with no jumps on it.
+    const ready = loadSchema();
+    if (browserState.current) ready.then(() => loadTable());
   }
   document.dispatchEvent(new CustomEvent('tabshown', { detail: { tab: name } }));
 }
@@ -209,6 +224,7 @@ function syncUrl() {
   // is: "look at supplier_aliases" is a message someone sends.
   if (currentTab === 'database' && browserState.current) {
     params.set('table', browserState.current);
+    if (browserState.search) params.set('q', browserState.search);
   }
   const query = params.toString();
   const target = `#${currentTab}${query ? `?${query}` : ''}`;
@@ -261,10 +277,15 @@ function applyUrlFilters(params) {
 
 /** Push the selected table from URL parameters into the browser state.
  *  Returns true if it changed, so the caller knows whether to reload. */
-function applyUrlTable(params) {
+function applyUrlTable(params, tab) {
+  // `q` means the review search on one tab and the table search on the other,
+  // so this only reads it where it means the latter.
+  if (tab !== 'database') return false;
   const wanted = params.get('table') || null;
-  if (wanted === browserState.current) return false;
+  const term = params.get('q') || '';
+  if (wanted === browserState.current && term === browserState.search) return false;
   browserState.current = wanted;
+  browserState.search = term;
   browserState.offset = 0;
   browserState.orderBy = null;
   browserState.desc = false;
@@ -670,9 +691,20 @@ function historyBlock(itemId, count) {
  * the cursor is replaced by a different one just as the next key is pressed.
  * The response is awaited first, so nothing is shown as decided that was not.
  */
-async function decideItems(ids, decision, note) {
+async function decideItems(ids, decision, note, isUndo) {
   const by = requireReviewer();
   if (!by) return null;
+
+  // What each item was, captured before the request: the rows are mutated (or
+  // removed) as soon as it succeeds, and this is the only chance to know what
+  // to put back. An undo is itself a recorded decision -- the queue keeps the
+  // whole history, including the mistake -- so this is a convenience, not an
+  // erasure.
+  const previously = new Map();
+  for (const id of ids) {
+    const item = reviewState.items.find((candidate) => candidate.id === id);
+    if (item) previously.set(id, item.status);
+  }
 
   let result;
   try {
@@ -714,7 +746,8 @@ async function decideItems(ids, decision, note) {
 
   const noun = result.updated.length === 1 ? 'item' : 'items';
   if (result.updated.length) {
-    toast(`${num(result.updated.length)} ${noun} ${verbFor(decision)}.`);
+    toast(`${num(result.updated.length)} ${noun} ${verbFor(decision)}.`, false,
+           isUndo ? null : undoFor(result.updated, previously));
   } else if (result.unchanged.length) {
     toast(`Already ${decision}; nothing changed.`);
   }
@@ -731,6 +764,35 @@ async function decideItems(ids, decision, note) {
 
 function verbFor(decision) {
   return decision === 'pending' ? 'reset to pending' : decision;
+}
+
+/** An undo action for the toast, or null if there is nothing to put back.
+ *
+ *  Grouped by what each item was: a bulk decision over a mixed selection has
+ *  no single previous status, and restoring them all to one would be a second
+ *  mistake dressed as a correction.
+ */
+function undoFor(updatedIds, previously) {
+  const groups = new Map();
+  for (const id of updatedIds) {
+    const was = previously.get(id);
+    if (was === undefined) continue;
+    if (!groups.has(was)) groups.set(was, []);
+    groups.get(was).push(id);
+  }
+  if (!groups.size) return null;
+
+  return {
+    label: 'Undo',
+    run: async () => {
+      for (const [status, ids] of groups) {
+        await decideItems(ids, status, null, true);
+      }
+      // The rows may have left the page when they were decided; if the undo
+      // put them back into the current filter, they belong on screen.
+      await loadReview(true);
+    },
+  };
 }
 
 /** The header pill, adjusted locally. The authoritative counts come back on
@@ -889,7 +951,46 @@ document.addEventListener('keydown', (event) => {
 
 // --- database browser -------------------------------------------------------
 
-const browserState = { objects: [], current: null, offset: 0, limit: 50, orderBy: null, desc: false, reveal: new Set() };
+const browserState = { objects: [], current: null, offset: 0, limit: 50, orderBy: null, desc: false, search: '', reveal: new Set() };
+
+/* Columns that name a row in another table. Following one by hand means
+ * reading the value, finding the other table in a list of sixty-five, and
+ * retyping the value into its search box — which is enough friction that the
+ * question usually just goes unasked.
+ *
+ * A short explicit map rather than anything derived from foreign keys: most of
+ * these relationships are not declared as constraints (evidence arrives from
+ * separate sources and is matched afterwards, so a code can legitimately
+ * reference an authority this warehouse has never seen), and the ones that are
+ * declared are not the ones worth clicking. */
+const JUMP_TARGETS = {
+  ons_code: 'authorities',
+  buyer_ons_code: 'authorities',
+  authority_ons_code: 'authorities',
+  local_authority_ons_code: 'authorities',
+  parent_code: 'authorities',
+  provider_key: 'providers',
+  supplier_key: 'providers',
+  company_number: 'companies',
+  charity_number: 'charity_financials',
+  indicator_id: 'fingertips_indicators',
+};
+
+/** A table cell: a jump to the row this value names, a link if it is a URL, or
+ *  plain text. Never markup built from a database value. */
+function cellContent(columnName, value) {
+  const target = JUMP_TARGETS[columnName];
+  const known = target && browserState.objects.some((o) => o.name === target);
+  if (known && target !== browserState.current && String(value).trim()) {
+    return el('a', {
+      class: 'jump',
+      href: `#database?table=${encodeURIComponent(target)}&q=${encodeURIComponent(value)}`,
+      title: `Find ${value} in ${target}`,
+      text: String(value),
+    });
+  }
+  return maybeLink(value);
+}
 
 async function loadSchema() {
   if (browserState.objects.length) return renderObjectList();
@@ -929,7 +1030,7 @@ function openObject(name) {
   browserState.offset = 0;
   browserState.orderBy = null;
   browserState.desc = false;
-  $('#table-search') && ($('#table-search').value = '');
+  browserState.search = '';
   renderObjectList();
   syncUrl();
   loadTable();
@@ -949,6 +1050,11 @@ async function loadTable(search) {
   const name = browserState.current;
   if (!name) return;
 
+  // The term lives in browserState, not in the input: the input is rebuilt on
+  // every render, and a jump link or a pasted URL sets the term before there
+  // is an input to read it from.
+  if (search !== undefined) browserState.search = search;
+
   const params = new URLSearchParams({
     limit: String(browserState.limit),
     offset: String(browserState.offset),
@@ -957,7 +1063,7 @@ async function loadTable(search) {
     params.set('order_by', browserState.orderBy);
     params.set('dir', browserState.desc ? 'desc' : 'asc');
   }
-  const term = search !== undefined ? search : ($('#table-search') ? $('#table-search').value.trim() : '');
+  const term = browserState.search;
   if (term) params.set('q', term);
   if (browserState.reveal.has(name)) params.set('reveal', '1');
 
@@ -991,7 +1097,11 @@ function renderTable(data, term) {
 
   const search = el('input', {
     id: 'table-search', type: 'search', placeholder: 'search all columns…', value: term || '',
-    onchange: (e) => { browserState.offset = 0; loadTable(e.target.value.trim()); },
+    onchange: (e) => {
+      browserState.offset = 0;
+      loadTable(e.target.value.trim());
+      syncUrl();
+    },
   });
 
   replace($('#table-head'),
@@ -1012,10 +1122,11 @@ function renderTable(data, term) {
     },
   }, column.name + (data.order_by === column.name ? (data.descending ? ' ↓' : ' ↑') : ''))));
 
-  const body = data.rows.map((row) => el('tr', {}, row.map((value) =>
+  const columnNames = data.columns.map((column) => column.name);
+  const body = data.rows.map((row) => el('tr', {}, row.map((value, index) =>
     value === null
       ? el('td', { class: 'null', text: 'NULL' })
-      : el('td', {}, maybeLink(value)))));
+      : el('td', {}, cellContent(columnNames[index], value)))));
 
   replace($('#data-table'),
     el('thead', {}, header),
@@ -1036,23 +1147,94 @@ function renderTable(data, term) {
 
 // --- SQL --------------------------------------------------------------------
 
-async function runSql() {
-  const sql = $('#sql-input').value.trim();
-  if (!sql) return;
+/* The last fifty statements, so the query someone spent ten minutes getting
+ * right is still there tomorrow. Kept newest-first and deduplicated: running
+ * the same thing four times while watching a run should leave one entry. */
+const SQL_HISTORY_KEY = 'cglpay.sql.history';
+const SQL_HISTORY_MAX = 50;
+
+function sqlHistory() {
+  try { return JSON.parse(localStorage.getItem(SQL_HISTORY_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+function rememberSql(sql) {
+  const kept = [sql, ...sqlHistory().filter((entry) => entry !== sql)]
+    .slice(0, SQL_HISTORY_MAX);
+  try { localStorage.setItem(SQL_HISTORY_KEY, JSON.stringify(kept)); }
+  catch (e) { /* private mode */ }
+  renderSqlHistory();
+}
+
+function renderSqlHistory() {
+  const select = $('#sql-history');
+  if (!select) return;
+  const entries = sqlHistory();
+  replace(select, [
+    el('option', { value: '', text: entries.length ? `${entries.length} recent` : '—' }),
+    ...entries.map((sql, index) => el('option', {
+      value: String(index),
+      // Collapsed to one line: a select cannot show a newline, and a
+      // multi-line query renders as a run of spaces without this.
+      text: sql.replace(/\s+/g, ' ').slice(0, 90),
+    })),
+  ]);
+  select.value = '';
+}
+
+/** The last result, kept for the CSV button. */
+let lastSqlResult = null;
+
+async function runSql(explain) {
+  const typed = $('#sql-input').value.trim();
+  if (!typed) return;
+  // EXPLAIN QUERY PLAN is a read like any other and goes down the same
+  // read-only connection; it answers "will this scan 98,000 contracts?"
+  // before someone finds out by waiting.
+  const sql = explain ? `EXPLAIN QUERY PLAN ${typed}` : typed;
+
   $('#sql-status').textContent = 'running…';
   try {
     const data = await post('/api/query', { sql });
+    lastSqlResult = explain ? null : data;
     $('#sql-status').textContent = `${num(data.rows.length)} row${data.rows.length === 1 ? '' : 's'}`
-      + (data.truncated ? ` (capped at ${num(data.limit)})` : '');
+      + (data.truncated ? ` (capped at ${num(data.limit)})` : '')
+      + (explain ? ' — query plan, nothing was fetched' : '');
     replace($('#sql-table'),
       el('thead', {}, el('tr', {}, data.columns.map((c) => el('th', { text: c.name })))),
       el('tbody', {}, data.rows.map((row) => el('tr', {}, row.map((value) =>
         value === null ? el('td', { class: 'null', text: 'NULL' }) : el('td', {}, maybeLink(value)))))));
+    if (!explain) rememberSql(typed);
   } catch (e) {
     $('#sql-status').textContent = '';
+    lastSqlResult = null;
     replace($('#sql-table'));
     toast(e.message, true);
   }
+}
+
+/** RFC 4180: quotes doubled, anything with a comma, quote or newline quoted. */
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadSqlCsv() {
+  if (!lastSqlResult) return toast('Run a query first.', true);
+  const lines = [lastSqlResult.columns.map((c) => csvCell(c.name)).join(',')];
+  for (const row of lastSqlResult.rows) lines.push(row.map(csvCell).join(','));
+
+  // Built and downloaded in the page: the rows are already here, and a round
+  // trip to ask the server to serialise what it just sent would be a second
+  // query against the warehouse for the same answer.
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = el('a', { href: url, download: `query_${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 // --- wiring -----------------------------------------------------------------
@@ -1111,10 +1293,20 @@ function init() {
   });
 
   $('#obj-filter').addEventListener('input', debounce(renderObjectList, 150));
-  $('#sql-run').addEventListener('click', runSql);
+  $('#sql-run').addEventListener('click', () => runSql(false));
+  $('#sql-explain').addEventListener('click', () => runSql(true));
+  $('#sql-csv').addEventListener('click', downloadSqlCsv);
   $('#sql-input').addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') runSql();
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') runSql(false);
   });
+  $('#sql-history').addEventListener('change', (event) => {
+    const entry = sqlHistory()[Number(event.target.value)];
+    if (entry === undefined) return;
+    $('#sql-input').value = entry;
+    $('#sql-input').focus();
+    event.target.value = '';
+  });
+  renderSqlHistory();
 
   setInterval(retickTimes, 60_000);
 
@@ -1129,7 +1321,7 @@ function init() {
     // rewrites itself to match, quietly losing what it was pointing at.
     if (tab === 'review' && !reviewState.facets) await loadFacets();
     const filtersChanged = applyUrlFilters(params);
-    const tableChanged = applyUrlTable(params);
+    const tableChanged = applyUrlTable(params, tab);
     if (tab !== currentTab) showTab(tab);
     else if (tab === 'review' && filtersChanged) loadReview();
     else if (tab === 'database' && tableChanged) showSelectedTable();
@@ -1142,7 +1334,7 @@ function init() {
   }
 
   const opened = parseHash();
-  applyUrlTable(opened.params);
+  applyUrlTable(opened.params, opened.tab);
 
   if (opened.tab === 'review') {
     // Facets first: the item-type dropdown is built from them, so a link

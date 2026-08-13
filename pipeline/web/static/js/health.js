@@ -81,7 +81,17 @@ async function loadHealth() {
   }
 
   renderHosts(data.hosts);
-  renderFreshness(data.freshness);
+}
+
+/* Separately, and last. On the real warehouse this is a couple of seconds of
+ * table scans, and the rest of the tab has no reason to wait for it. */
+async function loadFreshness() {
+  $('health-freshness').replaceChildren(
+    el('div', { class: 'muted small', text: 'measuring…' }));
+  try { renderFreshness((await api('/api/admin/freshness')).freshness); }
+  catch (e) {
+    $('health-freshness').replaceChildren(el('div', { class: 'warn', text: e.message }));
+  }
 }
 
 function renderHosts(hosts) {
@@ -283,6 +293,7 @@ function loadAll() {
   loadHealth();
   loadCoverage();
   loadFailures();
+  loadFreshness();
 }
 
 export function initHealth() {

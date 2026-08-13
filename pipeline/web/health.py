@@ -192,6 +192,17 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
     The honest freshness signal. A module that ran this morning and found
     nothing new leaves a recent cursor and stale evidence; the rows know when
     they were actually fetched.
+
+    This is the slow one, and deliberately so. `COUNT(*), MAX(retrieved_at),
+    MIN(retrieved_at)` is a full scan of every table: SQLite can answer MAX or
+    MIN from an index in one seek, but only when it is the single aggregate in
+    the query, so asking for all three together scans regardless. On the real
+    warehouse that is 1.6 seconds for contracts alone, 98,588 rows.
+
+    The fix is not an index. It would mean `retrieved_at` indexes on twenty
+    tables, paid for on every insert by every module, to speed up a panel
+    somebody looks at occasionally. It is served on its own route instead, so
+    the rest of the Health tab does not wait for it.
     """
     out = []
     for row in conn.execute(
@@ -213,10 +224,15 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
 
 
 def health(conn: sqlite3.Connection, settings) -> dict:
+    """The cheap half: size, migrations, and which hosts were last asked.
+
+    Freshness is not here. See its docstring -- it is seconds of table scans,
+    and making the whole tab wait for it to render a size in megabytes was the
+    wrong shape.
+    """
     return {
         "warehouse": warehouse(conn, settings),
         "hosts": hosts(conn),
-        "freshness": freshness(conn),
     }
 
 

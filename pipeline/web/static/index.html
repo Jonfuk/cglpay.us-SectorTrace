@@ -311,7 +311,13 @@
         placeholder="SELECT module, item_type, COUNT(*) FROM review_queue WHERE status='pending' GROUP BY 1,2 ORDER BY 3 DESC"></textarea>
       <div class="row">
         <button class="btn primary" id="sql-run">Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
+        <button class="btn" id="sql-explain" title="How SQLite would answer this: which indexes it uses, and where it scans">Explain</button>
+        <button class="btn" id="sql-csv" title="Download these results as CSV">CSV</button>
         <span id="sql-status" class="muted"></span>
+        <span class="spacer"></span>
+        <label class="small muted">History
+          <select id="sql-history"><option value="">—</option></select>
+        </label>
       </div>
       <div class="tablewrap"><table id="sql-table"></table></div>
     </div>

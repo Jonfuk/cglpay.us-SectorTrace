@@ -477,3 +477,18 @@ table.summary td, table.summary th { padding: 3px 8px; }
 
 #failure-rows td { padding: 6px 8px; }
 #failure-rows a { overflow-wrap: anywhere; }
+
+/* --- phase 5 polish ------------------------------------------------------- */
+
+/* Undo lives in the toast, so the toast needs to hold a control. */
+.toast { display: flex; align-items: center; gap: 12px; }
+.btn.toast-action { border-color: var(--accent); color: var(--accent); }
+
+/* A value that names a row in another table. Distinguished from an external
+   link by the arrow, since both are blue and only one leaves the warehouse. */
+a.jump { text-decoration: none; border-bottom: 1px dotted var(--accent); }
+a.jump::after { content: ' \2192'; opacity: 0.5; }
+a.jump:hover { border-bottom-style: solid; }
+
+#sql-history { max-width: 260px; }
+#sql-history option { font-family: var(--mono); font-size: 12px; }
