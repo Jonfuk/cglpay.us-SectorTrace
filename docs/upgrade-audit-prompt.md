@@ -28,13 +28,18 @@ Read these in full. Do not skim, and do not start proposing until you have:
 - `README.md` — the project's own account of what it collects, what it
   refuses to compute, the module dependency waves, the write-slot discipline,
   the portal and the review UI.
-- `docs/admin-ui-plan.md` — the existing phased plan for `/admin`. Phases 0–3
-  are **done**; Phase 4 (exports manager and overrides) is **in flight in the
-  working tree right now** (`pipeline/exports/run.py`,
-  `pipeline/web/artefacts.py`, `tests/test_web_exports.py` are untracked, and
-  `cli.py`/`server.py`/`admin.py`/`config.py` are modified). Phase 5
-  (performance and polish) is a sketch. Your roadmap must supersede and absorb
-  what remains of that plan, not duplicate or contradict it.
+- `docs/admin-ui-plan.md` — the phased plan for `/admin`, **now complete:
+  Phases 0–5 are all done and committed.** Read it as a design record rather
+  than a backlog. Two things in it matter more than the feature list: each
+  phase records what it found on the way and what it *deliberately did not
+  build*, and Phase 5 measured before changing anything and concluded "leave
+  it alone" for most of what it looked at. Your roadmap starts where that
+  document stops. Do not re-propose anything it delivered, and do not
+  re-propose what it explicitly declined — schema-aware SQL autocomplete,
+  hide/show columns, the long-value cell drawer, copy-row-as-JSON, saved
+  filter presets, the `parse_failures` mark-as-noted column — unless you have
+  evidence it did not have. Saying "the plan rejected X and was right" is a
+  finding; silently re-listing X is noise.
 - `docs/CAVEATS.md`, `docs/SOURCES.md`, `docs/DATA_DICTIONARY.md`.
 - `pipeline/` in whatever depth each area needs: `registry.py`, `runner.py`,
   `parallel.py`, `db.py`, `http.py`, `config.py`, `cli.py`, `console.py`,
@@ -133,19 +138,27 @@ PDF parsing cost. Memory on the large modules. Resumability after a kill.
 Give expected magnitudes, and say which claims are measured and which are
 inferred.
 
-**D. Web server performance (`P-nn` continued).** ETag/`If-None-Match` and
-304s for static assets, gzip for large JSON, cache-header correctness per
-surface, per-endpoint query cost and N+1 patterns, payload sizes, pagination,
-whether any aggregate deserves precomputation, and what the server does under
-a slow client or a browser left open on a polling tab.
+**D. Web server performance (`P-nn` continued).** Phase 5 already landed
+ETag/304 on static assets (weak tags keyed on mtime+size), gzip above 4 KB for
+text types with `Vary`, and query-plan assertions in
+`tests/test_web_performance.py`. So: check those hold rather than propose them
+— is the gzip threshold right, are the cache headers correct per surface, do
+the pinned query plans cover the endpoints that actually hurt? Then the ground
+Phase 5 did not cover: per-endpoint query cost and N+1 patterns beyond the
+coverage aggregates, payload sizes and pagination, what the server does under a
+slow client or a browser left open on a polling tab, and the freshness panel —
+Phase 5 measured it at 1.6 s on contracts, declined the twenty-table
+`retrieved_at` index as too expensive on every insert, and moved it to its own
+route. Revisit only with an approach that does not pay that cost.
 
-**E. Admin UI (`U-nn`).** Everything left in `docs/admin-ui-plan.md` Phases 4
-and 5, plus your own findings: review queue throughput (undo, per-item
-history, saved presets, keyboard coverage), the database browser (column
-hide/show, jump-links between related tables, cell drawer for long values,
-copy-as-JSON), the SQL tab (history, snippets, schema autocomplete, EXPLAIN,
-CSV export), job/exports management, empty and error states, and what an
-operator currently has to leave the browser to do.
+**E. Admin UI (`U-nn`).** The tabs exist and Phase 5 shipped undo on the last
+decision, jump-links between related tables, table search in the URL, and SQL
+history / EXPLAIN / CSV. Look for what the operator still cannot do: review
+queue throughput at the size the queue actually is, per-item decision history,
+keyboard coverage across every screen, empty and error states, what happens
+when a job fails or the browser is closed mid-run, and what an operator today
+still has to leave the browser and open a terminal for. Ground every finding in
+the real queue composition, not in what an admin UI usually has.
 
 **F. Public portal UX (`W-nn`).** Accessibility against WCAG 2.2 AA — keyboard
 paths, focus management, contrast, chart and map alternatives for screen
@@ -168,7 +181,8 @@ surface on the URL-check/resolve path, path traversal on any file-serving
 route, the SQL box's blast radius, DoS through run/export endpoints, response
 headers and CSP, `restricted_` leakage paths including via exports, logs,
 error messages and job output, secrets handling, and whether the README's
-security warnings still match the code after Phases 2–4.
+security warnings still match the code now that the admin UI can start
+pipeline runs, write exports and serve file downloads.
 
 **I. Testing and developer experience (`T-nn`).** Coverage gaps by module and
 by route, fixture staleness vs. live sources, contract tests for source shape,
@@ -207,9 +221,7 @@ Write `docs/upgrade-roadmap.md`. Structure it exactly like this:
    explicit out-of-scope, the acceptance criteria (including which tests must
    exist and pass), the risk and the rollback, and its commit plan. Phases must
    be ordered so each is shippable alone and leaves the tree green, and so no
-   phase depends on a later one. Say roughly how much work each is. Absorb the
-   remainder of `docs/admin-ui-plan.md` Phases 4–5 into this ordering, noting
-   which of its items you are keeping, changing or dropping, and why.
+   phase depends on a later one. Say roughly how much work each is.
 6. **Rejected** — from Part 3.
 7. **Open questions for me** — decisions that are mine, not yours, each with
    your recommendation and what it depends on.
@@ -229,10 +241,11 @@ do not write a table where one sentence would do.
   run it to establish the baseline is green before you propose anything.
 - Anything you learn from running the server locally, run it on a non-default
   port bound to `127.0.0.1` and stop it when done.
-- Respect the in-flight Phase 4 work in the working tree: read it, account for
-  it in the roadmap, do not modify or revert it, and do not commit it.
-- Nothing else in the tree gets staged either. The only file this stage
-  produces is `docs/upgrade-roadmap.md`.
+- **Parallel sessions share this checkout**, so the working tree may not be
+  clean and what is in it may not be yours. Check `git status` before you
+  start and again before you stage. Touch nothing you did not write. The only
+  file this stage produces is `docs/upgrade-roadmap.md`, and it is the only
+  path you stage.
 
 ## Part 6 — After I review
 
