@@ -10,6 +10,7 @@
  * inputs from outside, so nothing here depends on its internals or on which
  * of the two scripts finished first.
  */
+import { initHealth } from './health.js';
 import { initPalette } from './palette.js';
 import { initPipeline } from './pipeline.js';
 import { initTheme } from './theme.js';
@@ -17,3 +18,4 @@ import { initTheme } from './theme.js';
 initTheme();
 initPalette();
 initPipeline();
+initHealth();

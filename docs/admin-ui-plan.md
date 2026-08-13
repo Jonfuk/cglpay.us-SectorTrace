@@ -232,7 +232,38 @@ A new "Pipeline" tab that replaces "ssh in and run the CLI" for routine runs.
   exists in modules; document as stretch, don't fake it with thread kills)
   and scheduling (this is an operator tool, not a daemon).
 
-### Phase 3 — data health dashboard
+### Phase 3 — data health dashboard — **done**
+
+- **Coverage matrix** measured against the 159 authorities responsible for
+  public health, not all 347. The other 188 are non-metropolitan districts
+  with no treatment role: counting against them turns "155 of the 159 that
+  could have a grant" into "45% coverage", which is arithmetic and nonsense.
+  The denominator is printed above the matrix in words, an every-authority
+  view exists with its own warning, and both are pinned by tests.
+- Candidate tables are shown beside their confirmed counterparts rather than
+  folded in, because m09, m10 and m15 hold hundreds of candidates and zero
+  confirmed rows, and hiding that would report the pipeline as more finished
+  than it is.
+- **Freshness** from the rows (`MAX(retrieved_at)` per table) rather than from
+  cursors: a module that ran this morning and fetched nothing new leaves a
+  fresh cursor and stale evidence. Plus every source host and when it was last
+  asked, from the conditional-request cache.
+- **Warehouse state**: size, free pages, and applied migrations against the
+  files on disk, so a warehouse one schema behind the checkout is visible
+  before a module fails on a missing column mid-run.
+- **Parse-failure browser** grouped by (module, field, reason) — four failures
+  from one broken parser are one bug — with the raw fragment and source URL.
+- **Integrity check** as a job, reusing the Phase 2 registry and taking the
+  same single slot as a run, since both want the whole warehouse.
+- `queries.escape_like` extracted; the LIKE-escaping was inlined twice and
+  this needed it a third time.
+
+Not built, deliberately: the mark-as-noted column on `parse_failures`. It
+would be state duplicating what a commit message or an issue already says, and
+with 22 failures across three distinct reasons the grouping answers the
+question the note was for. Worth revisiting if that number grows.
+
+### Phase 3 — original sketch, for reference
 
 A "Health" tab answering "is the warehouse fresh, complete, and clean?"
 

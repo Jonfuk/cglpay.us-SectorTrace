@@ -434,3 +434,46 @@ table.summary { margin: 8px 0; }
 table.summary td, table.summary th { padding: 3px 8px; }
 
 #job-history tr.clickable td { padding: 4px 8px; }
+
+/* --- health tab ----------------------------------------------------------- */
+
+.card .n.good { color: var(--approve); }
+.card .n.bad { color: var(--reject); }
+.card .label.good { color: var(--approve); }
+.card .label.bad { color: var(--reject); }
+
+.warn {
+  background: var(--pending-bg); color: var(--pending);
+  border: 1px solid var(--pending); border-radius: 6px;
+  padding: 8px 10px; margin-top: 10px; font-size: 12.5px;
+}
+
+/* The coverage matrix. Wide and tall on purpose: 159 authorities against a
+   dozen evidence types is the shape of the question, and the answer is read by
+   scanning for holes. Both edges stick so a cell in the middle can still be
+   attributed. */
+.matrixwrap { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 6px; }
+#coverage-table { font-size: 12px; }
+#coverage-table th {
+  position: sticky; top: 0; z-index: 2; background: var(--panel);
+  vertical-align: bottom; white-space: nowrap;
+}
+#coverage-table th.rot { text-align: center; padding: 6px 4px; }
+#coverage-table th.sticky-left, #coverage-table td.sticky-left {
+  position: sticky; left: 0; background: var(--panel); z-index: 1;
+  white-space: nowrap; border-right: 1px solid var(--line);
+}
+#coverage-table th.sticky-left { z-index: 3; }
+#coverage-table tbody tr:hover td { background: var(--bg); }
+#coverage-table td.cell {
+  text-align: center; padding: 3px 4px; min-width: 34px;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+/* Filled cells read as a block of colour so the gaps are what stand out. */
+#coverage-table td.cell.has {
+  background: var(--approve-bg); color: var(--approve); font-weight: 600;
+}
+#coverage-table tbody tr:hover td.cell.has { background: var(--approve-bg); }
+
+#failure-rows td { padding: 6px 8px; }
+#failure-rows a { overflow-wrap: anywhere; }

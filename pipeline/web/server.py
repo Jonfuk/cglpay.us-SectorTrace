@@ -41,7 +41,15 @@ import structlog
 
 from pipeline import db
 from pipeline.config import Settings, get_settings
-from pipeline.web import admin, public_export, public_queries, queries, resolve, review
+from pipeline.web import (
+    admin,
+    health,
+    public_export,
+    public_queries,
+    queries,
+    resolve,
+    review,
+)
 from pipeline.web.jobs import JobError, JobRegistry
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -81,7 +89,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # reloading working review tooling differently buys nothing -- so everything
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
-for _module in ("shell", "dom", "theme", "palette", "pipeline"):
+for _module in ("shell", "dom", "theme", "palette", "pipeline", "health"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -442,6 +450,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/modules":
             return admin.modules(conn)
 
+        if path == "/api/admin/health":
+            return health.health(conn, self.settings)
+
+        if path == "/api/admin/coverage":
+            return health.coverage(conn, tier=_str(params, "tier") or "upper")
+
+        if path == "/api/admin/failures":
+            return health.failures(
+                conn,
+                module=_str(params, "module") or None,
+                search=_str(params, "q") or None,
+                limit=_int(params, "limit", 100),
+                offset=_int(params, "offset", 0))
+
         if path == "/api/admin/jobs":
             running = self.jobs.running()
             return {"jobs": [job.head() for job in self.jobs.all()],
@@ -555,7 +577,23 @@ class Handler(BaseHTTPRequestHandler):
             "/api/check-url": self._check_url,
             "/api/query": self._query,
             "/api/admin/run": self._run,
+            "/api/admin/check": self._check,
         }
+
+    def _check(self, body: dict) -> Any:
+        """Integrity-check the warehouse, as a job.
+
+        A job rather than an inline reply because it reads every page of the
+        file. It takes the same single slot a module run takes, which is right:
+        both want the whole warehouse, and checking one that is being written
+        would report on a moving target.
+        """
+        settings = self.settings
+        job = self.jobs.start(
+            kind="check", label="integrity check", args={},
+            work=lambda: health.integrity_check(settings),
+            thread_names=set())
+        return {**job.head(), "log": job.since(-1)[0], "next": job.since(-1)[1]}
 
     def _run(self, body: dict) -> Any:
         """Start a module run. The only route here that reaches the open web.

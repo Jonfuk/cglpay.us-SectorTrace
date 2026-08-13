@@ -41,6 +41,7 @@
     <button class="tab" data-tab="overview" role="tab">Overview</button>
     <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
     <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
+    <button class="tab" data-tab="health" role="tab">Health</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
   </nav>
@@ -176,6 +177,63 @@
         <pre id="job-log" class="joblog" aria-live="polite" aria-label="Job log"></pre>
         <h2>Recent jobs</h2>
         <div id="job-history"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Health ------------------------------------------------------------------>
+  <!-- Rendered by /admin/js/health.js. -->
+  <section id="tab-health" class="tabpanel">
+    <div class="cards" id="health-cards"></div>
+
+    <div class="panel" style="margin-top: 12px">
+      <div class="row">
+        <h2 style="margin: 0">Coverage</h2>
+        <span class="spacer"></span>
+        <label class="small muted">Tier
+          <select id="coverage-tier">
+            <option value="upper">Responsible for public health</option>
+            <option value="all">Every authority</option>
+          </select>
+        </label>
+        <input id="coverage-filter" type="search" placeholder="filter authorities…">
+      </div>
+      <p class="muted small" id="coverage-note"></p>
+      <div class="matrixwrap"><table id="coverage-table"></table></div>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <h2>Sources last asked</h2>
+        <p class="muted small">
+          From the conditional-request cache, so this is when this pipeline last
+          spoke to a host — not when the host last changed anything.
+        </p>
+        <div id="health-hosts"></div>
+        <h2>Evidence freshness</h2>
+        <p class="muted small">
+          Newest <code>retrieved_at</code> per table. A module that ran today and
+          fetched nothing new leaves a fresh cursor and stale rows; this reads the
+          rows.
+        </p>
+        <div id="health-freshness"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <h2 style="margin: 0">Parse failures</h2>
+          <span class="spacer"></span>
+          <select id="failure-module"><option value="">All modules</option></select>
+          <input id="failure-search" type="search" placeholder="reason or fragment…">
+        </div>
+        <p class="muted small">
+          Grouped by module, field and reason — four failures from one broken
+          parser are one bug. Not decidable: an empty cell with a logged reason is
+          the correct output. Fixing one means changing a parser.
+        </p>
+        <div id="failure-groups"></div>
+        <h2>Most recent</h2>
+        <div id="failure-rows"></div>
       </div>
     </div>
   </section>

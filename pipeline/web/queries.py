@@ -109,6 +109,17 @@ def deadline(conn: sqlite3.Connection, seconds: float = QUERY_TIMEOUT_SECONDS) -
         conn.set_progress_handler(None, 0)
 
 
+def escape_like(term: str) -> str:
+    """A search term as a literal, not a pattern.
+
+    Someone searching for `100%` means that, not "anything starting 100", and
+    `_` is a single-character wildcard that a person typing a column name will
+    hit constantly. Callers wrap the result in `%...%` and must pair it with
+    `ESCAPE '\\'` in the SQL.
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _quote(identifier: str) -> str:
     """A SQL identifier, quoted. Table and column names are never accepted
     from the caller directly — they are matched against the live schema first
@@ -238,11 +249,8 @@ def read_table(
     where, params = "", {}
     if search:
         # Every column as text, so a search box finds a number, a date or a
-        # URL fragment without the person having to say which column it is
-        # in. LIKE wildcards in the term are escaped: someone searching for a
-        # literal `100%` means that, not "anything starting 100".
-        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        params["q"] = f"%{escaped}%"
+        # URL fragment without the person having to say which column it is in.
+        params["q"] = f"%{escape_like(search)}%"
         clauses = " OR ".join(
             f"CAST({_quote(c)} AS TEXT) LIKE :q ESCAPE '\\'" for c in column_names
         )
@@ -408,8 +416,7 @@ def review_filter_sql(
         where.append("q.item_type = :item_type")
         params["item_type"] = item_type
     if search:
-        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        params["q"] = f"%{escaped}%"
+        params["q"] = f"%{escape_like(search)}%"
         where.append(
             "(q.raw_value LIKE :q ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE :q ESCAPE '\\')"
         )
