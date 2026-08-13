@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline import db, providers
+from pipeline import providers
 from pipeline.modules import m02_tribunals as trib
 from pipeline.registry import ModuleContext
 

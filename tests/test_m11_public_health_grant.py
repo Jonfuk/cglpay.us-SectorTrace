@@ -10,7 +10,6 @@ from odf.opendocument import OpenDocumentSpreadsheet
 from odf.table import Table, TableCell, TableRow
 from odf.text import P
 
-from pipeline import db
 from pipeline.http import PipelineHTTPClient
 from pipeline.modules import m11_public_health_grant as phg
 

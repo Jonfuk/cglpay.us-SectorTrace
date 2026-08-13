@@ -9,7 +9,6 @@ import hashlib
 import json
 import mimetypes
 import re
-import socket
 import sqlite3
 import threading
 import time
@@ -28,8 +27,8 @@ from tenacity import (
 )
 
 from pipeline import db
-from pipeline.meters import DISK, NETWORK
 from pipeline.config import Settings, get_settings
+from pipeline.meters import DISK, NETWORK
 
 log = structlog.get_logger()
 

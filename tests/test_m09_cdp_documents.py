@@ -5,7 +5,6 @@ import pytest
 from pipeline import authority_websites
 from pipeline.modules import m09_cdp_documents as cdp
 
-
 # --- classification --------------------------------------------------------------
 
 @pytest.mark.parametrize("url,text,expected_type", [
@@ -98,8 +97,6 @@ def test_cdp_documents_requires_a_confirmed_type(conn):
     """cdp_documents.document_type is NOT NULL — a promoted document has a
     confirmed type, never a guess.
     """
-    columns = {r[1]: r for r in
-                {c[1]: c for c in conn.execute("PRAGMA table_info(cdp_documents)")}.items()}
     info = {c[1]: c for c in conn.execute("PRAGMA table_info(cdp_documents)")}
     assert info["document_type"][3] == 1  # notnull
 

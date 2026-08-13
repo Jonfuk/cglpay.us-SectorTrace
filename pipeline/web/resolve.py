@@ -30,7 +30,7 @@ from urllib.parse import urljoin, urlparse
 from pipeline.authority_websites import detect_committee_system
 from pipeline.config import Settings, get_settings
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
-from pipeline.web.review import DecisionError, MAX_NOTE_LENGTH, _apply, _utcnow
+from pipeline.web.review import MAX_NOTE_LENGTH, _apply, _utcnow
 
 # The item types this module can do more than acknowledge, and what each one
 # is actually asking for. Anything not here is judgement-only, and the UI

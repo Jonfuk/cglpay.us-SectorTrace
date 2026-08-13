@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from pipeline import cli as cli_module
 from pipeline.config import Settings
-from pipeline.registry import MODULE_REGISTRY, ModuleContext, register_module
+from pipeline.registry import ModuleContext, register_module
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
 

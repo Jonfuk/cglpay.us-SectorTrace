@@ -197,10 +197,10 @@ def strip_html(raw_html: str) -> str:
 def parse_header_fields(text: str) -> dict:
     """The structured header judiciary.uk puts at the top of each report."""
     out: dict[str, str | None] = {}
-    for field, pattern in _FIELD_PATTERNS.items():
+    for field_name, pattern in _FIELD_PATTERNS.items():
         m = pattern.search(text or "")
         value = m.group(1).strip().rstrip(".").strip() if m else None
-        out[field] = value or None
+        out[field_name] = value or None
     return out
 
 

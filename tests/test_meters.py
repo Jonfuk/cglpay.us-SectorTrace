@@ -66,7 +66,8 @@ def test_the_meter_is_thread_safe():
 
 
 def test_reset_clears_both_meters():
-    NETWORK.add(1); DISK.add(1)
+    NETWORK.add(1)
+    DISK.add(1)
     reset_all()
     assert NETWORK.total == 0 and DISK.total == 0
 

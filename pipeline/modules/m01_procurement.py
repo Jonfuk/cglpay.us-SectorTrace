@@ -26,14 +26,18 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import structlog
 
 from pipeline import db
 from pipeline.buyer_name_overrides import BUYER_NAME_OVERRIDES
 from pipeline.http import PipelineHTTPClient
-from pipeline.keywords import RELEVANT_CPV_PREFIXES, SUBSTANCE_MISUSE_KEYWORDS, SUPPLIER_NAME_VARIANTS
+from pipeline.keywords import (
+    RELEVANT_CPV_PREFIXES,
+    SUBSTANCE_MISUSE_KEYWORDS,
+    SUPPLIER_NAME_VARIANTS,
+)
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()

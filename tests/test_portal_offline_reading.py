@@ -12,7 +12,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from test_portal_isolation import PUBLIC_API_ROUTES
 
 PORTAL = Path(__file__).resolve().parent.parent / "pipeline" / "web" / "static" / "public"

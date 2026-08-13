@@ -4,7 +4,6 @@ import pytest
 
 from pipeline.modules import m06_workforce_census as census
 
-
 # --- segment classification ------------------------------------------------------
 
 @pytest.mark.parametrize("line,expected", [

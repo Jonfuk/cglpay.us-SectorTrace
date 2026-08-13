@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
-from pipeline import db, providers
+from pipeline import providers
 from pipeline.modules import m05_cqc as cqc
 from pipeline.registry import ModuleContext
 

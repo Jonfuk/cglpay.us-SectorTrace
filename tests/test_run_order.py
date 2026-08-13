@@ -16,10 +16,6 @@ import re
 
 import pytest
 
-# Real pipeline modules follow the mNN_name convention; test-only modules
-# registered by other test files do not and must not affect these assertions.
-_REAL_MODULE_RE = re.compile(r"^m\d{2}_[a-z_]+$")
-
 from pipeline.registry import (
     MODULE_REGISTRY,
     DependencyCycleError,
@@ -29,6 +25,10 @@ from pipeline.registry import (
     module_meta,
     resolve_run_order,
 )
+
+# Real pipeline modules follow the mNN_name convention; test-only modules
+# registered by other test files do not and must not affect these assertions.
+_REAL_MODULE_RE = re.compile(r"^m\d{2}_[a-z_]+$")
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
-from pipeline import db, providers
-from pipeline.http import PipelineHTTPClient
+from pipeline import providers
 from pipeline.modules import m04_companies as ch
 from pipeline.registry import ModuleContext
 

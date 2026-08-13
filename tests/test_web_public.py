@@ -14,7 +14,6 @@ import threading
 import httpx
 import pytest
 
-from pipeline import db
 from pipeline.web import public_export, public_queries, queries
 from pipeline.web.server import build_server
 

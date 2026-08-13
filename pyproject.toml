@@ -94,7 +94,43 @@ ocr = [
 dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",
+    "ruff>=0.6",
 ]
+
+[tool.ruff]
+# The measured house width: p99 of every line in pipeline/ and tests/ is 99
+# characters. Recorded so a formatter or a future rule has the right number,
+# not as a gate — see the E501 note below.
+line-length = 100
+
+[tool.ruff.lint]
+# Ruff's own default (E4/E7/E9 + F), plus import sorting. Deliberately narrow.
+#
+# This is here for consistency between sessions working on the same checkout,
+# not to find defects: 1,357 tests do that. So the rules enabled are the ones
+# where there is one right answer and no judgement to exercise — an unused
+# import, a shadowed name, imports in a stable order so two sessions editing
+# the same header do not conflict over it.
+#
+# Four families were considered and left off, each for a reason:
+#
+#   E501 (line too long) — 269 lines exceed 100, and most are explanatory
+#     comments. In this codebase the comments are the documentation; reflowing
+#     prose to satisfy a linter is the tail wagging the dog, and a `noqa` on
+#     every long URL is noise.
+#   BLE001 (blind except) — 27 hits, nearly all deliberate and commented: a
+#     log handler that must never raise, a job store that must not be able to
+#     refuse a run. A rule that fights a documented decision is a rule that
+#     gets ignored.
+#   ISC (implicit string concatenation) — the long SQL in this project is
+#     written as adjacent literals on purpose, and reads better for it.
+#   D (docstrings) — the convention here is that a docstring explains a
+#     constraint or a reason. A rule enforcing that every function has one
+#     produces functions with a sentence restating their name.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pipeline"]
 
 [build-system]
 requires = ["hatchling"]

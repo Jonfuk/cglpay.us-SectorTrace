@@ -4,8 +4,6 @@ import csv
 import json
 from pathlib import Path
 
-import pytest
-
 from pipeline.exports import PERSONAL_DATA_COLUMNS, RESTRICTED_PREFIX
 from pipeline.exports import docs as docs_export
 from pipeline.exports import echarts as echarts_export

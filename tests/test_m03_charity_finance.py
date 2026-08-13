@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from pipeline.charity_accounts_config import AccountsProfile, DEFAULT_PROFILE, profile_for
+from pipeline.charity_accounts_config import DEFAULT_PROFILE, AccountsProfile, profile_for
 from pipeline.modules import m03_charity_finance as cf
 
 FIXTURES = Path(__file__).parent / "fixtures"

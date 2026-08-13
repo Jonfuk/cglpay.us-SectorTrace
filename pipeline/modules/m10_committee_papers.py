@@ -85,7 +85,6 @@ import structlog
 from pipeline import db
 from pipeline.authority_websites import (
     COMMITTEE_LINK_SIGNATURES,
-    SYSTEM_SIGNATURES,
     detect_committee_system,
     website_for,
 )

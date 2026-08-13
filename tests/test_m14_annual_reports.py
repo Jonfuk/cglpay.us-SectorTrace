@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import pytest
-
 from pipeline.modules import m14_annual_reports as ar
-
 
 # --- passage extraction ---------------------------------------------------------
 

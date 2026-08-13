@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import pytest
 
 from pipeline import db
 from pipeline.config import Settings
+
+MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
 
 
 @pytest.fixture(autouse=True)
@@ -101,8 +104,38 @@ def settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def conn(settings: Settings) -> sqlite3.Connection:
+def conn(settings: Settings, _schema_template: Path) -> sqlite3.Connection:
+    """A migrated warehouse, copied rather than built.
+
+    Applying the migrations costs 0.31s and the suite did it once per test, so
+    several hundred tests were each paying to build the same 30-migration
+    schema from scratch. The template is built once per session and copied,
+    which is a file copy of well under a megabyte.
+
+    The copy is a real file on disk, not a shared connection: tests still get
+    their own warehouse, and one that writes cannot be seen by another.
+    """
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(_schema_template, settings.database_path)
     connection = db.get_connection(settings)
-    db.apply_migrations(connection, settings.migrations_dir)
     yield connection
     connection.close()
+
+
+@pytest.fixture(scope="session")
+def _schema_template(tmp_path_factory) -> Path:
+    """Every migration applied once, as a file to copy from."""
+    path = tmp_path_factory.mktemp("schema") / "template.db"
+    settings = Settings(contact_email="test@example.com", database_path=path,
+                         migrations_dir=MIGRATIONS_DIR, _env_file=None)
+    connection = db.get_connection(settings)
+    try:
+        db.apply_migrations(connection, MIGRATIONS_DIR)
+        connection.commit()
+        # Fold the WAL back into the database file before copying it. A copy
+        # taken with pages still in the sidecar is a copy missing tables, and
+        # it would be missing whichever ones the last migrations added.
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        connection.close()
+    return path

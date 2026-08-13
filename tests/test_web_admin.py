@@ -416,7 +416,6 @@ def test_a_module_leaves_the_thread_name_it_found():
     thread stays labelled with whichever module ran last -- and the job log,
     which decides what belongs to a run by thread name, starts accepting lines
     from threads that are no longer running anything."""
-    import sqlite3
     from pipeline.registry import MODULE_REGISTRY as reg
 
     before = threading.current_thread().name

@@ -441,8 +441,8 @@ def test_a_parallel_wave_of_writing_modules_all_commit(tmp_path, monkeypatch):
     """
     import time
 
-    from pipeline import db, providers
     from pipeline import console as ui
+    from pipeline import db, providers
 
     settings = _settings(tmp_path)
     setup = db.get_connection(settings)

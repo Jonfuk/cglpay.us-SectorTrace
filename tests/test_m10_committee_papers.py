@@ -25,8 +25,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from pipeline.keywords import COMMITTEE_SEARCH_TERMS
 from pipeline.modules import m10_committee_papers as cp
 

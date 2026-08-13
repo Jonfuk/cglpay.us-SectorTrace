@@ -30,7 +30,7 @@ def test_discover_boundary_series_parses_real_search_response(httpx_mock, settin
         series = geo._discover_boundary_series(client, "Counties and Unitary Authorities", "BGC")
 
     labels = [v.vintage_label for v in series]
-    assert labels == sorted(labels, key=lambda l: series[labels.index(l)].vintage_date)
+    assert labels == sorted(labels, key=lambda label: series[labels.index(label)].vintage_date)
     assert "DEC_2025" in labels
     # the decoy "inc Metropolitan Counties" title must be excluded
     assert not any("inc Metropolitan Counties" in v.title for v in series)

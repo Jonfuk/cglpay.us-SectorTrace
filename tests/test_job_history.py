@@ -12,10 +12,6 @@ without taking the pipeline down with it.
 """
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from pipeline import db
 from pipeline.web.jobs import JobRegistry, JobStore
 

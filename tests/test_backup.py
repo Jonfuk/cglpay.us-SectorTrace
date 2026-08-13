@@ -189,7 +189,6 @@ def test_a_corrupt_backup_is_refused(warehouse, settings, tmp_path):
 
 
 def test_restoring_a_file_that_is_not_there(settings, tmp_path):
-    from pathlib import Path
 
     with pytest.raises(backup.BackupError, match="no backup file"):
         backup.restore(tmp_path / "nope.db", settings)
@@ -215,8 +214,8 @@ def test_stale_wal_sidecars_do_not_survive_a_restore(warehouse, settings):
 
 
 def test_backups_are_listed_newest_first(warehouse, settings):
-    first = backup.create(settings, label="first")
-    second = backup.create(settings, label="second")
+    backup.create(settings, label="first")
+    backup.create(settings, label="second")
 
     names = [entry["name"] for entry in backup.listing(settings)]
 

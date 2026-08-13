@@ -5,7 +5,6 @@ import pytest
 from pipeline import authority_websites
 from pipeline.modules import m15_foi as foi
 
-
 # --- GSS code extraction from mySociety's tags -----------------------------------
 
 @pytest.mark.parametrize("tags,expected", [

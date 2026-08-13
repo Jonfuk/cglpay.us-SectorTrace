@@ -4,7 +4,6 @@ import pytest
 
 from pipeline.modules import m07_ndtms as ndtms
 
-
 # --- publication title parsing ------------------------------------------------
 
 @pytest.mark.parametrize("title,expected", [

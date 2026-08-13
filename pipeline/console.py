@@ -32,9 +32,9 @@ from typing import Iterable, Iterator, TypeVar
 from rich.console import Console
 from rich.progress import (
     BarColumn,
-    ProgressColumn,
     MofNCompleteColumn,
     Progress,
+    ProgressColumn,
     SpinnerColumn,
     TaskProgressColumn,
     TextColumn,
