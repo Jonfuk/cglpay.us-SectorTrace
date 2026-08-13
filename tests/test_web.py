@@ -322,7 +322,12 @@ def test_decisions_travel_with_the_items_they_belong_to(seeded, settings):
     assert len(full["decisions"]) == 1
 
     facets = queries.review_facets(ro)
-    assert facets["statuses"] == {"pending": 2, "approved": 1, "rejected": 0}
+    # 'answered' is counted alongside the three a person can set, even at zero.
+    # It is a status items really hold — the pipeline closing a question it has
+    # since answered — and leaving it out of the totals would drop those items
+    # out of the overview without saying so.
+    assert facets["statuses"] == {"pending": 2, "approved": 1, "rejected": 0,
+                                   "answered": 0}
     ro.close()
 
 

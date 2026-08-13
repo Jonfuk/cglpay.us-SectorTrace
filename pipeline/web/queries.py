@@ -357,7 +357,16 @@ def run_select(conn: sqlite3.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -
 # --- review queue -------------------------------------------------------------
 
 
+# What a *person* may set an item to. 'pending' is the revert, and there is
+# deliberately nothing else here: 'answered' is not a decision anyone makes.
 REVIEW_STATUSES = ("pending", "approved", "rejected")
+
+# Every status an item can hold, which is a different question. 'answered'
+# means the pipeline went and got what the item was waiting for -- see
+# pipeline/review_sweep.py. Counting only the decidable three would drop those
+# items out of the totals silently, so the overview would show fewer items than
+# the queue holds and never say why.
+ALL_REVIEW_STATUSES = (*REVIEW_STATUSES, "answered")
 
 
 def review_facets(conn: sqlite3.Connection) -> dict:
@@ -380,7 +389,8 @@ def review_facets(conn: sqlite3.Connection) -> dict:
         "FROM review_queue GROUP BY module, item_type ORDER BY pending DESC, module, item_type",
     )
     return {
-        "statuses": {status: by_status.get(status, 0) for status in REVIEW_STATUSES},
+        "statuses": {status: by_status.get(status, 0)
+                      for status in ALL_REVIEW_STATUSES},
         "total": sum(by_status.values()),
         "modules": [dict(row) for row in modules],
         "item_types": [dict(row) for row in item_types],
@@ -405,7 +415,7 @@ def review_filter_sql(
     """
     where, params = [], {}
     if status and status != "all":
-        if status not in REVIEW_STATUSES:
+        if status not in ALL_REVIEW_STATUSES:
             raise QueryError(f"Unknown status {status!r}.")
         where.append("q.status = :status")
         params["status"] = status

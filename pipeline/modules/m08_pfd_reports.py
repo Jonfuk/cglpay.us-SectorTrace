@@ -738,6 +738,19 @@ def run(ctx: ModuleContext) -> None:
     if not ctx.dry_run:
         conn.commit()
 
+    # Close the items this run has just answered. A report filed as
+    # `pfd_concerns_in_pdf_only` because its concerns were in an unread PDF is
+    # not a judgement anyone can make once the PDF has been read -- and nothing
+    # else ever took it off the queue, so 1,067 answered questions sat in it
+    # looking like work. Evidence-driven and pending-only; see
+    # pipeline/review_sweep.py.
+    swept = 0
+    if not ctx.dry_run:
+        from pipeline import review_sweep
+
+        swept = review_sweep.sweep(
+            conn, rule="pfd_concerns_in_pdf_only")["total"]
+
     log.info("pfd.run_complete", reports=reports_written,
               recipient_mentions=recipient_mentions, body_mentions=body_mentions,
-              cross_report_redactions=cross_redacted)
+              cross_report_redactions=cross_redacted, review_items_answered=swept)

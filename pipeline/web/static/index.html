@@ -98,6 +98,9 @@
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
+          <!-- Not a decision anyone took: the pipeline went and got what the
+               item was waiting for. See pipeline/review_sweep.py. -->
+          <option value="answered">Answered by the pipeline</option>
           <option value="all">All</option>
         </select>
       </label>

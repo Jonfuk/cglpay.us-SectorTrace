@@ -74,6 +74,53 @@ def export(
     conn.close()
 
 
+@app.command("resolve-answered")
+def resolve_answered(
+    rule: str = typer.Option(None, help="Only this rule; default is all of them"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Say what would close, close nothing"),
+    reopen: bool = typer.Option(
+        False, "--reopen", help="Undo a rule's closures (requires --rule)"),
+) -> None:
+    """Close review items the pipeline has since answered for itself.
+
+    Fetches nothing: it is a query over the warehouse as it stands. Only
+    pending items are touched, every closure is recorded with its evidence in
+    `review_resolutions`, and `--reopen` undoes a rule in one operation.
+    """
+    from pipeline import review_sweep
+
+    configure_logging("review_sweep")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    try:
+        if reopen:
+            if not rule:
+                typer.echo("--reopen needs --rule: it undoes one rule's "
+                            "closures, not everything.", err=True)
+                raise typer.Exit(code=1)
+            count = review_sweep.reopen(conn, rule)
+            typer.echo(f"reopened {count:,} item(s) closed by {rule}")
+            return
+
+        result = review_sweep.sweep(conn, rule=rule, dry_run=dry_run)
+        for name, count in result["closed"].items():
+            verb = "would close" if dry_run else "closed"
+            typer.echo(f"{name}: {verb} {count:,}")
+        if not result["total"]:
+            typer.echo("Nothing to close — the queue is all questions that "
+                        "still need a person.")
+        elif dry_run:
+            ui.warn("--dry-run: nothing was changed.")
+    except KeyError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+
+
 @app.command()
 def backup(
     output: str = typer.Option(
