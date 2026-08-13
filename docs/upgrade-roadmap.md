@@ -2,9 +2,16 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phases 1–3, 5 and 6 are done, Phase 4 is
-partly done** (F-01 and U-01 closed; F-03 and D-04 open); Phase 7 is not
-built. Each phase records what changed from the plan as it lands.
+1 skipped, 18 deselected, 422s**). **All seven phases have been worked**:
+1–3, 5 and 6 are done; Phase 4 delivered F-01 and U-01 and left F-03 and D-04
+open; Phase 7 measured P-01 and F-04 and left P-03 open. Each phase records
+what changed from the plan as it landed.
+
+**Three findings remain open, and each needs a decision rather than more
+work:** F-03 (census verification is a different shape from candidate
+promotion), D-04 (~1,067 PDFs from one government host, plus a
+resolve-on-re-run concept that does not exist yet), and P-03 (two full
+collections to compare). See the phase notes for what each would take.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -56,7 +63,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence **[live]**: `workforce_census_metrics` 68 rows, all `verified = 0`. Portal correctly renders them as awaiting verification ([README.md:396](README.md:396)).
 - Same shape as F-01 — a markdown worklist and manual SQL. Fold into the same promotion mechanism rather than building a second one.
 
-**F-04 · Resumability is real for one module · S to establish**
+**F-04 · Resumability is real for one module · S to establish — closed in Phase 7** (confirmed: 1 of 17; README corrected)
 - Evidence **[live]**: `module_cursors` holds 2 rows, both `m01_procurement`. [README.md:108](README.md:108) describes resumable cursors as a property of modules generally.
 - Inferred, not confirmed: the other 16 may re-derive position cheaply or may re-crawl. Worth one pass to find out and then either fix the modules or soften the README.
 
@@ -91,7 +98,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### C. Pipeline performance
 
-**P-01 · Every commit is an fsync · S to try, MEASURE FIRST**
+**P-01 · Every commit is an fsync · S to try, MEASURE FIRST — measured in Phase 7, and declined**
 - Evidence: [pipeline/db.py:289](pipeline/db.py:289) sets `busy_timeout` and `foreign_keys`; WAL at [pipeline/db.py:272](pipeline/db.py:272). `synchronous` is never set, so it is SQLite's default `FULL`.
 - The project deliberately commits per unit of work ([README.md:326](README.md:326)) — so this is paid on every commit of every module, by design.
 - `synchronous = NORMAL` under WAL is the conventional trade and risks losing the last transactions on power loss, not corruption. For a warehouse that is re-runnable from an archive, that is close to free — but the size of the win is unmeasured. Measure with a fixed-size m01 slice before and after.
@@ -100,7 +107,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence **[live]**: `data/raw` is **3.6 GB across 6,322 files**; the warehouse it backs is 242.7 MB.
 - It is the audit trail, so deletion is not the answer. Compaction, per-source retention, or simply measuring and documenting the growth curve is.
 
-**P-03 · `--jobs > 1` is still opt-in · M, evidence-gated**
+**P-03 · `--jobs > 1` is still opt-in · M, evidence-gated — still open after Phase 7; needs two full runs**
 - `--jobs 1` remains the default ([README.md:198](README.md:198)), with the parallel path covered by [tests/test_parallel.py](tests/test_parallel.py) and [tests/test_run_waves.py](tests/test_run_waves.py) (332 and 482 lines).
 - What would settle it is one full `--jobs 4` run compared against a serial one on row counts, review items and parse failures — not another test.
 
@@ -457,12 +464,54 @@ the failing test names are readable without a repository token. Raw Actions
 logs are not public; annotations are. A build that is red with no readable
 reason is one people learn to ignore.
 
-### Phase 7 — Measured performance · M, gated
+### Phase 7 — Measured performance · M, gated — **P-01 and F-04 done** (`11e5088`); P-03 not run
 
-- **Goal:** take the two performance levers that are real, having measured them.
-- **Delivers:** P-01, P-03, F-04.
-- **Acceptance:** before/after on the same machine and warehouse for `synchronous = NORMAL`; a `--jobs 4` full run compared with serial on rows, review items and failures; cursor behaviour established per module and the README corrected if it overclaims.
-- **Risk:** low to try, and every part of it may correctly end in "leave it alone" — which Phase 5 of the admin plan already showed is the useful outcome.
+The phase anticipated ending in "leave it alone", and for the part that could
+be measured here, it did. Suite unchanged at **1358 passed**.
+
+**P-01 — measured, and declined. [measured]**
+
+| | 200 commits of 10 rows |
+|---|---|
+| `synchronous = FULL` (current) | 0.189s median |
+| `synchronous = NORMAL` | 0.020s median |
+
+9.5×, about 0.85 ms a commit — a real difference, and an irrelevant one.
+Commits happen per fetched unit (a page, a council, a document), so a full
+collection is on the order of 10,000 of them: **eight seconds**. That same
+collection makes ~6,300 requests at one per two seconds per host — **three and
+a half hours** of deliberate waiting. The lever buys 0.07% of a run in
+exchange for the guarantee that a committed row survives the power failing
+mid-crawl. Left at FULL, with the numbers written into `pipeline/db.py` so the
+next person to spot the lever gets to the same answer faster.
+
+**F-04 — established, and the README was overclaiming.** Exactly one module of
+seventeen records a cursor: `m01_procurement`, because Find a Tender is paged.
+The README said re-runs were "resumable (per-module cursors), so an
+interrupted crawl continues rather than restarting" — true of `m01` and of
+nothing else. The other sixteen restart from the beginning; what makes that
+acceptable is the conditional-request cache, since an unchanged document
+answers `304` and is read from the archive rather than downloaded. **The
+requests are still made at the same rate**, so a re-run costs time even when
+it costs no bandwidth. Corrected.
+
+**P-03 — not run, deliberately.** Its acceptance is a full `--jobs 4` run
+compared against a full serial one, on rows, review items and parse failures.
+That is two complete collections: ~6,300 requests each, several hours each,
+against live public bodies — and the second one exists only to be compared
+with the first. That is a decision to schedule, not something to start inside
+a phase, for the same reason D-04's PFD crawl was not started inside Phase 4.
+
+What is already known, and is not enough on its own: the parallel path is
+covered by `tests/test_parallel.py` and `tests/test_run_waves.py`, the write
+slot is handed out in arrival order and tested for starvation in
+`tests/test_db_concurrency.py`, and `m10` measured 64s against 156s serial on
+three councils ([README.md:302](README.md:302)). None of that answers the
+question the default turns on, which is whether a concurrent full run produces
+the *same evidence* as a serial one. Until someone runs both, `--jobs 1`
+remains the right default — and my recommendation is still that it stays,
+since the run is not interactive and the conservative default costs nothing
+anyone is waiting on.
 
 ## 6. Rejected
 
