@@ -75,6 +75,101 @@ def export(
 
 
 @app.command()
+def backup(
+    output: str = typer.Option(
+        None, help="Where to write the backup. Defaults to a timestamped file "
+                    "in the configured backup_dir."),
+    label: str = typer.Option(
+        None, help="Appended to the filename, e.g. --label before-m04-rerun"),
+) -> None:
+    """Copy the warehouse to a verified snapshot, and inventory the raw archive.
+
+    Uses VACUUM INTO, so the copy is consistent even while a run is writing,
+    and is checked against the original before it is called a backup. The raw
+    archive is inventoried rather than copied — see pipeline/backup.py.
+    """
+    from pathlib import Path
+
+    from pipeline import backup as backup_module
+
+    configure_logging("backup")
+    settings = get_settings()
+    try:
+        manifest = backup_module.create(
+            settings, destination=Path(output) if output else None, label=label)
+    except backup_module.BackupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+
+    from pipeline.meters import human_bytes
+
+    warehouse = manifest["warehouse"]
+    archive = manifest["raw_archive"]
+    typer.echo(f"warehouse -> {warehouse['backup']}")
+    typer.echo(f"  {warehouse['rows']:,} rows in {warehouse['tables']} tables, "
+                f"{human_bytes(warehouse['backup_bytes'])} "
+                f"(from {human_bytes(warehouse['source_bytes'])}), "
+                f"integrity {warehouse['integrity']}")
+    if warehouse["drifted_while_copying"]:
+        # Not a fault: the warehouse is live, and a module may have committed
+        # between the copy and the count. Said out loud so it is not mistaken
+        # for one later.
+        typer.echo(f"  note: {len(warehouse['drifted_while_copying'])} table(s) "
+                    "changed in the source while copying; the snapshot is "
+                    "consistent, just not the newest state.")
+    if archive.get("present"):
+        typer.echo(f"raw archive: {archive['files']:,} files, "
+                    f"{human_bytes(archive['bytes'])} across "
+                    f"{len(archive['sources'])} sources — inventoried, not copied")
+    typer.echo(f"  manifest: {Path(warehouse['backup']).with_suffix('.manifest.json')}")
+
+
+@app.command()
+def restore(
+    backup_file: str = typer.Argument(..., help="Path to a backup .db to restore"),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Required when a warehouse already exists. It is moved aside, "
+              "not deleted."),
+) -> None:
+    """Put a backup back in place of the warehouse.
+
+    Refuses a backup that fails its own integrity check, and never deletes the
+    warehouse it replaces — that one is renamed with a timestamp.
+    """
+    from pathlib import Path
+
+    from pipeline import backup as backup_module
+
+    configure_logging("backup")
+    try:
+        result = backup_module.restore(Path(backup_file), get_settings(), force=force)
+    except backup_module.BackupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+
+    typer.echo(f"restored {result['from']} -> {result['restored']}")
+    typer.echo(f"  {result['rows']:,} rows in {result['tables']} tables")
+    if result["superseded"]:
+        typer.echo(f"  previous warehouse kept at {result['superseded']}")
+
+
+@app.command("list-backups")
+def list_backups() -> None:
+    """Backups on disk, newest first."""
+    from pipeline import backup as backup_module
+    from pipeline.meters import human_bytes
+
+    entries = backup_module.listing(get_settings())
+    if not entries:
+        typer.echo("No backups yet. `pipeline backup` makes one.")
+        return
+    for entry in entries:
+        rows = f"{entry['rows']:,} rows" if entry.get("rows") else "no manifest"
+        typer.echo(f"{entry['name']}  {human_bytes(entry['bytes'])}  {rows}")
+
+
+@app.command()
 def web(
     port: int = typer.Option(1801, help="Port to listen on"),
     host: str = typer.Option(

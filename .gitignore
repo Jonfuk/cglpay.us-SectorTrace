@@ -8,6 +8,10 @@ secrets/
 data/raw/
 data/warehouse.db
 data/warehouse.db-*
+# Verified snapshots of the warehouse, plus their manifests and archive
+# listings. Regenerable by `pipeline backup`, and the same size as the thing
+# they copy.
+data/backups/
 
 # Generated export payloads — reproducible from the warehouse with
 # `./start.sh export all`, and large. The schema that produces them IS

@@ -53,6 +53,11 @@ def settings(tmp_path: Path) -> Settings:
         migrations_dir=Path(__file__).resolve().parent.parent / "pipeline" / "migrations",
         logs_dir=tmp_path / "logs",
         export_output_dir=tmp_path / "exports" / "output",
+        # Every writable path this fixture hands out points into tmp. A
+        # default that reaches back into the repo is how the suite ends up
+        # depositing its own output next to the operator's — which it has now
+        # done twice, once into logs/ and once into data/backups/.
+        backup_dir=tmp_path / "backups",
         # No politeness delay against mocked transports — the rate limiter is
         # exercised directly in test_http.py with its own explicit override.
         default_rate_limit_seconds=0.0,

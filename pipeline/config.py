@@ -107,6 +107,13 @@ class Settings(BaseSettings):
     # "wherever the warehouse is, two levels up" is a guess that happens to be
     # right for this layout and silently wrong for any other.
     export_output_dir: Path = REPO_ROOT / "exports" / "output"
+    # Where `pipeline backup` writes. Inside data/ so it sits beside what it
+    # copies, and gitignored for the same reason the warehouse is. A backup
+    # kept on the same disk protects against the failures that actually happen
+    # to this project -- a bad migration, a module that overwrote something,
+    # an interrupted rewrite -- and not against losing the disk. Copy one off
+    # the machine if that is the risk you are covering.
+    backup_dir: Path = REPO_ROOT / "data" / "backups"
 
     charity_commission_api_key: str | None = None
     companies_house_api_key: str | None = None

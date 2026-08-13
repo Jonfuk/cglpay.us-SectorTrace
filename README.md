@@ -513,6 +513,29 @@ Three things are worth knowing before pointing anyone else at it:
   returns a refusal until you confirm. That is a guard against opening one by
   accident — the SQL box reads them like any other table, as does `sqlite3`.
 
+## Keeping what has been collected
+
+The warehouse is the only queryable copy of hours of deliberately slow
+crawling. Back it up before anything that rewrites it — a migration, a re-run
+of a module you have changed, a restore:
+
+```bash
+./start.sh backup --label before-m04-rerun
+./start.sh list-backups
+./start.sh restore data/backups/warehouse-20260813T131334Z.db --force
+```
+
+`backup` copies the warehouse with `VACUUM INTO`, so the snapshot is
+consistent even while a run is writing to it, then reopens the copy and checks
+it table by table against the source before calling it a backup. The 3.5 GiB
+raw archive is **inventoried rather than copied** — it is content-addressed, so
+a listing is enough to say exactly which documents are missing after a partial
+loss. `restore` refuses a backup that fails its own integrity check and never
+deletes the warehouse it replaces.
+
+Both directories sit on the same disk, so this covers a bad migration and not
+a dead drive. See [`docs/BACKUP.md`](docs/BACKUP.md).
+
 ## Documentation
 
 | Document | Contents |
@@ -520,6 +543,7 @@ Three things are worth knowing before pointing anyone else at it:
 | [`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md) | Every table and column, generated from the live schema — never hand-edited |
 | [`docs/SOURCES.md`](docs/SOURCES.md) | Each source's URL, licence, key requirement and applied rate limit |
 | [`docs/CAVEATS.md`](docs/CAVEATS.md) | Known limitations, and what must not be computed |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | Backing the warehouse up, restoring it, and how big the archive gets |
 | `docs/verification/` | Per-run review worklists produced by `m06`, `m09` and `m10` |
 
 ## Development

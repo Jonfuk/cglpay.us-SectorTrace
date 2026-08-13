@@ -74,3 +74,68 @@ def test_run_dry_run_rolls_back(tmp_path, monkeypatch):
     count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone()[0]
     conn.close()
     assert count == 0
+
+
+def test_backup_command_writes_a_verified_copy(tmp_path, monkeypatch):
+    from pipeline import backup as backup_module
+    from pipeline.config import Settings
+
+    settings = Settings(
+        contact_email="test@example.com",
+        database_path=tmp_path / "warehouse.db",
+        raw_archive_dir=tmp_path / "raw",
+        migrations_dir=MIGRATIONS_DIR,
+        logs_dir=tmp_path / "logs",
+        backup_dir=tmp_path / "backups",
+        _env_file=None)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+
+    from pipeline import db
+
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    conn.close()
+
+    result = CliRunner().invoke(cli_module.app, ["backup"])
+    assert result.exit_code == 0, result.output
+    assert "integrity ok" in result.output
+
+    made = list((tmp_path / "backups").glob("warehouse-*.db"))
+    assert len(made) == 1
+    assert backup_module.listing(settings)[0]["rows"] is not None
+
+    listed = CliRunner().invoke(cli_module.app, ["list-backups"])
+    assert listed.exit_code == 0, listed.output
+    assert made[0].name in listed.output
+
+
+def test_restoring_over_a_warehouse_without_force_fails_cleanly(tmp_path, monkeypatch):
+    """A traceback is not a refusal. The CLI has to say why and exit non-zero."""
+    from pipeline.config import Settings
+
+    settings = Settings(
+        contact_email="test@example.com",
+        database_path=tmp_path / "warehouse.db",
+        raw_archive_dir=tmp_path / "raw",
+        migrations_dir=MIGRATIONS_DIR,
+        logs_dir=tmp_path / "logs",
+        backup_dir=tmp_path / "backups",
+        _env_file=None)
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+
+    from pipeline import db
+
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    conn.close()
+
+    CliRunner().invoke(cli_module.app, ["backup"])
+    made = next((tmp_path / "backups").glob("warehouse-*.db"))
+
+    result = CliRunner().invoke(cli_module.app, ["restore", str(made)])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+    assert settings.database_path.is_file()
