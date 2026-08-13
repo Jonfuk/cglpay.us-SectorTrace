@@ -9,6 +9,7 @@ import hashlib
 import json
 import mimetypes
 import re
+import socket
 import sqlite3
 import threading
 import time
@@ -364,14 +365,34 @@ class PipelineHTTPClient:
         source_system: str,
         settings: Settings | None = None,
         conn: sqlite3.Connection | None = None,
+        guard_destination: bool = False,
+        resolver=None,
     ) -> None:
+        """`guard_destination` refuses fetches that resolve into private space.
+
+        Off by default and on for the two callers that take a URL from whoever
+        is using the operator UI (`web/resolve.py` and `promote.py`). Modules
+        fetch addresses they discovered from published pages rather than from a
+        person at a keyboard, and turning it on for them would make every
+        offline test in the suite do a DNS lookup for a host that does not
+        exist. See pipeline/netguard.py.
+        """
         self.source_system = source_system
         self.settings = settings or get_settings()
         self.conn = conn
+        hooks = {}
+        if guard_destination:
+            from pipeline.netguard import guard_hook
+
+            hooks["request"] = [guard_hook(resolver)]
         self._client = httpx.Client(
             headers={"User-Agent": self.settings.user_agent},
             follow_redirects=True,
             timeout=30.0,
+            # Applied to redirect hops too, which is the point: httpx follows
+            # them itself, so a public URL that 302s into private space is a
+            # request the caller never made.
+            event_hooks=hooks,
         )
         self._rate_limiter = _RateLimiter(self.settings)
         self._robots = _RobotsCache(self._client, self.settings.user_agent)

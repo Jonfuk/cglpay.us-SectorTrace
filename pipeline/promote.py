@@ -127,12 +127,24 @@ def promoted_urls(conn: sqlite3.Connection, kind: str) -> set[str]:
 
 
 def _fetch_document(url: str, spec: dict, settings: Settings,
-                     conn: sqlite3.Connection):
-    """The document itself, archived, or a refusal explaining which failure."""
+                     conn: sqlite3.Connection, resolver=None):
+    """The document itself, archived, or a refusal explaining which failure.
+
+    Destination-guarded. The URL comes from a candidate table rather than
+    straight off a form, but a candidate is a link this pipeline copied off a
+    council's web page — so it is attacker-influenceable by anyone who can
+    publish on a site m09 or m10 reads, and this is the request that turns one
+    into a fetch from inside the operator's network.
+    """
+    from pipeline.netguard import BlockedAddress
+
     try:
         with PipelineHTTPClient(spec["source_system"], settings=settings,
-                                 conn=conn) as client:
+                                 conn=conn, guard_destination=True,
+                                 resolver=resolver) as client:
             result = client.get(url)
+    except BlockedAddress as exc:
+        raise PromotionError(str(exc)) from exc
     except RobotsDisallowed as exc:
         raise PromotionError(
             f"robots.txt refuses this document ({exc}). It is not promoted: "
@@ -150,7 +162,7 @@ def _fetch_document(url: str, spec: dict, settings: Settings,
 
 def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
              fields: dict | None = None, note: str | None = None,
-             settings: Settings | None = None) -> dict:
+             settings: Settings | None = None, resolver=None) -> dict:
     """Promote one candidate. Fetches the document; writes two rows or none."""
     settings = settings or get_settings()
     spec = _spec(kind)
@@ -183,7 +195,7 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
     # behind, and this is also the slow part -- doing it inside the write
     # transaction would hold the warehouse's single write slot across a network
     # round trip, which is the mistake the run loop had to be fixed for.
-    result = _fetch_document(url, spec, settings, conn)
+    result = _fetch_document(url, spec, settings, conn, resolver)
 
     target_key = f"{authority}|{url}"
     promoted_at = _now()

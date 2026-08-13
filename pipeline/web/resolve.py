@@ -97,7 +97,7 @@ def normalise_url(raw: str) -> str:
 
 
 def check_url(url: str, settings: Settings | None = None,
-               conn: sqlite3.Connection | None = None) -> dict:
+               conn: sqlite3.Connection | None = None, resolver=None) -> dict:
     """Fetch `url`, and probe it for a known committee system.
 
     Runs through PipelineHTTPClient, so this request is subject to the same
@@ -105,13 +105,20 @@ def check_url(url: str, settings: Settings | None = None,
     pipeline asks of a council — a reviewer clicking Check is a visitor to
     that council's site like any other, and the politeness commitment does not
     have an exception for people in a hurry.
+
+    The destination is guarded (pipeline/netguard.py): this is one of two
+    places where a URL typed by whoever can reach the operator UI becomes a
+    request from this machine, and nothing here authenticates anybody. A
+    council's website is a public address; the network the server is sitting
+    on is not.
     """
     settings = settings or get_settings()
     url = normalise_url(url)
     result: dict = {"url": url, "status": None, "ok": False,
                      "system": "unknown", "signature": None, "error": None}
 
-    with PipelineHTTPClient("review_ui", settings, conn) as client:
+    with PipelineHTTPClient("review_ui", settings, conn,
+                              guard_destination=True, resolver=resolver) as client:
         try:
             response = client.get(url)
         except RobotsDisallowed:

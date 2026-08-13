@@ -22,6 +22,36 @@ def _reset_host_clock():
 
 
 @pytest.fixture(autouse=True)
+def _names_resolve_somewhere_public(monkeypatch):
+    """DNS, stubbed, so the destination guard runs without leaving the machine.
+
+    `pipeline/netguard.py` refuses a fetch whose host resolves into private
+    space, which means the guarded paths now do a lookup. The suite is offline
+    and hermetic and must stay that way, so every name here resolves to one
+    public address.
+
+    Note this leaves the guard *switched on* for every test rather than
+    disabling it: the code still resolves, still inspects, and still decides.
+    Tests about refusal pass their own resolver, which takes precedence.
+    """
+    import socket
+
+    from pipeline import netguard
+
+    def fake(host, port, *args, **kwargs):
+        # 93.184.216.34 — public, globally routable, and not a real target of
+        # anything here: nothing in the suite actually opens a socket.
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+                  ("93.184.216.34", port))]
+
+    # netguard.DEFAULT_RESOLVER, never socket.getaddrinfo itself: patching
+    # the socket module patches it for httpx too, and the test server the web
+    # suites talk to lives on 127.0.0.1.
+    monkeypatch.setattr(netguard, "DEFAULT_RESOLVER", fake)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _logs_stay_out_of_the_repo(tmp_path: Path, monkeypatch):
     """No test writes into the operator's `logs/`.
 

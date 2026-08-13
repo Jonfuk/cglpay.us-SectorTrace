@@ -503,6 +503,17 @@ Three things are worth knowing before pointing anyone else at it:
   for a LAN you control; it is not safe on an untrusted network and must never
   be port-forwarded. `--host 127.0.0.1` restricts it to the machine running
   it, and the warning prints on every start that does not.
+- **It will not fetch your own network.** Two routes take a URL and go and get
+  it — the review queue's Check button and promoting a candidate — and without
+  a guard those answer "yes, 192.168.1.1 responded, and here is what it looked
+  like" to anyone who can reach the UI. Both now refuse a URL that resolves to
+  a loopback, private, link-local, multicast, reserved or unspecified address,
+  before any request and again on every redirect hop. The check is on the
+  resolved address, not the hostname, so `localhost`, `127.0.0.1`,
+  `127.0.0.1.nip.io` and a name whose owner points it inward are all the same
+  answer. It is not a firewall: it stops this pipeline being *used* to reach
+  private space, and does nothing about what the machine itself can reach.
+  See `pipeline/netguard.py`.
 - **What the headers do and do not cover.** Every response carries
   `Content-Security-Policy`, `X-Frame-Options: DENY`, `Referrer-Policy` and
   `nosniff`, so no other page on that network can frame `/admin` and drive it
