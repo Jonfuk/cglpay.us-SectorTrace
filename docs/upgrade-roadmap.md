@@ -2,8 +2,8 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Phases 1–3 and 5 are done, Phase 4 is
-partly done** (F-01 and U-01 closed; F-03 and D-04 open); Phases 6–7 are not
+1 skipped, 18 deselected, 422s**). **Phases 1–3, 5 and 6 are done, Phase 4 is
+partly done** (F-01 and U-01 closed; F-03 and D-04 open); Phase 7 is not
 built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
@@ -134,7 +134,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### G. Operations
 
-**O-01 · No CI · M** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
+**O-01 · No CI · M — closed in Phase 6** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
 
 **O-02 · No backup or restore · M — closed in Phase 3** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
@@ -142,7 +142,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` is 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` is 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
 - A test run polluting the operator's log directory is the kind of thing that erodes trust in the directory.
 
-**O-04 · No root `CLAUDE.md` · S** — the conventions are real, enforced and currently learned by reading `docs/admin-ui-plan.md` §2 and this file. Several sessions a day re-derive them.
+**O-04 · No root `CLAUDE.md` · S — closed in Phase 6** — the conventions are real, enforced and currently learned by reading `docs/admin-ui-plan.md` §2 and this file. Several sessions a day re-derive them.
 
 ### H. Security and privacy
 
@@ -160,9 +160,9 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### I. Testing and developer experience
 
-**T-01 · No lint or typecheck · S** — no ruff, mypy, black or pre-commit in [pyproject.toml](pyproject.toml). With 1,215 passing tests the marginal value is real but modest; the argument for ruff is consistency across concurrent sessions, not defect-finding.
+**T-01 · No lint or typecheck · S — closed in Phase 6** (ruff; a typechecker is still absent, deliberately) — no ruff, mypy, black or pre-commit in [pyproject.toml](pyproject.toml). With 1,215 passing tests the marginal value is real but modest; the argument for ruff is consistency across concurrent sessions, not defect-finding.
 
-**T-02 · A 7-minute suite is a suite people skip · M** — 422s **[measured]**. Worth profiling for the slow minority before optimising, and `-p no:cacheprovider`/parallelism are cheaper than restructuring.
+**T-02 · A 7-minute suite is a suite people skip · M — closed in Phase 6** (400.6s → 145.95s) — 422s **[measured]**. Worth profiling for the slow minority before optimising, and `-p no:cacheprovider`/parallelism are cheaper than restructuring.
 
 **T-03 · Per-module coverage is complete — no action.** Every `m00`–`m16` has a matching `tests/test_m*.py`, plus route, guard, concurrency, provenance and portal-isolation suites.
 
