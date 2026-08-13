@@ -39,6 +39,19 @@ jobs:
         run: uv run ruff check pipeline tests
 
       - name: Tests
-        # -q because the interesting output is the failures. The suite is
-        # ~2.5 minutes; there is no need to split or parallelise it yet.
-        run: uv run python -m pytest -q
+        # Failures are echoed back as `::error::` workflow commands, which
+        # become annotations on the run. Annotations are readable without a
+        # token; the raw logs are not, so a red build was otherwise a red
+        # light with no message attached to anyone without repo access.
+        run: |
+          set -o pipefail
+          uv run python -m pytest -q --tb=short > pytest.log 2>&1 && exit 0
+          status=$?
+          echo "::group::pytest output"
+          cat pytest.log
+          echo "::endgroup::"
+          grep -E '^(FAILED|ERROR)' pytest.log | while read -r line; do
+            echo "::error::$line"
+          done
+          tail -1 pytest.log | sed 's/^/::error::summary: /'
+          exit $status
