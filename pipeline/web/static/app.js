@@ -47,6 +47,47 @@ function when(iso) {
   return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/* Timestamps in this UI are nearly always being read for one reason: is this
+ * from the run I just did, or from last week? A relative label answers that
+ * without arithmetic. The exact value is kept in title= and datetime=, since
+ * "3 hours ago" is worthless the moment it goes into a bug report. */
+const RELATIVE = new Intl.RelativeTimeFormat('en-GB', { numeric: 'auto' });
+const RELATIVE_UNITS = [
+  ['year', 31_536_000], ['month', 2_592_000], ['week', 604_800],
+  ['day', 86_400], ['hour', 3_600], ['minute', 60],
+];
+
+function timeAgo(date) {
+  const seconds = (date.getTime() - Date.now()) / 1000;
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (Math.abs(seconds) >= size) return RELATIVE.format(Math.round(seconds / size), unit);
+  }
+  return RELATIVE.format(Math.round(seconds), 'second');
+}
+
+/** A <time> element: relative text, exact value on hover, and the ISO string
+ *  in the dataset so the ticker can rewrite it without a re-render. */
+function timeNode(iso) {
+  if (!iso) return document.createTextNode('—');
+  const d = new Date(iso);
+  if (isNaN(d)) return document.createTextNode(String(iso));
+  return el('time', {
+    datetime: d.toISOString(),
+    title: when(iso),
+    dataset: { iso: String(iso) },
+    text: timeAgo(d),
+  });
+}
+
+/* "2 minutes ago" is a lie after five minutes on a page left open, which this
+ * one routinely is. */
+function retickTimes() {
+  for (const node of document.querySelectorAll('time[data-iso]')) {
+    const d = new Date(node.dataset.iso);
+    if (!isNaN(d)) node.textContent = timeAgo(d);
+  }
+}
+
 /** A link only for http(s). Anything else stays plain text — a value from the
  *  database is not permitted to decide what a click does. */
 function maybeLink(value) {
@@ -130,7 +171,10 @@ function showTab(name) {
   syncUrl();
   if (name === 'overview') loadOverview();
   if (name === 'review') loadReview();
-  if (name === 'database') loadSchema();
+  if (name === 'database') {
+    loadSchema();
+    if (browserState.current) loadTable();
+  }
 }
 
 /* The review filters live in the URL, so a worklist is a link. "m10's unknown
@@ -156,9 +200,30 @@ function syncUrl() {
     if (!$('#f-oldest').checked) params.set('newest_first', '1');
     if (reviewState.offset) params.set('offset', String(reviewState.offset));
   }
+  // Which table is open is worth linking to for the same reason a worklist
+  // is: "look at supplier_aliases" is a message someone sends.
+  if (currentTab === 'database' && browserState.current) {
+    params.set('table', browserState.current);
+  }
   const query = params.toString();
   const target = `#${currentTab}${query ? `?${query}` : ''}`;
   if (location.hash !== target) history.replaceState(null, '', target);
+  remember(target);
+}
+
+/* Where the last session got to, so that opening /admin with a bare URL
+ * resumes it rather than dropping someone at an unfiltered queue several
+ * thousand items long. Only ever consulted when the URL says nothing at all:
+ * a link, a bookmark or the back button is an instruction and wins outright.
+ */
+const LOCATION_KEY = 'cglpay.location';
+
+function remember(target) {
+  try { localStorage.setItem(LOCATION_KEY, target); } catch (e) { /* private mode */ }
+}
+
+function remembered() {
+  try { return localStorage.getItem(LOCATION_KEY) || ''; } catch (e) { return ''; }
 }
 
 function parseHash() {
@@ -188,6 +253,19 @@ function applyUrlFilters(params) {
     $('#f-oldest').checked, reviewState.offset]);
   return before !== after;
 }
+
+/** Push the selected table from URL parameters into the browser state.
+ *  Returns true if it changed, so the caller knows whether to reload. */
+function applyUrlTable(params) {
+  const wanted = params.get('table') || null;
+  if (wanted === browserState.current) return false;
+  browserState.current = wanted;
+  browserState.offset = 0;
+  browserState.orderBy = null;
+  browserState.desc = false;
+  return true;
+}
+
 
 // --- reviewer identity ------------------------------------------------------
 
@@ -261,7 +339,8 @@ async function loadOverview() {
     el('td', {}, el('div', { class: 'mono', text: d.raw_value.slice(0, 90) }),
       el('div', { class: 'muted small', text: `${d.module} · ${d.item_type}` }),
       d.note ? el('div', { class: 'small', text: `“${d.note}”` }) : null),
-    el('td', { class: 'muted small' }, el('div', { text: d.decided_by }), el('div', { text: when(d.decided_at) }))));
+    el('td', { class: 'muted small' }, el('div', { text: d.decided_by }),
+      el('div', {}, timeNode(d.decided_at)))));
 
   replace($('#overview-decisions'), el('table', {}, el('tbody', {},
     decisions.length ? decisions
@@ -430,7 +509,7 @@ function renderDense(items) {
       el('td', {}, el('span', { class: 'badge type', text: item.item_type })),
       el('td', { class: 'raw', title: item.raw_value }, maybeLink(item.raw_value)),
       el('td', {}, el('span', { class: `badge ${item.status}`, text: item.status })),
-      el('td', { class: 'muted', text: when(item.created_at) }),
+      el('td', { class: 'muted' }, timeNode(item.created_at)),
       el('td', { class: 'act' },
         el('button', { class: 'btn approve', title: 'Approve',
           onclick: (e) => { e.stopPropagation(); decideItems([item.id], 'approved'); } }, 'A'),
@@ -464,12 +543,13 @@ function renderItem(item) {
       el('span', { class: 'badge module', text: item.module }),
       el('span', { class: 'badge type', text: item.item_type }),
       el('span', { class: `badge ${item.status}`, text: item.status }),
-      el('span', { class: 'muted', text: `#${item.id} · seen ${when(item.created_at)}` })),
+      el('span', { class: 'muted' }, `#${item.id} · seen `, timeNode(item.created_at))),
     el('div', { class: 'raw' }, maybeLink(item.raw_value)),
     context ? el('pre', { class: 'context', text: context }) : null,
     item.last_decision ? el('div', { class: 'muted small' },
-      `${item.last_decision} by ${item.last_decided_by} on ${when(item.last_decided_at)}`
-      + (item.last_note ? ` — “${item.last_note}”` : '')) : null,
+      `${item.last_decision} by ${item.last_decided_by} `,
+      timeNode(item.last_decided_at),
+      item.last_note ? ` — “${item.last_note}”` : '') : null,
     item.decision_count > 1 ? historyBlock(item.id, item.decision_count) : null,
     resolveForm(item),
     el('div', { class: 'actions' },
@@ -570,7 +650,7 @@ function historyBlock(itemId, count) {
           el('td', {}, el('span', { class: `badge ${d.decision}`, text: d.decision })),
           el('td', { class: 'muted', text: d.status_before }),
           el('td', { text: d.decided_by }),
-          el('td', { class: 'muted', text: when(d.decided_at) }),
+          el('td', { class: 'muted' }, timeNode(d.decided_at)),
           el('td', { text: d.note || '—' }))))));
     } catch (e) { replace(table, el('div', { class: 'muted small', text: e.message })); }
   });
@@ -846,7 +926,18 @@ function openObject(name) {
   browserState.desc = false;
   $('#table-search') && ($('#table-search').value = '');
   renderObjectList();
+  syncUrl();
   loadTable();
+}
+
+/** Reflect browserState.current into the page — used when the selection came
+ *  from the URL (a link, or the back button) rather than from a click. */
+function showSelectedTable() {
+  renderObjectList();
+  if (browserState.current) return loadTable();
+  replace($('#table-head'));
+  replace($('#data-table'));
+  replace($('#table-pager'));
 }
 
 async function loadTable(search) {
@@ -1020,15 +1111,34 @@ function init() {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') runSql();
   });
 
-  // Back/forward and pasted worklist links both arrive here.
+  setInterval(retickTimes, 60_000);
+
+  // Back/forward, pasted worklist links and the command palette all arrive
+  // here: everything that navigates does it by setting the hash.
   window.addEventListener('hashchange', async () => {
     const { tab, params } = parseHash();
-    const changed = applyUrlFilters(params);
+    // The same ordering the initial load needs, for the same reason: the
+    // module and item-type dropdowns are built from the facets, and setting a
+    // <select> to a value it has no option for silently does nothing. Without
+    // this, a link naming a worklist lands on an unfiltered queue and then
+    // rewrites itself to match, quietly losing what it was pointing at.
+    if (tab === 'review' && !reviewState.facets) await loadFacets();
+    const filtersChanged = applyUrlFilters(params);
+    const tableChanged = applyUrlTable(params);
     if (tab !== currentTab) showTab(tab);
-    else if (changed && tab === 'review') loadReview();
+    else if (tab === 'review' && filtersChanged) loadReview();
+    else if (tab === 'database' && tableChanged) showSelectedTable();
   });
 
+  // A bare /admin means "I have just opened the tool", so the last place this
+  // browser was looking at comes back. Any hash at all is an instruction.
+  if (!location.hash && remembered()) {
+    history.replaceState(null, '', remembered());
+  }
+
   const opened = parseHash();
+  applyUrlTable(opened.params);
+
   if (opened.tab === 'review') {
     // Facets first: the item-type dropdown is built from them, so a link
     // naming one has nothing to select until they are in.

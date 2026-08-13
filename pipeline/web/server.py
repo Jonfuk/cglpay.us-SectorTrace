@@ -76,6 +76,13 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
     "/admin/styles.css": ("styles.css", CSS, STATIC_DIR),
 }
 
+# The operator UI's ES modules. app.js stays a classic script -- it works, and
+# reloading working review tooling differently buys nothing -- so everything
+# added to that page since is a module loaded alongside it. Listed by name for
+# the same reason the rest of this map is: no directory walk, no traversal.
+for _module in ("shell", "dom", "theme", "palette"):
+    STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
+
 # Portal ES modules, listed rather than globbed for the same reason as above.
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)

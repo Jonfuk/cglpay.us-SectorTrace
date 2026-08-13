@@ -176,6 +176,19 @@ def test_the_portal_page_loads_only_its_own_assets():
         assert reference in STATIC_FILES, f"the portal links to {reference}, which is not served"
 
 
+def test_the_admin_modules_import_only_from_each_other():
+    """The operator UI's ES modules sit next to the portal's, one directory
+    apart, and `../` would reach them. Relative imports that leave /admin/js
+    are the shape that failure takes."""
+    for path in sorted((STATIC_DIR / "js").glob("*.js")):
+        source = path.read_text(encoding="utf-8")
+        for target in re.findall(r"""^\s*import\s[^'"]*['"]([^'"]+)['"]""",
+                                  source, re.MULTILINE):
+            assert target.startswith("./"), (
+                f"{path.name} imports {target}; admin modules import siblings only")
+            assert (path.parent / target).is_file(), f"{path.name} imports missing {target}"
+
+
 def test_the_admin_ui_does_not_import_portal_code():
     """Shared helpers are the usual way a boundary rots: a change made for the
     admin side lands in a function the portal calls. The operator modules
@@ -230,6 +243,15 @@ def test_the_admin_assets_served_are_the_operator_files(client):
     assert admin_js != portal_js
     assert "no raw HTML" in admin_js
     assert client.get("/admin/styles.css").text != client.get("/styles.css").text
+
+
+def test_the_admin_modules_are_served(client):
+    """A module that 404s takes the whole import graph with it, and the page
+    keeps working well enough that nobody notices the palette is gone."""
+    for name in ("shell", "dom", "theme", "palette"):
+        response = client.get(f"/admin/js/{name}.js")
+        assert response.status_code == 200, f"/admin/js/{name}.js is not served"
+        assert response.headers["Content-Type"].startswith("text/javascript")
 
 
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):

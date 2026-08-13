@@ -20,8 +20,12 @@
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* Dark, written twice. Once for "follow the OS", which is the default and was
+   the only behaviour before the toggle existed, and once for an explicit
+   choice of dark. CSS cannot share one declaration block between two
+   selectors, so these two palettes have to be edited together. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #14161a;
     --panel: #1b1e24;
     --ink: #e8eaed;
@@ -37,6 +41,28 @@
     --restricted: #f0a79c;
   }
 }
+
+:root[data-theme="dark"] {
+  --bg: #14161a;
+  --panel: #1b1e24;
+  --ink: #e8eaed;
+  --muted: #9aa2b1;
+  --line: #2c313a;
+  --accent: #8fb3e8;
+  --approve: #7ed6a0;
+  --approve-bg: #14301f;
+  --reject: #f0a79c;
+  --reject-bg: #331714;
+  --pending: #e5c76b;
+  --pending-bg: #2e2711;
+  --restricted: #f0a79c;
+}
+
+/* Scrollbars, form controls and the browser's own widgets follow
+   color-scheme rather than these variables, so an explicit choice has to be
+   declared to the browser as well as painted. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -302,3 +328,76 @@ table.dense td.act { white-space: nowrap; }
   z-index: 50; max-width: 70ch;
 }
 .toast.error { border-left-color: var(--reject); color: var(--reject); }
+
+/* --- top bar buttons ------------------------------------------------------ */
+
+/* .reviewer takes margin-left:auto, so these sit after it in the same
+   right-hand cluster rather than fighting it for the gap. */
+.toolbtns { display: flex; gap: 6px; align-items: center; }
+.iconbtn {
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--muted);
+  font: inherit; font-size: 12px; line-height: 1;
+  padding: 6px 8px; cursor: pointer; min-width: 30px;
+}
+.iconbtn:hover { color: var(--ink); border-color: var(--accent); }
+#theme-toggle { font-size: 14px; }
+
+/* --- timestamps ----------------------------------------------------------- */
+
+/* Relative text with the exact value in title=. The dotted underline is the
+   only hint that hovering is worth it. */
+time[data-iso] {
+  text-decoration: underline dotted var(--line);
+  text-underline-offset: 2px;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* --- command palette ------------------------------------------------------ */
+
+.palette-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(10, 12, 16, 0.45);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 10vh 16px 16px;
+}
+.palette-backdrop[hidden] { display: none; }
+
+.palette {
+  width: min(680px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column;
+  max-height: 70vh; overflow: hidden;
+}
+.palette-head { padding: 10px; border-bottom: 1px solid var(--line); }
+.palette-head input {
+  width: 100%; border: 0; background: transparent; color: var(--ink);
+  font: inherit; font-size: 15px; padding: 4px 2px; outline: none;
+}
+
+.palette-list { overflow-y: auto; }
+.palette-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 10px; align-items: baseline;
+  padding: 7px 12px; cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.palette-item.active { background: var(--bg); border-left-color: var(--accent); }
+.palette-kind {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-item.restricted .palette-label { color: var(--restricted); }
+.palette-detail { font-size: 12px; white-space: nowrap; }
+.palette-empty { padding: 16px 12px; }
+
+.palette-foot {
+  display: flex; gap: 14px; padding: 7px 12px;
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.palette-foot kbd { margin-right: 3px; }

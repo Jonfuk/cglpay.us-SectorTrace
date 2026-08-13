@@ -11,10 +11,33 @@ This is two things in one file:
    fresh Claude Code session to implement any phase without re-deriving
    context.
 
-No authentication is in scope, by explicit decision. The server binds loopback
-by default and the existing posture (`--host` widens it loudly, writes require
-`application/json` + same-origin `Origin`) is the whole security model. Do not
-spend effort adding auth, and do not weaken those guards either.
+No authentication is in scope, by explicit decision. The existing posture
+(writes require `application/json` + a same-origin `Origin`) is the whole
+security model. Do not spend effort adding auth, and do not weaken those
+guards either.
+
+## Decisions taken (2026-08-13)
+
+Recorded here because each one closes off an alternative that would otherwise
+be re-litigated every phase.
+
+1. **Admin actions are reachable wherever the server is.** No loopback-only
+   restriction on state-changing routes, and `pipeline web` keeps binding
+   `0.0.0.0` by default. Note what this means once Phase 2 lands: anyone who
+   can reach the UI can start a pipeline run, which fetches from real public
+   sources under this project's contact email and rate limits. `--host
+   127.0.0.1` remains the way to prevent that.
+2. **Jobs run in-process, behind an interface.** A worker thread in the server
+   process, reusing the run path factored out of `cli.py`. The execution
+   strategy sits behind one seam so it can become a subprocess later if
+   cancellation or crash isolation turns out to matter in practice. Do not
+   design the UI around cancellation that does not exist yet.
+3. **New front-end code is ES modules under `/admin/js/`.** `app.js` stays a
+   classic script — it works, and reloading working review tooling differently
+   buys nothing. The two halves do not call each other: the module side
+   reaches the page through the DOM and the URL hash, both of which `app.js`
+   already treats as outside input.
+4. **Phases run in order**, each committed and pushed on its own.
 
 ---
 
@@ -106,27 +129,45 @@ The portal is protected by construction, and then by test:
 
 Each phase is shippable alone and leaves the tree green.
 
-### Phase 0 — repair and guardrails (small, do first)
+### Phase 0 — repair and guardrails — **done** (commit `d2c2d0d`)
 
-- Fix `static/index.html` to reference `/admin/styles.css` and `/admin/app.js`.
-- Add `tests/test_portal_isolation.py` as above, plus a smoke test that
-  `GET /admin` returns HTML whose every `src`/`href` is a key of
-  `STATIC_FILES` mapping into `STATIC_DIR`.
-- Acceptance: `/admin` renders with its own stylesheet; portal byte-identical.
+- Fixed `static/index.html` to reference `/admin/styles.css` and
+  `/admin/app.js`.
+- Added `tests/test_portal_isolation.py`: frozen literal lists of the portal's
+  static paths and `/api/v1/` routes, directory checks on every `STATIC_FILES`
+  entry, an assets-never-cross-but-links-may rule for both index pages, and
+  end-to-end checks over HTTP.
+- Found and removed a dead `/js/charts.js` route mapping a file that has never
+  existed in this tree; it answered 500 to anyone who asked.
 
-### Phase 1 — admin shell and navigation QoL
+### Phase 1 — admin shell and navigation QoL — **done**
 
-- Hash-router deep links: `#/review?status=pending&module=m10_committee_papers`
-  restores tab + filters on reload; back/forward work. (The portal already
-  hash-routes; the admin gets its own, simpler one.)
-- Persist reviewer name, filters, per-page, dense mode in `localStorage`
-  (verify what `app.js` already persists; fill gaps rather than rework).
-- Command palette (`Ctrl+K`): jump to tab, jump to table by name, run a saved
-  SQL snippet, open a review item by id. Pure client-side, built from
-  `/api/schema` + a static action list.
-- Relative timestamps everywhere ("3 h ago", full ISO in `title=`).
-- Theme: honour `prefers-color-scheme` with a manual toggle stored locally.
-  Admin-only CSS variables — the portal's theme files are off-limits.
+Much of this turned out to exist already: hash routing with filters in the
+URL, back/forward, a persisted reviewer name and dense-row setting, and
+debounced search. What was added:
+
+- **Command palette** (`Ctrl+K`, or the button in the top bar), in
+  `js/palette.js`. Tabs, actions, review worklists built from
+  `/api/review/facets`, and every table and view from `/api/schema`, ranked
+  with contiguous matches first and subsequence matching as a fallback.
+  Navigates by setting the URL hash — it holds no application state and
+  cannot decide a review item.
+- **Theme toggle** (`js/theme.js`): three states, system / light / dark, with
+  the manual choice applied inline in `<head>` so an override that disagrees
+  with the OS does not flash on load.
+- **Relative timestamps**: `<time>` elements with the exact value in `title=`
+  and `datetime=`, re-ticked once a minute so a page left open stops claiming
+  "2 minutes ago" an hour later.
+- **Deep-linkable tables**: `#database?table=supplier_aliases`, so the table
+  someone is reading is a link like a worklist already was.
+- **Resume on open**: a bare `/admin` returns to the last place this browser
+  was looking. Any hash at all is an instruction and wins.
+- **Bug fixed on the way**: the `hashchange` path applied review filters
+  before the facets had loaded, and setting a `<select>` to a value it has no
+  option for silently does nothing — so a worklist link opened in an
+  already-running tab landed on the unfiltered queue and then rewrote its own
+  URL to match, losing what it pointed at. Only the initial-load path had the
+  ordering right.
 
 ### Phase 2 — pipeline control room (the biggest win)
 

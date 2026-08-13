@@ -16,6 +16,19 @@
 <title>Evidence pipeline — review</title>
 <link rel="stylesheet" href="/admin/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128203;</text></svg>">
+<script>
+  /* Inline, and before the stylesheet has painted anything, because a module
+     script runs after the document is parsed: a saved theme that disagrees
+     with the OS would otherwise show the wrong colours for a frame on every
+     load. js/theme.js owns this setting; these three lines only apply it
+     early. */
+  try {
+    var saved = localStorage.getItem('cglpay.theme');
+    if (saved === 'light' || saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', saved);
+    }
+  } catch (e) { /* private mode: the media query still applies */ }
+</script>
 </head>
 <body>
 
@@ -34,6 +47,11 @@
     <span>Reviewer</span>
     <input id="reviewer" type="text" placeholder="your name" autocomplete="name">
   </label>
+  <div class="toolbtns">
+    <button class="iconbtn" id="palette-open" type="button"
+            title="Jump to a tab, table or worklist (Ctrl+K)">Ctrl K</button>
+    <button class="iconbtn" id="theme-toggle" type="button" title="Theme">◐</button>
+  </div>
 </header>
 
 <div id="busybar" class="busybar" hidden><div class="busybar-run"></div></div>
@@ -122,7 +140,8 @@
     <div class="pager" id="review-pager"></div>
     <p class="muted small keys">
       Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>r</kbd> reject ·
-      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search
+      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search ·
+      <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
     </p>
   </section>
 
@@ -167,5 +186,6 @@
 </main>
 
 <script src="/admin/app.js"></script>
+<script type="module" src="/admin/js/shell.js"></script>
 </body>
 </html>
