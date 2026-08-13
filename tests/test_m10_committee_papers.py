@@ -555,3 +555,26 @@ def test_result_pages_per_term_are_capped():
     and a very long crawl.
     """
     assert 1 <= cp.MAX_RESULT_PAGES <= 5
+
+
+def test_every_registry_entry_is_well_formed():
+    """105 entries were added by hand from a verification document, and a
+    hand-edited table of that size is where a typo hides.
+
+    Each was fetched once through the pipeline's own client before it was
+    recorded — see docs/verification/issue1_committee_urls.md — so what is
+    checked here is shape, not reachability: no test may make a request.
+    """
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    for code, entry in AUTHORITY_WEBSITES.items():
+        assert code == entry.ons_code, f"{code} is filed under the wrong key"
+        assert re.fullmatch(r"E\d{8}", code), f"{code} is not an ONS code"
+        assert entry.name, f"{code} has no name"
+        for url in (entry.base_url, entry.committee_url):
+            if url is not None:
+                assert url.startswith("https://") or url.startswith("http://"), url
+                assert not url.endswith("/"), f"{url} has a trailing slash"
+        assert entry.committee_system in (None, "moderngov", "cmis", "democracy"), (
+            f"{code} claims an unknown committee system")
+        assert entry.verified_on, f"{code} does not say when it was verified"

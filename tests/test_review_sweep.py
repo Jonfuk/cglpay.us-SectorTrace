@@ -185,3 +185,53 @@ def test_the_sweep_makes_no_requests(queued, httpx_mock):
     review_sweep.sweep(queued)
 
     assert not httpx_mock.get_requests()
+
+
+# --- the registry rule ---------------------------------------------------------
+
+
+def test_a_committee_url_in_the_registry_answers_its_item(conn):
+    """The URLs moved into pipeline/authority_websites.py after 191 of them
+    were lost with the override table. An item asking where a council
+    publishes is answered once the answer is committed to git."""
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    known = next(code for code, entry in AUTHORITY_WEBSITES.items()
+                  if entry.committee_url)
+    add_item(conn, known, item_type="committee_url_unknown")
+    add_item(conn, "E99999999", item_type="committee_url_unknown")
+    conn.commit()
+
+    result = review_sweep.sweep(conn, rule="committee_url_in_registry")
+
+    assert result["closed"]["committee_url_in_registry"] == 1
+    assert statuses(conn)[known] == "answered"
+    assert statuses(conn)["E99999999"] == "pending", (
+        "an authority nobody has verified is still an open question")
+
+
+def test_the_registry_rule_records_the_url_it_answered_with(conn):
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    known = next(code for code, entry in AUTHORITY_WEBSITES.items()
+                  if entry.committee_url)
+    add_item(conn, known, item_type="committee_url_unknown")
+    conn.commit()
+
+    review_sweep.sweep(conn, rule="committee_url_in_registry")
+
+    evidence = conn.execute(
+        "SELECT evidence FROM review_resolutions").fetchone()[0]
+    assert AUTHORITY_WEBSITES[known].committee_url in evidence
+
+
+def test_the_registry_rule_leaves_a_decided_item_alone(conn):
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    known = next(code for code, entry in AUTHORITY_WEBSITES.items()
+                  if entry.committee_url)
+    add_item(conn, known, item_type="committee_url_unknown", status="rejected")
+    conn.commit()
+
+    assert review_sweep.sweep(conn, rule="committee_url_in_registry")["total"] == 0
+    assert statuses(conn)[known] == "rejected"

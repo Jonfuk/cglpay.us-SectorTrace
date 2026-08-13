@@ -5,13 +5,18 @@ because the pipeline was missing something, and it has since gone and got it.
 Those are not judgements waiting to be made, they are stale — and a queue whose
 bulk is questions already answered is a queue people stop reading.
 
-One rule so far, and the shape is meant to make a second obvious rather than to
-be a framework:
+Two rules, and between them they show the shape:
 
     pfd_concerns_in_pdf_only — filed when m08 could read only the metadata stub
     and the coroner's concerns lived in a PDF nobody had fetched. m08 reads
     those PDFs now. If the report has `matters_of_concern`, the question is
     answered.
+
+    committee_url_unknown — filed when nothing knew where a council publishes.
+    If the authority is now in `pipeline/authority_websites.py` with a
+    committee URL, it is known. This one is a Python predicate rather than a
+    SELECT, because the answer lives in code rather than in a table — which is
+    the point of it being there.
 
 Three rules the sweep obeys, and they are the whole safety argument:
 
@@ -20,8 +25,8 @@ Three rules the sweep obeys, and they are the whole safety argument:
     refresh a decided item; this is the same discipline from the other side.
 
   * **It is evidence-driven, not time-driven.** An item closes because the
-    warehouse now holds the answer — checked per item, in SQL, against the
-    actual row — not because a module ran or a date passed.
+    answer actually exists — checked per item against the row or the registry
+    entry that holds it — not because a module ran or a date passed.
 
   * **Every closure is recorded and reversible.** `review_resolutions` keeps
     the rule and the evidence; resetting an item to pending is an ordinary
@@ -44,10 +49,42 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _registry_answers_committee_url(conn: sqlite3.Connection) -> list[tuple]:
+    """`committee_url_unknown` items whose authority is now in the registry.
+
+    The one rule that cannot be a SELECT: the answer lives in
+    `pipeline/authority_websites.py`, which is code rather than a table —
+    deliberately, because a committed entry survives the warehouse and is
+    reviewable in a diff.
+    """
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    rows = conn.execute(
+        "SELECT id, raw_value FROM review_queue "
+        "WHERE item_type = 'committee_url_unknown' AND status = 'pending'"
+    ).fetchall()
+    out = []
+    for item_id, ons_code in rows:
+        entry = AUTHORITY_WEBSITES.get(ons_code)
+        if entry is not None and entry.committee_url:
+            out.append((item_id,
+                         f"the committee URL is in the registry: "
+                         f"{entry.committee_url} (verified {entry.verified_on})"))
+    return out
+
+
 # Each rule finds pending items of one type that the warehouse can now answer,
-# and says in words what answered them. The SELECT must return
-# (review_item_id, evidence).
+# and says in words what answered them. A rule is either a `sql` returning
+# (review_item_id, evidence), or a `find(conn)` doing the same in Python for
+# the cases where the answer is not in the database at all.
 RULES: dict[str, dict] = {
+    "committee_url_in_registry": {
+        "module": "m10_committee_papers",
+        "why": ("filed when nothing knew where this council publishes; the "
+                 "committee URL has since been verified and committed to "
+                 "pipeline/authority_websites.py"),
+        "find": _registry_answers_committee_url,
+    },
     "pfd_concerns_in_pdf_only": {
         "module": "m08_pfd_reports",
         "why": ("filed when the report's concerns were in a PDF this pipeline "
@@ -67,6 +104,13 @@ RULES: dict[str, dict] = {
 }
 
 
+def _matches(conn: sqlite3.Connection, spec: dict) -> list[tuple]:
+    """The items one rule would close, however that rule is expressed."""
+    if "find" in spec:
+        return list(spec["find"](conn))
+    return [tuple(row) for row in conn.execute(spec["sql"]).fetchall()]
+
+
 def preview(conn: sqlite3.Connection, rule: str | None = None) -> dict[str, int]:
     """How many items each rule would close, without closing any.
 
@@ -77,7 +121,7 @@ def preview(conn: sqlite3.Connection, rule: str | None = None) -> dict[str, int]
     for name, spec in RULES.items():
         if rule and name != rule:
             continue
-        out[name] = len(conn.execute(spec["sql"]).fetchall())
+        out[name] = len(_matches(conn, spec))
     return out
 
 
@@ -93,7 +137,7 @@ def sweep(conn: sqlite3.Connection, rule: str | None = None,
     for name, spec in RULES.items():
         if rule and name != rule:
             continue
-        rows = conn.execute(spec["sql"]).fetchall()
+        rows = _matches(conn, spec)
         closed[name] = len(rows)
         if dry_run or not rows:
             continue

@@ -7,6 +7,15 @@ address, robots respected, per-host rate limit). This records what each one did.
 - **104 of 313 responded** and were written to `authority_url_overrides`.
 - **209 did not** and were not stored. Their review items remain pending.
 
+**Update, 2026-08-13.** `authority_url_overrides` was emptied and all 191
+verified URLs in it were lost, these 104 among them. Because this document
+records the ONS code and the probed system for every one, they were
+reconstructible from the repository without re-fetching a single council —
+and they now live in `pipeline/authority_websites.py`, which is committed,
+diff-reviewable and survives the warehouse. The override table remains the
+route for an answer given in the UI; the registry is where an answer worth
+keeping belongs.
+
 A URL that does not respond is worse than an absent one: Module 10 would search a
 host that isn't there, find nothing, and record the authority as publishing nothing.
 

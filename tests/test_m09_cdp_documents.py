@@ -127,9 +127,19 @@ def test_markdown_handles_no_candidates():
 def test_registry_contains_only_verified_entries():
     """Every entry must carry the date its URLs were confirmed to load, so an
     unverified guess cannot quietly sit in the registry.
+
+    `base_url` may be absent and most entries now leave it so: the 102 added
+    from issue #1 are committee portals, and nobody has confirmed a main
+    council domain for them. The dataclass has always allowed that — callers
+    needing a base URL check for one — but this test assumed every entry had
+    one, because for the first three it did. An entry must still say *when* it
+    was verified, which is the part that keeps guesses out.
     """
     for site in authority_websites.AUTHORITY_WEBSITES.values():
-        assert site.base_url.startswith("https://")
+        if site.base_url is not None:
+            assert site.base_url.startswith("https://")
+        assert site.committee_url or site.base_url, (
+            f"{site.ons_code} carries no URL at all")
         assert site.verified_on, f"{site.ons_code} has no verified_on date"
 
 
