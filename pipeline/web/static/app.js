@@ -157,7 +157,11 @@ function replace(container, ...children) {
 
 // --- tabs -------------------------------------------------------------------
 
-const TABS = ['overview', 'review', 'database', 'sql'];
+/* 'pipeline' is rendered by an ES module, not from here. This file still owns
+ * the routing, so the name has to be known to it; what happens next is the
+ * module's business, and it finds out through the event at the end of
+ * showTab rather than by being called. */
+const TABS = ['overview', 'review', 'pipeline', 'database', 'sql'];
 let currentTab = 'overview';
 
 function showTab(name) {
@@ -175,6 +179,7 @@ function showTab(name) {
     loadSchema();
     if (browserState.current) loadTable();
   }
+  document.dispatchEvent(new CustomEvent('tabshown', { detail: { tab: name } }));
 }
 
 /* The review filters live in the URL, so a worklist is a link. "m10's unknown

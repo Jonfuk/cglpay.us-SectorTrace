@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import threading
-import time
+from contextlib import contextmanager
 
 import typer
 
 from pipeline import console as ui
-from pipeline import db
+from pipeline import db, runner
 from pipeline.config import get_settings
 from pipeline.logging_conf import configure_logging
 from pipeline.registry import (
@@ -159,21 +158,7 @@ def web(
         server.server_close()
 
 
-def _audit_counts(conn, module: str) -> dict[str, int]:
-    """Review items and parse failures already recorded for this module.
-
-    Both deduplicate on a natural key, so a re-run that finds the same
-    problems adds nothing — the delta reported in the summary is genuinely
-    what this run newly could not resolve.
-    """
-    def count(table: str) -> int:
-        try:
-            return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE module = ?", (module,)).fetchone()[0]
-        except Exception:
-            return 0
-
-    return {"review": count("review_queue"), "failures": count("parse_failures")}
+_audit_counts = runner.audit_counts
 
 
 def _print_summary(summary: list[dict], dry_run: bool) -> None:
@@ -204,112 +189,63 @@ def _print_summary(summary: list[dict], dry_run: bool) -> None:
                   "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
 
 
-def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict:
-    """Run one module on its own connection, and report what it did.
+class _BarObserver(runner.RunObserver):
+    """The Rich progress display, as something a run can report to.
 
-    A connection per module rather than one shared across the run. That is
-    required for concurrency — SQLite objects cannot cross threads — but it is
-    better serially too: a module that fails now rolls back only its own
-    writes, where a shared connection could roll back work belonging to
-    whatever else had touched it.
-
-    Never raises. The outcome, including a failure, comes back in the summary
-    so one module cannot take the run down with it.
+    Everything terminal-shaped about a run lives here: the pulsing task per
+    module, the overall counter, and the line announcing a concurrent wave.
+    The run itself is in pipeline/runner.py and does not know any of it.
     """
-    from pipeline.registry import ModuleContext
 
-    started = time.perf_counter()
-    # A task per module, always, with no total. Rich renders that as a pulsing
-    # bar, which is the honest display for work whose size is not known up
-    # front — and it means the screen is never blank.
-    #
-    # This was the failure: only m09, m10 and m15 call ctx.track(), so the
-    # first wave (m00, m02, m03, m06, m08) added no tasks at all and the
-    # display rendered nothing for however long they took. A progress system
-    # that shows nothing during the first twenty minutes of a run is not a
-    # progress system.
-    task = bar.add_task(name, total=None)
-    # Name the thread after the module, so the write slot can say who is
-    # holding it and every log line from a wave is attributable.
-    threading.current_thread().name = name
-    conn = db.get_connection(settings)
-    conn.write_label = name
-    try:
-        before = _audit_counts(conn, name)
-        changes_before = conn.total_changes
-        ctx = ModuleContext(conn=conn, settings=settings, since=since,
-                             dry_run=dry_run, limit=limit,
-                             progress=ui.ProgressReporter(bar, parent_description=name,
-                                                          task_id=task))
+    def __init__(self, bar) -> None:
+        self._bar = bar
+        self._overall = None
+
+    def run_starting(self, total_modules: int) -> None:
+        # The one task that outlives every module, so there is always a bar on
+        # screen and the request counter and throughput columns always have
+        # somewhere to render.
+        self._overall = self._bar.add_task("all modules", total=total_modules,
+                                            run_level=True)
+
+    def wave_starting(self, names: list[str], width: int) -> None:
+        self._bar.console.print(
+            f"[pipeline.muted]  wave of {len(names)}, {width} at a time: "
+            f"{', '.join(names)}[/]")
+
+    @contextmanager
+    def module_progress(self, name: str):
+        # A task per module, always, with no total. Rich renders that as a
+        # pulsing bar, which is the honest display for work whose size is not
+        # known up front — and it means the screen is never blank.
+        #
+        # This was the failure: only m09, m10 and m15 call ctx.track(), so the
+        # first wave (m00, m02, m03, m06, m08) added no tasks at all and the
+        # display rendered nothing for however long they took. A progress
+        # system that shows nothing during the first twenty minutes of a run is
+        # not a progress system.
+        task = self._bar.add_task(name, total=None)
         try:
-            fn(ctx)
-        except Exception as exc:
-            conn.rollback()
-            return {"module": name, "status": "failed",
-                     "elapsed": time.perf_counter() - started, "error": exc}
+            yield ui.ProgressReporter(self._bar, parent_description=name, task_id=task)
+        finally:
+            self._bar.remove_task(task)
 
-        if dry_run:
-            conn.rollback()
-        else:
-            conn.commit()
+    def module_finished(self, row: dict) -> None:
+        if self._overall is not None:
+            self._bar.advance(self._overall)
 
-        after = _audit_counts(conn, name)
-        return {
-            "module": name, "status": "ok",
-            "elapsed": time.perf_counter() - started,
-            "rows": conn.total_changes - changes_before,
-            "review": after["review"] - before["review"],
-            "failures": after["failures"] - before["failures"],
-        }
-    finally:
-        conn.close()
-        bar.remove_task(task)
+
+def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict:
+    """Kept as the CLI's bar-shaped way in. The run is runner.execute_module."""
+    return runner.execute_module(name, fn, settings, since, dry_run, limit,
+                                  _BarObserver(bar))
 
 
 def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
                 bar) -> list[dict]:
-    """Each wave concurrently, waves in order.
-
-    Every module in a wave has its dependencies satisfied by an earlier wave,
-    so within a wave there is nothing to order. Concurrency across modules is
-    safe because the per-host rate limit is enforced process-wide: modules on
-    different APIs proceed independently, and the four sharing www.gov.uk
-    queue behind each other on that host alone.
-
-    A wave is joined before the next begins, so a module never starts before
-    the module whose output it reads has finished.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    total_modules = sum(len(wave) for wave in waves)
-    # The one task that outlives every module, so there is always a bar on
-    # screen and the request counter and throughput columns always have
-    # somewhere to render.
-    overall = bar.add_task("all modules", total=total_modules, run_level=True)
-
-    summary: list[dict] = []
-    for wave in waves:
-        width = max(1, min(jobs, len(wave)))
-        if width == 1:
-            for name in wave:
-                summary.append(_execute_module(
-                    name, MODULE_REGISTRY[name], settings, since, dry_run, limit, bar))
-                bar.advance(overall)
-            continue
-
-        bar.console.print(
-            f"[pipeline.muted]  wave of {len(wave)}, {width} at a time: "
-            f"{', '.join(wave)}[/]")
-        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
-            futures = [pool.submit(_execute_module, name, MODULE_REGISTRY[name],
-                                    settings, since, dry_run, limit, bar)
-                        for name in wave]
-            # Collected in submission order, so the summary reads the same way
-            # twice regardless of which API answered first.
-            for future in futures:
-                summary.append(future.result())
-                bar.advance(overall)
-    return summary
+    """Every wave, painted onto `bar`. The ordering rules are in runner.py."""
+    return runner.run_waves(waves, jobs, settings, since, dry_run, limit,
+                             _BarObserver(bar))
 
 
 @app.command()

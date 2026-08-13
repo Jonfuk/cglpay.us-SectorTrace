@@ -401,3 +401,36 @@ time[data-iso] {
   border-top: 1px solid var(--line); background: var(--bg);
 }
 .palette-foot kbd { margin-right: 3px; }
+
+/* --- pipeline tab --------------------------------------------------------- */
+
+.runbar {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: end;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+}
+.runbar label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.runbar input[type="number"] { width: 90px; }
+.runbar input[type="date"] { width: 150px; }
+
+#module-list td { vertical-align: middle; }
+#module-list .act { white-space: nowrap; text-align: right; }
+
+/* The log. Monospace and dense, because it is the same text that would have
+   scrolled past in a terminal, and scrollable on its own so the page around it
+   stays put while a run talks. */
+.joblog {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.45;
+  margin: 8px 0; padding: 8px 10px;
+  height: 340px; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.joblog:empty::after { content: 'No job selected.'; color: var(--muted); }
+.logline.warning { color: var(--pending); }
+.logline.error { color: var(--reject); }
+
+table.summary { margin: 8px 0; }
+table.summary td, table.summary th { padding: 3px 8px; }
+
+#job-history tr.clickable td { padding: 4px 8px; }

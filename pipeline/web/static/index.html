@@ -40,6 +40,7 @@
   <nav class="tabs" role="tablist">
     <button class="tab" data-tab="overview" role="tab">Overview</button>
     <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
+    <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
   </nav>
@@ -143,6 +144,40 @@
       <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search ·
       <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
     </p>
+  </section>
+
+  <!-- Pipeline --------------------------------------------------------------->
+  <!-- Rendered by /admin/js/pipeline.js. Only the shell is here; every row is
+       built from /api/admin/modules through the DOM, like everywhere else. -->
+  <section id="tab-pipeline" class="tabpanel">
+    <div class="runbar">
+      <label>Since <input id="run-since" type="date"></label>
+      <label>Limit <input id="run-limit" type="number" min="1" placeholder="all"></label>
+      <label>Modules at once <input id="run-jobs" type="number" min="1" value="1"></label>
+      <button class="btn" id="dry-all">Dry run all</button>
+      <button class="btn primary" id="run-all">Run all</button>
+      <span class="spacer"></span>
+      <span id="run-status" class="muted small"></span>
+    </div>
+    <p class="muted small">
+      A run here is the run <code>pipeline run</code> would do: same dependency
+      waves, same rate limits, same writes. It fetches from live public sources.
+      One at a time — the warehouse has a single write slot.
+    </p>
+
+    <div class="split">
+      <div class="panel">
+        <h2>Modules</h2>
+        <div id="module-list"></div>
+      </div>
+      <div class="panel">
+        <h2>Job <span id="job-label" class="muted small"></span></h2>
+        <div id="job-meta" class="muted small"></div>
+        <pre id="job-log" class="joblog" aria-live="polite" aria-label="Job log"></pre>
+        <h2>Recent jobs</h2>
+        <div id="job-history"></div>
+      </div>
+    </div>
   </section>
 
   <!-- Database browser ------------------------------------------------------>

@@ -169,7 +169,39 @@ debounced search. What was added:
   URL to match, losing what it pointed at. Only the initial-load path had the
   ordering right.
 
-### Phase 2 — pipeline control room (the biggest win)
+### Phase 2 — pipeline control room — **done**
+
+- `pipeline/runner.py` now owns module execution — the dependency waves, the
+  connection per module, the rollback on failure, the audit-count deltas. The
+  CLI keeps its Rich display as a `RunObserver` implementation and its old
+  function signatures, so every existing test of the progress display still
+  drives the same entry points.
+- `pipeline/web/jobs.py`: a job registry with one slot. A second run is
+  refused with 409 and the running job's id, not queued — the warehouse has a
+  single write slot, so queueing would only hide the wait. Execution sits
+  behind `ThreadStrategy` so a subprocess version can replace it.
+- The job log is captured off the root logger for the length of the run and
+  filtered to the threads the run is using, so what the browser shows is the
+  same audit trail that lands in `logs/`, not a parallel commentary.
+- `pipeline/web/admin.py`: `/api/admin/modules` (registry, waves, cursors,
+  queue and failure counts), and `/api/admin/run`, which refuses what
+  `cli.run` refuses — unknown module, `limit` below 1, unparseable `since`.
+- Pipeline tab (`js/pipeline.js`): module table with per-module Run and Dry
+  buttons, run-all with a confirmation, live log tail polled by line index,
+  a summary table, job history, and a pill in the tab strip while a run is
+  going. A run started in one tab is picked up by another.
+- **Two bugs found while building it.** `limit: 0` was silently becoming "no
+  limit" — `0 == False` in Python, so a membership test against `(None, "",
+  False)` swallowed the one value the check existed to refuse, turning "fetch
+  nothing" into a full crawl. And `execute_module` renamed the running thread
+  after the module but never restored it, so after any CLI run the main
+  thread stayed named after the last module and every later log line was
+  misattributed.
+
+Still deliberately absent: cancellation (no cooperative stop exists in the
+modules; a Stop button that lied would be worse than none) and scheduling.
+
+### Phase 2 — original sketch, for reference
 
 A new "Pipeline" tab that replaces "ssh in and run the CLI" for routine runs.
 

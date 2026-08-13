@@ -41,7 +41,8 @@ import structlog
 
 from pipeline import db
 from pipeline.config import Settings, get_settings
-from pipeline.web import public_export, public_queries, queries, resolve, review
+from pipeline.web import admin, public_export, public_queries, queries, resolve, review
+from pipeline.web.jobs import JobError, JobRegistry
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PUBLIC_DIR = STATIC_DIR / "public"
@@ -80,7 +81,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # reloading working review tooling differently buys nothing -- so everything
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
-for _module in ("shell", "dom", "theme", "palette"):
+for _module in ("shell", "dom", "theme", "palette", "pipeline"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -160,8 +161,11 @@ class Handler(BaseHTTPRequestHandler):
     _body_read = False
     _responded = False
 
-    def __init__(self, *args, settings: Settings, **kwargs):
+    def __init__(self, *args, settings: Settings, jobs: JobRegistry, **kwargs):
         self.settings = settings
+        # Shared across every request: the whole point of the registry is that
+        # a run started by one request is visible to the next.
+        self.jobs = jobs
         super().__init__(*args, **kwargs)
 
     # --- plumbing -------------------------------------------------------------
@@ -293,6 +297,11 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(f"No route for {path}", status=404)
         except ApiError as exc:
             self._fail(exc.status, exc.message)
+        except JobError as exc:
+            # The refusal carries the running job's id, so the page can offer
+            # to show it rather than just saying no.
+            self._fail(exc.status, exc.message,
+                        extra={"job_id": exc.job_id} if exc.job_id else None)
         except queries.QueryError as exc:
             self._fail(400, str(exc))
         except review.DecisionError as exc:
@@ -309,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("web.unhandled", path=path)
             self._fail(500, f"{type(exc).__name__}: {exc}")
 
-    def _fail(self, status: int, message: str) -> None:
+    def _fail(self, status: int, message: str, extra: dict | None = None) -> None:
         if self._responded:
             # Something went wrong after the reply was already on the wire —
             # a serialisation error part-way through, or the client going
@@ -320,7 +329,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             self._discard_body()
         if self.path.startswith("/api/"):
-            self._send_json({"error": message}, status=status)
+            self._send_json({"error": message, **(extra or {})}, status=status)
         else:
             self._send(status, message.encode("utf-8"), "text/plain; charset=utf-8")
 
@@ -428,6 +437,27 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/overrides":
             return {"overrides": resolve.overrides(conn)}
 
+        # --- admin: the pipeline itself, not the warehouse --------------------
+
+        if path == "/api/admin/modules":
+            return admin.modules(conn)
+
+        if path == "/api/admin/jobs":
+            running = self.jobs.running()
+            return {"jobs": [job.head() for job in self.jobs.all()],
+                     "running": running.id if running else None}
+
+        match = re.fullmatch(r"/api/admin/jobs/(\d+)", path)
+        if match:
+            job = self.jobs.get(int(match.group(1)))
+            if job is None:
+                raise ApiError(f"No job {match.group(1)}.", status=404)
+            # `after` is a line index, not an offset: the buffer drops its
+            # oldest lines on a long run, and an index survives that where a
+            # count would silently skip whatever was trimmed.
+            lines, next_index = job.since(_int(params, "after", -1))
+            return {**job.head(), "log": lines, "next": next_index}
+
         match = re.fullmatch(r"/api/review/(\d+)", path)
         if match:
             item = queries.review_item(conn, int(match.group(1)))
@@ -524,7 +554,20 @@ class Handler(BaseHTTPRequestHandler):
             "/api/review/resolve": self._resolve,
             "/api/check-url": self._check_url,
             "/api/query": self._query,
+            "/api/admin/run": self._run,
         }
+
+    def _run(self, body: dict) -> Any:
+        """Start a module run. The only route here that reaches the open web.
+
+        Nothing authenticates this, and the server binds every interface by
+        default, so anyone who can reach the UI can start a crawl against real
+        public sources under this project's contact email and rate limits.
+        That is a known, recorded decision -- see docs/admin-ui-plan.md -- and
+        `--host 127.0.0.1` is the lever that closes it.
+        """
+        job = admin.start_run(self.jobs, self.settings, body)
+        return {**job.head(), "log": job.since(-1)[0], "next": job.since(-1)[1]}
 
     def _check_url(self, body: dict) -> Any:
         """Fetch a candidate URL so the reviewer can see what is there before
@@ -664,7 +707,8 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     and so the CLI can report the real port before anything blocks.
     """
     settings = settings or get_settings()
-    server = ThreadingHTTPServer((host, port), partial(Handler, settings=settings))
+    server = ThreadingHTTPServer(
+        (host, port), partial(Handler, settings=settings, jobs=JobRegistry()))
     # Sockets held by request threads must not keep the process alive after
     # Ctrl-C; a review UI that needs killing twice is a review UI people leave
     # running by accident.

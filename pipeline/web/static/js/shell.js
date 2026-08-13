@@ -11,7 +11,9 @@
  * of the two scripts finished first.
  */
 import { initPalette } from './palette.js';
+import { initPipeline } from './pipeline.js';
 import { initTheme } from './theme.js';
 
 initTheme();
 initPalette();
+initPipeline();
