@@ -8,15 +8,16 @@ baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 open. Each phase records what changed from the plan as it landed.
 
 **What is left, as of 2026-08-13.** Everything the audit filed has been
-delivered, measured and declined, or is listed here. None of the five is
-blocked on effort; each needs a decision first.
+delivered, measured and declined, or is listed here. **Three remain**, and
+none is blocked on effort — each needs a decision first. D-05 and D-06, both
+filed after the override table was emptied, were closed the same day.
 
 | | Finding | What it needs |
 |---|---|---|
 | **F-03** | Workforce census stays unverified — 68 metrics, all `verified = 0` | A design. The census is a different shape from candidate promotion: no URL per row, a markdown worklist, and a caveat forbidding cross-year differencing. |
 | **F-05** | Nothing is tracked over time | A decision before a design, and my recommendation is still *not yet* — history invites exactly the differencing `docs/CAVEATS.md` forbids. Add it to one table if one specific claim needs it. |
-| **D-05** | An answer given in the UI has no home outside the warehouse | Making a resolution write a registry-shaped record. 2026-08-13 turned this from a tidiness point into the reason ~86 verified URLs are gone for good. |
-| **D-06** | Nothing takes a backup unless a person remembers | A schedule, or a hook before destructive operations, plus a retention rule. |
+| ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
+| ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
 
 Also standing, and deliberately: **O-03** is half done — tests no longer write
@@ -104,12 +105,14 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - `pfd_concerns_in_pdf_only` was filed because the concerns were PDF-only ([docs/CAVEATS.md:159](docs/CAVEATS.md:159)); commits `c17eaf1` and `847a937` taught m08 to read those PDFs. So up to 1,067 items may now be answerable by re-running rather than by a human — but they will not clear themselves, because a decided item stays decided and a pending one is only refreshed ([README.md:470](README.md:470)).
 - Costs today: a queue whose bulk is undecidable one-at-a-time trains its operator to ignore it.
 
-**D-05 · "Approved" on an unknown-URL item does not mean it was answered · S — still open, and 2026-08-13 made the case for it**
+**D-05 · "Approved" on an unknown-URL item does not mean it was answered · S — closed 2026-08-13** (`1198dea`)
+- **Fix:** `resolve_authority_url` writes `pipeline/verified_websites.json` as well as the override row. Tracked in git, read by `website_for()` ahead of the seed registry, hand-editable, and sorted so a diff shows the answer added rather than the whole file moving. The answer was already registry-quality when given — the server confirms the URL responds before storing it — so only its filing was missing.
 - Evidence **[live, superseded]**: 132 `authority_website_unknown` and 53 `committee_url_unknown` were `approved` while `authority_url_overrides` held 191 rows. Approval records a judgement; answering writes an override ([README.md:445](README.md:445)).
 - **What happened since:** the override table was emptied and all 191 URLs went with it. The 105 committee URLs were recovered from `docs/verification/issue1_committee_urls.md` into the code registry; the ~86 council base URLs answered in the UI were **not recoverable**, because the answer only ever existed in that table.
 - So the finding is no longer "these two counts might not correspond". It is that **an answer given in the UI has no home outside the warehouse**. The fix is for a resolution to produce a registry-shaped record — a committed entry, or at minimum a line in a verification document — at the moment it is given, rather than relying on somebody later getting round to a commit.
 
-**D-06 · Nothing takes a backup unless a person remembers · S — new, 2026-08-13**
+**D-06 · Nothing takes a backup unless a person remembers · S — closed 2026-08-13** (`778476b`)
+- **Fix:** `backup --keep N` prunes after copying, a labelled backup is never pruned, and `docs/BACKUP.md` carries the cron and Task Scheduler lines. Writing the test found the bug that made pruning dangerous: `listing()` sorted by filename and called it "newest first", but the same-second uniquifier means `warehouse-…Z.db` sorts *after* `warehouse-…Z-5.db`, so prune would have kept the oldest of a run and deleted the four taken after it. Sorted by mtime now.
 - Evidence: `pipeline/backup.py` exists and works (Phase 3), and on the day the override table was emptied the only backup on disk had been taken *after* the loss. An earlier one taken the same afternoon was no longer there.
 - A backup you have to remember is a backup you take too late. Worth a scheduled or pre-destructive-operation hook, and a retention rule so that clearing the directory of test debris cannot take the real snapshots with it.
 
