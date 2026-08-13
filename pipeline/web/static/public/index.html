@@ -71,6 +71,38 @@
 
 <main id="main" tabindex="-1"></main>
 
+<noscript>
+  <div class="noscript">
+    <h1>This portal needs JavaScript to draw its charts and tables</h1>
+    <p>
+      The evidence itself does not. Everything on these pages is read from a
+      read-only JSON API on this same server, and every response carries the
+      source URL, retrieval time and payload hash of the figures in it:
+    </p>
+    <ul>
+      <li><code>/api/v1/summary</code> — headline counts and their caveats</li>
+      <li><code>/api/v1/pay</code> — pay evidence</li>
+      <li><code>/api/v1/contracts</code> — contract notices</li>
+      <li><code>/api/v1/providers</code> — one entry per provider</li>
+      <li><code>/api/v1/authorities</code> — commissioning authorities</li>
+      <li><code>/api/v1/geography</code> — evidence coverage per authority</li>
+      <li><code>/api/v1/boundaries</code> — authority boundary geometry</li>
+      <li><code>/api/v1/fingertips</code> — treatment demand indicators</li>
+    </ul>
+    <p>
+      <code>/api/v1/export</code> returns the same figures as CSV or JSON with
+      that provenance written <em>into</em> the file, because a CSV gets
+      separated from any accompanying note within a day of leaving the server.
+    </p>
+    <p>
+      <strong>Read the caveats before quoting any of it.</strong> They lead with
+      the things that must not be computed from this data — no
+      claims-per-employee rate, no dividing treatment numbers by workforce
+      figures, no differencing workforce census years.
+    </p>
+  </div>
+</noscript>
+
 <footer class="sitefoot">
   <p>
     Every figure here comes from a public-domain source and carries its own

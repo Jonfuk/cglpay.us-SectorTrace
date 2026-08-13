@@ -359,3 +359,62 @@ main:focus { outline: none; }
   .chart { height: 300px; }
   .map { height: 420px; }
 }
+
+/* No JavaScript. The page is rendered entirely from /api/v1/, so without it
+ * the reader gets chrome and nothing else -- on a site whose whole purpose is
+ * to be citable. This says where the evidence actually is. */
+.noscript {
+  max-width: 70ch; margin: 0 auto; padding: var(--space-8) var(--space-6);
+  color: var(--text-secondary); font-size: 14.5px; line-height: 1.6;
+}
+.noscript h1 { color: var(--text-primary); font-size: 20px; margin: 0 0 var(--space-4); }
+.noscript ul { padding-left: var(--space-5); }
+.noscript li { margin-bottom: var(--space-2); }
+.noscript code { font-family: var(--mono); color: var(--accent-teal); }
+.noscript strong { color: var(--accent-amber); }
+
+/* Print.
+ *
+ * This evidence gets printed and carried into rooms, and the failure this
+ * guards against is specific: a figure arriving on paper without the caveat
+ * that governs it. So caveat bodies are forced open regardless of the
+ * disclosure state they were left in on screen, provenance drawers print
+ * expanded, and link targets are written out -- a citation whose URL only
+ * existed as an href is not a citation once it is on paper.
+ *
+ * Backgrounds are dropped rather than fought with: the screen palette is dark
+ * by design and printing it wastes toner and reads worse.
+ */
+@media print {
+  :root {
+    --bg-base: #fff; --bg-surface: #fff; --bg-elevated: #fff;
+    --text-primary: #000; --text-secondary: #1a1a1a; --text-muted: #333;
+    --border-subtle: #bbb; --border-accent: #888;
+    --caveat-bg: transparent; --caveat-border: #000; --unverified-bg: none;
+  }
+  body { background: #fff; color: #000; }
+
+  /* Navigation, filters and the busy indicator are controls, not content. */
+  .topbar, .filterbar, .busybar, .skip, .adminlink, .btn { display: none !important; }
+
+  main { padding: 0; max-width: none; }
+  .panel { border: 1px solid #bbb; break-inside: avoid; page-break-inside: avoid; }
+
+  /* The point of the whole block: a caveat that was collapsed on screen is
+   * still the caveat that belongs to the number above it. */
+  .caveat-body[hidden] { display: block !important; }
+  .caveat-badge { display: none; }
+  .caveat-pinned { border: 1px solid #000; }
+  .provenance[open] > *, .provenance > * { display: revert; }
+  .provenance summary { list-style: none; font-weight: 600; color: #000; }
+
+  /* A link is only a citation on paper if its target is on the paper. */
+  .provenance a[href]::after,
+  .sitefoot a[href]::after { content: " (" attr(href) ")"; word-break: break-all; }
+
+  /* Charts are canvas and print as an opaque block; the table or the figures
+   * beside them carry the same values, and the provenance drawer names the
+   * source either way. */
+  .chart, .map { display: none; }
+  .chart-empty { display: block; border: 1px dashed #888; }
+}
