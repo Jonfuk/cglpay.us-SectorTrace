@@ -1,8 +1,9 @@
 # Upgrade roadmap
 
-Status: audit, 2026-08-13. Nothing here is built. Written against commit
-`841bd49` with a clean tree; baseline `uv run python -m pytest` was green
-before any of it (**1215 passed, 1 skipped, 18 deselected, 422s**).
+Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
+baseline `uv run python -m pytest` was green before any of it (**1215 passed,
+1 skipped, 18 deselected, 422s**). **Phase 1 is done**; Phases 2–7 are not
+built. Each phase records what changed from the plan as it lands.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -26,10 +27,10 @@ coverage and polish are pursued only where they cost none of the above.
 | | Finding | Why it leads |
 |---|---|---|
 | 1 | **F-01** — 1,941 candidates, zero promoted to evidence **[live]** | Three modules collect and nothing crosses into the evidence base. The gap between "collected" and "usable" is the project's biggest. |
-| 2 | **D-02** — a dry run and a real run are indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
+| 2 | ~~**D-02**~~ *(closed, Phase 1)* — a dry run and a real run were indistinguishable afterwards | `m13` logged `run_complete, rows: 238,407` and wrote nothing. Nothing in the log or warehouse says which it was. |
 | 3 | **O-02** — no backup of a 242 MB warehouse and a 3.6 GB archive **[live]** | Hours of deliberately slow crawling, reconstructible only by redoing it. |
 | 4 | **S-01** — `check-url` will fetch any host and report whether it answered | Unauthenticated, binds `0.0.0.0` by default, follows redirects. |
-| 5 | **D-01** — this warehouse is one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
+| 5 | ~~**D-01**~~ *(closed, Phase 1)* — this warehouse was one migration behind the checkout **[live]** | `0028` is on disk, not in `schema_migrations`. The condition the health tab exists to catch, currently true. |
 
 ## 3. Findings register
 
@@ -44,7 +45,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Risk: **high**. Promotion is exactly the judgement the project refuses to automate. Any design must keep a human deciding each row and record who and when, like `review_decisions` already does.
 - Depends on: nothing. Verified by: a test that promotion writes both the evidence row and its decision record, and that nothing reaches an evidence table without one.
 
-**F-02 · `m13_la_budgets` has never landed in this warehouse · S**
+**F-02 · `m13_la_budgets` has never landed in this warehouse · S — closed in Phase 1**
 - Evidence **[live]**: `la_revenue_budgets` 0 rows, `la_budget_publications` 0 rows, no `module_cursors` entry. [logs/m13_la_budgets.log](logs/m13_la_budgets.log) last line records `budgets.run_complete documents=4 rows=238407`, and four `budgets.sheet_processed` events totalling the same.
 - Costs today: an entire evidence type — what councils budget, against what Module 11 says they were allocated — is absent, and the absence looks identical to a module that ran fine.
 - Most likely a `--dry-run` (the commit guard at [pipeline/modules/m13_la_budgets.py:391](pipeline/modules/m13_la_budgets.py:391) is correct, and the runner rolls back at [pipeline/runner.py:120](pipeline/runner.py:120)). **Not proven** — see D-02, which is why it cannot be proven.
@@ -65,11 +66,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### B. Data quality and provenance
 
-**D-01 · Warehouse is a migration behind · S**
+**D-01 · Warehouse is a migration behind · S — closed in Phase 1**
 - Evidence **[live]**: `schema_migrations` holds 27 filenames, newest `0027_authority_url_overrides.sql`; `pipeline/migrations/` holds 28, including `0028_pfd_concerns_source.sql` (added in `847a937`).
 - The health tab was built to make this visible ([docs/admin-ui-plan.md:257](docs/admin-ui-plan.md:257)). The finding is not that it is invisible — it is that the condition is live right now and unremarked, so the panel is either unread or not loud enough.
 
-**D-02 · A dry run leaves no trace that it was one · S**
+**D-02 · A dry run leaves no trace that it was one · S — closed in Phase 1**
 - Evidence: [pipeline/runner.py:120](pipeline/runner.py:120) rolls back and returns `status: ok`; no log event carries `dry_run`; `grep -c dry_run logs/m13_la_budgets.log` → 0.
 - Costs today: F-02 cannot be diagnosed from the record. A module reporting `run_complete` with 238,407 rows and an empty table is the single most misleading state this pipeline can be in, and it contradicts the property [README.md:345](README.md:345) claims.
 - Fix is small: log the run parameters at module start and stamp the outcome `dry_run: true`; make the CLI and job summary say "wrote nothing (dry run)".
@@ -115,7 +116,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **U-01 · No bulk path for the queue's bulk · M** — the operational half of F-01/D-04. Deciding a filtered set exists ([README.md:440](README.md:440)); *answering* one does not.
 
-**U-02 · Job history dies with the process · S**
+**U-02 · Job history dies with the process · S — closed in Phase 1**
 - Evidence: [pipeline/web/jobs.py:192](pipeline/web/jobs.py:192) — the registry is in-memory, log lines in a ring buffer.
 - After a restart there is no record that a run happened; `logs/` has the lines but nothing ties them to a job. A row per job in the warehouse would close it.
 
@@ -180,14 +181,44 @@ Small, safe, independently shippable, no dependencies:
 
 ## 5. Phases
 
-### Phase 1 — Make a run's outcome unambiguous · S
+### Phase 1 — Make a run's outcome unambiguous · S — **done** (`7f457fd` and this commit)
 
-- **Goal:** never again be unable to tell what a run did.
-- **Delivers:** D-02, D-01, F-02, U-02.
-- **Out of scope:** anything about *what* modules collect.
-- **Acceptance:** a dry run's log and summary both say so; a run records a job row that survives restart; `0028` applied; `m13` re-run for real and `la_revenue_budgets` non-empty, or a recorded reason why not. Tests: dry-run distinguishability, job persistence.
-- **Risk:** low. **Rollback:** revert; the job table is additive.
-- **Commit plan:** one commit for the logging and job record, one for the `m13` outcome.
+Delivered D-02, D-01, F-02, U-02. Suite green throughout: 1215 → **1229
+passed**, 1 skipped.
+
+- **Every run says what it was asked and what it did.** `module.starting`
+  carries `dry_run`, `since` and `limit` before the work begins;
+  `module.finished` carries `dry_run` and `wrote` after it. Both land in the
+  module's own log file, which is where the question gets asked six months
+  later.
+- **The summary table disowns its own numbers on a dry run** — retitled, and
+  the column renamed to "Rows not written". The count is still shown, because
+  what a run *would* have written is the useful part; it just must never
+  appear bare. The table gets screenshotted, and the terminal warning
+  underneath it does not travel with the screenshot.
+- **`job_runs`** (migration `0029`) keeps the fact of a job, not its log. A row
+  still saying `running` at startup is corrected to `interrupted`. Ids continue
+  from the highest persisted one, so a job id means one job for the life of the
+  warehouse. The store swallows its own failures — there is a test that runs a
+  job against a warehouse with no schema, because bookkeeping that can refuse a
+  run is worse than bookkeeping that is missing a row.
+- **`0028` and `0029` applied** to the working warehouse: 27 → 29. D-01 closed.
+- **F-02 settled, and it was a dry run.** `m13_la_budgets` re-run for real
+  wrote **477,199 budget rows** across 2023-24 to 2026-27 and 10 publication
+  rows in 119s, including 13,184 rows in the Public Health section, which
+  populates `v_la_public_health_budget` for the first time. 319 of the 421 ONS
+  codes join to `authorities`; the remaining 102 are police, fire, park and
+  combined authorities whose absence the module documents as correct.
+- **What the re-run recorded alongside the rows:** 5 `budget_no_ra_attachment`
+  review items, and 2 `amounts_multiplier` parse failures where a sheet's
+  denomination could not be read, leaving those amounts NULL rather than
+  assumed — the module behaving as designed. 15,572 of 477,199 amounts are
+  NULL for that reason.
+
+**Found on the way:** the previous run had discovered 4 publications; this one
+found 10, so the earlier `rows=238407` was also a smaller crawl than today's.
+Nothing was lost — but it is a second reason the old log could not be read as
+a measurement of anything.
 
 ### Phase 2 — Housekeeping that should not wait · S
 

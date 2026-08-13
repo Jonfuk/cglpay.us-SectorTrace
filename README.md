@@ -347,6 +347,23 @@ with a row in `parse_failures`; anything needing human judgement is in
 `review_queue`. Both are worth reading after a run — an empty cell with a
 logged reason is the correct output, not a failure to hide.
 
+**A run says whether it wrote anything.** `--dry-run` rolls back, so it leaves
+a warehouse identical to the one it started with — which also makes "parsed
+238,407 rows and wrote nothing on purpose" look exactly like "the parser
+silently found nothing". Every module logs `module.starting` with the
+arguments it was given and `module.finished` with `dry_run` and `wrote`, and
+the summary table retitles itself and renames its rows column on a dry run.
+That is not a hypothetical distinction: `m13_la_budgets` spent a day reported
+as complete against two empty tables.
+
+**A run is remembered after the process ends.** Runs started from `/admin` get
+a row in `job_runs` — what was asked for, when, and how it ended — which
+outlives the server. Their log lines do not: those are in `logs/`, and copying
+them into the warehouse would put the chattiest table in the database next to
+the evidence. A job still marked running when the server starts is recorded as
+`interrupted`, so a crawl killed by a crash reads as an interrupted crawl
+rather than as nothing at all.
+
 ```bash
 sqlite3 data/warehouse.db "SELECT module, reason, COUNT(*) FROM parse_failures GROUP BY 1,2;"
 sqlite3 data/warehouse.db "SELECT module, item_type, COUNT(*) FROM review_queue WHERE status='pending' GROUP BY 1,2;"
