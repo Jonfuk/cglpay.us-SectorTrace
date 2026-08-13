@@ -156,9 +156,17 @@ simply not gone and read. So one gets hidden and one gets fixed.
 > filter to exclude them, and show them under their own heading with a count.
 > No schema change, no decisions recorded that mean nothing.
 
-> **Suggestion 6 — fetch the PDF in m08.** *(Decided: in the build order.)*
-> This retires 1,067 items by making the pipeline do the work rather than
-> asking a person to.
+> **Suggestion 6 — fetch the PDF in m08.** *(Built, 2026-08-13.)*
+>
+> **Measured correction to the estimate below.** This does not retire 1,067
+> items. Sampling twelve of them against the live source found **seven whose
+> PDF is a scan with no text layer** — paper, mostly 2014 to 2018 — which needs
+> OCR, not a parser. Five of twelve yielded their concerns, so the realistic
+> figure is **around 445 of 1,067**, and the remaining ~620 stay in the queue
+> carrying a `reason` that says they need OCR rather than a person. That is
+> still the right change: 445 reports gain their matters of concern as
+> evidence, and the residue becomes honestly labelled instead of uniformly
+> mysterious.
 >
 > It is not a download. The PDF link is not in the REST content, so the module
 > has to fetch each report's HTML page and find the PDF href there, then fetch
@@ -176,6 +184,14 @@ simply not gone and read. So one gets hidden and one gets fixed.
 > - `redact_name()` must run on the extracted matters of concern before they
 >   reach the public column — the deceased is named in roughly one report in
 >   twenty, and in the body text far more often than in the header;
+> - **and it had to be strengthened to do it.** `redact_name` removed the full
+>   name and the surname, which was enough for the structured REST stub and is
+>   not enough for coroner prose. The first real PDF read said *"As a result
+>   Kay was not referred to a senior medical practitioner"* — the forename,
+>   into a public column. 1,056 of the 1,059 affected reports have a forename
+>   that would have survived. It now removes every part of the name longer
+>   than two characters, at the cost of over-redacting the 18 deceased called
+>   Mark, Rose, May, June or Joy. That is the right way round to fail here;
 > - the deceased's name comes from the report header, so a PDF whose header
 >   does not parse gives nothing to redact *with*. That case must record a
 >   parse failure and store nothing public, rather than storing unredacted
@@ -214,7 +230,7 @@ Smaller, but they compound over hundreds of items:
 | 1 | Context as fields + derived links (§3) | small | Fixes the stated problem; helps every one of the 4,762 |
 | 2 | Cluster panel (§2) | small | Turns ~2,000 items into ~8 decisions using write machinery that already exists |
 | 3 | Not-decidable grouping (§5, suggestion 5) | small | Removes from view the 25% no human can action |
-| 4 | **m08 fetches the PDF** (§5, suggestion 6) | medium–large | Retires 1,067 items by extracting the evidence instead of asking about it |
+| 4 | **m08 fetches the PDF** (§5, suggestion 6) — **built** | medium–large | Extracts the evidence instead of asking about it; ~445 of 1,067 retire, the rest are labelled as needing OCR |
 | 5 | Evidence panel (§4, suggestion 3) | medium | Removes the second lookup for the items that remain |
 | 6 | Scored candidates (§4, suggestion 4) | medium | Only worth it after 1–4; the residue is ~182 items |
 | 7 | Flow polish (§6) | small each | Compounding, but pointless before the content is right |

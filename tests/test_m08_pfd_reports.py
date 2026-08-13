@@ -76,6 +76,35 @@ def test_redact_name_is_case_insensitive():
     assert "ALEX ROE" not in pfd.redact_name("ALEX ROE died", "Alex Roe")
 
 
+def test_redact_name_removes_the_forename_used_alone():
+    """From the first real PDF this module read: "As a result Kay was not
+    referred to a senior medical practitioner". Surname-only redaction
+    published the forename, and coroner prose uses it constantly — 1,056 of
+    the 1,059 affected reports have one."""
+    out = pfd.redact_name(
+        "Kay Simmonds was admitted. As a result Kay was not referred.",
+        "Kay Simmonds")
+    assert "Kay" not in out
+    assert "Simmonds" not in out
+    assert "was not referred" in out
+
+
+def test_redact_name_over_redacts_a_forename_that_is_also_a_word():
+    """The accepted cost. Eighteen of the affected deceased are called Mark,
+    Rose, May, June or Joy, and a sentence about a date loses a word. That is
+    the right way round to fail in a corpus of reports into deaths."""
+    out = pfd.redact_name("June Smith died in June 2022.", "June Smith")
+    assert "June" not in out
+    assert out.count("[name redacted]") >= 2
+
+
+def test_redact_name_leaves_initials_alone():
+    """A one or two character part matches far too much to be safe."""
+    out = pfd.redact_name("A B Roe was seen. A nurse recorded it.", "A B Roe")
+    assert "A nurse recorded it" in out
+    assert "Roe" not in out
+
+
 @pytest.mark.parametrize("placeholder", ["REDACTED", "Redacted", "Unknown", "Withheld"])
 def test_redact_name_ignores_placeholders(placeholder):
     """judiciary.uk sometimes withholds the name itself, putting a placeholder

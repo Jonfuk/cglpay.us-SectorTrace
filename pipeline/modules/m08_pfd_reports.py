@@ -34,7 +34,7 @@ import re
 
 import structlog
 
-from pipeline import db, providers
+from pipeline import db, pdftext, providers
 from pipeline.http import PipelineHTTPClient
 from pipeline.keywords import PFD_CONCERN_INDEX_TERMS, SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
@@ -75,18 +75,34 @@ def redact_name(text: str | None, name: str | None) -> str | None:
 
     Deterministic: an exact, case-insensitive replacement of a name this
     module already read from the report's own header — not an attempt to
-    detect names generally. Used on MATTERS OF CONCERN, where the deceased is
-    named in roughly one report in twenty.
+    detect names generally.
+
+    Every part of the name is removed, not just the surname. That changed when
+    the module started reading the report PDFs rather than the structured REST
+    stub, because full coroner prose uses the forename freely: the first real
+    report checked said "As a result Kay was not referred to a senior medical
+    practitioner", and surname-only redaction published it. Of the 1,059
+    reports this applies to, 1,056 have a forename that would otherwise
+    survive into a public column.
+
+    The cost is over-redaction where a forename is also an ordinary word —
+    18 of those 1,059 are called Mark, Rose, May, June or Joy, and a sentence
+    about a date or a mark loses a word to the placeholder. That is the right
+    way round to fail. This is a corpus of reports into people's deaths, and a
+    legible sentence is worth less than a name kept out of a public column.
     """
     if not text or not name:
         return text
     if name.strip().lower().strip(".") in _NAME_PLACEHOLDERS:
         return text  # judiciary.uk already withheld it; nothing to redact
+
     redacted = re.sub(re.escape(name), "[name redacted]", text, flags=re.IGNORECASE)
-    # Also catch the surname alone, which coroners often use after first use.
-    parts = [p for p in re.split(r"\s+", name.strip()) if len(p) > 2]
-    if parts:
-        redacted = re.sub(rf"\b{re.escape(parts[-1])}\b", "[name redacted]",
+    # Longest first, so a part never matches inside a longer one it belongs to.
+    # Parts of one or two characters are skipped: an initial matches too much.
+    parts = sorted((p for p in re.split(r"\s+", name.strip()) if len(p) > 2),
+                    key=len, reverse=True)
+    for part in parts:
+        redacted = re.sub(rf"\b{re.escape(part)}\b", "[name redacted]",
                            redacted, flags=re.IGNORECASE)
     return redacted
 
@@ -109,6 +125,26 @@ _MATTERS_RE = re.compile(
 _NAME_PLACEHOLDERS = {"redacted", "unknown", "not stated", "n/a", "na", "withheld", "anonymised"}
 
 _PDF_LINK_RE = re.compile(r'href="([^"]+\.pdf[^"]*)"', re.IGNORECASE)
+
+
+def choose_report_pdf(urls: list[str]) -> str | None:
+    """The report itself, out of the PDFs linked on a report's page.
+
+    A page usually carries two: the coroner's report and one or more responses
+    to it. They are different documents making different claims, and the
+    matters of concern are in the first — a response is somebody answering
+    them. judiciary.uk names both in the URL ("...-Prevention-of-Future-Deaths-
+    Report-2024-0484.pdf" beside "2024-0484-Response-from-InMind.pdf"), which
+    is what this reads.
+
+    Returns None rather than guessing when nothing looks like a report: taking
+    "the first PDF" would file a response as the coroner's concerns.
+    """
+    candidates = [url for url in urls if "response" not in url.lower()]
+    for url in candidates:
+        if "report" in url.lower():
+            return url
+    return candidates[0] if candidates else None
 
 
 def strip_html(raw_html: str) -> str:
@@ -261,6 +297,83 @@ def redact_known_names_across_reports(conn) -> int:
     return redacted_rows
 
 
+def fetch_pdf_report(client, settings,
+                      report_url: str) -> tuple[str | None, list[str], str | None, str | None]:
+    """The text of a report published only as a PDF.
+
+    Roughly two thirds of PFD reports put nothing but a metadata header in the
+    REST content: the report itself is a PDF, and it is not linked from the
+    API response either. So this goes to the report's own page, finds the PDF
+    there, and reads it.
+
+    Two fetches per report, and there are over a thousand of them, which at the
+    standard 2s/host is around seventy minutes of crawling. That cost is the
+    reason the caller skips any report whose concerns it already holds: after
+    the first pass this does nothing, and an interrupted pass resumes where it
+    stopped because each page of results commits.
+
+    Returns (pdf_text, every_pdf_url_on_the_page, chosen_pdf_url, reason).
+    `reason` is None on success and otherwise names what stopped it, because
+    the reports this cannot read are not all the same problem and the review
+    item that remains should say which one it hit. Sampling twelve of them
+    found seven with no text layer at all — scanned paper, mostly from 2014 to
+    2018 — which needs OCR rather than a person's judgement, and a queue item
+    saying so is worth more than one saying "the concerns are in a PDF".
+    """
+    page = client.get(report_url)
+    if not page.ok:
+        log.info("pfd.report_page_unavailable", url=report_url,
+                  status=page.status_code)
+        return None, [], None, f"report page returned {page.status_code}"
+
+    html = page.body.decode("utf-8", "replace")
+    urls = [url.replace("&amp;", "&")
+             for url in dict.fromkeys(_PDF_LINK_RE.findall(html))]
+    chosen = choose_report_pdf(urls)
+    if chosen is None:
+        return None, urls, None, (
+            "no report PDF on the page" if not urls
+            else "the only PDFs on the page are responses, not the report")
+
+    document = client.get(chosen)
+    if not document.ok:
+        log.info("pfd.report_pdf_unavailable", url=chosen,
+                  status=document.status_code)
+        return None, urls, chosen, f"report PDF returned {document.status_code}"
+
+    try:
+        pages = pdftext.page_texts(settings, SOURCE_SYSTEM,
+                                    document.payload_sha256, document.body)
+    except Exception as exc:
+        # A PDF that pdfplumber cannot open is a source problem, not a reason
+        # to abandon the run. The caller falls back to raising the review item.
+        log.warning("pfd.pdf_unreadable", url=chosen, error=f"{type(exc).__name__}: {exc}")
+        return None, urls, chosen, f"PDF could not be opened: {type(exc).__name__}"
+
+    text = "\n".join(page_text for page_text in pages if page_text).strip()
+    if not text:
+        # pdfplumber opened it and every page came back empty: a scan with no
+        # text layer. Reading it needs OCR, which this pipeline does not do.
+        return None, urls, chosen, (
+            f"the report PDF is a scan with no text layer ({len(pages)} pages); "
+            "extracting it would need OCR")
+    return text, urls, chosen, None
+
+
+def _already_has_concerns(conn, report_ref: str) -> bool:
+    """Whether a previous run already read this report's PDF.
+
+    What makes the PDF pass affordable to repeat. Without it every run would
+    spend another seventy minutes re-fetching a thousand documents whose
+    contents are already in the warehouse.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM pfd_reports WHERE report_ref = ? "
+        "AND matters_of_concern IS NOT NULL AND TRIM(matters_of_concern) <> ''",
+        (report_ref,)).fetchone()
+    return row is not None
+
+
 def _is_before_since_ddmmyyyy(ctx, report_date: str | None) -> bool:
     """PFD headers give the report date as DD/MM/YYYY, not ISO.
 
@@ -360,6 +473,48 @@ def run(ctx: ModuleContext) -> None:
                     matters = extract_matters_of_concern(text)
                     provenance = _provenance(result)
 
+                    # The REST content is a metadata stub for about two thirds
+                    # of reports. Go and read the PDF the page links to.
+                    #
+                    # `body_text` stays the stub unless the PDF is actually
+                    # read: the header fields and the recipients list are
+                    # cleanly structured in the stub and are not re-derived
+                    # from PDF prose, so only the things the stub genuinely
+                    # lacks — the concerns, the full text, and the provider
+                    # mentions inside it — come from the document.
+                    pdf_urls: list[str] = []
+                    pdf_reason: str | None = None
+                    if (matters is None and len(text) < 1500
+                            and not _already_has_concerns(conn, report_ref)):
+                        ctx.phase(f"reading the PDF for {report_ref}")
+                        pdf_text, pdf_urls, chosen, pdf_reason = fetch_pdf_report(
+                            client, ctx.settings, post.get("link") or "")
+                        pdf_matters = extract_matters_of_concern(pdf_text or "")
+                        if pdf_text and not pdf_matters:
+                            pdf_reason = ("the report PDF was read but has no "
+                                           "matters-of-concern section")
+
+                        if pdf_matters and not deceased_name:
+                            # Nothing to redact *with*. The header gave no name,
+                            # so there is no way to know whether the coroner
+                            # used one in this section — and "probably not" is
+                            # not a standard to publish personal data against.
+                            # The text is kept where restricted text belongs
+                            # and the concerns column is left empty.
+                            db.record_parse_failure(
+                                conn, module_name, "deceased_name", report_ref,
+                                "PDF carries matters of concern but the header gave no "
+                                "name to redact against; concerns not stored publicly",
+                                source_url=chosen or "")
+                            pdf_matters = None
+
+                        if pdf_text:
+                            text = pdf_text
+                        if pdf_matters:
+                            matters = pdf_matters
+                            log.info("pfd.concerns_from_pdf", report_ref=report_ref,
+                                      url=chosen, chars=len(pdf_matters))
+
                     db.upsert(conn, "pfd_reports", {
                         "report_ref": report_ref,
                         "report_date": fields.get("report_date"),
@@ -412,25 +567,31 @@ def run(ctx: ModuleContext) -> None:
                         }, natural_key=["report_ref", "provider_key", "mention_type"])
                         body_mentions += 1
 
-                    # Roughly two thirds of reports publish only a metadata
-                    # stub inline, with the report itself as a PDF that is not
-                    # linked in the REST content. Recorded so the missing
-                    # concerns are visibly a source limitation, not a parser
-                    # failure — and so the PDFs can be chased separately.
+                    # Only when the PDF could not supply them either. The
+                    # common case — a metadata stub whose PDF reads cleanly —
+                    # no longer reaches here at all, which is the point: it was
+                    # never a judgement anyone could make, it was a document
+                    # this module had not gone and read.
                     if matters is None and len(text) < 1500:
                         db.record_review_item(
                             conn, module_name, "pfd_concerns_in_pdf_only", report_ref,
                             json.dumps({"report_url": post.get("link") or "",
                                          "body_chars": len(text),
-                                         "note": "inline content is a metadata stub; matters of "
-                                                  "concern are in a PDF not linked in the REST content"}))
+                                         "pdfs_on_page": pdf_urls,
+                                         "reason": pdf_reason or "not attempted",
+                                         "note": "inline content is a metadata stub and the "
+                                                  "report PDF did not yield the concerns; "
+                                                  "see reason"}))
 
                     for term, occurrences in index_concern_terms(matters or "").items():
                         db.upsert(conn, "pfd_concern_terms", {
                             "report_ref": report_ref, "term": term, "occurrences": occurrences,
                         }, natural_key=["report_ref", "term"])
 
-                    for url in dict.fromkeys(_PDF_LINK_RE.findall(rendered)):
+                    # PDFs named in the REST content, plus any found on the
+                    # report's own page when it was fetched above.
+                    for url in dict.fromkeys(
+                            [*_PDF_LINK_RE.findall(rendered), *pdf_urls]):
                         lowered = url.lower()
                         document_type = ("response" if "response" in lowered
                                           else "report" if "report" in lowered else None)
