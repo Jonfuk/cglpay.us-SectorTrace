@@ -17,9 +17,18 @@ same statistic completely differently —
 — and 2023's report is laid out in two columns, which pdfplumber
 interleaves. So rather than pretend a single parser can read these reliably,
 every metric is stored with the verbatim line it came from, every page's
-full text is retained, and nothing is marked verified automatically:
-docs/verification/census_{year}_tables.md pairs each parsed value with its
-source line for eyeball checking, exactly as the brief requires.
+full text is retained, and nothing is marked verified automatically.
+
+Where the checking happens: the Census tab of the operator UI, over
+`workforce_census_page_text` — which is why this module keeps every page it
+reads even though nothing else queries the table. Each figure is shown beside
+its own parsed line and beside the whole page that line sits on, and a
+decision is recorded against a named person (`pipeline/census_verify.py`,
+migration 0033). This module used to write a markdown worklist per year
+instead, pairing each value with its line and printing an `UPDATE ... WHERE
+census_year = ?` at the top; that route is gone and the database now refuses
+that statement. It set twenty flags on one statement, attributed them to
+nobody, and could not tell you afterwards whether a page had been read.
 
 Two things this module will not do:
 
@@ -35,7 +44,6 @@ from __future__ import annotations
 import io
 import json
 import re
-from pathlib import Path
 
 import pdfplumber
 import structlog
@@ -235,51 +243,10 @@ def _provenance(result) -> dict:
     }
 
 
-def render_verification_markdown(census_year: int, document_url: str, metrics: list[dict]) -> str:
-    """Parsed value beside the verbatim source line, for eyeball checking
-    before anything is published.
-    """
-    lines = [
-        f"# Workforce census {census_year} — extracted values for verification",
-        "",
-        f"Source: <{document_url}>",
-        "",
-        "Every row below was read automatically from the PDF. **Check each parsed",
-        "value against the source text beside it before using any of these figures.**",
-        "Nothing here is marked verified in the database until you say so:",
-        "",
-        "```sql",
-        f"UPDATE workforce_census_metrics SET verified = 1 WHERE census_year = {census_year};",
-        "```",
-        "",
-        "Note: this census is not like-for-like between years — provider",
-        "participation varies, and the reports say so themselves. Do not difference",
-        "two years from this table without reading both years' participation notes.",
-        "",
-        "| Page | Metric | Segment | Parsed | Unit | Source line |",
-        "| ---: | --- | --- | ---: | --- | --- |",
-    ]
-    for m in sorted(metrics, key=lambda r: (r["source_page"], r["metric"])):
-        raw = m["raw_text"].replace("|", "\\|")
-        if len(raw) > 240:
-            raw = raw[:237] + "…"
-        value = f"{m['value']:,.0f}" if m["unit"] == "wte" else f"{m['value']:g}"
-        lines.append(
-            f"| {m['source_page']} | {m['metric']} | {m['workforce_segment']} | "
-            f"{value} | {m['unit']} | {raw} |"
-        )
-    if not metrics:
-        lines.append("| — | — | — | — | — | *no metrics matched — see parse_failures* |")
-    lines.append("")
-    return "\n".join(lines)
-
-
 @register_module("m06_workforce_census", supports_since=True)
 def run(ctx: ModuleContext) -> None:
     module_name = "m06_workforce_census"
     conn = ctx.conn
-    verification_dir = Path(ctx.settings.logs_dir).parent / "docs" / "verification"
-    verification_dir.mkdir(parents=True, exist_ok=True)
 
     reports: dict[int, dict] = {}
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
@@ -348,9 +315,11 @@ def run(ctx: ModuleContext) -> None:
                     db.upsert(conn, "workforce_census_metrics", {
                         "census_year": year,
                         **metric,
-                        # Preserved: verification here is the hand-run UPDATE
-                        # the generated worklist prints, and a re-parse of the
-                        # same line must not undo it.
+                        # Preserved: a figure somebody has checked against its
+                        # page must not go back to unchecked because the module
+                        # re-read the same line. Migration 0033 gave this table
+                        # the other two DECISION_COLUMNS, so `preserve` now
+                        # covers all three rather than one by accident.
                         "verified": 0,
                         **provenance,
                     }, natural_key=["census_year", "metric", "workforce_segment", "raw_text"],
@@ -364,11 +333,8 @@ def run(ctx: ModuleContext) -> None:
                     "no metrics matched any known phrasing in this report",
                     source_url=document_url)
 
-            out_path = verification_dir / f"census_{year}_tables.md"
-            out_path.write_text(
-                render_verification_markdown(year, document_url, year_metrics), encoding="utf-8")
             log.info("census.year_processed", year=year, pages=len(pages),
-                      metrics=len(year_metrics), verification=str(out_path))
+                      metrics=len(year_metrics))
 
             if not ctx.dry_run:
                 conn.commit()

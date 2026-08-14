@@ -5,9 +5,12 @@
  * against the current warehouse, and the page says so instead of rendering
  * them anyway:
  *
- *   * Sector vacancy and turnover rates. All 68 workforce census metrics are
- *     `verified = 0`, and the pipeline's own caveats say to filter on that
- *     before publishing. They appear, marked as awaiting verification.
+ *   * Sector vacancy and turnover rates. A census metric is `verified = 0`
+ *     until somebody has checked it against the page it was parsed from, and
+ *     the pipeline's own caveats say to filter on that before publishing. The
+ *     card reads the flag per figure rather than per corpus — a partly-checked
+ *     census is the normal state now that checking is done one figure at a
+ *     time — and an unverified one is drawn plain and marked as such.
  *
  *   * Total contract value. A handful of cross-government framework notices
  *     carry ceilings in the tens of billions, so the sum is not a figure about

@@ -11,6 +11,7 @@
  * of the two scripts finished first.
  */
 import { initCandidates } from './candidates.js';
+import { initCensus } from './census.js';
 import { initExports } from './exports.js';
 import { initHealth } from './health.js';
 import { initPalette } from './palette.js';
@@ -23,3 +24,4 @@ initPipeline();
 initHealth();
 initExports();
 initCandidates();
+initCensus();
