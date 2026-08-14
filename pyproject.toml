@@ -86,6 +86,22 @@ ocr = [
     "pypdfium2>=4.0",
 ]
 
+# The PostgreSQL backend. An extra rather than a dependency because SQLite
+# remains the default and must keep working with no driver installed at all:
+# a fresh checkout, CI, and every test that does not name a backend open a
+# file, and none of them should need a database driver on the machine.
+#
+# `psycopg[binary]` rather than plain `psycopg` so there is no libpq build
+# step on Windows, where development happens. A LAN or production deployment
+# that would rather link the system libpq installs `psycopg` itself; nothing
+# in this codebase depends on which.
+#
+# psycopg_pool is separate from psycopg and has to be asked for by name.
+postgres = [
+    "psycopg[binary]>=3.1",
+    "psycopg_pool>=3.2",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script

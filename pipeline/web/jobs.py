@@ -219,10 +219,23 @@ class JobStore:
             log.warning("web.job_store_write_failed", error=str(exc))
 
     def create(self, job: Job) -> None:
+        # `ON CONFLICT` rather than SQLite's `INSERT OR REPLACE`, which has no
+        # PostgreSQL equivalent. Not just a spelling: `INSERT OR REPLACE`
+        # deletes the conflicting row and inserts a new one, so a column not
+        # named here would be reset to its default. Every column this table
+        # has that is not listed — finished_at, error, summary_json — is
+        # written later by finish(), and create() is only ever called before
+        # that, so the two behave identically for the one caller. Spelling it
+        # as an upsert makes that true by construction rather than by
+        # coincidence of call order.
         self._write(
-            "INSERT OR REPLACE INTO job_runs "
+            "INSERT INTO job_runs "
             "(id, kind, label, args_json, state, dry_run, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "kind = excluded.kind, label = excluded.label, "
+            "args_json = excluded.args_json, state = excluded.state, "
+            "dry_run = excluded.dry_run, started_at = excluded.started_at",
             (job.id, job.kind, job.label, json.dumps(job.args), job.state,
              1 if job.args.get("dry_run") else 0, job.started_at))
 

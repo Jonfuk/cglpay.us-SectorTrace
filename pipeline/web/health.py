@@ -30,6 +30,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from pipeline import catalog, db
 from pipeline.web import queries
 
 # Authorities responsible for public health, and therefore the ones any
@@ -205,10 +206,7 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
     the rest of the Health tab does not wait for it.
     """
     out = []
-    for row in conn.execute(
-            "SELECT m.name AS name FROM sqlite_master m JOIN pragma_table_info(m.name) p "
-            "WHERE m.type = 'table' AND p.name = 'retrieved_at' ORDER BY m.name"):
-        name = row["name"]
+    for name in catalog.tables_with_column(conn, "retrieved_at"):
         if queries.is_restricted(name):
             continue
         quoted = queries._quote(name)
@@ -216,7 +214,18 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
             stats = conn.execute(
                 f"SELECT COUNT(*) AS rows_held, MAX(retrieved_at) AS newest, "
                 f"       MIN(retrieved_at) AS oldest FROM {quoted}").fetchone()
-        except sqlite3.Error:
+        except db.Error:
+            # Skip the table, keep the panel: one unreadable table is not a
+            # reason to report nothing about the other nineteen.
+            #
+            # This `continue` is why the PostgreSQL read connection runs in
+            # autocommit. Inside a transaction a failed statement aborts the
+            # whole transaction, so the first failure here would make every
+            # remaining iteration raise InFailedSqlTransaction and the panel
+            # would silently truncate at the first bad table rather than skip
+            # it — a wrong answer that looks like a right one. On SQLite this
+            # loop has always been safe; the connection setting is what makes
+            # it mean the same thing on both. See pipeline/pg.py.
             continue
         out.append({"table": name, "rows": stats["rows_held"],
                      "newest": stats["newest"], "oldest": stats["oldest"]})

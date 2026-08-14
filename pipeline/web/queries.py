@@ -28,6 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from pipeline import db
 from pipeline.config import Settings, get_settings
 from pipeline.db import RESTRICTED_PREFIX
 
@@ -76,7 +77,7 @@ def readonly_connection(settings: Settings | None = None) -> sqlite3.Connection:
 
     try:
         conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-    except sqlite3.OperationalError as exc:
+    except db.OperationalError as exc:
         # The usual cause is a WAL database whose -shm file is missing and
         # cannot be created by a read-only connection: SQLite needs shared
         # memory to read a WAL, and read-only cannot make it. Any pipeline
@@ -139,7 +140,7 @@ def _run(conn: sqlite3.Connection, sql: str, params: Any = ()) -> list[sqlite3.R
     with deadline(conn):
         try:
             return conn.execute(sql, params).fetchall()
-        except sqlite3.OperationalError as exc:
+        except db.OperationalError as exc:
             if "interrupted" in str(exc):
                 raise QueryError(
                     f"Query took longer than {QUERY_TIMEOUT_SECONDS:.0f}s and was "
@@ -147,7 +148,7 @@ def _run(conn: sqlite3.Connection, sql: str, params: Any = ()) -> list[sqlite3.R
                     "indexed column."
                 ) from exc
             raise QueryError(str(exc)) from exc
-        except sqlite3.Error as exc:
+        except db.Error as exc:
             raise QueryError(str(exc)) from exc
 
 
@@ -214,7 +215,7 @@ def _has_rowid(conn: sqlite3.Connection, name: str) -> bool:
         with deadline(conn, 2.0):
             conn.execute(f"SELECT rowid FROM {_quote(name)} LIMIT 0")
         return True
-    except sqlite3.Error:
+    except db.Error:
         return False
 
 
@@ -327,16 +328,16 @@ def run_select(conn: sqlite3.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -
             truncated = cursor.fetchone() is not None
             column_names = [d[0] for d in cursor.description or []]
             cursor.close()
-        except sqlite3.OperationalError as exc:
+        except db.OperationalError as exc:
             if "interrupted" in str(exc):
                 raise QueryError(
                     f"Query took longer than {QUERY_TIMEOUT_SECONDS:.0f}s and was stopped."
                 ) from exc
             raise QueryError(str(exc)) from exc
-        except sqlite3.Warning as exc:
+        except db.Warning as exc:
             # "You can only execute one statement at a time" arrives here.
             raise QueryError(str(exc)) from exc
-        except sqlite3.Error as exc:
+        except db.Error as exc:
             raise QueryError(str(exc)) from exc
 
     if not column_names:
