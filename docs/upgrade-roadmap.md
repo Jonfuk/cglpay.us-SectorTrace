@@ -13,8 +13,8 @@ none is blocked on effort — each needs a decision first. D-05 and D-06, both
 filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
-comparison filed twelve new findings (W-05–W-16, §3F), none yet worked, plus
-four possible futures (§3J).
+comparison filed seventeen new findings (W-05–W-21, §3F), none yet worked,
+plus thirteen possible futures (§3J).
 
 | | Finding | What it needs |
 |---|---|---|
@@ -250,6 +250,36 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: an export target that zips the sheets, geojson and echarts outputs with their `.provenance.json` companions and a README naming the contents; offered from the admin exports tab, and a decision on whether the public portal serves it.
 - Verified by: a test that the zip contains every file its manifest names, and no file the manifest does not.
 
+**W-17 · There is no "find my council" · S — filed 2026-08-14**
+- Evidence: the global filter bar offers provider, region and years ([pipeline/web/static/public/index.html:45](pipeline/web/static/public/index.html:45)); the only authority typeahead in the whole portal is on the Treatment page ([pipeline/web/static/public/js/pages/treatment.js:83](pipeline/web/static/public/js/pages/treatment.js:83)). A reader who knows their town rather than their ONS code has the choropleth tooltip and nothing else. Fingertips' GP finder searches by name, postcode and ODS code; every council site has a "find my council".
+- Costs today: the portal's entry points all presuppose knowing the commissioning geography — for the campaign's own audience, "my council" is the natural first query, and it has no answer.
+- Fix: an authority name typeahead in the global chrome — 347 rows, Fuse.js already vendored ([pipeline/web/static/public/index.html:22](pipeline/web/static/public/index.html:22)) — whose result lands on W-13's authority page when it exists, and on the geography map for that authority until then. The postcode half is deliberately not filed: ONS NSPD is a large, quarterly-updating source with its own archive cost, and the name search covers the common case for free.
+- Verified by: a test that every authority name in the corpus resolves through the new control.
+
+**W-18 · The public tables cannot be searched, filtered or paged · S — filed 2026-08-14**
+- Evidence: every portal table is built by the same call ([pipeline/web/static/public/js/components.js:192](pipeline/web/static/public/js/components.js:192)) with data, columns, height and nothing else — no `headerFilter`, no pagination, no search box — while the contracts table holds up to 1,000 rows of a 98,636-row corpus ([pipeline/web/static/public/js/pages/contracts.js:20](pipeline/web/static/public/js/pages/contracts.js:20)). The SQL box and the admin browser can search; the public tables cannot.
+- Costs today: a reader looking for one buyer, one provider or one notice reads rows until the page ends. The corpus is searchable by nobody but the two typeaheads.
+- Fix: enable the Tabulator features already vendored — per-column search, a pager, and the row count shown so "1,000 of 98,636" is visible rather than implied.
+- Verified by: a test that a table larger than one page renders a pager and that a search narrows the visible rows.
+
+**W-19 · The portal map shows one layer at a time · M — filed 2026-08-14**
+- Evidence: the geography page switches between six metrics over a single choropleth ([pipeline/web/static/public/js/pages/geography.js:19](pipeline/web/static/public/js/pages/geography.js:19), [:43](pipeline/web/static/public/js/pages/geography.js:43)); nothing overlays. The exports already produce four separate layers — contracts points, CQC locations, treatment polygons, PFD groupings ([pipeline/exports/geojson.py:48](pipeline/exports/geojson.py:48)) — for use elsewhere. Fingertips maps carry contextual layers and transparency; LG Inform layers metrics over boundaries.
+- Costs today: the readiest relationships — where the contracts cluster, where CQC-registered services sit — are invisible on the only public map.
+- Fix: layer toggles on the geography page (contracts, CQC, boundaries, coverage) reusing the export layers' shapes, each carrying the caveat discipline its layer already has.
+- Verified by: a test that every toggled layer carries its own caveat text, and a browser check of the overlay.
+
+**W-20 · Nothing tells the operator the exports are stale · S — filed 2026-08-14**
+- Evidence: the exports listing carries file mtimes and nothing else ([pipeline/web/artefacts.py:75](pipeline/web/artefacts.py:75)); nothing compares them against `module_cursors` or `job_runs`. The Exports tab can show sheets written before a warehouse-changing re-run, and the README's "regenerate any time" is the only signal.
+- Costs today: a figure exported from stale sheets looks current — the shape D-02 existed to kill, for artefacts instead of runs.
+- Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
+- Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
+
+**W-21 · Storage costs are invisible on the Health tab · S — filed 2026-08-14**
+- Evidence: the health cards report warehouse size, page size and free bytes and nothing else ([pipeline/web/health.py:141](pipeline/web/health.py:141)); the 3.5 GiB raw archive, the backups directory and the exports output are measured nowhere in the UI. P-02's growth curve was measured once for the audit ([docs/upgrade-roadmap.md §C](docs/upgrade-roadmap.md)) and is otherwise invisible.
+- Costs today: the archive is the audit trail with a growth curve the roadmap itself says should be measured until it hurts — and the only instrument is a one-off audit. The operator gets no signal until a disk fills.
+- Fix: a storage card — raw archive bytes, backup count and bytes, exports bytes — stat-ing the three directories in the cheap half of the health query, so the curve is visible on every visit rather than once an audit.
+- Verified by: a test that the card's numbers equal a direct listing of the three directories.
+
 ### G. Operations
 
 **O-01 · No CI · M — closed in Phase 6** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
@@ -286,10 +316,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 ### J. Possible future — filed 2026-08-14, deliberately not findings
 
-These are the two items from the same comparison that are not findings yet.
-Each is big, and each has a reason it is not in the register above: one needs a
-schema decision, the other is F-05 wearing a delivery shape. Filed so that
-"we thought about this" is written down somewhere it survives.
+Ideas from the same comparison that are not findings yet. Each has a reason
+it is not in the register above — a schema decision, an inference question, a
+contract with seventeen modules, or a solution that duplicates a planned
+one — and each is filed so that "we thought about this" is written down
+somewhere it survives.
 
 **Corpus-wide search · L**
 - What: full-text search across contract titles, buyers and suppliers, PFD reports, committee and CDP candidates, FOI requests and NDTMS rows — the search every comparable portal leads with (WhatDoTheyKnow is search-first, LG Inform has advanced operators, Fingertips searches indicators by keyword).
@@ -306,6 +337,42 @@ schema decision, the other is F-05 wearing a delivery shape. Filed so that
 **Trend markers in tables · S**
 - What: ▲▼ "direction of travel" per row against the previous period, as Fingertips' England view shows.
 - Why it is here rather than in the register: every row-level change marker invites the differencing `docs/CAVEATS.md` forbids for the census, and the marker must know per row which layers it may appear on. The rule exists; a marker needs it encoded, and which layers carry it and what the caveat next to it says is a decision to settle before the button is. Filed so that decision is remembered.
+
+**API rate cap · S**
+- What: a per-IP token bucket on the `/api/v1/*` read routes — a 429 with `Retry-After` rather than silence.
+- Why it is here rather than in the register: it is small, and its answer depends on a standing decision — the bind address is the control, and a cap only earns its place once the portal is reachable by readers the operator does not trust, which is the same exposure the README's security section already governs. Filed so the limit exists when the exposure does. Every public data API answers overload with a limit.
+
+**Table-browser CSV · S**
+- What: a "download current view" on the admin table browser, alongside the SQL box's existing CSV.
+- Why it is here rather than in the register: the browser is a paging window, not a dataset — the honest export path is the export layer, and W-06's completeness fix covers the public half of it; a browser CSV would be a third, smaller route into the same rows. Filed so the gap is remembered rather than solved twice.
+
+**Post-run verification pass · M**
+- What: after each module, run FK integrity, a no-row-without-provenance sweep and module-declared row-count floors, recording the results in the run summary.
+- Why it is here rather than in the register: the floors are a contract with each of seventeen modules — declaring and maintaining them is a design, not a button — and the integration suite already sweeps provenance once. Filed because D-02 showed the cost of a run whose record cannot be trusted.
+
+**Significance-aware colouring · M — needs a decision**
+- What: colour treatment figures by whether an authority's paired CI overlaps the England value, as Fingertips' red-amber-green-vs-benchmark does throughout.
+- Why it is here rather than in the register: the warehouse already holds the CIs, so the work is implementation — but the colour *is* an inference, and `docs/CAVEATS.md` decides which inferences this project makes. The 2026 default for health data, and the decision it needs, filed together.
+
+**Peer-group benchmarking · M — needs a decision**
+- What: LG Inform-style nearest-neighbour groups — "how does my authority compare with its peers".
+- Why it is here rather than in the register: comparability is a claim. Which authorities are comparable — type, region, deprivation? — is a method decision, and a group implies a fairness the caveats have not asserted. Filed so the idea is remembered rather than adopted by default.
+
+**Browser-level regression tests · M**
+- What: a headless pass that loads each portal route and asserts it renders without console errors or vendor-library failures — the manual "verify in a browser" the house rules already demand, automated.
+- Why it is here rather than in the register: it costs a dev-only browser dependency, which is a trade to make explicitly against the "no build step" decision — runtime is unaffected, but the repository gains a test tool with its own maintenance. Filed because every CI-running portal closes this gap, and the manual check is per-session by design.
+
+**Distribution views (box plots) · S–M**
+- What: Fingertips' box plot — the range and interquartile spread of treatment numbers across authorities, over time.
+- Why it is here rather than in the register: it is descriptive and single-layer, but it is a statistical shape with a threshold question — what the whiskers invite a reader to conclude — and the project's rule is to settle the inference question before shipping the visual.
+
+**Module run record visible to the operator UI · S–M**
+- What: a per-module "last run" panel on the Pipeline tab reading `logs/` — file mtimes plus the tail `module.finished` events — and a read-only viewer for the log files themselves.
+- Why it is here rather than in the register: `job_runs` deliberately records only runs started from the browser, `module_cursors` only m01's, and the server serves only the in-memory job ring buffer ([pipeline/web/server.py:761](pipeline/web/server.py:761)); the durable record is the log files, and nothing reads them in the UI. The fix is display-only over files that exist, but it decides a boundary — how much of the operator's record belongs in the browser — that no decision has covered. Filed so the boundary is chosen rather than assumed.
+
+**Cross-table duplicate candidates · M**
+- What: a flag when the same document URL already appears in another candidate table — a URL found by m09 (CDP), m10 (committee papers) and m15 (FOI) is currently three unconnected rows.
+- Why it is here rather than in the register: each table dedupes internally on its natural key, but "duplicate" across tables *is* a judgement here — the same URL found in two roles may be two evidence rows. What counts as a duplicate is a decision to make before a flag means anything. Filed so the definition is settled before the button is.
 
 ## 4. Quick wins
 
@@ -326,6 +393,10 @@ Small, safe, independently shippable, no dependencies:
 | W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence |
 | W-15 | Link providers to their registers | The cheapest verification affordance is a link |
 | W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today |
+| W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point |
+| W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it |
+| W-20 | Stale-exports warning on the Exports tab | A state that looks fine and isn't — the D-02 shape, for artefacts |
+| W-21 | Storage card on the Health tab | The only instrument for P-02's growth curve is a one-off audit |
 
 ## 5. Phases
 
