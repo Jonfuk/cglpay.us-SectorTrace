@@ -13,8 +13,8 @@ none is blocked on effort — each needs a decision first. D-05 and D-06, both
 filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
-comparison filed eight new findings (W-05–W-12, §3F), none yet worked, plus
-two possible futures (§3J).
+comparison filed twelve new findings (W-05–W-16, §3F), none yet worked, plus
+four possible futures (§3J).
 
 | | Finding | What it needs |
 |---|---|---|
@@ -226,6 +226,30 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a public coverage view per authority (which of grant, budget, contracts, NDTMS, Fingertips, CQC and candidates hold rows), reusing the health tab's counts, carrying the caveat that absence is not evidence of absence.
 - Verified by: a test that the public coverage endpoint and the admin one agree row for row.
 
+**W-13 · No page exists for an authority · M — filed 2026-08-14**
+- Evidence: the portal routes to six sections plus a provider deep dive ([pipeline/web/static/public/app.js:206](pipeline/web/static/public/app.js:206)); nothing keys off an authority, yet grant, budgets, treatment and contracts all join to `authorities`, and `/api/v1/contracts` accepts `buyer_ons_code` ([pipeline/web/public_queries.py:337](pipeline/web/public_queries.py:337)) that no control on any page sets. LG Inform's Headline Report and Fingertips' area profiles are the comparators.
+- Costs today: the campaign question — "what does my authority get?" — is answered only by assembling the choropleth, the treatment page and the contracts API by hand, then aligning them by eye.
+- Fix: a per-authority page in the provider deep-dive shape — grant allocation, budgeted spend, treatment estimates with their paired CIs, contracts let (the `buyer_ons_code` filter finally exposed), and W-12's coverage ticks. No new data.
+- Verified by: a test that an authority page shows the same figures the existing endpoints return for that authority.
+
+**W-14 · The map cannot carry a click through to the data · S — filed 2026-08-14**
+- Evidence: the choropleth renders hover tooltips and nothing else ([pipeline/web/static/public/js/pages/geography.js:196](pipeline/web/static/public/js/pages/geography.js:196)); no click navigates anywhere. Fingertips' map selects an area and carries it through the other views.
+- Costs today: no UI path to "contracts let by council X" — the parameter exists, the page does not. A researcher hand-crafts API URLs.
+- Fix: clicking an authority opens its page (W-13) or a contracts view filtered to that buyer. Depends on W-13 or a lighter filtered-lists route.
+- Verified by: a browser check of the click, and a test that the click target URL carries the ONS code.
+
+**W-15 · Providers are not linked to their registers · S — filed 2026-08-14**
+- Evidence: zero references to Companies House, the Charity Commission or CQC in the public JS (verified by search); providers carry `company_number` ([pipeline/exports/schema.py:97](pipeline/exports/schema.py:97)) and charities carry `charity_number`, and neither is rendered as a link.
+- Costs today: the cheapest verification affordance — checking the register — requires a manual search. All three registers run public lookups by exactly these identifiers.
+- Fix: `company_number` → Companies House, `charity_number` → Charity Commission, each CQC location → its CQC profile, labelled "verify at source" so the link is understood as an offer, not a claim.
+- Verified by: a test that the links are built from the registers' public URL shapes.
+
+**W-16 · No single bundle of the evidence exists · S — filed 2026-08-14**
+- Evidence: no zip anywhere in `pipeline/exports/` or `pipeline/web/` (verified by search); the admin Exports tab writes the four targets and offers per-file downloads; the public `/api/v1/export` serves one endpoint at a time.
+- Costs today: a researcher who wants "the evidence" clicks nine CSVs, four GeoJSONs and five JSONs separately; the bundle that would travel with a citation is assembled by hand, which is how companions get lost.
+- Fix: an export target that zips the sheets, geojson and echarts outputs with their `.provenance.json` companions and a README naming the contents; offered from the admin exports tab, and a decision on whether the public portal serves it.
+- Verified by: a test that the zip contains every file its manifest names, and no file the manifest does not.
+
 ### G. Operations
 
 **O-01 · No CI · M — closed in Phase 6** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
@@ -275,6 +299,14 @@ schema decision, the other is F-05 wearing a delivery shape. Filed so that
 - What: ONS publishes editions and versions of each dataset; a re-run that changes rows is a new version, with the previous one still citable ([developer.ons.gov.uk](https://developer.ons.gov.uk/)). Under this shape, "the 2026-08 version of the contracts table" would be a real thing to link.
 - Why it is here rather than in the register: every domain table upserts on a natural key, so nothing can be cited as a version today. F-05's decision stands and the recommendation is unchanged: not yet, and as history on one table only if one specific claim needs it.
 
+**Matrix ("tartan rug") views · M**
+- What: Fingertips' Overview view — authorities × periods as a colour-coded matrix, one glance at the whole distribution (Fingertips calls it a tartan rug).
+- Why it is here rather than in the register: it overlaps W-11 (compare view) — the matrix is the same comparison without the axes, and whichever is built first shapes the other. Filed so the shape is remembered rather than re-invented. ECharts heatmap, no new dependency.
+
+**Trend markers in tables · S**
+- What: ▲▼ "direction of travel" per row against the previous period, as Fingertips' England view shows.
+- Why it is here rather than in the register: every row-level change marker invites the differencing `docs/CAVEATS.md` forbids for the census, and the marker must know per row which layers it may appear on. The rule exists; a marker needs it encoded, and which layers carry it and what the caveat next to it says is a decision to settle before the button is. Filed so that decision is remembered.
+
 ## 4. Quick wins
 
 Small, safe, independently shippable, no dependencies:
@@ -292,6 +324,8 @@ Small, safe, independently shippable, no dependencies:
 | W-06 | Make contract exports complete | The table shows 1,000 rows, its CSV ships 500 of 98,636, and nothing says so |
 | W-07 | NDTMS download path | One section whose data cannot leave the server |
 | W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence |
+| W-15 | Link providers to their registers | The cheapest verification affordance is a link |
+| W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today |
 
 ## 5. Phases
 
