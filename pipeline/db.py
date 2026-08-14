@@ -426,9 +426,15 @@ def migrations_dir_for(settings: Settings | None = None) -> Path:
 
 def applied_migrations(conn) -> set[str]:
     if backend_of(conn) == "postgres":
+        # pg_catalog, not information_schema: the standard view is filtered to
+        # objects the current role holds a privilege on, so a role that could
+        # not read `schema_migrations` would be told it does not exist and
+        # would then try to apply all 34 migrations over the top of a schema
+        # that already has them. See pipeline/catalog.py.
         exists = conn.execute(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = current_schema() AND table_name = ?",
+            "SELECT 1 FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = current_schema() AND c.relname = ?",
             ("schema_migrations",)).fetchone()
     else:
         exists = conn.execute(

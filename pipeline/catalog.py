@@ -33,12 +33,29 @@ def list_objects(conn) -> list[dict]:
     the migration-tree equivalence test compares them directly.
     """
     if db.backend_of(conn) == "postgres":
+        # pg_catalog, NOT information_schema. The SQL-standard views are
+        # filtered to objects the *current role* holds some privilege on, and
+        # `sqlite_master` is not filtered at all — so the same call answered
+        # differently depending on who was connected, which is a behavioural
+        # difference this phase exists to prevent.
+        #
+        # It found itself: the read path connected as `sectortrace_reader`,
+        # information_schema returned nothing, and the operator UI reported an
+        # empty warehouse rather than a permissions problem. A missing grant
+        # should look like a missing grant.
+        #
+        # It also matters for `db.restricted_tables`, which is built on this
+        # and is a security boundary (settled decision 3). A guard that
+        # enumerates fewer restricted_ tables when the connection holds fewer
+        # privileges is a guard that quietly stops guarding.
         rows = conn.execute(
-            "SELECT table_name AS name, "
-            "       CASE WHEN table_type = 'VIEW' THEN 'view' ELSE 'table' END AS type "
-            "FROM information_schema.tables "
-            "WHERE table_schema = current_schema() "
-            "ORDER BY table_name"
+            "SELECT c.relname AS name, "
+            "       CASE WHEN c.relkind = 'v' THEN 'view' ELSE 'table' END AS type "
+            "FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = current_schema() "
+            "  AND c.relkind IN ('r', 'p', 'v') "
+            "ORDER BY c.relname"
         ).fetchall()
     else:
         rows = conn.execute(
@@ -73,26 +90,32 @@ def columns_of(conn, name: str) -> list[dict]:
     equality.
     """
     if db.backend_of(conn) == "postgres":
+        # pg_attribute rather than information_schema.columns, for the reason
+        # in `list_objects`: the standard views are privilege-filtered and
+        # `PRAGMA table_info` is not.
         rows = conn.execute(
-            "SELECT c.column_name AS name, c.data_type AS type, "
-            "       c.is_nullable AS is_nullable, "
-            "       COALESCE(k.is_pk, 0) AS pk "
-            "FROM information_schema.columns c "
-            "LEFT JOIN ( "
-            "    SELECT a.attname AS column_name, 1 AS is_pk "
-            "    FROM pg_index i "
-            "    JOIN pg_attribute a "
-            "      ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-            "    WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
-            ") k ON k.column_name = c.column_name "
-            "WHERE c.table_schema = current_schema() AND c.table_name = ? "
-            "ORDER BY c.ordinal_position", (name, name)
+            "SELECT a.attname AS name, "
+            "       format_type(a.atttypid, a.atttypmod) AS type, "
+            "       a.attnotnull AS notnull, "
+            "       COALESCE(i.indisprimary, false) AS pk "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_index i "
+            "  ON i.indrelid = c.oid AND i.indisprimary "
+            " AND a.attnum = ANY(i.indkey) "
+            "WHERE n.nspname = current_schema() AND c.relname = ? "
+            # attnum > 0 skips the system columns (ctid, xmin and friends);
+            # attisdropped skips columns removed by ALTER TABLE, which
+            # PostgreSQL keeps as tombstones in this catalog.
+            "  AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY a.attnum", (name,)
         ).fetchall()
         return [
             {
                 "name": r["name"],
                 "type": r["type"] or "",
-                "notnull": r["is_nullable"] == "NO",
+                "notnull": bool(r["notnull"]),
                 "pk": bool(r["pk"]),
             }
             for r in rows
@@ -142,18 +165,19 @@ def tables_with_column(conn, column: str) -> list[str]:
     The Health tab's freshness scan wants "tables with a `retrieved_at`". On
     SQLite that was a join against `pragma_table_info(m.name)` — a
     table-valued function, which is not a construct PostgreSQL has at all;
-    `information_schema.columns` answers it directly, and the SQLite side
-    keeps the join it already had.
+    `pg_attribute` answers it directly, and the SQLite side keeps the join it
+    already had.
     """
     if db.backend_of(conn) == "postgres":
         rows = conn.execute(
-            "SELECT DISTINCT c.table_name AS name "
-            "FROM information_schema.columns c "
-            "JOIN information_schema.tables t "
-            "  ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
-            "WHERE c.table_schema = current_schema() "
-            "  AND t.table_type = 'BASE TABLE' AND c.column_name = ? "
-            "ORDER BY c.table_name", (column,)
+            "SELECT c.relname AS name "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = current_schema() "
+            "  AND c.relkind IN ('r', 'p') AND a.attname = ? "
+            "  AND a.attnum > 0 AND NOT a.attisdropped "
+            "ORDER BY c.relname", (column,)
         ).fetchall()
     else:
         rows = conn.execute(
