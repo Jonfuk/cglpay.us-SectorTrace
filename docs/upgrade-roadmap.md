@@ -9,7 +9,8 @@ open. Each phase records what changed from the plan as it landed.
 
 **Everything still open is now sequenced as Phases 8–19**, at the end of §5 —
 twenty-one findings, four workstreams and three standing decisions, in the
-order to take them and with the reasons for that order. None has been started.
+order to take them and with the reasons for that order. **Phase 9 is done**
+(2026-08-14); the rest have not been started.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -36,7 +37,7 @@ already there.
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
-| **W-05 – W-27** | Twenty-one open portal and operator findings from the 2026-08-14 comparison | Not decisions — work, and now sequenced. Phases 9–13. |
+| **W-05 – W-27** | Twenty-one open portal and operator findings from the 2026-08-14 comparison | Not decisions — work, and now sequenced. Phases 9–13. **Phase 9 closed five of them** (W-05, W-08, W-10, W-15, W-18); W-15's CQC half needs one manual URL check, below. |
 | **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
 
 The three decisions above are the only things in this register still waiting on
@@ -44,6 +45,13 @@ somebody rather than on a session. F-03 opens Phase 8 (its design is the
 phase); F-05 and P-03 are Phase 14, together, because both are gated on your
 say-so and neither should be started inside a phase that is about something
 else.
+
+A fourth, much smaller, arrived with Phase 9 and is a minute rather than a
+decision: **does `https://www.cqc.org.uk/location/{location_id}` load a real
+CQC profile?** The CQC API publishes no profile URL and the site refuses
+automated clients, so the shape could not be verified here and the portal
+links the other two registers and not that one (W-15). One look in a browser
+at a location id from `cqc_locations` closes it.
 
 Also standing, and deliberately: **O-03** is half done — tests no longer write
 into `logs/`, but nothing rotates them (Phase 10).
@@ -206,7 +214,15 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
 
-**W-05 · The portal's Region filter is a dead control · S — filed 2026-08-14**
+**W-05 · The portal's Region filter is a dead control · S — closed in Phase 9**
+- **Fix:** removed, as recommended. Each remaining control declares the state
+  key it writes in `data-filter`, `Reset` clears the bar by walking that
+  attribute, and `tests/test_portal_controls.py` follows the chain from
+  control to state key to endpoint parameter. Writing that test found its own
+  first draft was too loose to catch the finding it was written for — see
+  Phase 9's record. Removing the select also removed the
+  `/api/v1/authorities` request every page load made to fill it.
+
 - Evidence: `#f-region` renders in the global filter bar ([pipeline/web/static/public/index.html:56](pipeline/web/static/public/index.html:56)); its change handler writes `state.region` ([pipeline/web/static/public/app.js:312](pipeline/web/static/public/app.js:312)); `filterParams()` forwards only `provider_key`, `year_from` and `year_to` ([pipeline/web/static/public/app.js:188](pipeline/web/static/public/app.js:188)); no page reads it. The word `region` appears in public JS only as a map tooltip and a treatment context label.
 - Costs today: a researcher picks a region, sees the same figures, and has no way to know the control did nothing. On a portal built around "no figure without its caveat", a dead control is the one UI failure that rule does not cover.
 - Fix: consume it — filter contract notices by buyer region, which is one join to the `authorities.region` the warehouse already holds — or remove the control. Removing is the cheaper honest fix.
@@ -222,7 +238,19 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - **Fix:** `EXPORTABLE` gained `"ndtms": ("estimates", "ndtms")` and the section a Download CSV button. The file carries the shape the chart draws — `value`, `lower`, `upper`, `has_interval`, `value_text` and both years — so a reader can cite a point estimate with the interval that belongs to it rather than retyping the number without it. Verified against the running server: 57 estimate rows for Hartlepool, provenance in the `#` header.
 - Filed and closed within the same hour, from opposite directions: this entry was written while the NDTMS section was still uncommitted, which is also why it describes hollow markers for unpairable CIs. The shipped version does not draw those — it charts only the figures the source published an interval for, because these sheets print an estimate, its denominator population and a rate side by side and one axis cannot carry all three. The unpairable ones are in the table beneath with the reason. See W-22.
 
-**W-08 · Charts cannot be exported as images · M — filed 2026-08-14**
+**W-08 · Charts cannot be exported as images · M — closed in Phase 9**
+- **Fix:** every chart carries a *Save image* button. The PNG is composed
+  rather than taken from the canvas: the section's caption, the pinned caveat
+  with its amber rule, and a footer naming the portal, the page URL and the
+  date are drawn *into* the picture. Caption and caveat are read from the DOM
+  around the chart, so what the reader can see beside the figure is what lands
+  in the file. Verified by saving one and reading it back — the treatment
+  page's indicator chart came out 2,334 × 1,044 with its "what must not be
+  computed here" caveat legible under the plot.
+- Found by doing it: `role="img"` on the chart wrapper made the new button
+  invisible to screen readers, because an `img` role's children are
+  presentational. The role moved onto the chart itself.
+
 - Evidence: ECharts is vendored and every chart is drawn client-side ([pipeline/web/static/public/index.html:19](pipeline/web/static/public/index.html:19)); no page calls `getDataURL()`. Fingertips offers "More options > Download image/CSV" on every chart, and the WHO Global Health Observatory does the same.
 - Costs today: the visual is screenshotted at unknown resolution or rebuilt; the provenance chain survives in the CSV, but the figure as drawn is not reproducible from the portal.
 - Fix: a per-chart menu — PNG via the canvas `toDataURL` ECharts already owns, next to the section CSV that already exists — with the caption and its caveat rendered into the download.
@@ -234,7 +262,20 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a static `/api/v1` docs page: routes, parameters, example URLs, response shapes, the export endpoint's filter forwarding, and the caveats. Pinned by a test against the same route list `test_portal_isolation.py` uses — a published list of endpoints is a promise, and a wrong one is worse than none.
 - Verified by: the route-list pin above.
 
-**W-10 · No licence statement per dataset · S — filed 2026-08-14**
+**W-10 · No licence statement per dataset · S — closed in Phase 9**
+- **Fix:** `pipeline/licences.py`, one entry per module, read from
+  `docs/SOURCES.md`. Consumed by the export layer as `# licence:` lines in
+  every CSV header (and a `licence` key in the JSON and the `X-Provenance`
+  header) and mirrored into the portal's provenance drawer, where the
+  attribution wording is rendered to be copied rather than summarised. A test
+  fails for any collecting module the table does not name, and compares the
+  drawer's copy against the table word for word.
+- The point of doing it per module: **not everything here is OGL.** The
+  workforce census is NHS Benchmarking content, council documents vary by
+  council, and both carry the reason next to the name so "Varies by authority"
+  cannot be read as "probably OGL". The footer says the exceptions exist
+  rather than implying there are none.
+
 - Evidence: the footer says "public-domain source" ([pipeline/web/static/public/index.html:106](pipeline/web/static/public/index.html:106)); no figure or export names a licence. `docs/SOURCES.md` records each source's licence but the portal never links it; Fingertips prints its OGL v3 terms and a citation format with every indicator.
 - Costs today: reuse — and defending reuse — starts with the licence. A figure whose terms a researcher cannot state is an unfinished citation.
 - Fix: per-source licence lines in the provenance drawer (most sources are OGL v3), a `# Licence:` line in export headers, and a link to `docs/SOURCES.md`.
@@ -264,7 +305,23 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: clicking an authority opens its page (W-13) or a contracts view filtered to that buyer. Depends on W-13 or a lighter filtered-lists route.
 - Verified by: a browser check of the click, and a test that the click target URL carries the ONS code.
 
-**W-15 · Providers are not linked to their registers · S — filed 2026-08-14**
+**W-15 · Providers are not linked to their registers · S — mostly closed in Phase 9; CQC still open**
+- **Fix:** `company_number` → Companies House and `charity_number` → the
+  Charity Commission, on the providers list and under a provider's name on the
+  deep dive, labelled *verify at source*. The deep-dive links are built from
+  the entity edges already in the payload; the list needed the two identifiers
+  added to `public_queries.providers`. Both URL shapes were checked against
+  the live registers with real identifiers from this warehouse.
+- The charity link is the register's **search** on the registered number, not
+  the charity-details page: that page is keyed by an internal organisation
+  number this pipeline does not store.
+- **CQC is not linked and this is the open half.** The public API publishes no
+  profile URL — 520 archived payloads contain no `cqc.org.uk` address — and
+  the conventional shape could not be verified without working around a bot
+  block. A test asserts none is built. One manual check of
+  `www.cqc.org.uk/location/{location_id}` against a real location id would
+  settle it; until then a link that 404s is worse than a name.
+
 - Evidence: zero references to Companies House, the Charity Commission or CQC in the public JS (verified by search); providers carry `company_number` ([pipeline/exports/schema.py:97](pipeline/exports/schema.py:97)) and charities carry `charity_number`, and neither is rendered as a link.
 - Costs today: the cheapest verification affordance — checking the register — requires a manual search. All three registers run public lookups by exactly these identifiers.
 - Fix: `company_number` → Companies House, `charity_number` → Charity Commission, each CQC location → its CQC profile, labelled "verify at source" so the link is understood as an offer, not a claim.
@@ -282,7 +339,19 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: an authority name typeahead in the global chrome — 347 rows, Fuse.js already vendored ([pipeline/web/static/public/index.html:22](pipeline/web/static/public/index.html:22)) — whose result lands on W-13's authority page when it exists, and on the geography map for that authority until then. The postcode half is deliberately not filed: ONS NSPD is a large, quarterly-updating source with its own archive cost, and the name search covers the common case for free.
 - Verified by: a test that every authority name in the corpus resolves through the new control.
 
-**W-18 · The public tables cannot be searched, filtered or paged · S — filed 2026-08-14**
+**W-18 · The public tables cannot be searched, filtered or paged · S — closed in Phase 9**
+- **Fix:** in `table()`, so every table the portal has and every table it grows
+  inherits it: a header filter per column (opt out with `headerFilter: false`,
+  worth doing on a cell whose text is a link label rather than the value), a
+  local pager sized to the height the caller budgeted, and Tabulator's row
+  counter. `tableCard()` shows the honest number beside the title —
+  **"1,000 of 98,636 rows"**, in amber, with the rest named as in the
+  warehouse and not sent. The contracts section is no longer "Every notice".
+- The behavioural half — pager appears, search narrows — is a browser check by
+  decision: asserting it in Python needs a JS runtime in the suite, which §3J
+  files as a trade to make deliberately. Checked: 14 rows of 1,000, a Buyer
+  search narrowing to 4, counter following.
+
 - Evidence: every portal table is built by the same call ([pipeline/web/static/public/js/components.js:192](pipeline/web/static/public/js/components.js:192)) with data, columns, height and nothing else — no `headerFilter`, no pagination, no search box — while the contracts table holds up to 1,000 rows of a 98,636-row corpus ([pipeline/web/static/public/js/pages/contracts.js:20](pipeline/web/static/public/js/pages/contracts.js:20)). The SQL box and the admin browser can search; the public tables cannot.
 - Costs today: a reader looking for one buyer, one provider or one notice reads rows until the page ends. The corpus is searchable by nobody but the two typeaheads.
 - Fix: enable the Tabulator features already vendored — per-column search, a pager, and the row count shown so "1,000 of 98,636" is visible rather than implied.
@@ -464,14 +533,14 @@ not quite true of the work.
 | W-01 | `<noscript>` on the portal | A few lines, and it is a public site | *done, 2* |
 | O-03 | Point test logging at a temp dir | Stops tests writing 5 MB into `logs/` | *half done, 2* — rotation in **10** |
 | S-03 | Bring the README's warning up to date | Text only, and it is currently understated | *done, 2* |
-| W-05 | Wire or remove the Region filter | A visible control that does nothing is the one failure the portal's honesty rules do not cover | **9** — first, because it is a deletion |
-| W-06 | Make contract exports complete | The table shows 1,000 rows, its CSV ships 500 of 98,636, and nothing says so | **10** — after W-10's header |
+| W-05 | Wire or remove the Region filter | A visible control that does nothing is the one failure the portal's honesty rules do not cover | *done, 9* |
+| W-06 | Make contract exports complete | The table now says "1,000 of 98,636" (W-18) and its CSV still ships 500 | **10** — after W-10's header, which has landed |
 | W-07 | NDTMS download path | One section whose data cannot leave the server | *done, 2026-08-14* |
-| W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence | **9** — two consumers, one lookup |
-| W-15 | Link providers to their registers | The cheapest verification affordance is a link | **9** — reused by 11 and 12 |
+| W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence | *done, 9* |
+| W-15 | Link providers to their registers | The cheapest verification affordance is a link | *done, 9* — CQC still open |
 | W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today | **10** — after W-06 |
 | W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point | **11** — needs W-13 to land on |
-| W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it | **9** — every later table inherits it |
+| W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it | *done, 9* |
 | W-20 | Stale-exports warning on the Exports tab | A state that looks fine and isn't — the D-02 shape, for artefacts | **10** |
 | W-21 | Storage card on the Health tab | The only instrument for P-02's growth curve is a one-off audit | **10** |
 
@@ -897,7 +966,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | Phase | Delivers | Effort | Gate |
 |---|---|---|---|
 | **8** | F-03 — census verification, and the campaign starts | M | Open question 1 |
-| **9** | W-18, W-08, W-10, W-05, W-15 — the shared furniture | S–M | none |
+| ~~**9**~~ | *done* — W-05, W-18, W-08, W-10, W-15 — the shared furniture | S–M | none |
 | **10** | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | none |
 | **11** | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | Phase 9 |
 | **12** | W-23, W-26, W-25, W-24 — show what is already collected | M–L | Phase 9 |
@@ -909,10 +978,10 @@ is introduced in two phases (11 and 12) rather than in seven.
 | **18** | F1, F2, F3, and D-04's remainder — the sector universe | L | Phase 15 |
 | **19** | B4, G5, G2, G8 — heavy, conditional, or gated on B4 | M–L | Phase 18 |
 
-Phases 9 and 10 are independent of each other and of Phase 8; either can run
-in a session that is not the one doing the campaign. Phases 11 and 12 both
-depend on 9 and on nothing else, so they can be taken in either order or in
-parallel by two sessions — with the caveat that both edit the frozen route
+Phase 9 is done (2026-08-14). Phase 10 is independent of it and of Phase 8 and
+can run in a session that is not the one doing the campaign. Phases 11 and 12
+depended on 9 and on nothing else, so both are now unblocked and can be taken
+in either order or in parallel by two sessions — with the caveat that both edit the frozen route
 list, and concurrent sessions have collided on this file before.
 
 ---
@@ -961,10 +1030,16 @@ unmatched-name items (Phase 18).
 open question 1 answered, and then people deciding rows, through the
 Candidates tab U-03 made usable. It runs from here to the end of the plan.
 
-### Phase 9 — The shared portal furniture · S–M — **planned**
+### Phase 9 — The shared portal furniture · S–M — **done**
 
-Delivers **W-18**, **W-08**, **W-10**, **W-05**, **W-15**. Five findings across
-three shared files, and every phase after this one is cheaper for it.
+Delivered **W-05**, **W-18**, **W-08**, **W-10** and **W-15**, in that order.
+Suite 1,433 → **1,475 passed** (42 new), 2 skipped, 18 deselected; ruff clean;
+all six portal routes plus a provider deep dive loaded in a browser against
+Jon's own warehouse with no console errors. What follows is the plan; the record of what changed as it landed is
+at the end of the entry.
+
+Five findings across three shared files, and every phase after this one is
+cheaper for it.
 
 **Why these together:** they are all edits to
 [components.js](pipeline/web/static/public/js/components.js),
@@ -1008,6 +1083,71 @@ Order within the phase, because it is not arbitrary:
 **Deliberately not in this phase:** any new route, page or endpoint. This
 phase must not touch the frozen lists at all, which is what makes it safe to
 run concurrently with Phase 8 or 10.
+
+#### What changed as it landed
+
+The plan held. Five things it did not anticipate:
+
+- **The dead-control test needed the page to declare the chain, not the test
+  to guess it.** Each control now carries `data-filter="<state key>"`, and
+  `Reset` clears the controls by walking that attribute — so the attribute is
+  load-bearing rather than decoration for a test, and a wrong key breaks reset
+  in the browser as well as failing in CI. The first draft of the test looked
+  for `.region` anywhere in the page modules and **would have passed on the
+  very control it was written for**: geography.js carries an authority's
+  `region` in a map tooltip, which has nothing to do with the filter. A reader
+  now counts only if it goes through `getState()`.
+  Removing the control also removed a request: `/api/v1/authorities` was
+  fetched on every page load solely to fill the region `<select>`.
+- **W-18's behavioural half is a browser check by decision, not by omission.**
+  "A pager appears past one page, a search narrows the rows" cannot be
+  asserted from Python without a JavaScript runtime in the suite, which §3J
+  files as a trade to make deliberately rather than as a side effect of a
+  table fix. `tests/test_portal_tables.py` pins the configuration in the one
+  function every table goes through; the behaviour was checked in the browser
+  — 14 rows of 1,000, a Buyer search narrowing to 4, the counter following.
+  The count reads **"1,000 of 98,636 rows"** in amber on the contracts page,
+  and the section is no longer called "Every notice", because it never was.
+- **W-08 found an ARIA bug that only the browser could show.** `role="img"`
+  sat on the chart wrapper; putting a save button inside it made a button no
+  screen reader announces, because an `img` role's children are
+  presentational. The role moved onto the chart element and the button is its
+  sibling. The caption and caveat are read from the DOM around the chart
+  rather than passed in per call site, so whatever the reader can see beside
+  the figure is what lands in the file and the two cannot drift.
+- **W-10 is one table and one mirror, not two tables.** `pipeline/licences.py`
+  is read directly by the export layer; `components.js` holds a copy because
+  the drawer is drawn client-side from the module id the page already knows
+  and this phase added no route to fetch it over. `tests/test_licences.py`
+  compares them **word for word** and fails in either direction — which it
+  did, immediately: the OS rider on the geography licence was an attribution
+  requirement in Python and a caution in the JS. The attribution wording is
+  now rendered in the drawer to be copied rather than summarised.
+  The table is keyed per module because a licence is a property of the source;
+  an endpoint names every licence its rows can be under, deduplicated, because
+  guessing the one that applies to a particular row would need per-row
+  attribution the payloads do not carry — and over-inclusion errs strict.
+- **W-15 shipped two registers of three, and the missing one is the finding's
+  own rule applied to itself.** Companies House and the Charity Commission
+  were verified against the live registers with real identifiers from this
+  warehouse on 2026-08-14 — `03861209` resolves to CHANGE, GROW, LIVE, and
+  `1079327` and `234887` each return exactly one match. The charity link is
+  the register's *search* on the registered number, not the charity-details
+  page: that page is keyed by an internal organisation number this pipeline
+  does not store, and building a details URL from the charity number would
+  produce a link that looks right and is not.
+  **CQC is not linked.** Its public API publishes no profile URL — 520
+  archived payloads contain no `cqc.org.uk` address at all — and the
+  conventional shape could not be verified without working around a bot block,
+  which this project does not do. A test asserts no CQC URL is built, so the
+  absence is a decision rather than an oversight. What would settle it: one
+  manual check of `www.cqc.org.uk/location/{location_id}` against a real
+  location id, or `report_uri` (already stored, e.g.
+  `/reports/{guid}?{stamp}`) gaining a documented host.
+  The first browser pass also showed the same company number twice under a
+  provider's name: it arrives as both a `company_number` identifier and a
+  `company` edge from Companies House. Deduplication moved onto the resolved
+  register URL, which is the thing that is actually the same.
 
 ### Phase 10 — The artefacts and the machine tell the truth · S–M — **planned**
 

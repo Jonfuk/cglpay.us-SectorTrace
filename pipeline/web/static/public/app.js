@@ -143,7 +143,14 @@ export function exportUrl(endpoint, params = {}, format = 'csv') {
 
 // --- global filter state -----------------------------------------------------
 
-const state = { provider: null, region: null, yearFrom: null, yearTo: null };
+/* Every key here is forwarded by `filterParams()` and read by a page. A key
+ * that is written and never read is worse than a missing filter: the control
+ * that sets it looks like it worked. The portal carried a Region select for
+ * months that wrote `state.region` and reached no endpoint, so a reader could
+ * pick a region, see the same figures, and have no way to tell. See
+ * tests/test_portal_controls.py, which fails if a control is added back
+ * without a consumer. */
+const state = { provider: null, yearFrom: null, yearTo: null };
 const listeners = new Set();
 
 export function getState() { return { ...state }; }
@@ -177,7 +184,6 @@ function readStateFromUrl() {
   const params = parseHash().params;
   setState({
     provider: params.get('provider') || null,
-    region: params.get('region') || null,
     yearFrom: params.get('yearFrom') || null,
     yearTo: params.get('yearTo') || null,
   }, { silent: true });
@@ -255,22 +261,12 @@ async function initFilterBar() {
   bar.hidden = false;
 
   let providers = [];
-  let authorities = [];
   try {
-    [providers, authorities] = await Promise.all([
-      fetchJSON('providers').then((d) => d.providers || []),
-      fetchJSON('authorities').then((d) => d.authorities || []),
-    ]);
+    providers = (await fetchJSON('providers')).providers || [];
   } catch (e) {
     $('#filter-note').textContent = 'Filters unavailable: ' + e.message;
     return;
   }
-
-  const regions = [...new Set(authorities.map((a) => a.region).filter(Boolean))].sort();
-  replace($('#f-region'), [
-    el('option', { value: '', text: 'All regions' }),
-    ...regions.map((r) => el('option', { value: r, text: r })),
-  ]);
 
   const input = $('#f-provider');
   const list = $('#f-provider-list');
@@ -309,15 +305,19 @@ async function initFilterBar() {
   input.addEventListener('input', showMatches);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
 
-  $('#f-region').addEventListener('change', (e) => setState({ region: e.target.value || null }));
   $('#f-year-from').addEventListener('change', (e) => setState({ yearFrom: e.target.value || null }));
   $('#f-year-to').addEventListener('change', (e) => setState({ yearTo: e.target.value || null }));
+  // Reset walks the controls rather than naming them, so a filter added to the
+  // bar is cleared by this without anyone remembering to come back here. It
+  // also keeps `data-filter` honest: a wrong key stops reset working, which is
+  // visible, rather than rotting quietly.
   $('#f-reset').addEventListener('click', () => {
-    input.value = '';
-    $('#f-region').value = '';
-    $('#f-year-from').value = '';
-    $('#f-year-to').value = '';
-    setState({ provider: null, region: null, yearFrom: null, yearTo: null });
+    const cleared = {};
+    for (const control of document.querySelectorAll('#filterbar [data-filter]')) {
+      control.value = '';
+      cleared[control.dataset.filter] = null;
+    }
+    setState(cleared);
   });
 
   // Reflect state restored from a shared link.
@@ -326,7 +326,6 @@ async function initFilterBar() {
     const match = providers.find((p) => p.provider_key === s.provider);
     if (match) input.value = match.canonical_name;
   }
-  if (s.region) $('#f-region').value = s.region;
   if (s.yearFrom) $('#f-year-from').value = s.yearFrom;
   if (s.yearTo) $('#f-year-to').value = s.yearTo;
 }

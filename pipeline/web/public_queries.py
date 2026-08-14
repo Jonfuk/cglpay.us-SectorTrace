@@ -304,7 +304,19 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
                     ON pi.identifier = cf.charity_number
                    AND pi.scheme = 'charity_number'
                  WHERE pi.provider_key = p.provider_key
-                 ORDER BY cf.financial_year_end DESC LIMIT 1) AS charity_year_latest
+                 ORDER BY cf.financial_year_end DESC LIMIT 1) AS charity_year_latest,
+               -- The register identifiers, so the portal can offer a link to
+               -- the register rather than printing a number and leaving the
+               -- reader to search for it. MIN() because a provider can carry
+               -- more than one of a scheme -- a trading subsidiary, a merged
+               -- predecessor -- and the list page shows one row per provider;
+               -- the deep dive shows every edge.
+               (SELECT MIN(pi.identifier) FROM provider_identifiers pi
+                 WHERE pi.provider_key = p.provider_key
+                   AND pi.scheme = 'company_number') AS company_number,
+               (SELECT MIN(pi.identifier) FROM provider_identifiers pi
+                 WHERE pi.provider_key = p.provider_key
+                   AND pi.scheme = 'charity_number') AS charity_number
         FROM providers p
         ORDER BY p.is_target DESC, contract_value_gbp DESC, p.canonical_name
     """)

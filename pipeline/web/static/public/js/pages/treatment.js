@@ -237,7 +237,7 @@ async function loadNdtms(container, state, charts) {
   }
 
   replace(tableHolder, tableCard(
-    `${num(rest.length + (data.other_rows || []).length)} other published values`, [
+    'Other published values', [
       { title: 'Dataset', field: 'dataset' },
       { title: 'Measure', field: 'measure' },
       { title: 'Period', field: 'time_period', width: 170 },
@@ -436,7 +436,8 @@ function median(values) {
 
 function drawTable(container, data, state) {
   const rows = data.series || [];
-  replace(container, tableCard(`${num(rows.length)} values`, [
+  // The count lives in the toolbar now, so the title is just what these are.
+  replace(container, tableCard('Indicator values', [
     { title: 'Authority', field: 'authority_name' },
     { title: 'ONS code', field: 'ons_code', width: 110 },
     { title: 'Period', field: 'time_period', width: 110 },

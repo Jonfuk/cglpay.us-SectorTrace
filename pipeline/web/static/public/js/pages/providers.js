@@ -14,7 +14,7 @@
 import { el, replace, fetchJSON, num, gbp, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          statCard, exportButton } from '/js/components.js';
+          statCard, exportButton, registerLink, registerLinks } from '/js/components.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
@@ -99,6 +99,13 @@ async function renderList(main) {
     { title: 'NHS adverts', field: 'nhs_job_advert_count', width: 110 },
     { title: 'Charity income', field: 'charity_income_latest', width: 130,
       formatter: (c) => gbp(c.getValue()) },
+    // Tabulator formatters may return a DOM node, so these stay text nodes
+    // built by el() like everything else on this page -- no HTML string is
+    // assembled from a warehouse value to make a link.
+    { title: 'Companies House', field: 'company_number', width: 190,
+      formatter: (c) => registerLink('company_number', c.getValue()) || '' },
+    { title: 'Charity Commission', field: 'charity_number', width: 200,
+      formatter: (c) => registerLink('charity_number', c.getValue()) || '' },
   ], providers, { height: 380, exportEndpoint: 'providers' }));
 
   return () => disposeCharts(charts);
@@ -123,7 +130,13 @@ async function renderOne(main, key) {
       el('h1', {}, provider.canonical_name || key,
         provider.is_target ? ' ' : null,
         provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null),
-      provider.notes ? el('p', { class: 'lede', text: provider.notes }) : null),
+      provider.notes ? el('p', { class: 'lede', text: provider.notes }) : null,
+      // Built from the entity edges the timeline already carries rather than
+      // from a new query: an `identified_by` edge is a scheme and an
+      // identifier, which is exactly what a register lookup takes.
+      registerLinks((data.entity_edges || [])
+        .filter((e) => e.source_id === key)
+        .map((e) => ({ scheme: e.target_type, identifier: e.target_id })))),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
     el('div', { id: 'cqc' }),
@@ -257,6 +270,10 @@ function renderCqc(container, data) {
     return 'neutral';
   };
 
+  // No "verify at source" link per location, deliberately. The CQC public API
+  // publishes no profile URL -- 520 archived payloads contain no cqc.org.uk
+  // address at all -- and the conventional shape could not be verified without
+  // working around a bot block. A link that 404s is worse than a name.
   replace(container, section(
     'CQC registrations',
     `${num(locations.length)} registered locations.`,

@@ -19,6 +19,8 @@ import io
 from datetime import datetime, timezone
 from typing import Any
 
+from pipeline import licences
+
 # Which part of each endpoint's payload is "the data" for export purposes, and
 # what to call it in the filename. An endpoint returning several tables
 # exports its principal one — the charts have the rest, and a CSV with five
@@ -70,6 +72,14 @@ def provenance(endpoint: str, filters: dict[str, Any]) -> dict:
         "source_endpoint": f"/api/v1/{endpoint.strip('/')}",
         "filters_applied": {k: v for k, v in filters.items() if v not in (None, "")},
         "pipeline_corpus": "SectorTrace",
+        # Reuse starts with the licence, so it travels with the figures rather
+        # than living on a page the file gets separated from. Every licence
+        # this endpoint's rows can be under, from pipeline/licences.py.
+        "licence": [
+            {"name": lic.name, "url": lic.url, "attribution": lic.attribution,
+              "caution": lic.caution or None}
+            for lic in licences.for_endpoint(endpoint)
+        ],
         "note": NOTE,
     }
 
@@ -90,6 +100,19 @@ def to_csv(rows: list[dict], prov: dict) -> str:
         buffer.write(f"# filters_applied: {applied}\n")
     else:
         buffer.write("# filters_applied: none (full dataset)\n")
+    # One line per licence the rows can be under, never a single flattened
+    # one: two of this pipeline's sources are not OGL, and they are among the
+    # most quotable it holds.
+    for lic in prov.get("licence") or []:
+        terms = " ".join(part for part in (
+            lic["name"],
+            f"<{lic['url']}>" if lic.get("url") else "",
+            lic["attribution"],
+            lic.get("caution") or "",
+        ) if part)
+        buffer.write(f"# licence: {terms}\n")
+    if not prov.get("licence"):
+        buffer.write("# licence: not recorded for this endpoint — see docs/SOURCES.md\n")
     buffer.write(f"# note: {prov['note']}\n")
 
     if not rows:

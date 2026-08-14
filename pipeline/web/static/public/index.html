@@ -42,25 +42,30 @@
   <a class="adminlink" href="/admin/" title="Pipeline operator tools">Admin &rarr;</a>
 </header>
 
+<!--
+  data-filter names the app.js state key each control writes, and it is
+  load-bearing: Reset clears the controls by walking this attribute. A control
+  without one sets nothing and is checked for by tests/test_portal_controls.py,
+  because a filter that quietly does nothing is the one failure this portal's
+  "no figure without its caveat" rule does not cover -- the reader sees the
+  same numbers and has no way to know the control was ignored.
+-->
 <div class="filterbar" id="filterbar" hidden>
   <div class="filter">
     <label for="f-provider">Provider</label>
     <div class="typeahead">
-      <input id="f-provider" type="search" placeholder="All providers" autocomplete="off"
+      <input id="f-provider" type="search" data-filter="provider" placeholder="All providers"
+             autocomplete="off"
              role="combobox" aria-expanded="false" aria-controls="f-provider-list">
       <ul id="f-provider-list" class="typeahead-list" role="listbox" hidden></ul>
     </div>
   </div>
   <div class="filter">
-    <label for="f-region">Region</label>
-    <select id="f-region"><option value="">All regions</option></select>
-  </div>
-  <div class="filter">
     <label for="f-year-from">Years</label>
     <div class="yearrange">
-      <input id="f-year-from" type="number" inputmode="numeric" placeholder="from" min="2000" max="2100">
+      <input id="f-year-from" type="number" data-filter="yearFrom" inputmode="numeric" placeholder="from" min="2000" max="2100">
       <span aria-hidden="true">–</span>
-      <input id="f-year-to" type="number" inputmode="numeric" placeholder="to" min="2000" max="2100">
+      <input id="f-year-to" type="number" data-filter="yearTo" inputmode="numeric" placeholder="to" min="2000" max="2100">
     </div>
   </div>
   <button class="btn ghost" id="f-reset">Reset filters</button>
@@ -112,6 +117,21 @@
   <p class="muted">
     Read the caveats before quoting anything. They lead with the things that
     must <strong>not</strong> be computed from this data.
+  </p>
+  <!--
+    Named here in general and per source everywhere it matters: the licence is
+    where reuse starts, and two of the sources behind these figures are not
+    OGL. No link, because this page makes no external requests at all — the
+    licence deed is linked from the provenance drawer beside each figure,
+    which is where a reader is when they need it.
+  -->
+  <p class="muted">
+    Most of this material is licensed under the Open Government Licence v3.0,
+    which requires attribution. It is not all of it: the workforce census is
+    NHS Benchmarking Network content with its own terms, and council documents
+    vary by council. Every figure names its own licence in the
+    <em>Where this came from</em> drawer beside it, and every export writes it
+    into the file.
   </p>
 </footer>
 

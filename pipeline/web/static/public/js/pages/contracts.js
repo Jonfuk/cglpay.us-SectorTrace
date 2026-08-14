@@ -173,10 +173,17 @@ function renderBuyers(container, data, charts) {
 
 function renderNotices(container, data) {
   const notices = data.notices || [];
+  // Not "every notice", which is what this section used to be called: the page
+  // asks for 1,000 of a corpus that is currently 98,636. The count in the
+  // toolbar says which, and the description says why there is a limit at all.
   replace(container, section(
-    'Every notice',
-    'The full list behind the charts above, downloadable with its provenance.',
-    tableCard(`${num(notices.length)} notices`, [
+    'The notices',
+    notices.length < (data.total || 0)
+      ? 'The most recent notices behind the charts above. The charts are '
+        + 'computed over the whole corpus; this list is the page\'s share of '
+        + 'it. Search a column, or narrow the filters, to reach the rest.'
+      : 'The full list behind the charts above, downloadable with its provenance.',
+    tableCard('Published notices', [
       { title: 'Published', field: 'date_published', width: 110,
         formatter: (c) => isoDate(c.getValue()) },
       { title: 'Buyer', field: 'buyer_name' },
@@ -194,7 +201,9 @@ function renderNotices(container, data) {
       // A constructed link says so on hover. 84% of rows have one, because
       // most releases do not publish their own address; the mapping from the
       // notice id is verified but it is still not something the source said.
-      { title: 'Notice', field: 'notice_link', width: 90,
+      // No header filter on the two link columns: the cell shows "notice ↗",
+      // so a search box there would filter on a URL the reader cannot see.
+      { title: 'Notice', field: 'notice_link', width: 90, headerFilter: false,
         formatter: (c) => {
           const url = c.getValue();
           if (!url) return '';
@@ -209,7 +218,7 @@ function renderNotices(container, data) {
         // Tabulator renders this cell as HTML, so everything in it is escaped
         // above. Nothing here is concatenated from a value that was not.
         formatterParams: {}, htmlOutput: true },
-      { title: 'Data', field: 'source_url', width: 70,
+      { title: 'Data', field: 'source_url', width: 70, headerFilter: false,
         formatter: (c) => (c.getValue()
           ? `<a href="${escapeHtml(c.getValue())}" target="_blank" rel="noopener noreferrer"`
             + ` title="The API response this row was parsed from">api ↗</a>`
@@ -217,6 +226,7 @@ function renderNotices(container, data) {
         formatterParams: {}, htmlOutput: true },
     ], notices, {
       height: 520,
+      total: data.total,
       exportEndpoint: 'contracts',
       exportParams: filterParams(),
     })));
