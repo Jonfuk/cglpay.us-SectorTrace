@@ -18,6 +18,32 @@ name: codeql
 #
 # Nothing here reaches a real source. CodeQL reads the checkout; it does not
 # run the pipeline.
+#
+# ---------------------------------------------------------------------------
+# This workflow is the *only* CodeQL configuration on the repository, and it
+# has to stay that way.
+#
+# GitHub offers a second one — "default setup", enabled from Settings — and
+# the two cannot coexist: an advanced configuration's results are refused with
+# "CodeQL analyses from advanced configurations cannot be processed when the
+# default setup is enabled", and the job fails at the upload step after
+# running the whole analysis. That was live on this repository from
+# 2026-08-13 until 2026-08-14, so every push and every pull request carried a
+# red `analyze` check that had nothing to do with the code in it. A check that
+# is always red is a check nobody reads.
+#
+# Default setup was turned off rather than this file deleted, because the two
+# are not equivalent. Default setup runs the **default** query suite, which is
+# the quiet one; this runs `security-extended`, which is where the
+# request-forgery and path-traversal queries live — the queries S-01 was.
+# Losing those to keep a green tick would be the trade this project exists to
+# refuse.
+#
+# What default setup did cover and this file now has to: it scanned
+# `javascript-typescript` and `actions` as well as `python`. Those are in the
+# matrix below for that reason. If you ever re-enable default setup, delete
+# this file in the same change.
+# ---------------------------------------------------------------------------
 
 on:
   push:
@@ -37,6 +63,7 @@ concurrency:
 
 jobs:
   analyze:
+    name: analyse (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -47,20 +74,34 @@ jobs:
       contents: read
       actions: read
 
+    strategy:
+      # One language failing should not hide the results of the other two.
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+
     steps:
       - uses: actions/checkout@v7
 
       - name: Initialise CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: python
+          languages: ${{ matrix.language }}
           # The default suite is the quiet one. This project's whole posture is
           # that a defensible result is worth more than a convenient one, and
           # the extended suite is where the request-forgery and path-traversal
           # queries live.
           queries: security-extended
+          config: |
+            paths-ignore:
+              # Third-party minified builds, committed so the portal renders
+              # with no internet (see the vendor README). Findings in ECharts
+              # or D3 are not this project's to fix and not this project's to
+              # dismiss — they belong upstream, and a hundred of them would
+              # bury the ones that are ours.
+              - pipeline/web/static/public/vendor
 
       - name: Analyse
         uses: github/codeql-action/analyze@v3
         with:
-          category: /language:python
+          category: /language:${{ matrix.language }}
