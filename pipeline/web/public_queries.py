@@ -34,6 +34,7 @@ from typing import Any, Iterator
 
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.notice_urls import notice_page_url
+from pipeline.web import health
 from pipeline.web.queries import QueryError, _run
 
 # Caveats that must travel with particular figures. Kept here, in one place,
@@ -141,6 +142,18 @@ CAVEATS = {
         "A cell showing a marker rather than a number is a statistical "
         "disclosure control, kept verbatim from the publication. It does not "
         "mean zero and must not be read, plotted or averaged as zero."
+    ),
+    "coverage_absence": (
+        "A tick means the warehouse holds rows of this kind for this "
+        "authority. Its absence is absence of collection, not evidence of "
+        "absence — the pipeline has not looked everywhere, and what it has "
+        "not looked at is not zero."
+    ),
+    "budget_detail": (
+        "Each line is what the authority planned to spend, as reported to "
+        "MHCLG. Amounts are shown as published: no per-capita figures, no "
+        "inflation adjustment, and no ratio against the grant allocation or "
+        "contract values elsewhere on this page."
     ),
 }
 
@@ -1311,5 +1324,132 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         "caveats": {
             "cqc_coverage": CAVEATS["cqc_coverage"],
             "tribunal_component": CAVEATS["tribunal_component"],
+        },
+    }
+
+
+# --- authority deep dive -------------------------------------------------------
+#
+# W-13: "what does my authority get?" is the campaign's own question and the
+# portal had no surface that answered it, while /api/v1/contracts had accepted
+# `buyer_ons_code` since it was written and no control anywhere set it. This is
+# the provider deep-dive shape applied to an authority: grant allocation,
+# budgeted spend, treatment estimates with their paired intervals, and
+# contracts let.
+#
+# The four figure sections reuse the existing endpoint functions rather than
+# re-writing their queries, so a number on this page cannot disagree with the
+# same number on the page it came from — and the test that pins that agreement
+# would fail the moment anyone replaced the reuse with a hand-written query.
+# Grant and budget stay separate keys and are never summed or divided: the
+# CAVEATS rule that a grant allocation is not a budgeted spend is exactly the
+# reason they sit side by side on the page and nowhere else.
+
+
+def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
+    """How many rows of each evidence kind the warehouse holds for one authority.
+
+    The same declaration the admin Health tab's coverage matrix uses, read
+    from health.py rather than re-declared here — a second copy of what
+    "covered" means would be a second statement free to drift. W-12's pin is
+    that the two answers agree row for row.
+    """
+    def exists(name: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,)).fetchone() is not None
+
+    cells: dict[str, int] = {}
+    for label, table, column, _module in health.COVERAGE_COLUMNS:
+        if not exists(table):
+            cells[label] = 0
+            continue
+        # Table and column names come from health.COVERAGE_COLUMNS, which is
+        # code, not a request, so interpolating them is the same trust as the
+        # admin matrix.
+        cells[label] = _one(
+            conn, f"SELECT COUNT(*) AS n FROM {table} WHERE {column} = ?",
+            (ons_code,)).get("n", 0)
+    return cells
+
+
+def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
+    """Everything the warehouse holds about one authority, in one payload."""
+    _public(["authorities", "public_health_grants", "la_revenue_budgets",
+              "v_la_public_health_budget", "fingertips_indicators",
+              "fingertips_la_values", "ndtms_la_statistics", "ndtms_publications",
+              "contracts", "supplier_aliases", "providers", "cqc_locations",
+              "cdp_documents", "cdp_document_candidates", "committee_papers",
+              "committee_paper_candidates", "foi_requests",
+              "foi_request_candidates"])
+
+    authority_row = _one(
+        conn, "SELECT ons_code, name, type, region FROM authorities "
+              "WHERE ons_code = ?", (ons_code,))
+    if not authority_row:
+        raise QueryError(f"No authority {ons_code!r}.")
+
+    # Grant allocation by year, every grant type as recorded. The page draws
+    # the allocation and the ring-fenced drug-and-alcohol share as separate
+    # lines: the second is part of the first, so they are never summed into
+    # one series. Provenance per row, like every other payload here.
+    grant = _rows(conn, """
+        SELECT financial_year, grant_type, allocation_status, amount, unit,
+               source_url, retrieved_at, payload_sha256
+        FROM public_health_grants WHERE ons_code = ?
+        ORDER BY financial_year, grant_type""", (ons_code,))
+
+    # Budgeted public health spend by year. The same aggregation the geography
+    # page's budget metric uses, so the two cannot disagree.
+    budget = _rows(conn, """
+        SELECT b.financial_year, SUM(b.budget_gbp) AS amount
+        FROM v_la_public_health_budget b WHERE b.ons_code = ?
+        GROUP BY b.financial_year ORDER BY b.financial_year""", (ons_code,))
+
+    # W-27: the drill-down, by section and line code as published. Amounts
+    # only — no per-capita, no deflation, no ratio against the grant. A row
+    # whose denomination could not be read carries a NULL amount and a
+    # verbatim value_text, kept as it was stored.
+    budget_detail = _rows(conn, """
+        SELECT financial_year, section, line_code, line_number, column_label,
+               amounts_multiplier, amount, value_text
+        FROM la_revenue_budgets WHERE ons_code = ?
+        ORDER BY financial_year, section, line_number""", (ons_code,))
+
+    # Treatment with its paired intervals, straight from the functions the
+    # Treatment page itself uses. `fingertips` carries the series with its
+    # lower/upper columns; `ndtms` carries the pairing discipline — a bound
+    # attaches to an estimate only where the source's own naming makes it
+    # unambiguous.
+    treatment = {
+        "fingertips": fingertips(conn, topic="numbers_in_treatment",
+                                 ons_code=ons_code),
+        "ndtms": ndtms(conn, ons_code=ons_code),
+    }
+
+    contract_payload = contracts(conn, buyer_ons_code=ons_code, limit=200)
+    contracts_held = {
+        "total": contract_payload["total"],
+        "notices": contract_payload["notices"],
+        "caveats": contract_payload["caveats"],
+    }
+
+    return {
+        "authority": authority_row,
+        "coverage": {
+            "labels": [label for label, _t, _c, _m in health.COVERAGE_COLUMNS],
+            "cells": _coverage_cells(conn, ons_code),
+            "caveat": CAVEATS["coverage_absence"],
+        },
+        "grant": {"rows": grant, "unit": "gbp"},
+        "budget": {"rows": budget, "unit": "gbp"},
+        "budget_detail": {"rows": budget_detail},
+        "treatment": treatment,
+        "contracts": contracts_held,
+        "caveats": {
+            "grant_not_budget": CAVEATS["grant_not_budget"],
+            "budget_detail": CAVEATS["budget_detail"],
+            "contract_value": CAVEATS["contract_value"],
+            "contract_provider_match": CAVEATS["contract_provider_match"],
         },
     }

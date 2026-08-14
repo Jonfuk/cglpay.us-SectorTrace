@@ -152,6 +152,33 @@
     <p><a href="/api/v1/authorities"><code>/api/v1/authorities</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="authorities/{ons_code}"
+           data-route-pattern="authorities/([A-Z][0-9]{8})">
+    <h3><code>/api/v1/authorities/{ons_code}</code></h3>
+    <p>
+      Everything the warehouse holds about one authority: coverage ticks
+      (W-12), grant allocation and budgeted spend as published, the budget
+      lines behind the budget figure (W-27), treatment estimates with their
+      paired confidence intervals, and the contracts it let.
+      <code>ons_code</code> is the <code>ons_code</code> field from
+      <code>/api/v1/authorities</code>.
+    </p>
+    <p class="small">
+      Returns <code>authority</code>, <code>coverage</code>,
+      <code>grant</code>, <code>budget</code>, <code>budget_detail</code>,
+      <code>treatment</code> (<code>fingertips</code> and
+      <code>ndtms</code>, with the same pairing rules the treatment page
+      uses), <code>contracts</code>, <code>caveats</code>.
+    </p>
+    <p>
+      The grant and the budget are different figures from different documents
+      and are never combined or divided — the payload keeps them separate and
+      so must anything built on it. <code>budget_detail</code> carries amounts
+      as published: no per-capita, no inflation adjustment, no ratio.
+    </p>
+    <p><code>/api/v1/authorities/E08000025</code></p>
+  </article>
+
   <article class="apiroute" data-route="contracts">
     <h3><code>/api/v1/contracts</code></h3>
     <p>
