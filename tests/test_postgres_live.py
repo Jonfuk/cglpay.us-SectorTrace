@@ -289,6 +289,154 @@ class TestRowsAndCountersBehave:
         assert row["n"] > 50
 
 
+class TestTheReadPath:
+    """`pipeline/web/queries.py` against a real server.
+
+    Set `POSTGRES_TEST_RO_URL` as well to exercise the `sectortrace_reader`
+    role — the tests that need it skip individually rather than the whole
+    class, because everything else here works through the ordinary URL.
+    """
+
+    @pytest.fixture
+    def readonly(self):
+        from pipeline.config import Settings
+        from pipeline.web import queries
+
+        settings = Settings(contact_email="t@e.com", database_url=POSTGRES_TEST_URL,
+                             database_ro_url=os.environ.get("POSTGRES_TEST_RO_URL") or None)
+        conn = queries.readonly_connection(settings)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def test_the_sidebar_lists_tables_and_views(self, readonly):
+        from pipeline.web import queries
+
+        objects = queries.list_objects(readonly)
+        names = {o["name"] for o in objects}
+        assert "contracts" in names
+        assert "v_wage_per_employee" in names
+        # Tables carry a count, views deliberately do not.
+        by_name = {o["name"]: o for o in objects}
+        assert by_name["contracts"]["rows"] is not None
+        assert by_name["v_wage_per_employee"]["rows"] is None
+
+    def test_restricted_objects_are_flagged(self, readonly):
+        """The prefix rule that settled decision 3 stands on, on the other
+        backend."""
+        from pipeline.web import queries
+
+        restricted = [o for o in queries.list_objects(readonly) if o["restricted"]]
+        assert restricted
+        assert all(o["name"].startswith("restricted_") for o in restricted)
+
+    def test_object_type_validates_a_caller_supplied_name(self, readonly):
+        from pipeline.web import queries
+
+        assert queries.object_type(readonly, "contracts") == "table"
+        assert queries.object_type(readonly, "v_wage_per_employee") == "view"
+        assert queries.object_type(readonly, "no_such_thing") is None
+
+    def test_columns_come_back_in_declaration_order(self, readonly, lite):
+        from pipeline.web import queries
+
+        assert ([c["name"] for c in queries.columns_of(readonly, "contracts")]
+                == [c["name"] for c in queries.columns_of(lite, "contracts")])
+
+    def test_a_table_pages_in_primary_key_order(self, readonly):
+        """What replaces ORDER BY rowid. `ordered` must be True or the UI
+        tells the operator the pages may overlap."""
+        from pipeline.web import queries
+
+        page = queries.read_table(readonly, "authorities", limit=5)
+        assert page["ordered"] is True
+
+    def test_a_view_is_reported_as_unordered(self, readonly):
+        from pipeline.web import queries
+
+        page = queries.read_table(readonly, "v_wage_per_employee", limit=5)
+        assert page["ordered"] is False
+
+    def test_search_escapes_wildcards(self, readonly):
+        """`escape_like` plus `ESCAPE '\\'`, through the scanner, to the
+        server. A literal percent must not become a wildcard."""
+        from pipeline.web import queries
+
+        page = queries.read_table(readonly, "authorities", search="100%", limit=5)
+        assert page["rows"] == []
+
+    def test_the_sql_box_answers_a_select(self, readonly):
+        from pipeline.web import queries
+
+        result = queries.run_select(readonly, "SELECT 1 AS one")
+        assert result["rows"] == [[1]]
+
+    def test_the_sql_box_cannot_write(self, readonly):
+        """The guarantee `mode=ro` gives on SQLite, on PostgreSQL."""
+        from pipeline.web import queries
+
+        with pytest.raises(queries.QueryError):
+            queries.run_select(readonly, "CREATE TABLE should_not_exist (x int)")
+
+    def test_a_write_is_refused_by_the_server_not_by_the_code(self):
+        """With a reader role configured, the refusal survives a bug here.
+
+        `run_select` guards by statement inspection and the connection carries
+        `default_transaction_read_only`; both are things this application asks
+        for. This goes underneath both and writes directly, which is what a bug
+        in either would amount to.
+        """
+        ro_url = os.environ.get("POSTGRES_TEST_RO_URL")
+        if not ro_url:
+            pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
+        from pipeline import pg as pg_module
+
+        conn = pg_module.connect(ro_url, readonly=True)
+        try:
+            with pytest.raises(db.Error):
+                conn.execute("CREATE TABLE should_not_exist (x int)")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def test_the_reader_can_still_read_everything_it_needs(self):
+        ro_url = os.environ.get("POSTGRES_TEST_RO_URL")
+        if not ro_url:
+            pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
+        from pipeline import pg as pg_module
+
+        conn = pg_module.connect(ro_url, readonly=True)
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM authorities").fetchone()[0] >= 0
+            assert catalog.list_objects(conn)
+        finally:
+            conn.close()
+
+    def test_a_failed_statement_does_not_poison_the_connection(self, readonly):
+        """Gap 2, end to end.
+
+        In a transaction, one failed statement makes every later one raise
+        InFailedSqlTransaction. `health.freshness` catches an error per table
+        and carries on, so under a transaction the panel would truncate at the
+        first bad table rather than skip it. Read connections run in
+        autocommit for this reason; here is the proof it holds.
+        """
+        from pipeline.web import queries
+
+        with pytest.raises(queries.QueryError):
+            queries.run_select(readonly, "SELECT * FROM no_such_table")
+        # The connection must still answer.
+        assert queries.run_select(readonly, "SELECT 2 AS two")["rows"] == [[2]]
+
+    def test_the_freshness_panel_survives_an_unreadable_table(self, readonly):
+        from pipeline.web import health
+
+        rows = health.freshness(readonly)
+        assert rows, "no tables carry retrieved_at"
+        assert all("newest" in r for r in rows)
+
+
 class TestGroupConcatMatchesSqlite:
     """The compatibility aggregate from 0034.
 

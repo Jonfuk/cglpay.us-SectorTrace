@@ -247,7 +247,7 @@ def _run(conn, sql: str, params: Any = ()) -> list:
 # --- schema ------------------------------------------------------------------
 
 
-def list_objects(conn: sqlite3.Connection) -> list[dict]:
+def list_objects(conn: db.Connection) -> list[dict]:
     """Every table and view, with row counts for tables.
 
     Views are listed uncounted. `v_fingertips_la_latest` is 20k rows over a
@@ -313,7 +313,7 @@ def _default_order(conn, name: str) -> str:
 
 
 def read_table(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     name: str,
     *,
     limit: int = DEFAULT_PAGE_SIZE,
@@ -389,7 +389,7 @@ def read_table(
     }
 
 
-def _row_to_json(row: sqlite3.Row, column_names: list[str]) -> list[Any]:
+def _row_to_json(row, column_names: list[str]) -> list[Any]:
     """A row as a list of JSON-safe values, positionally.
 
     Positional rather than a dict because several views repeat a column name
@@ -406,7 +406,7 @@ def _row_to_json(row: sqlite3.Row, column_names: list[str]) -> list[Any]:
     return values
 
 
-def run_select(conn: sqlite3.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dict:
+def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dict:
     """Run one statement typed by the user and return up to `limit` rows.
 
     Nothing inspects the SQL for danger. The connection is read-only, which
@@ -469,7 +469,7 @@ REVIEW_STATUSES = ("pending", "approved", "rejected")
 ALL_REVIEW_STATUSES = (*REVIEW_STATUSES, "answered")
 
 
-def review_facets(conn: sqlite3.Connection) -> dict:
+def review_facets(conn: db.Connection) -> dict:
     """The values worth filtering on, with counts, so the UI's dropdowns are
     built from what is actually in the queue rather than a hardcoded list that
     goes stale the next time a module invents an item type."""
@@ -535,7 +535,7 @@ def review_filter_sql(
 
 
 def review_items(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     *,
     status: str | None = "pending",
     module: str | None = None,
@@ -592,7 +592,7 @@ def review_items(
     }
 
 
-def review_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
+def review_item(conn: db.Connection, item_id: int) -> dict | None:
     """One item with its full decision history, newest first."""
     rows = _run(conn, "SELECT * FROM review_queue WHERE id = ?", (item_id,))
     if not rows:
@@ -612,7 +612,7 @@ def review_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
     return item
 
 
-def recent_decisions(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
+def recent_decisions(conn: db.Connection, limit: int = 20) -> list[dict]:
     return [
         dict(row)
         for row in _run(
@@ -626,7 +626,7 @@ def recent_decisions(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     ]
 
 
-def parse_failures(conn: sqlite3.Connection, limit: int = 200) -> list[dict]:
+def parse_failures(conn: db.Connection, limit: int = 200) -> list[dict]:
     """Parse failures, grouped the way they are read: by module and reason.
 
     Read-only and never decidable. A parse failure is a bug report about this
@@ -646,7 +646,7 @@ def parse_failures(conn: sqlite3.Connection, limit: int = 200) -> list[dict]:
     ]
 
 
-def overview(conn: sqlite3.Connection, settings: Settings | None = None) -> dict:
+def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     """The landing screen: what is in the queue, what has been decided, and
     what the warehouse holds."""
     settings = settings or get_settings()

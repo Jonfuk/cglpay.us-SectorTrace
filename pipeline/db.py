@@ -30,10 +30,28 @@ from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from pipeline.config import Settings, get_settings
 
 RESTRICTED_PREFIX = "restricted_"
+
+# What a warehouse connection is, whichever backend answered.
+#
+# Written as a name rather than spelled out at eighty call sites. There is no
+# type checker in this project — ruff's selected rules do not include one — so
+# an annotation here is documentation, and `db.Connection` says "a warehouse
+# connection" where `sqlite3.Connection` now says something that is not true.
+#
+# `object` at runtime because psycopg is an optional extra: a checkout without
+# it must still import this module. Annotations are never evaluated anyway
+# (`from __future__ import annotations`), so nothing looks at either branch.
+if TYPE_CHECKING:
+    from pipeline.pg import PostgresConnection
+
+    Connection = Union[sqlite3.Connection, PostgresConnection]
+else:
+    Connection = object
 
 # Exception classes to catch, per backend, as tuples so `except db.Error:`
 # works whichever one is connected.
@@ -466,7 +484,7 @@ DECISION_COLUMNS = ("verified", "verified_at", "rejected")
 
 
 def upsert(
-    conn: sqlite3.Connection,
+    conn: Connection,
     table: str,
     row: dict,
     natural_key: list[str],
@@ -514,7 +532,7 @@ def upsert(
 
 
 def record_parse_failure(
-    conn: sqlite3.Connection,
+    conn: Connection,
     module: str,
     field_name: str,
     raw_fragment: str,
@@ -535,7 +553,7 @@ def record_parse_failure(
 
 
 def record_review_item(
-    conn: sqlite3.Connection,
+    conn: Connection,
     module: str,
     item_type: str,
     raw_value: str,
@@ -555,14 +573,14 @@ def record_review_item(
     )
 
 
-def get_cursor(conn: sqlite3.Connection, module: str) -> str | None:
+def get_cursor(conn: Connection, module: str) -> str | None:
     row = conn.execute(
         "SELECT cursor_value FROM module_cursors WHERE module = ?", (module,)
     ).fetchone()
     return row["cursor_value"] if row else None
 
 
-def set_cursor(conn: sqlite3.Connection, module: str, cursor_value: str) -> None:
+def set_cursor(conn: Connection, module: str, cursor_value: str) -> None:
     conn.execute(
         "INSERT INTO module_cursors (module, cursor_value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT (module) DO UPDATE SET cursor_value = excluded.cursor_value, "
@@ -571,12 +589,12 @@ def set_cursor(conn: sqlite3.Connection, module: str, cursor_value: str) -> None
     )
 
 
-def get_http_cache(conn: sqlite3.Connection, url: str) -> sqlite3.Row | None:
+def get_http_cache(conn: Connection, url: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM http_cache WHERE url = ?", (url,)).fetchone()
 
 
 def set_http_cache(
-    conn: sqlite3.Connection,
+    conn: Connection,
     url: str,
     host: str,
     etag: str | None,
@@ -593,7 +611,7 @@ def set_http_cache(
     )
 
 
-def rows_missing_provenance(conn: sqlite3.Connection, table: str) -> list[sqlite3.Row]:
+def rows_missing_provenance(conn: Connection, table: str) -> list[sqlite3.Row]:
     """Constraint 1: every row in every public (non-restricted) table must
     carry a non-null source_url and retrieved_at. Returns the offending rows
     (empty list if the table is clean). Assumes the table has those columns
