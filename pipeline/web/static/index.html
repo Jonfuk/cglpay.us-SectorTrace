@@ -43,6 +43,7 @@
     <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
     <button class="tab" data-tab="health" role="tab">Health</button>
     <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
+    <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
@@ -318,6 +319,68 @@
         not the candidate is later reset — the judgement was still taken.
       </p>
       <div id="promotion-history"></div>
+    </div>
+  </section>
+
+  <!-- Workforce census verification --------------------------------------------->
+  <!-- Rendered by /admin/js/census.js. -->
+  <section id="tab-census" class="tabpanel">
+    <p class="muted small">
+      Figures Module 6 read out of the sector workforce census PDFs. Each one
+      is a parse until somebody checks it, and checking it means reading the
+      page it came from — which is here, archived, rather than linked. This
+      replaces the generated <code>docs/verification/census_*_tables.md</code>
+      worklist and the bulk <code>UPDATE</code> it printed; migration 0033
+      refuses that statement, because it set twenty flags at once and
+      attributed them to nobody.
+    </p>
+    <p class="muted small">
+      Verified means <em>checked against its source</em>. It does not mean
+      comparable: provider participation varies between census rounds and the
+      reports say so themselves, so two verified years still must not be
+      differenced. See <code>docs/CAVEATS.md</code>.
+    </p>
+
+    <div id="census-counts" class="chips"></div>
+    <div id="census-stale" class="batchnote" hidden></div>
+
+    <div class="runbar">
+      <select id="census-status-filter" aria-label="Status">
+        <option value="unchecked">Unchecked</option>
+        <option value="verified">Verified</option>
+        <option value="rejected">Rejected</option>
+        <option value="all">All</option>
+      </select>
+      <span class="spacer"></span>
+      <span id="census-status" class="muted small"></span>
+    </div>
+
+    <!--
+      "Verify read" sends one request per figure, in turn, and only for figures
+      whose page was expanded in this session. What is batched is the clicking,
+      not the reading — one page carries several figures and is read once.
+      Selected figures off unread pages are named under the bar with the
+      reason, and there is no override.
+    -->
+    <div class="runbar batchbar">
+      <button class="btn primary" id="census-verify-read" disabled>Verify read</button>
+      <button class="btn reject" id="census-reject-selected" disabled>Reject selected</button>
+    </div>
+    <div id="census-batch" class="batchnote" hidden></div>
+    <div id="census-result" class="batchnote" hidden></div>
+
+    <div id="census-list"></div>
+    <div class="pager" id="census-pager"></div>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>Checks</h2>
+      <p class="muted small">
+        Every census figure somebody checked, and what they decided. Kept
+        whether or not the figure is later reset — the judgement was still
+        taken. A rejection also files a <code>parse_failures</code> row, so a
+        bad parse is findable from the parser's side too.
+      </p>
+      <div id="census-history"></div>
     </div>
   </section>
 

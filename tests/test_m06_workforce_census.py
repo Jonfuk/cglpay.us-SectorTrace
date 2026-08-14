@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from pipeline.modules import m06_workforce_census as census
@@ -120,34 +122,24 @@ def test_discover_reports_ignores_unrelated_pdfs():
     assert census.discover_reports(html) == []
 
 
-# --- verification markdown -------------------------------------------------------------
+# --- the worklist this module no longer writes --------------------------------------------
 
-def test_verification_markdown_pairs_value_with_source_line():
-    metrics = [{
-        "metric": "vacancy_rate", "workforce_segment": "delivery", "value": 8.0,
-        "unit": "percent", "source_page": 6,
-        "raw_text": "8% vacancy rate in the delivery workforce",
-    }]
-    md = census.render_verification_markdown(2024, "https://example.com/r.pdf", metrics)
-    assert "8% vacancy rate in the delivery workforce" in md
-    assert "vacancy_rate" in md
-    assert "https://example.com/r.pdf" in md
-    # must tell the reader the years are not comparable
-    assert "not like-for-like" in md
+def test_the_module_writes_no_verification_markdown():
+    """Phase 8 replaced the generated worklist with the Census tab, rather than
+    supplementing it.
 
-
-def test_verification_markdown_escapes_pipes_in_source_text():
-    metrics = [{
-        "metric": "wte_total", "workforce_segment": "unspecified", "value": 100.0,
-        "unit": "wte", "source_page": 1, "raw_text": "a | b | c",
-    }]
-    md = census.render_verification_markdown(2024, "u", metrics)
-    assert r"a \| b \| c" in md
-
-
-def test_verification_markdown_handles_no_metrics():
-    md = census.render_verification_markdown(2024, "u", [])
-    assert "no metrics matched" in md
+    The worklist printed `UPDATE workforce_census_metrics SET verified = 1
+    WHERE census_year = ?` at the top -- twenty flags on one statement,
+    attributed to nobody. Migration 0033 refuses that statement, so a module
+    still generating a document that instructs it would be handing the operator
+    a route the database aborts. Asserted against the source rather than the
+    filesystem: the failure is the instruction existing, wherever it is
+    written.
+    """
+    source = inspect.getsource(census)
+    assert "render_verification_markdown" not in source
+    assert "SET verified = 1" not in source
+    assert "verification_dir" not in source
 
 
 # --- schema guarantees -------------------------------------------------------------------

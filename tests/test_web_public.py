@@ -151,6 +151,68 @@ def test_unverified_census_figures_are_marked_as_such(ro):
     assert all(row["verified"] == 0 for row in pay["workforce_census"])
 
 
+def test_a_partly_checked_census_still_says_so(warehouse, settings):
+    """Phase 8 made verification something a person does one figure at a time,
+    so partly-checked is the state this corpus will be in for most of its life.
+
+    The chart draws every figure whatever its flag. `census_all_unverified`
+    going false the moment one figure was checked would have taken the pinned
+    caveat off the other sixty-seven, which is the failure the portal's whole
+    "no figure without its caveat" rule exists to prevent.
+    """
+    from pipeline import census_verify
+
+    warehouse.execute(
+        "INSERT INTO workforce_census_metrics (census_year, metric, "
+        " workforce_segment, value, unit, verified, raw_text, source_url, "
+        " retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (2024, 'turnover_rate', 'all_staff', 19.0, 'percent', 0, "
+        " 'a 19% turnover rate for all staff', 'https://nhsbn.example/census', "
+        " '2026-08-01T00:00:00Z', 200, 'nhs_benchmarking', 'cen123')")
+    warehouse.commit()
+
+    key = census_verify.metric_key(dict(warehouse.execute(
+        "SELECT * FROM workforce_census_metrics WHERE metric = 'vacancy_rate'"
+    ).fetchone()))
+    census_verify.verify(warehouse, key, verified_by="Jon")
+
+    ro = queries.readonly_connection(settings)
+    try:
+        pay = public_queries.pay(ro)
+    finally:
+        ro.close()
+
+    assert pay["census_all_unverified"] is False
+    assert (pay["census_verified_count"], pay["census_total"]) == (1, 2)
+    assert pay["caveats"]["census_partly_verified_note"]
+
+
+def test_the_comparability_caveat_survives_verification(warehouse, settings):
+    """Verified means transcribed correctly. It has never meant comparable, and
+    checking every figure in a census round does not make its years
+    differenceable — provider participation still varies between rounds and the
+    reports still say so themselves (docs/CAVEATS.md).
+    """
+    from pipeline import census_verify
+
+    key = census_verify.metric_key(dict(warehouse.execute(
+        "SELECT * FROM workforce_census_metrics").fetchone()))
+    census_verify.verify(warehouse, key, verified_by="Jon")
+
+    ro = queries.readonly_connection(settings)
+    try:
+        pay = public_queries.pay(ro)
+        summary = public_queries.summary(ro)
+    finally:
+        ro.close()
+
+    # Every figure checked, so the unverified caveat is legitimately gone.
+    assert pay["census_verified_count"] == pay["census_total"]
+    # This one is not, and must not be.
+    assert "must not be used to infer" in pay["caveats"]["census_comparability_note"]
+    assert summary["workforce"]["caveat"]
+
+
 # --- NDTMS: bounds must stay attached to their own estimate --------------------
 #
 # These figures are modelled estimates published with 95% confidence

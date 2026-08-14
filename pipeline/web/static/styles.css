@@ -544,3 +544,31 @@ a.jump:hover { border-bottom-style: solid; }
 .batchnote li { margin: 2px 0; }
 .batchnote p { margin: 2px 0; }
 .batchnote .mono { word-break: break-all; }
+
+/* --- census verification -----------------------------------------------------
+ *
+ * Reuses .candidate for the row, because it is the same kind of object: one
+ * thing to look at and a decision to take. What differs is what has to be
+ * legible, and it is the text rather than a link -- the check is a number
+ * against a line, and that line against the page it sits on.
+ *
+ * So the parsed line is set as a quotation and never clipped: an ellipsis
+ * here would hide the neighbouring sentence a bad parse swallowed, which is
+ * the failure the whole screen is looking for. */
+.rawline {
+  margin: 6px 0; padding: 6px 10px; border-left: 3px solid var(--line);
+  color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+.candidate .value { font-weight: 600; color: var(--accent); }
+
+/* The archived page. Scrolls rather than growing the row to the height of a
+   PDF page, and keeps the source's own line breaks -- a table read out of a
+   PDF is only readable at all because of them. */
+.pagetext {
+  margin: 6px 0; border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 10px; background: var(--bg);
+}
+.pagetext pre {
+  max-height: 380px; overflow: auto; margin: 4px 0 0;
+  white-space: pre-wrap; word-break: break-word;
+}
