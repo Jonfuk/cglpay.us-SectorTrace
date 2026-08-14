@@ -180,6 +180,12 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - **Fix:** migration `0032` adds `contracts.notice_web_url` for the address *the release published*; m01 fills it going forward and a one-shot filled 15,736 rows from bytes already in `data/raw/`, fetching nothing. Where a release published none, the portal constructs the link at read time from the notice id and says that it did. Both link kinds now appear next to the API link rather than instead of it.
 - The construction rule was verified against every archived page, not assumed: 117,317 of 117,365 published notice URLs follow it, and every exception is an attachment path or a release citing a different notice.
 
+**W-05 · Collected and never shown · L — NDTMS done 2026-08-14, the rest open**
+- The portal reads what is named in `_public([...])` in `public_queries.py` and nothing else. Tables collected, caveated and never displayed **[live]**: `ndtms_la_statistics` 17,231, `la_revenue_budgets` 477,199 (one metric used), `pfd_reports` 1,539 with 214 concern terms and 57 provider mentions, `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180.
+- **Done:** NDTMS reaches the treatment page. `/api/v1/ndtms` returns estimates with their bounds attached, and the page charts only the figures the source published an interval for — these sheets print an estimate, its denominator population and a rate side by side, and one axis carrying 1,363 and 73,236 and 1.86 says nothing about any of them.
+- The pairing rule is the part worth knowing: bounds attach within a publication, sheet, area, period and age group, and a standalone pair attaches only where exactly one measure in the group is a point estimate. Where a sheet has several, the bounds are left unattached and the estimate is drawn without a band. A confidence interval on the wrong estimate is invented, which is worse than an absent one.
+- Still open: PFD, budget lines, CQC inspection history, filings, disclosure gaps, and the candidate-to-evidence funnel on the overview.
+
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
 
 **W-05 · The portal's Region filter is a dead control · S — filed 2026-08-14**

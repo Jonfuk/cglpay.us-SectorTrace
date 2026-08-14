@@ -159,6 +159,18 @@ pay scale, and not the pay of anyone currently in post.
   such as "Cornwall & Isles of Scilly", and pre-reorganisation authorities.
 - Statistical disclosure markers (`c`, `*`) are kept verbatim in `value_text`
   with `value` NULL. They do not mean zero.
+- **The local-authority figures are modelled estimates, and the confidence
+  interval is part of the figure.** Opiate and crack use, alcohol dependency
+  and deaths-in-treatment are all published with 95% bounds. Do not quote a
+  point estimate without them, and do not treat two authorities as different
+  because their point estimates are: overlapping intervals have not shown a
+  difference. The portal charts only the figures the source published an
+  interval for — the rest of each sheet is denominators (mid-year
+  populations) and rates, which share no axis with a count.
+- Bounds are paired to an estimate only where the publication makes the
+  pairing unambiguous. Where a sheet carries several point estimates and one
+  unlabelled pair of bounds, they are left unattached rather than assigned:
+  a confidence interval put on the wrong estimate is invented.
 
 ### PFD reports (Module 8)
 

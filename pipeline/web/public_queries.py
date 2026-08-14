@@ -109,6 +109,28 @@ CAVEATS = {
         "and alcohol provision is not CQC-registered, so this is not a "
         "service map and absence does not mean absence of a service."
     ),
+    "ndtms_estimates": (
+        "These are modelled estimates published with 95% confidence "
+        "intervals, not counts. The interval is part of the figure: an "
+        "estimate quoted without it claims a precision the source does not. "
+        "Two authorities whose intervals overlap have not been shown to "
+        "differ."
+    ),
+    "ndtms_la_coverage": (
+        "Only a small part of each NDTMS publication is local-authority "
+        "level — 1 of 44 sheets in the 2024-25 adult report, down from 3 in "
+        "2018-19. Numbers in treatment, waiting times and successful "
+        "completions are published nationally; use Fingertips for those at "
+        "authority level. About 5% of published area names do not resolve to "
+        "a single ONS code and are absent here: national and regional "
+        "aggregates, combined areas such as \"Cornwall & Isles of Scilly\", "
+        "and pre-reorganisation authorities."
+    ),
+    "ndtms_suppressed": (
+        "A cell showing a marker rather than a number is a statistical "
+        "disclosure control, kept verbatim from the publication. It does not "
+        "mean zero and must not be read, plotted or averaged as zero."
+    ),
 }
 
 
@@ -867,6 +889,219 @@ def authorities(conn: sqlite3.Connection) -> list[dict]:
     _public(["authorities"])
     return _rows(conn, "SELECT ons_code, name, type, region FROM authorities "
                         "ORDER BY name")
+
+
+# --- NDTMS published statistics -----------------------------------------------
+#
+# 17,231 local-authority rows that the portal did not read at all until now.
+# They are almost entirely modelled estimates published with 95% confidence
+# intervals -- opiate and crack use, alcohol dependency, deaths in treatment --
+# and the interval is not decoration on them. So the shape of this endpoint is
+# built around keeping the bounds attached to the estimate they belong to,
+# rather than returning a flat list of rows and hoping the page pairs them up.
+
+# What each source table is, in a phrase. Keyed by the `table_ref` the parser
+# recorded, which is the sheet name in the published ODS and varies between
+# editions -- the same figures live under `Table_2_1` in one year and
+# `2_1_Drug_prevalence` in another.
+NDTMS_TABLES = {
+    "Table_2_1": "Opiate and crack use, estimated",
+    "2_1_Drug_prevalence": "Opiate and crack use, estimated",
+    "Table_2_2": "Alcohol dependency, estimated",
+    "2_2_Alcohol_prevalence": "Alcohol dependency, estimated",
+    "Table_9_2": "Deaths in treatment, observed against expected",
+    "Table_10_2": "Deaths in treatment, observed against expected",
+    "10_2_Deaths": "Deaths in treatment, observed against expected",
+}
+
+# Indicator names carrying a bound, as published. Two shapes: a suffix on the
+# measure's own name ("Crack cocaine (number) lower bound 95% CI"), and a
+# standalone column belonging to whatever the sheet's point estimate is
+# ("Lower bound to confidence interval (CI)"). Both are matched literally --
+# no fuzzy matching, because a mis-paired bound would silently widen or
+# narrow somebody's confidence interval.
+_NDTMS_BOUNDS = {
+    "lower bound 95% ci": "lower",
+    "upper bound 95% ci": "upper",
+    "lower bound to ci": "lower",
+    "upper bound to ci": "upper",
+    "lower bound to confidence interval (ci)": "lower",
+    "upper bound to confidence interval (ci)": "upper",
+    "lower ci": "lower",
+    "upper ci": "upper",
+}
+
+
+def _ndtms_role(indicator: str) -> tuple[str, str]:
+    """(measure, role) for a published indicator name.
+
+    role is 'lower', 'upper' or 'point'. A measure of '' means the bound is
+    a standalone column and belongs to the sheet's own point estimate, which
+    `_ndtms_pair` resolves -- and refuses to guess at when there is more than
+    one candidate.
+    """
+    name = (indicator or "").strip()
+    lowered = name.lower()
+
+    if lowered in _NDTMS_BOUNDS:
+        return "", _NDTMS_BOUNDS[lowered]
+
+    for suffix, role in _NDTMS_BOUNDS.items():
+        if lowered.endswith(" " + suffix):
+            return name[: -(len(suffix) + 1)].strip(), role
+
+    return name, "point"
+
+
+def _ndtms_pair(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split published rows into estimates-with-bounds and everything else.
+
+    Rows are grouped by everything that makes a figure a different figure --
+    publication, sheet, area, period, age group -- and bounds are attached
+    within a group only.
+
+    A standalone bound attaches to the group's point estimate when exactly one
+    measure looks like one. Where a sheet has several (Table 2.2 carries a
+    dependency estimate, a mid-year population and a rate side by side), the
+    bound is left unattached and the estimate is drawn without a band rather
+    than with somebody else's. Guessing here would be inventing a confidence
+    interval, which is worse than not drawing one.
+    """
+    groups: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["publication_slug"], row["table_ref"], row["ons_code"],
+                row["time_period"], row["age_group"])
+        measure, role = _ndtms_role(row["indicator"])
+        group = groups.setdefault(key, {"points": {}, "bounds": {}, "loose": {}})
+        if role == "point":
+            group["points"][measure] = row
+        elif measure:
+            group["bounds"].setdefault(measure, {})[role] = row
+        else:
+            group["loose"][role] = row
+
+    estimates: list[dict] = []
+    other: list[dict] = []
+
+    for key, group in groups.items():
+        # Which measure the standalone bounds belong to, if it is unambiguous.
+        named = [m for m in group["points"] if "point estimate" in m.lower()]
+        anchor = named[0] if len(named) == 1 else None
+
+        for measure, row in group["points"].items():
+            bounds = dict(group["bounds"].get(measure, {}))
+            if measure == anchor:
+                bounds = {**group["loose"], **bounds}
+
+            # Non-numeric point rows are context, not measures: "Region" and
+            # "PHE Region" arrive as indicators carrying a name in value_text.
+            if row["value"] is None:
+                other.append(_ndtms_row(row, measure))
+                continue
+
+            estimates.append({
+                **_ndtms_row(row, measure),
+                "value": row["value"],
+                "lower": (bounds.get("lower") or {}).get("value"),
+                "upper": (bounds.get("upper") or {}).get("value"),
+                # Said plainly rather than left to be inferred from two nulls:
+                # a missing band and an unpublished band look the same on a
+                # chart and are not the same fact.
+                "has_interval": bool(bounds.get("lower") and bounds.get("upper")),
+            })
+
+    estimates.sort(key=lambda e: (e["dataset"], e["measure"],
+                                    e["time_period"] or "", e["published_in"] or ""))
+    other.sort(key=lambda o: (o["dataset"], o["measure"]))
+    return estimates, other
+
+
+def _ndtms_row(row: dict, measure: str) -> dict:
+    return {
+        "dataset": NDTMS_TABLES.get(row["table_ref"], row["table_ref"]),
+        "table_ref": row["table_ref"],
+        "measure": measure or row["indicator"],
+        "ons_code": row["ons_code"],
+        "authority_name": row["authority_name"] or row["area_name_raw"],
+        # Two different years, kept apart. `time_period` is the period the
+        # estimate covers and is often absent; `financial_year` is the edition
+        # of the publication it was read from. Folding one into the other
+        # would date a 2017 mid-year estimate to 2019 because a 2019 report
+        # reprinted it.
+        "time_period": row["time_period"] or None,
+        "age_group": row["age_group"],
+        "published_in": row["financial_year"],
+        # Kept whatever the value is. Where `value` is NULL this is the
+        # published marker -- 'c', '*' -- and it is not zero.
+        "value_text": row["value_text"],
+        "source_url": row["source_url"],
+        "retrieved_at": row["retrieved_at"],
+    }
+
+
+def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
+    """Local-authority NDTMS figures for one authority, or the catalogue.
+
+    Called without an authority this returns what is available rather than
+    17,231 rows: which sheets, how many authorities each covers, and which
+    publications they came from.
+    """
+    _public(["ndtms_la_statistics", "ndtms_publications", "authorities"])
+
+    datasets = _rows(conn, """
+        SELECT s.table_ref, COUNT(*) AS rows,
+               COUNT(DISTINCT s.ons_code) AS authorities,
+               COUNT(DISTINCT s.publication_slug) AS publications
+        FROM ndtms_la_statistics s
+        WHERE s.ons_code IS NOT NULL
+        GROUP BY s.table_ref
+        ORDER BY rows DESC""")
+    for dataset in datasets:
+        dataset["label"] = NDTMS_TABLES.get(dataset["table_ref"], dataset["table_ref"])
+
+    publications = _rows(conn, """
+        SELECT publication_slug, title, financial_year, cohort, document_url,
+               sheets_total, sheets_local_authority, source_url, retrieved_at
+        FROM ndtms_publications
+        ORDER BY financial_year DESC""")
+
+    payload = {
+        "datasets": datasets,
+        "publications": publications,
+        "caveats": {
+            "estimates": CAVEATS["ndtms_estimates"],
+            "coverage": CAVEATS["ndtms_la_coverage"],
+            "suppressed": CAVEATS["ndtms_suppressed"],
+            "not_need": CAVEATS["treatment_not_need"],
+        },
+    }
+
+    if not ons_code:
+        return {**payload, "estimates": [], "other_rows": [], "authority": None}
+
+    where = ["s.ons_code = :ons_code"]
+    params: dict = {"ons_code": ons_code}
+    if table_ref:
+        where.append("s.table_ref = :table_ref")
+        params["table_ref"] = table_ref
+
+    rows = _rows(conn, f"""
+        SELECT s.publication_slug, s.table_ref, s.ons_code, s.area_name_raw,
+               s.age_group, s.time_period, s.indicator, s.value, s.value_text,
+               s.financial_year, s.source_url, s.retrieved_at,
+               a.name AS authority_name
+        FROM ndtms_la_statistics s
+        LEFT JOIN authorities a ON a.ons_code = s.ons_code
+        WHERE {' AND '.join(where)}""", params)
+
+    estimates, other = _ndtms_pair(rows)
+    return {
+        **payload,
+        "authority": _one(conn, "SELECT ons_code, name, region FROM authorities "
+                                 "WHERE ons_code = ?", (ons_code,)),
+        "estimates": estimates,
+        "other_rows": other,
+    }
 
 
 # --- provider deep dive -------------------------------------------------------

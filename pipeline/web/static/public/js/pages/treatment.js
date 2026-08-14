@@ -1,16 +1,22 @@
-/* Treatment demand and outcomes, from OHID Fingertips.
+/* Treatment demand and outcomes, from OHID Fingertips and NDTMS.
  *
  * The note that matters is the one about unmet need. Prevalence estimates and
  * treatment numbers come from different methods and different populations, and
  * subtracting one from the other produces a number this pipeline will not
  * publish. It is stated on the page rather than left in a document nobody
  * opens.
+ *
+ * The NDTMS section below has a second rule of its own: every figure in it is
+ * a modelled estimate published with a 95% confidence interval, so nothing is
+ * drawn as a bare point. An estimate whose bounds could not be paired to it
+ * with certainty is drawn hollow and counted in the line under the chart --
+ * visibly missing an interval rather than quietly appearing to have none.
  */
 'use strict';
 
 import { el, replace, fetchJSON, num, isoDate } from '/app.js';
-import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenanceFromRows, tableCard, symbolFor, escapeHtml,
+import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
+          disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
           exportButton } from '/js/components.js';
 
 const TOPICS = [
@@ -32,7 +38,8 @@ export async function render(main) {
       el('p', { class: 'lede' },
         'Indicators published by OHID through Fingertips, by local authority ',
         'and against the England figure.')),
-    el('div', { id: 'ft' }));
+    el('div', { id: 'ft' }),
+    el('div', { id: 'ndtms' }));
   replace(main, page);
 
   const tabs = el('div', { class: 'metrictabs' });
@@ -100,6 +107,9 @@ export async function render(main) {
     areaInput.value = label;
     areaList.hidden = true;
     load();
+    // NDTMS is local-authority only and does not know about the topic tabs,
+    // so it reloads when the authority changes and not when a tab is pressed.
+    loadNdtms(page.querySelector('#ndtms'), state, charts);
   };
   areaInput.addEventListener('focus', showAreas);
   areaInput.addEventListener('input', showAreas);
@@ -137,7 +147,193 @@ export async function render(main) {
   }
 
   await load();
+  await loadNdtms(page.querySelector('#ndtms'), state, charts);
   return () => disposeCharts(charts);
+}
+
+// --- NDTMS ---------------------------------------------------------------
+//
+// 17,231 local-authority rows the portal did not read until now: opiate and
+// crack use, alcohol dependency, and deaths in treatment against expected.
+// All estimates, all published with bounds.
+
+async function loadNdtms(container, state, charts) {
+  let data;
+  try {
+    data = await fetchJSON('ndtms', { ons_code: state.ons });
+  } catch (error) {
+    replace(container, section('NDTMS estimates', null, errorCard(error.message,
+      () => loadNdtms(container, state, charts))));
+    return;
+  }
+
+  const datasets = data.datasets || [];
+  const holder = el('div', {});
+  const tableHolder = el('div', {});
+  const provHolder = el('div', {});
+
+  replace(container, section(
+    'NDTMS estimates',
+    'Modelled estimates of opiate and crack use, alcohol dependency, and '
+    + 'deaths in treatment, published by OHID with 95% confidence intervals.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveats?.estimates, 'These are estimates, not counts'),
+      el('p', { class: 'small muted', text: data.caveats?.coverage || '' }),
+      state.ons
+        ? el('p', {}, exportButton('ndtms', { ons_code: state.ons }))
+        : null,
+      holder,
+      tableHolder,
+      provHolder)));
+
+  if (!datasets.length) {
+    replace(holder, noData('NDTMS local-authority statistics',
+      './start.sh run m07_ndtms'));
+    return;
+  }
+
+  if (!state.ons) {
+    // The figures are per authority and there is no meaningful England row in
+    // this table, so the catalogue is the honest thing to show rather than a
+    // chart averaging 150 authorities into one bar.
+    replace(holder,
+      el('p', { class: 'small' },
+        'Choose an authority above to see its estimates. Held for '
+        + `${num(Math.max(...datasets.map((d) => d.authorities)))} authorities `
+        + `across ${datasets.length} published tables:`),
+      el('ul', { class: 'small muted' }, datasets.map((d) => el('li', {},
+        `${d.label} — ${num(d.rows)} values, ${num(d.authorities)} authorities`))));
+    replace(tableHolder, tableCard('Publications read', [
+      { title: 'Publication', field: 'title' },
+      { title: 'Year', field: 'financial_year', width: 100 },
+      { title: 'Cohort', field: 'cohort', width: 90 },
+      { title: 'LA sheets', field: 'sheets_local_authority', width: 100 },
+      { title: 'Sheets', field: 'sheets_total', width: 80 },
+    ], data.publications || [], { height: 260 }));
+    return;
+  }
+
+  const estimates = data.estimates || [];
+  if (!estimates.length) {
+    replace(holder, noData(`NDTMS estimates for ${data.authority?.name || state.ons}`,
+      null));
+    replace(tableHolder, el('span', {}));
+    return;
+  }
+
+  // Only the figures the source published with an interval reach the chart.
+  // That is not a display preference: these sheets put a dependency estimate,
+  // the mid-year population it was calculated against, and a rate per
+  // thousand side by side, and a single axis carrying 1,363 and 73,236 and
+  // 1.86 tells the reader nothing about any of them. Having an interval is
+  // the source's own mark of which rows are the estimates.
+  const charted = estimates.filter((e) => e.has_interval);
+  const rest = estimates.filter((e) => !e.has_interval);
+
+  if (charted.length) {
+    drawNdtms(holder, data, charted, rest.length, charts);
+  } else {
+    replace(holder, noData('estimates with published confidence intervals', null));
+  }
+
+  replace(tableHolder, tableCard(
+    `${num(rest.length + (data.other_rows || []).length)} other published values`, [
+      { title: 'Dataset', field: 'dataset' },
+      { title: 'Measure', field: 'measure' },
+      { title: 'Period', field: 'time_period', width: 170 },
+      { title: 'In publication', field: 'published_in', width: 120 },
+      // `value_text` and not `value`: some of these rows have no number at
+      // all. Some are context (a region name); some are a disclosure marker,
+      // which is not zero and must not be shown as one.
+      { title: 'Published as', field: 'value_text', width: 140 },
+    ], [...rest, ...(data.other_rows || [])], { height: 260 }));
+
+  replace(provHolder, provenanceFromRows(estimates, {
+    tables: ['ndtms_la_statistics', 'ndtms_publications'],
+    module: 'm07_ndtms',
+  }) || el('span', {}));
+}
+
+function drawNdtms(container, data, estimates, without, charts) {
+  // One row per measure-and-period. Where a sheet gives no period the label
+  // says which publication the figure was read from instead — several
+  // editions reprint the same estimate, and dating a 2017 estimate to the
+  // 2019 report that reprinted it would be wrong.
+  const labels = estimates.map((e) => (e.time_period
+    ? `${e.measure} · ${e.time_period}`
+    : `${e.measure} · in ${e.published_in} report`));
+
+  charts.push(mountChart(container, {
+    grid: { left: 220, top: 30, right: 40, bottom: 40 },
+    tooltip: {
+      trigger: 'item',
+      formatter: (p) => {
+        const e = estimates[p.dataIndex];
+        return `<strong>${escapeHtml(e.measure)}</strong><br>`
+          + `${escapeHtml(String(e.value_text ?? e.value))}<br>`
+          + `<span style="color:#8b949e">95% CI ${escapeHtml(String(e.lower))}`
+          + ` to ${escapeHtml(String(e.upper))}</span><br>`
+          + `<span style="color:#8b949e">read from the ${escapeHtml(String(e.published_in))}`
+          + ' publication</span>';
+      },
+    },
+    xAxis: { type: 'value', name: 'published value' },
+    yAxis: { type: 'category', data: labels, axisLabel: { width: 210, overflow: 'truncate' } },
+    series: [
+      // The interval first, so the point estimate draws on top of it.
+      {
+        name: '95% confidence interval',
+        type: 'custom',
+        silent: true,
+        renderItem: (params, api) => {
+          const estimate = estimates[api.value(0)];
+          if (!estimate) return null;
+          const y = api.coord([0, api.value(0)])[1];
+          const left = api.coord([estimate.lower, api.value(0)])[0];
+          const right = api.coord([estimate.upper, api.value(0)])[0];
+          const cap = 5;
+          return {
+            type: 'group',
+            children: [
+              { type: 'line', shape: { x1: left, y1: y, x2: right, y2: y },
+                style: { stroke: 'rgba(56, 189, 248, 0.65)', lineWidth: 2 } },
+              { type: 'line', shape: { x1: left, y1: y - cap, x2: left, y2: y + cap },
+                style: { stroke: 'rgba(56, 189, 248, 0.65)', lineWidth: 2 } },
+              { type: 'line', shape: { x1: right, y1: y - cap, x2: right, y2: y + cap },
+                style: { stroke: 'rgba(56, 189, 248, 0.65)', lineWidth: 2 } },
+            ],
+          };
+        },
+        data: estimates.map((e, i) => [i, e.value]),
+      },
+      {
+        name: 'published estimate',
+        type: 'scatter',
+        symbolSize: 11,
+        itemStyle: { color: '#38bdf8' },
+        data: estimates.map((e, i) => [e.value, i]),
+      },
+    ],
+  }, {
+    height: estimates.length > 12 ? 'tall' : null,
+    aria: `${estimates.length} estimates for `
+      + `${data.authority?.name || 'the selected authority'}, each drawn as a `
+      + 'point with the 95% confidence interval the source published for it.',
+  }));
+
+  if (without) {
+    const note = caveat(
+      'These sheets print an estimate, the population it was calculated '
+      + 'against and a rate per thousand side by side. Charting them on one '
+      + 'axis would make all three unreadable, and only the estimates carry '
+      + 'an interval — which is the source’s own mark of which rows are '
+      + 'estimates. The rest are in the table below, with their values.',
+      { label: 'What is not on this chart' });
+    container.append(el('p', { class: 'small muted' },
+      `${without} further published value${without === 1 ? '' : 's'} `
+      + 'for this authority carry no confidence interval and are not charted. ',
+      note.button), note.body);
+  }
 }
 
 function drawSeries(container, data, state, charts) {

@@ -62,6 +62,7 @@ PUBLIC_API_ROUTES = {
     "geography",
     "boundaries",
     "fingertips",
+    "ndtms",
 }
 
 # Route patterns under /api/v1/ that take a parameter.

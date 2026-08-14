@@ -833,6 +833,11 @@ class Handler(BaseHTTPRequestHandler):
                      "available_years": public_queries.geography_years(conn, metric)}
         if route == "boundaries":
             return public_queries.boundaries(conn)
+        if route == "ndtms":
+            return public_queries.ndtms(
+                conn,
+                ons_code=_str(params, "ons_code") or None,
+                table_ref=_str(params, "table_ref") or None)
         if route == "fingertips":
             return public_queries.fingertips(
                 conn,

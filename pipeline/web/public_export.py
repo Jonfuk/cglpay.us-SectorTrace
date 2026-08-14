@@ -31,6 +31,10 @@ EXPORTABLE = {
     "pay": ("charity_wage_series", "pay"),
     "geography": ("features", "geography"),
     "fingertips": ("series", "fingertips"),
+    # The estimates, not `other_rows`. The latter is context and suppression
+    # markers — rows with no number in them, which is not what somebody
+    # downloading this is after.
+    "ndtms": ("estimates", "ndtms"),
 }
 
 NOTE = (

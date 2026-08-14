@@ -151,6 +151,123 @@ def test_unverified_census_figures_are_marked_as_such(ro):
     assert all(row["verified"] == 0 for row in pay["workforce_census"])
 
 
+# --- NDTMS: bounds must stay attached to their own estimate --------------------
+#
+# These figures are modelled estimates published with 95% confidence
+# intervals. Pairing a bound to the wrong measure would silently widen or
+# narrow somebody's interval, which is a worse failure than showing no
+# interval at all -- so the pairing refuses ambiguity rather than resolving it.
+
+
+def _ndtms_row(**overrides):
+    row = {"publication_slug": "/p", "table_ref": "Table_9_2", "ons_code": "E06000001",
+            "area_name_raw": "Hartlepool", "authority_name": "Hartlepool",
+            "age_group": "18+", "time_period": "April 2022 to March 2025",
+            "indicator": "Point estimate", "value": 1.36, "value_text": "1.36",
+            "financial_year": "2024-25", "source_url": "https://ndtms.example/x",
+            "retrieved_at": "2026-08-12T00:00:00Z"}
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.parametrize("indicator, expected", [
+    ("Point estimate", ("Point estimate", "point")),
+    ("Lower bound to confidence interval (CI)", ("", "lower")),
+    ("Upper bound 95% CI", ("", "upper")),
+    ("Crack cocaine (number) lower bound 95% CI", ("Crack cocaine (number)", "lower")),
+    ("Crack cocaine (rate) upper bound 95% CI", ("Crack cocaine (rate)", "upper")),
+    ("15-64 population", ("15-64 population", "point")),
+])
+def test_a_published_indicator_name_resolves_to_a_measure_and_a_role(indicator, expected):
+    assert public_queries._ndtms_role(indicator) == expected
+
+
+def test_a_suffixed_bound_attaches_to_its_own_measure():
+    estimates, _ = public_queries._ndtms_pair([
+        _ndtms_row(table_ref="Table_2_1", indicator="Crack cocaine (number)", value=263),
+        _ndtms_row(table_ref="Table_2_1",
+                    indicator="Crack cocaine (number) lower bound 95% CI", value=161),
+        _ndtms_row(table_ref="Table_2_1",
+                    indicator="Crack cocaine (number) upper bound 95% CI", value=371),
+        _ndtms_row(table_ref="Table_2_1", indicator="Opiate (number)", value=500),
+    ])
+    by_measure = {e["measure"]: e for e in estimates}
+
+    assert by_measure["Crack cocaine (number)"]["lower"] == 161
+    assert by_measure["Crack cocaine (number)"]["upper"] == 371
+    assert by_measure["Crack cocaine (number)"]["has_interval"] is True
+    # The other measure in the same sheet must not inherit them.
+    assert by_measure["Opiate (number)"]["lower"] is None
+    assert by_measure["Opiate (number)"]["has_interval"] is False
+
+
+def test_a_standalone_bound_attaches_to_the_one_point_estimate():
+    estimates, _ = public_queries._ndtms_pair([
+        _ndtms_row(indicator="Point estimate", value=1.36),
+        _ndtms_row(indicator="Lower bound to confidence interval (CI)", value=0.98),
+        _ndtms_row(indicator="Upper bound to confidence interval (CI)", value=1.86),
+        _ndtms_row(indicator="Observed", value=43),
+        _ndtms_row(indicator="Expected", value=31.7),
+    ])
+    by_measure = {e["measure"]: e for e in estimates}
+
+    assert (by_measure["Point estimate"]["lower"],
+             by_measure["Point estimate"]["upper"]) == (0.98, 1.86)
+    assert by_measure["Observed"]["has_interval"] is False
+    assert by_measure["Expected"]["has_interval"] is False
+
+
+def test_an_ambiguous_standalone_bound_is_left_unattached():
+    """Two measures that could own the bounds means the source did not say
+    which, and a confidence interval put on the wrong estimate is invented."""
+    estimates, _ = public_queries._ndtms_pair([
+        _ndtms_row(indicator="Drug point estimate", value=10),
+        _ndtms_row(indicator="Alcohol point estimate", value=20),
+        _ndtms_row(indicator="Lower bound 95% CI", value=5),
+        _ndtms_row(indicator="Upper bound 95% CI", value=25),
+    ])
+
+    assert estimates
+    assert all(e["has_interval"] is False for e in estimates)
+    assert all(e["lower"] is None and e["upper"] is None for e in estimates)
+
+
+def test_bounds_do_not_cross_a_period_boundary():
+    estimates, _ = public_queries._ndtms_pair([
+        _ndtms_row(time_period="April 2021 to March 2024", indicator="Point estimate", value=1.37),
+        _ndtms_row(time_period="April 2022 to March 2025", indicator="Point estimate", value=1.36),
+        _ndtms_row(time_period="April 2022 to March 2025",
+                    indicator="Lower bound to confidence interval (CI)", value=0.98),
+        _ndtms_row(time_period="April 2022 to March 2025",
+                    indicator="Upper bound to confidence interval (CI)", value=1.86),
+    ])
+    by_period = {e["time_period"]: e for e in estimates}
+
+    assert by_period["April 2022 to March 2025"]["has_interval"] is True
+    assert by_period["April 2021 to March 2024"]["has_interval"] is False
+
+
+def test_a_suppressed_cell_keeps_its_marker_and_never_becomes_a_number():
+    """`c` and `*` are disclosure controls. docs/CAVEATS.md: they do not mean
+    zero, so they must not reach a chart as a value at all."""
+    estimates, other = public_queries._ndtms_pair([
+        _ndtms_row(indicator="Point estimate", value=None, value_text="c"),
+    ])
+
+    assert estimates == []
+    assert other[0]["value_text"] == "c"
+    assert "value" not in other[0]
+
+
+def test_the_ndtms_endpoint_carries_all_three_of_its_caveats(ro):
+    payload = public_queries.ndtms(ro)
+
+    assert payload["caveats"]["estimates"]
+    assert payload["caveats"]["coverage"]
+    assert payload["caveats"]["suppressed"]
+    assert payload["estimates"] == [], "no authority asked for, no rows returned"
+
+
 # --- the address a reader follows ---------------------------------------------
 
 
