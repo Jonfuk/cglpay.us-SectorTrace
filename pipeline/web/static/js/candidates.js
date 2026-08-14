@@ -1,11 +1,36 @@
 /* The Candidates tab: what three modules found, and what a person makes of it.
  *
  * The shape of this screen follows the shape of the decision it supports.
- * Promoting is one row at a time and opens the document first, because the act
- * being recorded is that somebody looked; there is no select-all, and the
- * server would refuse an array anyway. Rejecting is bulk, because deciding a
- * link is not what it looked like is something you can do from the list, and
- * being wrong leaves a candidate a candidate.
+ * Promoting opens the document first, because the act being recorded is that
+ * somebody looked. Rejecting is bulk, because deciding a link is not what it
+ * looked like is something you can do from the list, and being wrong leaves a
+ * candidate a candidate.
+ *
+ * Promoting used to be one row and one click, with no batch path at all. The
+ * result, after the screen had existed for a while: 2,462 undecided
+ * candidates and zero promotions. Nothing had ever crossed into the evidence
+ * base, because the only way across was a form filled in 2,462 times. A
+ * safeguard that stops all traffic is not protecting anything.
+ *
+ * So there is a batch path now, and the thing it batches is the clicking:
+ *
+ *   * `state.opened` records which documents this session actually opened,
+ *     from the anchor on the row. Only those can be promoted in a batch.
+ *     Selected-but-unopened rows are listed with the reason and there is no
+ *     override — the gate is the settled decision (CLAUDE.md 4, migration
+ *     0030), and one that can be clicked past is decoration.
+ *
+ *   * The requests go one at a time, never Promise.all. Each promotion
+ *     fetches a live document through the shared client, so a parallel batch
+ *     would fight the per-host rate limit and the process-wide write slot.
+ *
+ *   * A failure is recorded against its row and the run continues. A dead
+ *     link in position two must not abandon the remaining four.
+ *
+ * The server is unchanged and deliberately so: /api/admin/candidates/promote
+ * still takes one URL and still refuses a list. What makes a promotion honest
+ * is one fetch, one archived payload and one evidence_promotions row per
+ * document, and that is still what happens.
  *
  * The confidence and match-quality columns are shown but never sorted on by
  * default. `match_quality` is ModernGov's own textual ranking and `confidence`
@@ -24,8 +49,20 @@ const state = {
   offset: 0,
   items: [],
   selected: new Set(),
+  // Documents opened in this session. Deliberately not persisted: "I have
+  // read this" is a claim about the person at the keyboard now, and a
+  // localStorage key would let a batch inherit somebody else's reading, or
+  // last week's.
+  opened: new Set(),
+  // url -> { fields: {name: input}, note: input }, so a batch can read what
+  // each row's own form says rather than sending one set of values for all.
+  forms: new Map(),
   busy: false,
 };
+
+// A browser will not open an unbounded number of tabs from one click, and a
+// person will not read them either.
+const OPEN_AT_ONCE = 10;
 
 const KIND_LABELS = {
   cdp_document: 'CDP documents',
@@ -162,11 +199,17 @@ async function loadList() {
 
   state.items = data.items;
   state.selected.clear();
+  // The inputs these pointed at are about to be replaced. `opened` survives:
+  // it records what a person read, which paging away from does not undo.
+  state.forms.clear();
   render(data);
 }
 
 function render(data) {
   const list = $('candidate-list');
+  // The selection is cleared with every load, so the bulk bar has to be told;
+  // otherwise its buttons keep the counts of a list that is gone.
+  updateBulk();
   if (!data.items.length) {
     list.replaceChildren(el('p', { class: 'muted', text: 'Nothing here.' }));
     $('candidate-pager').replaceChildren();
@@ -206,20 +249,33 @@ function renderItem(item, requires) {
 
   const decided = item.verified ? 'promoted' : (item.rejected ? 'rejected' : null);
 
-  return el('div', { class: 'candidate' },
+  const openedPill = el('span', { class: 'pill opened', text: 'opened' });
+  openedPill.hidden = !state.opened.has(item.url);
+
+  // The document itself, opened in a new tab. Promoting without having read
+  // it is the failure this whole screen is arranged against, so this is also
+  // where a candidate becomes eligible for a batch: the click is the record
+  // that somebody looked.
+  const link = el('a', {
+    href: item.url, target: '_blank', rel: 'noopener noreferrer',
+    class: 'small mono', text: item.url,
+    onclick: () => markOpened(item.url),
+    // Middle-click and "open in new tab" are how a lot of people open a list.
+    onauxclick: (event) => { if (event.button === 1) markOpened(item.url); },
+  });
+
+  const row = el('div', { class: 'candidate' },
     el('div', { class: 'row' },
       check,
       el('strong', { text: item.summary.title || item.summary.report_title || '(untitled)' }),
       el('span', { class: 'spacer' }),
+      openedPill,
       decided ? el('span', { class: 'pill', text: decided }) : null,
       el('span', { class: 'muted small', text: item.authority_name || item.authority_ons_code || '' }),
     ),
     el('div', { class: 'row wrap' }, ...summary),
     el('div', { class: 'row' },
-      // The document itself, opened in a new tab. Promoting without having
-      // read it is the failure this whole screen is arranged against.
-      el('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer',
-                 class: 'small mono', text: item.url }),
+      link,
       el('span', { class: 'spacer' }),
       el('button', {
         class: 'btn ghost', title: 'Copy a link that reopens this list on this candidate',
@@ -236,6 +292,10 @@ function renderItem(item, requires) {
           onclick: () => resetOne(item.url),
         }))
       : promoteControls(item, requires));
+
+  // What the batch reports against, and what it marks while it runs.
+  row.dataset.url = item.url;
+  return row;
 }
 
 function promoteControls(item, requires) {
@@ -252,6 +312,10 @@ function promoteControls(item, requires) {
 
   const note = el('input', { type: 'text', placeholder: 'note (optional)' });
 
+  // Registered so "Fill into selected" and the batch can reach this row's own
+  // values. Cleared with the list, in loadList.
+  state.forms.set(item.url, { fields: inputs, note });
+
   return el('div', { class: 'row wrap' },
     ...fields,
     note,
@@ -265,11 +329,79 @@ function promoteControls(item, requires) {
     }));
 }
 
+// --- what a batch may touch ---------------------------------------------------
+
+function markOpened(url) {
+  if (state.opened.has(url)) return;
+  state.opened.add(url);
+  const row = rowFor(url);
+  if (row) {
+    const pill = row.querySelector('.pill.opened');
+    if (pill) pill.hidden = false;
+  }
+  updateBulk();
+}
+
+function rowFor(url) {
+  return [...document.querySelectorAll('#candidate-list .candidate')]
+    .find((node) => node.dataset.url === url) || null;
+}
+
+/** Split the selection into what a batch promote may send and what it may
+ *  not, with the reason. Undecided-ness comes from the loaded item, so a row
+ *  already promoted in this session is excluded without a round trip. */
+function partitionSelection() {
+  const ready = [];
+  const blocked = [];
+  for (const url of state.selected) {
+    const item = state.items.find((candidate) => candidate.url === url);
+    if (!item) continue;
+    if (item.verified) blocked.push({ item, why: 'already promoted' });
+    else if (!state.opened.has(url)) blocked.push({ item, why: 'not opened in this session' });
+    else ready.push(item);
+  }
+  return { ready, blocked };
+}
+
 function updateBulk() {
-  const button = $('candidate-reject-selected');
-  button.disabled = state.selected.size === 0;
-  button.textContent = state.selected.size
-    ? `Reject ${state.selected.size} selected` : 'Reject selected';
+  const count = state.selected.size;
+  const { ready, blocked } = partitionSelection();
+
+  const reject = $('candidate-reject-selected');
+  reject.disabled = count === 0 || state.busy;
+  reject.textContent = count ? `Reject ${count} selected` : 'Reject selected';
+
+  const open = $('candidate-open-selected');
+  open.disabled = count === 0 || state.busy;
+  open.textContent = count
+    ? `Open ${Math.min(count, OPEN_AT_ONCE)} selected` : 'Open selected';
+
+  const promote = $('candidate-promote-opened');
+  promote.disabled = ready.length === 0 || state.busy;
+  promote.textContent = ready.length
+    ? `Promote ${ready.length} opened` : 'Promote opened';
+
+  $('candidate-fill-apply').disabled = count === 0 || state.busy;
+
+  // Why the button says fewer than you selected. Named rather than counted:
+  // "3 excluded" tells you nothing about which three.
+  const note = $('candidate-batch');
+  if (!blocked.length) {
+    note.hidden = true;
+    note.replaceChildren();
+    return;
+  }
+  note.hidden = false;
+  note.replaceChildren(
+    el('p', { class: 'muted small' },
+      `${blocked.length} selected candidate${blocked.length === 1 ? '' : 's'} `
+      + 'cannot be promoted in a batch:'),
+    el('ul', { class: 'small' }, ...blocked.map(({ item, why }) => el('li', {},
+      el('span', { text: item.summary.title || item.summary.report_title || item.url }),
+      el('span', { class: 'muted', text: ` — ${why}` })))),
+    el('p', { class: 'muted small', text:
+      'Open a document to make it promotable. Nothing here promotes a '
+      + 'document nobody has looked at.' }));
 }
 
 // --- deciding -----------------------------------------------------------------
@@ -299,6 +431,132 @@ async function promoteOne(item, inputs, note, button) {
     return status(e.message, 'bad');
   }
   await Promise.all([loadCounts(), loadList()]);
+}
+
+/** Promote every opened candidate in the selection, one request at a time.
+ *
+ * Sequential on purpose. Each promotion fetches a live document through the
+ * same client the modules use, so a parallel batch would queue behind the
+ * per-host rate limit anyway and would fight the process-wide write slot
+ * while doing it. One at a time is also what makes the progress line honest.
+ *
+ * A failure stops that candidate and nothing else: a dead link in position
+ * two must not abandon the remaining four, and a candidate that failed is
+ * still a candidate.
+ */
+async function promoteOpened() {
+  const who = reviewerName();
+  if (!who) {
+    status('Put your name in the reviewer box first — promotions are attributed.', 'bad');
+    return;
+  }
+
+  const { ready } = partitionSelection();
+  if (!ready.length) return;
+
+  // Each of these fetches a document from somebody else's server. Worth one
+  // confirmation with the number in it.
+  if (!confirm(`Promote ${ready.length} opened candidate${ready.length === 1 ? '' : 's'}? `
+                + 'Each one fetches and archives the document.')) return;
+
+  state.busy = true;
+  updateBulk();
+
+  const done = [];
+  const failed = [];
+
+  for (const [index, item] of ready.entries()) {
+    const form = state.forms.get(item.url);
+    const fields = {};
+    for (const [name, input] of Object.entries(form ? form.fields : {})) {
+      fields[name] = input.value;
+    }
+    const note = form && form.note.value ? form.note.value : null;
+
+    const row = rowFor(item.url);
+    if (row) row.classList.add('working');
+    status(`${index + 1} of ${ready.length} — fetching ${item.url}…`);
+
+    try {
+      const result = await api('/api/admin/candidates/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: state.kind, url: item.url, promoted_by: who,
+                                fields, note }),
+      });
+      done.push({ item, sha: result.payload_sha256 });
+    } catch (e) {
+      failed.push({ item, why: e.message });
+    } finally {
+      if (row) row.classList.remove('working');
+    }
+  }
+
+  state.busy = false;
+  status(`promoted ${done.length} of ${ready.length}`, failed.length ? 'bad' : 'good');
+  renderBatchResult(done, failed);
+  await Promise.all([loadCounts(), loadList()]);
+}
+
+/** The run's outcome, kept on screen. Failures especially: a batch that
+ *  reports only a total is a batch whose failures get discovered later. */
+function renderBatchResult(done, failed) {
+  const note = $('candidate-result');
+  note.hidden = false;
+  note.replaceChildren(
+    el('p', { class: failed.length ? 'small bad' : 'small good' },
+      `Promoted ${done.length}. Failed ${failed.length}.`),
+    ...(failed.length
+      ? [el('ul', { class: 'small' }, ...failed.map(({ item, why }) => el('li', {},
+          el('span', { class: 'mono', text: item.url }),
+          el('span', { class: 'muted', text: ` — ${why}` }))))]
+      : []),
+    ...(done.length
+      ? [el('p', { class: 'muted small', text:
+          `Archived: ${done.map((d) => d.sha.slice(0, 12)).join(', ')}` })]
+      : []),
+    el('button', {
+      class: 'btn ghost', text: 'Dismiss',
+      onclick: () => { note.hidden = true; note.replaceChildren(); },
+    }));
+}
+
+/** Open the selected documents, so "read them, then promote them" is two
+ *  clicks. Capped: browsers block a burst of tabs, and a person cannot read
+ *  thirty of them anyway. */
+function openSelected() {
+  const urls = [...state.selected].slice(0, OPEN_AT_ONCE);
+  let blocked = 0;
+  for (const url of urls) {
+    const win = window.open(url, '_blank', 'noopener');
+    if (win) markOpened(url);
+    else blocked += 1;
+  }
+  if (blocked) {
+    status(`${blocked} tab${blocked === 1 ? '' : 's'} blocked by the browser — `
+            + 'allow pop-ups for this page, or open them from the list.', 'bad');
+  } else {
+    status(`opened ${urls.length}`, 'good');
+  }
+}
+
+/** Write one document type into every selected row's own input, so the value
+ *  that will be sent is visible per row before anything runs. */
+function fillTypeIntoSelected() {
+  const value = $('candidate-fill-type').value.trim();
+  if (!value) {
+    status('Nothing to fill — put a document type in the box first.', 'bad');
+    return;
+  }
+  let filled = 0;
+  for (const url of state.selected) {
+    const form = state.forms.get(url);
+    if (!form || !form.fields.document_type) continue;
+    form.fields.document_type.value = value;
+    filled += 1;
+  }
+  status(filled ? `filled ${filled} row${filled === 1 ? '' : 's'}`
+                 : 'no selected row asks for a document type');
 }
 
 async function rejectMany(urls) {
@@ -390,6 +648,9 @@ export function initCandidates() {
   $('candidate-reject-selected').addEventListener('click', () => {
     if (state.selected.size) rejectMany([...state.selected]);
   });
+  $('candidate-open-selected').addEventListener('click', openSelected);
+  $('candidate-promote-opened').addEventListener('click', promoteOpened);
+  $('candidate-fill-apply').addEventListener('click', fillTypeIntoSelected);
 
   // The command palette asks for a kind by name. It sets the hash to reach
   // this tab and then says which list it meant; it does not reach in and set

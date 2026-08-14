@@ -871,6 +871,13 @@ class Handler(BaseHTTPRequestHandler):
         document, and a route that took an array would be a route that made
         pretending cheap. Bulk rejection has its own endpoint below.
 
+        The operator UI does now offer a batch promote, and this route is
+        still the only way through it: the page sends one request per
+        candidate, in turn, for candidates it saw the operator open. That
+        leaves the guarantee here exactly where it was -- one fetch, one
+        archived payload and one evidence_promotions row per document -- and
+        keeps the batching where it belongs, which is in the clicking.
+
         This fetches the document, so it reaches the open web with the same
         standing as a module run: robots, the shared rate limit, and the bytes
         archived under data/raw/.

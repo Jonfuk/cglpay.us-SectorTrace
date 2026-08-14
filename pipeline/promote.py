@@ -27,9 +27,17 @@ Three rules hold here, and the first is the one that shapes the code:
     trigger refuses the evidence row without it (migration 0030). The audit
     trail is not something the caller is trusted to remember.
 
-Promotion is per row and per person. There is no bulk promote, and that is a
-decision rather than an omission: the point of the act is that somebody opened
-the document. Bulk *rejection* is fine and cheap — see `reject()`.
+Promotion is per row and per person. There is no bulk promote *here*, and that
+is a decision rather than an omission: the point of the act is that somebody
+opened the document. Bulk *rejection* is fine and cheap — see `reject()`.
+
+The operator UI batches the clicking, not the deciding: it calls `promote()`
+once per candidate, in turn, and only for candidates it watched the operator
+open. So there is still one fetch, one archived payload and one
+`evidence_promotions` row per document, which is the whole of what the rule
+was protecting. Do not add a `promote_many()` here to save the round trips —
+the round trips are not the cost, and a function taking a list would be
+callable from somewhere that had watched nobody open anything.
 """
 from __future__ import annotations
 

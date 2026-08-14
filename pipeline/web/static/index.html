@@ -275,9 +275,38 @@
       <input id="candidate-search" type="search" placeholder="Search title or URL"
              autocomplete="off">
       <span class="spacer"></span>
-      <button class="btn" id="candidate-reject-selected" disabled>Reject selected</button>
       <span id="candidate-status" class="muted small"></span>
     </div>
+
+    <!--
+      Bulk mechanics, one judgement at a time.
+
+      "Promote opened" sends one request per candidate, in turn, and only for
+      candidates opened in this session. That is the whole of the difference
+      between it and a bulk promote: the server still takes one URL and still
+      refuses a list, and what is batched is the clicking, not the deciding.
+      Selected-but-unopened rows are named under the bar with the reason, and
+      there is no override — a gate you can click past is decoration.
+
+      "Fill into selected" writes a document type into the selected rows'
+      own inputs, so what will be sent is on screen, per row, before the run.
+    -->
+    <div class="runbar batchbar">
+      <button class="btn" id="candidate-open-selected" disabled>Open selected</button>
+      <button class="btn primary" id="candidate-promote-opened" disabled>Promote opened</button>
+      <button class="btn reject" id="candidate-reject-selected" disabled>Reject selected</button>
+      <span class="spacer"></span>
+      <label class="small" for="candidate-fill-type">document type</label>
+      <input id="candidate-fill-type" type="text" placeholder="e.g. strategy"
+             autocomplete="off">
+      <button class="btn" id="candidate-fill-apply" disabled>Fill into selected</button>
+    </div>
+    <!-- Two boxes, because they answer different questions and one must not
+         clear the other: why the button offers fewer than you selected, and
+         what the last run actually did. Reloading the list wipes the first;
+         the second stays until dismissed. -->
+    <div id="candidate-batch" class="batchnote" hidden></div>
+    <div id="candidate-result" class="batchnote" hidden></div>
 
     <div id="candidate-list"></div>
     <div class="pager" id="candidate-pager"></div>

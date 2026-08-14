@@ -226,6 +226,58 @@ def test_a_rejected_candidate_can_be_reset(client, seeded):
         "/api/admin/candidates?kind=cdp_document").json()["total"] == 3
 
 
+# --- the batch path ------------------------------------------------------------
+#
+# The gate that makes a batch promote acceptable lives in the browser: only
+# candidates the operator opened in this session can be sent. That cannot be
+# exercised from here, so what these pin is the pair of properties that keep
+# it meaningful -- the shipped script still sends one URL per request, and the
+# gate is not something a later edit can quietly drop while leaving the button.
+
+
+def _candidates_js() -> str:
+    from pipeline.web.server import STATIC_DIR
+
+    return (STATIC_DIR / "js" / "candidates.js").read_text(encoding="utf-8")
+
+
+def test_the_batch_promotes_through_the_single_url_route():
+    """One request per candidate. A body carrying `urls` to the promote route
+    would be a bulk promote whatever the button said."""
+    source = _candidates_js()
+    promote_calls = source.count("'/api/admin/candidates/promote'")
+    assert promote_calls == 2, (
+        "expected exactly two callers of the promote route -- the single-row "
+        "button and the batch loop -- found "
+        f"{promote_calls}")
+    assert "urls," not in source.split("candidates/promote'")[1][:400], (
+        "the promote route is being sent a list")
+
+
+def test_the_batch_cannot_send_a_candidate_nobody_opened():
+    """`partitionSelection` is the gate. If it stops naming `opened`, a
+    selection promotes documents nobody looked at."""
+    source = _candidates_js()
+    assert "state.opened.has(url)" in source, (
+        "the opened-in-this-session check is gone from partitionSelection")
+    assert "blocked.push" in source, (
+        "excluded candidates are no longer reported to the operator")
+
+
+def test_the_batch_runs_one_at_a_time():
+    """Parallel promotion would fight the per-host rate limit and the
+    process-wide write slot, and would make the progress line a lie."""
+    source = _candidates_js()
+    body = source.split("async function promoteOpened()")[1]
+    assert "for (const [index, item] of ready.entries())" in body
+
+    # The loop itself, not the refresh after it -- reloading the counts and
+    # the list together is fine and is not what this is about.
+    loop = body.split("for (const [index, item] of ready.entries())")[1]
+    loop = loop.split("state.busy = false;")[0]
+    assert "Promise.all" not in loop, "the batch is promoting in parallel"
+
+
 # --- the isolation contract ----------------------------------------------------
 
 

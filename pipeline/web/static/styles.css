@@ -520,3 +520,27 @@ a.jump:hover { border-bottom-style: solid; }
 .candidate .row.wrap { flex-wrap: wrap; }
 .candidate a[href] { color: var(--accent); word-break: break-all; }
 .candidate input[type="text"] { flex: 1; min-width: 140px; }
+
+/* Mid-promotion. The row is doing something on somebody else's server and
+   the batch is not going to move on until it answers. */
+.candidate.working { border-color: var(--accent); opacity: 0.75; }
+
+/* "Opened" is not a decision, so it is not coloured like one -- it is the
+   statement that this row is eligible to be promoted in a batch at all. */
+.pill.opened { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+
+.batchbar { margin-top: 8px; align-items: center; }
+.batchbar input[type="text"] { width: 160px; }
+.batchbar label { flex-direction: row; align-items: center; }
+
+/* The two notes under the bulk bar: what a batch will refuse to touch, and
+   what the last run did. Left-bordered rather than boxed, so neither reads
+   as another panel of the page. */
+.batchnote {
+  border-left: 3px solid var(--line); background: var(--panel);
+  border-radius: 0 6px 6px 0; padding: 8px 12px; margin-top: 8px;
+}
+.batchnote ul { margin: 4px 0 4px 18px; padding: 0; }
+.batchnote li { margin: 2px 0; }
+.batchnote p { margin: 2px 0; }
+.batchnote .mono { word-break: break-all; }
