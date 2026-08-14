@@ -250,6 +250,14 @@ main:focus { outline: none; }
 /* --- charts -------------------------------------------------------------- */
 
 .chartwrap { position: relative; min-height: 320px; }
+
+/* Always shown rather than revealed on hover: a control that only exists for
+   a mouse is a control a touch reader does not have. Faded until wanted. */
+.chart-save {
+  position: absolute; top: 0; right: 0; z-index: 5;
+  opacity: 0.45; transition: opacity 0.15s;
+}
+.chartwrap:hover .chart-save, .chart-save:focus-visible { opacity: 1; }
 .chart { width: 100%; height: 380px; }
 .chart.tall { height: 520px; }
 .chart.short { height: 260px; }
@@ -284,13 +292,28 @@ main:focus { outline: none; }
 .provenance dd { margin: 0; overflow-wrap: anywhere; }
 .provenance .hash { font-family: var(--mono); }
 
+/* A licence that is not a plain open one gets the caveat colour, because that
+   is what it is: a condition on reuse that a reader who skims will miss. */
+.provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
+
 /* --- tables -------------------------------------------------------------- */
 
 .tablecard { margin-top: var(--space-4); }
 .tablecard .toolbar { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); flex-wrap: wrap; }
+.tablecard .toolbar h3 { margin: 0; }
+
+/* The row count, and the one case worth colouring: rows the page was not sent.
+   "1,000 of 98,636" in amber is the honest half of a table that stops. */
+.rowcount { font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.rowcount.truncated { color: var(--accent-amber); }
+
 .tabulator { background: var(--bg-base); border-color: var(--border-subtle); font-size: 13px; }
 .tabulator .tabulator-header { background: var(--bg-elevated); border-color: var(--border-subtle); }
 .tabulator-row.unverified-row { background-image: var(--unverified-bg); }
+.tabulator .tabulator-header-filter input {
+  min-width: 0; width: 100%; padding: 2px 6px; font-size: 12px;
+}
+.tabulator .tabulator-footer { background: var(--bg-elevated); border-color: var(--border-subtle); }
 
 /* --- map ----------------------------------------------------------------- */
 
@@ -312,6 +335,11 @@ main:focus { outline: none; }
 .metrictabs { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-bottom: var(--space-3); }
 .metrictabs button { border-radius: 999px; }
 .metrictabs button[aria-pressed="true"] { background: var(--accent-teal); border-color: var(--accent-teal); color: #04121d; font-weight: 600; }
+
+/* An offer to go and check, not a claim that the register agrees. Styled as a
+   quiet aside rather than as a badge for that reason. */
+.registers { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: baseline; }
+.registerlink { white-space: nowrap; }
 
 /* --- timeline ------------------------------------------------------------ */
 
@@ -407,6 +435,14 @@ main:focus { outline: none; }
   .caveat-pinned { border: 1px solid #000; }
   .provenance[open] > *, .provenance > * { display: revert; }
   .provenance summary { list-style: none; font-weight: 600; color: #000; }
+
+  /* A table's search boxes and page buttons are controls. Its row counter is
+     not: "showing 1-25 of 98,636" is the fact that the printed page is a
+     fraction of the corpus, which is exactly what must survive printing. */
+  .tabulator-header-filter,
+  .tabulator-paginator > button,
+  .tabulator-paginator > .tabulator-pages,
+  .tabulator-paginator > select { display: none !important; }
 
   /* A link is only a citation on paper if its target is on the paper. */
   .provenance a[href]::after,

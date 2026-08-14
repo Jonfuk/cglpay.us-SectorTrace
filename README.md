@@ -422,9 +422,24 @@ Three properties it is built around:
   test asserts the guard actually refuses a `restricted_` table, so the other
   tests are worth something.
 - **Everything is citable.** Each chart has a provenance drawer with source
-  URL, retrieval time and payload hash, and each section exports CSV or JSON
-  with that provenance written *into* the file — a CSV gets separated from any
-  accompanying note within a day of leaving the server.
+  URL, retrieval time, payload hash and the licence its reuse is governed by,
+  and each section exports CSV or JSON with all of that written *into* the
+  file — a CSV gets separated from any accompanying note within a day of
+  leaving the server. A chart can also be saved as an image, and the caption
+  and the pinned caveat are drawn into the picture rather than left behind in
+  the page.
+
+  The licence is one table, `pipeline/licences.py`, read from
+  `docs/SOURCES.md` one module at a time. Most of this material is OGL v3;
+  the workforce census and council documents are not, and the portal says so
+  rather than printing "public-domain source" over everything.
+
+Every table can be searched a column at a time and pages rather than stopping,
+and says how much of the corpus it is holding: the contracts list reads
+"1,000 of 98,636 rows" instead of implying it is all of them. Where a provider
+carries a company or charity number, it is a link to the register, labelled
+*verify at source* — an offer to go and check, not a claim that the register
+agrees.
 
 Where the warehouse does not support a figure, the portal says so instead of
 drawing it. Two examples from the current corpus, both decided by measuring

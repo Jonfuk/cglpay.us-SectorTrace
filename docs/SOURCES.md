@@ -13,6 +13,17 @@ and 503 responses.
 The `User-Agent` on every request identifies the pipeline and includes the
 contact email from `.env`, so any operator can reach the person running it.
 
+**The licence rows below are also code.** Each module's licence is recorded in
+[`pipeline/licences.py`](../pipeline/licences.py), which is what writes the
+`# licence:` lines into every export header and names the terms in the
+portal's provenance drawer. A new module's row here needs an entry there on
+the same day — `tests/test_licences.py` fails for any registered module the
+table does not name, because a source collected under terms nobody wrote down
+is a source nothing may be published from. Where a licence is *not* a plain
+open one — Module 6, Modules 9 and 10, Modules 14 to 16 — the entry carries
+the reason next to it, so "Varies by authority" cannot be read as "probably
+OGL".
+
 ---
 
 ## Module 0 — Geography

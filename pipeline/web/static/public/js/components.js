@@ -9,7 +9,7 @@
  */
 'use strict';
 
-import { el, replace, sourceLink, exportUrl, ago, isoDate } from '/app.js';
+import { el, replace, sourceLink, exportUrl, ago, isoDate, num } from '/app.js';
 import { registerTheme, SYMBOLS } from '/js/theme.js';
 
 let caveatSeq = 0;
@@ -40,8 +40,94 @@ export function pinnedCaveat(text, lead = 'Read this with the figure') {
     el('strong', { text: `${lead}: ` }), text);
 }
 
-/** The provenance drawer under a chart. Source, when it was fetched, and the
- *  hash of the payload it was parsed from. */
+/* Licence per source, mirrored from pipeline/licences.py.
+ *
+ * A copy, because this phase adds no route and the drawer is drawn from what
+ * the page already knows — the module id it passes to provenance(). The copy
+ * is held to the Python table by tests/test_licences.py, which fails on any
+ * difference in either direction; edit both or neither.
+ *
+ * Most of it is OGL v3. The two entries that are not are the two most
+ * quotable sources this pipeline holds, which is exactly why the drawer says
+ * so rather than printing "public-domain source" over everything.
+ */
+const OGL_URL = 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/';
+
+const LICENCES = {
+  ogl_v3: {
+    name: 'Open Government Licence v3.0', url: OGL_URL,
+    attribution: 'Contains public sector information licensed under the Open '
+      + 'Government Licence v3.0.',
+    caution: '',
+  },
+  ogl_v3_os: {
+    name: 'Open Government Licence v3.0 (contains OS data)', url: OGL_URL,
+    attribution: 'Contains public sector information licensed under the Open '
+      + 'Government Licence v3.0. Contains OS data © Crown copyright and '
+      + 'database right.',
+    caution: '',
+  },
+  nhs_benchmarking: {
+    name: 'NHS England / NHS Benchmarking Network — not OGL', url: null,
+    attribution: 'NHS England / NHS Benchmarking Network content.',
+    caution: 'Not open-licensed. Check the publisher’s terms before '
+      + 'republishing any figure from it.',
+  },
+  authority_varies: {
+    name: 'Varies by authority', url: null,
+    attribution: 'Local authority publications; the publishing authority holds '
+      + 'the rights.',
+    caution: 'Most councils publish under OGL v3.0 and none of them is '
+      + 'guaranteed to. Check the individual document before republishing it.',
+  },
+  charity_own: {
+    name: 'The charity’s own copyright', url: null,
+    attribution: 'Filed accounts from the public register of charities.',
+    caution: 'A public record, not an open licence. Passages are held as '
+      + 'evidence rather than republished wholesale.',
+  },
+  mysociety_mixed: {
+    name: 'CC BY-SA (mySociety) with OGL v3.0 responses',
+    url: 'https://creativecommons.org/licenses/by-sa/4.0/',
+    attribution: 'Authority register and search data from mySociety '
+      + '(WhatDoTheyKnow) under CC BY-SA; FOI responses generally OGL v3.0.',
+    caution: 'Share-alike applies to the mySociety half. Council disclosure '
+      + 'logs carry their own terms.',
+  },
+  nhs_jobs: {
+    name: 'Crown copyright, advert content the employer’s', url: null,
+    attribution: 'NHS Jobs service, Crown copyright.',
+    caution: 'The text of each advert belongs to the employer that placed it.',
+  },
+};
+
+const MODULE_LICENCES = {
+  m00_geography: 'ogl_v3_os',
+  m01_procurement: 'ogl_v3',
+  m02_tribunals: 'ogl_v3',
+  m03_charity_finance: 'ogl_v3',
+  m04_companies: 'ogl_v3',
+  m05_cqc: 'ogl_v3',
+  m06_workforce_census: 'nhs_benchmarking',
+  m07_ndtms: 'ogl_v3',
+  m08_pfd_reports: 'ogl_v3',
+  m09_cdp_documents: 'authority_varies',
+  m10_committee_papers: 'authority_varies',
+  m11_public_health_grant: 'ogl_v3',
+  m12_fingertips: 'ogl_v3',
+  m13_la_budgets: 'ogl_v3',
+  m14_annual_reports: 'charity_own',
+  m15_foi: 'mysociety_mixed',
+  m16_nhs_jobs: 'nhs_jobs',
+};
+
+export function licenceFor(module) {
+  return LICENCES[MODULE_LICENCES[module]] || null;
+}
+
+/** The provenance drawer under a chart. Source, when it was fetched, the
+ *  licence its reuse is governed by, and the hash of the payload it was
+ *  parsed from. */
 export function provenance({ sources = [], retrievedAt = null, module = null,
                               hash = null, tables = [] } = {}) {
   const rows = [];
@@ -62,6 +148,20 @@ export function provenance({ sources = [], retrievedAt = null, module = null,
   if (module) {
     rows.push(el('dt', { text: 'Collected by' }));
     rows.push(el('dd', { class: 'mono', text: module }));
+
+    // Beside the figure, not on a page about the portal. A citation whose
+    // terms the reader cannot state is an unfinished one.
+    const lic = licenceFor(module);
+    if (lic) {
+      rows.push(el('dt', { text: 'Licence' }));
+      rows.push(el('dd', {},
+        lic.url ? sourceLink(lic.url, lic.name) : lic.name,
+        // The attribution wording is here to be copied, not summarised: it is
+        // the condition of the licence, and a reuser who has to compose it
+        // themselves composes it differently every time.
+        el('div', { class: 'small muted', text: lic.attribution }),
+        lic.caution ? el('div', { class: 'small licence-caution', text: lic.caution }) : null));
+    }
   }
   if (hash) {
     rows.push(el('dt', { text: 'Payload SHA-256' }));
@@ -94,6 +194,83 @@ export function provenanceFromRows(rows, { module = null, tables = [] } = {}) {
     hash: list.find((r) => r.payload_sha256)?.payload_sha256 || null,
     module, tables,
   });
+}
+
+/* Links into the registers a provider is on.
+ *
+ * The cheapest verification affordance there is, and the portal had none: the
+ * warehouse holds company and charity numbers and rendered both as plain
+ * text, so checking one meant a manual search. Every link is labelled *verify
+ * at source*, which is the whole point of the wording — it is an offer to go
+ * and check, not this project asserting that the register says what the
+ * warehouse says.
+ *
+ * Both shapes were checked against the live registers on 2026-08-14 with real
+ * identifiers from this warehouse, not taken from memory:
+ *
+ *   company_number 03861209 -> the Companies House profile for CHANGE, GROW, LIVE
+ *   charity_number 1079327  -> one match, CHANGE, GROW, LIVE
+ *   charity_number 234887   -> one match, TURNING POINT
+ *
+ * The Charity Commission's charity-details page is keyed by an internal
+ * organisation number this pipeline does not store, so the link is the
+ * register's own search on the registered charity number — which returns
+ * exactly one match for a valid number. One click further and honest about
+ * what it is, rather than a details URL built from an id we do not hold.
+ *
+ * CQC is deliberately absent. The public API publishes no profile URL for a
+ * location (checked against 520 archived payloads, which contain no
+ * cqc.org.uk address at all), and the shape could not be verified without
+ * working around a bot block, which this project does not do. See
+ * docs/upgrade-roadmap.md, W-15.
+ */
+const REGISTERS = {
+  company_number: {
+    label: 'Companies House',
+    url: (id) => 'https://find-and-update.company-information.service.gov.uk/company/'
+      + encodeURIComponent(id),
+  },
+  company: {
+    label: 'Companies House',
+    url: (id) => 'https://find-and-update.company-information.service.gov.uk/company/'
+      + encodeURIComponent(id),
+  },
+  charity_number: {
+    label: 'Charity Commission',
+    url: (id) => 'https://register-of-charities.charitycommission.gov.uk/en/'
+      + 'charity-search/-/results/page/1/delta/20/keywords/' + encodeURIComponent(id),
+  },
+};
+
+export function registerLink(scheme, identifier) {
+  const register = REGISTERS[scheme];
+  if (!register || !identifier) return null;
+  return el('a', {
+    class: 'registerlink',
+    href: register.url(identifier),
+    target: '_blank', rel: 'noopener noreferrer',
+    title: `Verify at source: ${register.label} record ${identifier}`,
+  }, `${register.label} ${identifier} ↗`);
+}
+
+/** The line under a provider's name. `pairs` is [{scheme, identifier}], which
+ *  is the shape the entity edges already arrive in. */
+export function registerLinks(pairs) {
+  const seen = new Set();
+  const links = [];
+  for (const { scheme, identifier } of pairs || []) {
+    const link = registerLink(scheme, identifier);
+    // Deduplicated on the register record, not on the scheme that named it.
+    // A company number reaches this from two edges — `company_number` in the
+    // identifier register and `company` from Companies House itself — and
+    // they are one company, so keying on the scheme showed it twice.
+    if (!link || seen.has(link.href)) continue;
+    seen.add(link.href);
+    links.push(link);
+  }
+  if (!links.length) return null;
+  return el('p', { class: 'registers small' },
+    el('span', { class: 'muted', text: 'Verify at source: ' }), links);
 }
 
 export function exportButton(endpoint, params = {}, label = 'Download CSV') {
@@ -143,18 +320,29 @@ export function errorCard(message, retry) {
  * — both change a chart's width without the window changing at all. */
 const observers = new Map();
 
-export function mountChart(container, option, { height = null, aria = null } = {}) {
+export function mountChart(container, option, { height = null, aria = null,
+                                                 caption = null,
+                                                 caveat: caveatText = null } = {}) {
   registerTheme();
   if (!window.echarts) {
     replace(container, errorCard('Charting library did not load.'));
     return null;
   }
 
-  const holder = el('div', { class: `chart${height ? ` ${height}` : ''}` });
-  const wrap = el('div', {
-    class: 'chartwrap', role: 'img',
-    'aria-label': aria || 'Chart',
-  }, holder);
+  // role="img" sits on the chart itself rather than on the wrapper, because
+  // the wrapper now also holds a button and the children of an img role are
+  // presentational — a save button inside one is a button no screen reader
+  // announces.
+  const holder = el('div', {
+    class: `chart${height ? ` ${height}` : ''}`,
+    role: 'img', 'aria-label': aria || 'Chart',
+  });
+  const save = el('button', {
+    class: 'btn tiny chart-save', type: 'button',
+    title: 'Download this chart as an image, with its caption and caveat drawn into it',
+    onclick: () => saveChartImage(chart, wrap, { caption, caveat: caveatText }, save),
+  }, 'Save image');
+  const wrap = el('div', { class: 'chartwrap' }, holder, save);
   replace(container, wrap);
 
   const chart = window.echarts.init(holder, 'sectorTrace');
@@ -164,6 +352,145 @@ export function mountChart(container, option, { height = null, aria = null } = {
   observer.observe(holder);
   observers.set(chart, observer);
   return chart;
+}
+
+/* Saving a chart as an image.
+ *
+ * ECharts owns a canvas and will hand back a PNG of it, which is the easy
+ * half and the wrong artefact on its own: the caption above the chart and the
+ * caveat beside it are DOM siblings, and an image saved from the canvas keeps
+ * neither. A figure that arrives somewhere without the caveat that governs it
+ * is the exact failure this portal is built against, so the text is drawn
+ * *into* the picture — where it cannot be cropped off by saving.
+ *
+ * The caption and caveat are read from the DOM around the chart rather than
+ * passed in at every call site. That is deliberate: whatever the reader can
+ * see next to the figure is what goes into the file, so the two cannot drift.
+ * An explicit `caption`/`caveat` on mountChart overrides it.
+ */
+function chartContext(wrap, { caption, caveat }) {
+  const panel = wrap.closest('.panel');
+  const section = wrap.closest('.section');
+  const heading = [
+    section?.querySelector(':scope > header h2')?.textContent,
+    panel?.querySelector(':scope > h3')?.textContent,
+  ].filter(Boolean).join(' — ');
+
+  // Nearest first: a caveat inside this chart's own panel belongs to this
+  // chart. Only if there is none does the section-level one apply.
+  const pinned = (root) => [...(root?.querySelectorAll('.caveat-pinned') || [])]
+    .map((node) => node.textContent.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const notes = caveat ? [caveat] : (pinned(panel).length ? pinned(panel) : pinned(section));
+
+  return { title: caption || heading || 'SectorTrace', notes };
+}
+
+function wrapText(ctx, text, maxWidth) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text).split(/\s+/)) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(candidate).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+async function saveChartImage(chart, wrap, meta, button) {
+  const label = button.textContent;
+  try {
+    const { title, notes } = chartContext(wrap, meta);
+    const scale = 2;
+    const source = chart.getDataURL({
+      type: 'png', pixelRatio: scale, backgroundColor: '#0d1117',
+    });
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('the chart could not be rasterised'));
+      img.src = source;
+    });
+
+    const pad = 24 * scale;
+    const width = Math.max(image.width, 640 * scale);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const textWidth = width - pad * 2;
+
+    // Measure before sizing: setting canvas.width resets the context, so the
+    // fonts are established twice — once to lay the text out and once to draw.
+    const fonts = {
+      title: `700 ${17 * scale}px "Inter", system-ui, sans-serif`,
+      note: `${12 * scale}px "Inter", system-ui, sans-serif`,
+      foot: `${10.5 * scale}px ui-monospace, Consolas, monospace`,
+    };
+    ctx.font = fonts.title;
+    const titleLines = wrapText(ctx, title, textWidth);
+    ctx.font = fonts.note;
+    const noteLines = notes.map((note) => wrapText(ctx, note, textWidth - 12 * scale));
+
+    const titleHeight = titleLines.length * 24 * scale;
+    const noteHeight = noteLines.reduce(
+      (total, lines) => total + lines.length * 17 * scale + 14 * scale, 0);
+    const footHeight = 22 * scale;
+    canvas.width = width;
+    canvas.height = pad + titleHeight + image.height + noteHeight + footHeight + pad;
+
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    let y = pad + 18 * scale;
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = fonts.title;
+    for (const line of titleLines) {
+      ctx.fillText(line, pad, y);
+      y += 24 * scale;
+    }
+
+    ctx.drawImage(image, (width - image.width) / 2, y - 6 * scale);
+    y += image.height + 8 * scale;
+
+    for (const lines of noteLines) {
+      const blockHeight = lines.length * 17 * scale;
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(pad, y - 12 * scale, 3 * scale, blockHeight + 6 * scale);
+      ctx.font = fonts.note;
+      ctx.fillStyle = '#e6edf3';
+      for (const line of lines) {
+        ctx.fillText(line, pad + 12 * scale, y);
+        y += 17 * scale;
+      }
+      y += 14 * scale;
+    }
+
+    ctx.font = fonts.foot;
+    ctx.fillStyle = '#6e7681';
+    ctx.fillText(
+      `SectorTrace · ${location.href} · saved ${new Date().toISOString().slice(0, 10)}`,
+      pad, canvas.height - pad + 6 * scale);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const href = URL.createObjectURL(blob);
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const link = el('a', {
+      href, download: `sectorTrace_${slug || 'chart'}_`
+        + `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.png`,
+    });
+    link.click();
+    // Revoked on the next turn of the loop: revoking synchronously races the
+    // download the click just started.
+    setTimeout(() => URL.revokeObjectURL(href), 10000);
+    button.textContent = 'saved';
+  } catch (error) {
+    button.textContent = 'could not save';
+  }
+  setTimeout(() => { button.textContent = label; }, 2000);
 }
 
 export function disposeCharts(charts) {
@@ -180,20 +507,50 @@ export function symbolFor(index) {
   return SYMBOLS[index % SYMBOLS.length];
 }
 
+/* Tabulator ships per-column search and paging and the portal configured
+ * neither, so a reader looking for one buyer in 98,636 notices read rows until
+ * the page ended. Both are on by default here rather than opted into per page:
+ * a table added later inherits them, which is the whole reason this lives in
+ * one function.
+ *
+ * A column opts out with `headerFilter: false` — worth doing for a cell whose
+ * displayed text is a link label rather than the value behind it, where a
+ * search box would filter on something the reader cannot see.
+ */
 export function table(container, columns, rows, { height = 420, rowClass = null } = {}) {
   if (!window.Tabulator) {
-    // Degrade to a plain table rather than showing nothing.
+    // Degrade to a plain table rather than showing nothing — and say what was
+    // dropped, because a table that silently stops at row 200 is the failure
+    // this whole finding is about, in miniature.
     const head = el('tr', {}, columns.map((c) => el('th', { text: c.title })));
-    const body = rows.slice(0, 200).map((r) =>
+    const shown = rows.slice(0, 200);
+    const body = shown.map((r) =>
       el('tr', {}, columns.map((c) => el('td', { text: r[c.field] ?? '' }))));
-    replace(container, el('table', {}, el('thead', {}, head), el('tbody', {}, body)));
+    replace(container,
+      el('table', {}, el('thead', {}, head), el('tbody', {}, body)),
+      rows.length > shown.length
+        ? el('p', { class: 'small muted',
+            text: `Showing ${num(shown.length)} of ${num(rows.length)} rows: the `
+              + 'table library did not load, so there is no pager. The download '
+              + 'carries what the server sent.' })
+        : null);
     return null;
   }
+  // Page size follows the height the caller budgeted, so a section that asked
+  // for a short table still gets one and the pager lands where the table used
+  // to end.
+  const perPage = Math.max(8, Math.round((height - 96) / 30));
   return new window.Tabulator(container, {
     data: rows,
-    columns,
-    height,
+    columns: columns.map((column) => (
+      column.headerFilter === undefined && column.field
+        ? { ...column, headerFilter: 'input', headerFilterPlaceholder: 'search' }
+        : column)),
+    maxHeight: height,
     layout: 'fitColumns',
+    pagination: true,
+    paginationSize: perPage,
+    paginationCounter: 'rows',
     placeholder: 'No rows match these filters.',
     rowFormatter: rowClass ? (row) => {
       const cls = rowClass(row.getData());
@@ -202,11 +559,30 @@ export function table(container, columns, rows, { height = 420, rowClass = null 
   });
 }
 
+/** "1,000 of 98,636 rows" — said out loud rather than implied by a table that
+ *  simply stops. `total` is the corpus behind the rows the page was given; the
+ *  page has to pass it, because nothing in the table can know it. */
+export function rowCount(shown, total = null) {
+  if (total === null || total === undefined || total <= shown) {
+    return `${num(shown)} row${shown === 1 ? '' : 's'}`;
+  }
+  return `${num(shown)} of ${num(total)} rows`;
+}
+
 export function tableCard(title, columns, rows, options = {}) {
   const holder = el('div', {});
+  const truncated = options.total > rows.length;
   const card = el('div', { class: 'tablecard' },
     el('div', { class: 'toolbar' },
       el('h3', { text: title }),
+      el('span', {
+        class: `rowcount${truncated ? ' truncated' : ''}`,
+        title: truncated
+          ? 'The rest are in the warehouse and were not sent to this page. '
+            + 'Narrow the filters to reach them.'
+          : null,
+        text: rowCount(rows.length, options.total),
+      }),
       el('span', { class: 'spacer' }),
       options.exportEndpoint
         ? exportButton(options.exportEndpoint, options.exportParams || {})
