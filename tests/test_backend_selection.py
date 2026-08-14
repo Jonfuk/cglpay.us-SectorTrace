@@ -13,7 +13,9 @@ recorded it in `schema_migrations` as done.
 from __future__ import annotations
 
 import inspect
+import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -107,6 +109,39 @@ class TestMigrationTreeSelection:
             assert db.backend_of(conn) == "sqlite"
         finally:
             conn.close()
+
+
+class TestTheOfflineSuiteStaysOffline:
+    """The suite must not find a PostgreSQL warehouse, whatever is configured.
+
+    This is not hypothetical. The moment a `DATABASE_URL` went into this
+    checkout's `.env`, a bare `Settings()` began resolving to postgres — and
+    `db.get_connection()` and `queries.readonly_connection()` both fall back
+    to `get_settings()` when handed nothing. Without the autouse fixture in
+    conftest, tests that write would have written to a real warehouse over the
+    LAN.
+    """
+
+    def test_a_bare_settings_object_is_sqlite(self):
+        assert Settings(contact_email="t@e.com").database_backend == "sqlite"
+
+    def test_get_settings_is_sqlite(self):
+        from pipeline.config import get_settings
+
+        assert get_settings().database_backend == "sqlite"
+
+    def test_the_environment_is_neutralised_not_merely_absent(self):
+        """Deleting the variable would not be enough — the value comes from
+        the `.env` file, and an environment variable is what overrides it."""
+        assert os.environ.get("DATABASE_URL") == ""
+        assert os.environ.get("DATABASE_RO_URL") == ""
+
+    def test_the_live_tests_use_a_different_variable(self):
+        """So that pointing the suite at a database is a deliberate act and
+        cannot happen by inheriting a working configuration."""
+        source = (Path(__file__).parent / "test_postgres_live.py").read_text(encoding="utf-8")
+        assert "POSTGRES_TEST_URL" in source
+        assert 'environ.get("DATABASE_URL")' not in source
 
 
 class TestExceptionTuples:

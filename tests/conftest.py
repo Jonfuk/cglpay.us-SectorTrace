@@ -45,6 +45,34 @@ def _contact_email_is_always_set(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _the_suite_never_finds_a_postgresql_warehouse(monkeypatch):
+    """`DATABASE_URL` is unset for every test, whatever `.env` says.
+
+    Same hazard as `_contact_email_is_always_set` above and the same fix, for
+    a setting where getting it wrong costs more. Not every code path takes its
+    settings from a fixture — `db.get_connection()` and
+    `queries.readonly_connection()` both fall back to `get_settings()`, which
+    reads the environment and `.env`. On a developer's machine with a
+    PostgreSQL URL configured, those paths would leave the offline suite and
+    open a socket to a real warehouse, and the tests that write would write to
+    it.
+
+    Set to empty rather than deleted, because deleting the variable would not
+    help: the value comes from the `.env` *file*, and an environment variable
+    is what takes precedence over it. The empty string reads as unset (see
+    `Settings._usable_database_url`), which is what puts every test back on
+    SQLite.
+
+    A test that wants PostgreSQL sets its own URL and says so —
+    `tests/test_postgres_live.py` reads `POSTGRES_TEST_URL`, a different
+    variable entirely, for exactly this reason.
+    """
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("DATABASE_RO_URL", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _fresh_console():
     """The Rich console is cached process-wide and binds `sys.stdout` when it
     is built.
