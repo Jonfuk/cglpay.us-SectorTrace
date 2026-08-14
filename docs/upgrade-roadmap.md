@@ -7,10 +7,14 @@ baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 (D-04 followed on 2026-08-13); Phase 7 measured P-01 and F-04 and left P-03
 open. Each phase records what changed from the plan as it landed.
 
-**What is left, as of 2026-08-13.** Everything the audit filed has been
+**What is left, as of 2026-08-14.** Everything the audit filed has been
 delivered, measured and declined, or is listed here. **Three remain**, and
 none is blocked on effort — each needs a decision first. D-05 and D-06, both
-filed after the override table was emptied, were closed the same day.
+filed after the override table was emptied, were closed the same day. On
+2026-08-14 the portal was compared against the systems its audience actually
+uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
+comparison filed eight new findings (W-05–W-12, §3F), none yet worked, plus
+two possible futures (§3J).
 
 | | Finding | What it needs |
 |---|---|---|
@@ -174,6 +178,54 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
 
+**W-05 · The portal's Region filter is a dead control · S — filed 2026-08-14**
+- Evidence: `#f-region` renders in the global filter bar ([pipeline/web/static/public/index.html:56](pipeline/web/static/public/index.html:56)); its change handler writes `state.region` ([pipeline/web/static/public/app.js:312](pipeline/web/static/public/app.js:312)); `filterParams()` forwards only `provider_key`, `year_from` and `year_to` ([pipeline/web/static/public/app.js:188](pipeline/web/static/public/app.js:188)); no page reads it. The word `region` appears in public JS only as a map tooltip and a treatment context label.
+- Costs today: a researcher picks a region, sees the same figures, and has no way to know the control did nothing. On a portal built around "no figure without its caveat", a dead control is the one UI failure that rule does not cover.
+- Fix: consume it — filter contract notices by buyer region, which is one join to the `authorities.region` the warehouse already holds — or remove the control. Removing is the cheaper honest fix.
+- Verified by: a test asserting every filter control the portal renders is read by at least one page.
+
+**W-06 · Contract exports silently truncate at 500 rows · S — filed 2026-08-14**
+- Evidence **[live]**: `contracts` holds 98,636 rows; `/api/v1/contracts` defaults `limit` to 500 and caps it at 5,000 ([pipeline/web/public_queries.py:338](pipeline/web/public_queries.py:338), [:391](pipeline/web/public_queries.py:391)); the "Every notice" table asks for 1,000 ([pipeline/web/static/public/js/pages/contracts.js:20](pipeline/web/static/public/js/pages/contracts.js:20)) but its Download CSV passes no limit at all ([contracts.js:221](pipeline/web/static/public/js/pages/contracts.js:221)) — so the export ships the first 500 rows of 98,636 with nothing in the file saying so.
+- Costs today: a researcher's CSV looks complete and is 0.5% of the corpus. The one export that must not lie is lying structurally, and the table and its download disagree about what "the notices" are.
+- Fix: a complete-download path with the row count written into the `#` header line — chunked CSV streaming, or a raised cap the export states. The count must travel in the provenance line, not beside it.
+- Verified by: a test that a full export of a corpus larger than 500 rows contains every row and names the count.
+
+**W-07 · NDTMS data has no download path · S — filed 2026-08-14**
+- Evidence: `EXPORTABLE` has no `ndtms` entry ([pipeline/web/public_export.py:26](pipeline/web/public_export.py:26)), so `/api/v1/export` refuses it, while the treatment page renders NDTMS estimates with paired 95% CIs and hollow markers where a CI could not be paired ([pipeline/web/static/public/js/pages/treatment.js:264](pipeline/web/static/public/js/pages/treatment.js:264)). The Fingertips card next to it has a Download CSV button; the NDTMS card has none.
+- Costs today: the section with the most careful visualisation is the only one whose data cannot leave the server — a reader who wants to cite a point estimate must retype it.
+- Fix: add `ndtms` to `EXPORTABLE`, exporting the row shape the page renders (estimate, `lower`/`upper`, `has_interval`, `value_text`), with the "why some points are hollow" note in the file header.
+- Verified by: the export tests gaining the new endpoint, and a test that its rows carry the same paired-CI fields the page draws.
+
+**W-08 · Charts cannot be exported as images · M — filed 2026-08-14**
+- Evidence: ECharts is vendored and every chart is drawn client-side ([pipeline/web/static/public/index.html:19](pipeline/web/static/public/index.html:19)); no page calls `getDataURL()`. Fingertips offers "More options > Download image/CSV" on every chart, and the WHO Global Health Observatory does the same.
+- Costs today: the visual is screenshotted at unknown resolution or rebuilt; the provenance chain survives in the CSV, but the figure as drawn is not reproducible from the portal.
+- Fix: a per-chart menu — PNG via the canvas `toDataURL` ECharts already owns, next to the section CSV that already exists — with the caption and its caveat rendered into the download.
+- Verified by: a browser check that a downloaded chart image carries its pinned caveat, which a header test cannot tell you.
+
+**W-09 · The public API has no documentation page · M — filed 2026-08-14**
+- Evidence: the only description of `/api/v1/*` is the `<noscript>` block ([pipeline/web/static/public/index.html:74](pipeline/web/static/public/index.html:74)) and the whitelist in ([pipeline/web/server.py:74](pipeline/web/server.py:74)). ONS runs a developer hub; Fingertips publishes request URLs meant to be embedded straight into notebooks and Power BI.
+- Costs today: the audience most likely to consume the API — researchers working in notebooks — must reverse-engineer it from a page they only see with JS off.
+- Fix: a static `/api/v1` docs page: routes, parameters, example URLs, response shapes, the export endpoint's filter forwarding, and the caveats. Pinned by a test against the same route list `test_portal_isolation.py` uses — a published list of endpoints is a promise, and a wrong one is worse than none.
+- Verified by: the route-list pin above.
+
+**W-10 · No licence statement per dataset · S — filed 2026-08-14**
+- Evidence: the footer says "public-domain source" ([pipeline/web/static/public/index.html:106](pipeline/web/static/public/index.html:106)); no figure or export names a licence. `docs/SOURCES.md` records each source's licence but the portal never links it; Fingertips prints its OGL v3 terms and a citation format with every indicator.
+- Costs today: reuse — and defending reuse — starts with the licence. A figure whose terms a researcher cannot state is an unfinished citation.
+- Fix: per-source licence lines in the provenance drawer (most sources are OGL v3), a `# Licence:` line in export headers, and a link to `docs/SOURCES.md`.
+- Verified by: a test that every export header carries a licence line.
+
+**W-11 · No way to compare areas or providers side by side · M — filed 2026-08-14**
+- Evidence: the portal shows one area at a time (choropleth, per-authority series) or one provider (deep-dive timeline). Fingertips leads with Compare areas; LG Inform's standard report is a comparison table with min/mean/max against a chosen peer group.
+- Costs today: the campaign's central question — "how does my authority compare?" — is answered only by the reader opening two tabs and aligning them by eye.
+- Fix: a compare view over data the portal already renders — pick two or more authorities (or providers) and draw the existing series (grant, budget, treatment, contracts) on shared axes. No new data, and the existing no-cross-layer-arithmetic caveats reapply on each shared axis.
+- Verified by: a browser check of a two-area comparison, with the cross-layer caveat present on the shared axis.
+
+**W-12 · The coverage matrix never reaches the public · M — filed 2026-08-14**
+- Evidence: the admin Health tab's authority × evidence coverage matrix ([pipeline/web/health.py:50](pipeline/web/health.py:50)) is the best existing answer to "what is missing here", and only the operator sees it.
+- Costs today: a public reader cannot tell whether an absent figure for their authority is absence of evidence or absence of collection — the exact distinction the review queue exists to keep, kept invisible.
+- Fix: a public coverage view per authority (which of grant, budget, contracts, NDTMS, Fingertips, CQC and candidates hold rows), reusing the health tab's counts, carrying the caveat that absence is not evidence of absence.
+- Verified by: a test that the public coverage endpoint and the admin one agree row for row.
+
 ### G. Operations
 
 **O-01 · No CI · M — closed in Phase 6** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
@@ -208,6 +260,21 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **T-03 · Per-module coverage is complete — no action.** Every `m00`–`m16` has a matching `tests/test_m*.py`, plus route, guard, concurrency, provenance and portal-isolation suites.
 
+### J. Possible future — filed 2026-08-14, deliberately not findings
+
+These are the two items from the same comparison that are not findings yet.
+Each is big, and each has a reason it is not in the register above: one needs a
+schema decision, the other is F-05 wearing a delivery shape. Filed so that
+"we thought about this" is written down somewhere it survives.
+
+**Corpus-wide search · L**
+- What: full-text search across contract titles, buyers and suppliers, PFD reports, committee and CDP candidates, FOI requests and NDTMS rows — the search every comparable portal leads with (WhatDoTheyKnow is search-first, LG Inform has advanced operators, Fingertips searches indicators by keyword).
+- Why it is here rather than in the register: a client-side index over 98,636 notices is a payload and a freshness problem, and a server-side one is SQLite FTS5 — a schema decision carrying the same maintenance burden the roadmap has already declined once for the archived documents (Section 6, "Full-text search over archived documents"). The difference: warehouse tables are ~520 MB against the 3.5 GiB archive, so this is the cheaper half of that rejection. Revisit once the promotion work has given it verified documents to search rather than candidates.
+
+**Versioned datasets, ONS-style · L — F-05 with a delivery shape**
+- What: ONS publishes editions and versions of each dataset; a re-run that changes rows is a new version, with the previous one still citable ([developer.ons.gov.uk](https://developer.ons.gov.uk/)). Under this shape, "the 2026-08 version of the contracts table" would be a real thing to link.
+- Why it is here rather than in the register: every domain table upserts on a natural key, so nothing can be cited as a version today. F-05's decision stands and the recommendation is unchanged: not yet, and as history on one table only if one specific claim needs it.
+
 ## 4. Quick wins
 
 Small, safe, independently shippable, no dependencies:
@@ -221,6 +288,10 @@ Small, safe, independently shippable, no dependencies:
 | W-01 | `<noscript>` on the portal | A few lines, and it is a public site |
 | O-03 | Point test logging at a temp dir | Stops tests writing 5 MB into `logs/` |
 | S-03 | Bring the README's warning up to date | Text only, and it is currently understated |
+| W-05 | Wire or remove the Region filter | A visible control that does nothing is the one failure the portal's honesty rules do not cover |
+| W-06 | Make contract exports complete | The table shows 1,000 rows, its CSV ships 500 of 98,636, and nothing says so |
+| W-07 | NDTMS download path | One section whose data cannot leave the server |
+| W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence |
 
 ## 5. Phases
 
