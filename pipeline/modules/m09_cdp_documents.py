@@ -301,10 +301,13 @@ def run(ctx: ModuleContext) -> None:
                 "authority_ons_code": authority["ons_code"],
                 **candidate,
                 "discovered_at": datetime.now(timezone.utc).isoformat(),
+                # Initial values for a candidate nobody has seen yet, and
+                # preserved so re-finding the link cannot un-promote it.
                 "verified": 0,
                 "verified_at": None,
                 "rejected": 0,
-            }, natural_key=["authority_ons_code", "candidate_url"])
+            }, natural_key=["authority_ons_code", "candidate_url"],
+                preserve=db.DECISION_COLUMNS)
             candidates_found += 1
 
         if not ctx.dry_run:

@@ -348,9 +348,13 @@ def run(ctx: ModuleContext) -> None:
                     db.upsert(conn, "workforce_census_metrics", {
                         "census_year": year,
                         **metric,
+                        # Preserved: verification here is the hand-run UPDATE
+                        # the generated worklist prints, and a re-parse of the
+                        # same line must not undo it.
                         "verified": 0,
                         **provenance,
-                    }, natural_key=["census_year", "metric", "workforce_segment", "raw_text"])
+                    }, natural_key=["census_year", "metric", "workforce_segment", "raw_text"],
+                        preserve=db.DECISION_COLUMNS)
                     year_metrics.append(metric)
                     metrics_written += 1
 

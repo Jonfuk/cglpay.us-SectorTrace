@@ -222,6 +222,18 @@ evidence:
 - **`m10`** finds committee papers the same way. Nothing reaches
   `committee_papers` unverified.
 
+**A decision survives a re-run.** These modules re-write every candidate they
+find on every run, and until [#2](https://github.com/Jonfuk/cglpay.us-SectorTrace/issues/2)
+that included the verification flag — so a link re-found after somebody had
+opened the document and promoted it came back round the worklist as though
+nobody had. `db.upsert` now leaves the decision columns alone on a conflict.
+If a run had already cleared some, the promotions themselves are still on
+record and the flags can be put back:
+
+```bash
+./start.sh restore-promotion-flags          # reports; add --apply to write
+```
+
 `m09` and `m10` are also **coverage-limited**: they need each council's
 publication URL, which cannot be derived, so `pipeline/authority_websites.py`
 holds only entries verified by request. `m10` will additionally accept a

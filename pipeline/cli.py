@@ -121,6 +121,49 @@ def resolve_answered(
         conn.close()
 
 
+@app.command("restore-promotion-flags")
+def restore_promotion_flags(
+    kind: str = typer.Option(None, help="Only this candidate kind; default is all"),
+    apply: bool = typer.Option(
+        False, "--apply", help="Write the flags back. Without it, only reports."),
+) -> None:
+    """Re-mark candidates that were promoted but read as unverified.
+
+    Module runs used to overwrite the decision columns, so a link re-found
+    after somebody promoted it lost its `verified` flag and came back round
+    the review worklist. Fixed at the source in `db.upsert`; this puts right
+    the rows a run had already reached.
+
+    Reports by default, because a candidate somebody reset on purpose looks
+    identical from here — a reset deliberately leaves the promotion record
+    standing. Read the list before passing `--apply`.
+    """
+    from pipeline import promote
+
+    configure_logging("promote")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, settings.migrations_dir)
+    conn.commit()
+    try:
+        rows = promote.restore_flags(conn, kind=kind, dry_run=not apply)
+        if not rows:
+            typer.echo("Nothing to restore — every promotion on record has "
+                        "its candidate flag.")
+            return
+        for row in rows:
+            typer.echo(f"{row['kind']}: {row['url']} "
+                        f"(promoted {row['promoted_at']})")
+        if apply:
+            typer.echo(f"restored {len(rows):,} flag(s)")
+        else:
+            ui.warn(f"{len(rows):,} candidate(s) would be re-marked verified. "
+                     "Nothing was changed; pass --apply once you have read the "
+                     "list, and re-reset anything you reset on purpose.")
+    finally:
+        conn.close()
+
+
 @app.command()
 def backup(
     output: str = typer.Option(

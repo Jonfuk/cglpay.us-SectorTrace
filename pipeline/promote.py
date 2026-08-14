@@ -303,6 +303,73 @@ def reject(conn: sqlite3.Connection, kind: str, urls: list[str],
     return cursor.rowcount
 
 
+def promotions_without_flag(conn: sqlite3.Connection,
+                             kind: str | None = None) -> list[dict]:
+    """Candidates with a promotion on record whose own `verified` flag says 0.
+
+    Until `db.upsert` learned to preserve the decision columns, every module
+    run re-wrote its candidates with `verified = 0`, so a link re-found after
+    it was promoted lost the flag. The evidence row and this table's record
+    both survived — only the candidate's flag went, which is the one the
+    review worklist and the operator UI read, so the document reappeared in
+    the queue of things nobody had looked at.
+
+    This is a query, not a repair, and it is the honest half: a candidate
+    somebody `reset()` deliberately looks exactly the same from here, because
+    a reset leaves the promotion record alone on purpose. So the list is
+    "these two facts disagree", and which way to settle it is a person's call
+    — see `restore_flags`.
+    """
+    out = []
+    for name, spec in KINDS.items():
+        if kind and name != kind:
+            continue
+        rows = conn.execute(
+            f"SELECT c.{spec['candidate_url_column']} AS url, "
+            f"       c.{spec['authority_column']} AS authority, "
+            f"       c.rejected AS rejected, "
+            f"       MAX(p.promoted_at) AS promoted_at, "
+            f"       COUNT(p.id) AS promotions "
+            f"FROM {spec['candidate_table']} c "
+            f"JOIN evidence_promotions p "
+            f"  ON p.candidate_table = ? "
+            f" AND p.candidate_url = c.{spec['candidate_url_column']} "
+            f"WHERE c.verified = 0 "
+            f"GROUP BY 1, 2, 3 ORDER BY 1",
+            (spec["candidate_table"],))
+        out.extend({"kind": name, **dict(row)} for row in rows)
+    return out
+
+
+def restore_flags(conn: sqlite3.Connection, kind: str | None = None,
+                   dry_run: bool = False) -> list[dict]:
+    """Set `verified` back to 1 on candidates a promotion record vouches for.
+
+    `verified_at` is set to the promotion's own `promoted_at` rather than now:
+    the flag is being restored to what it said, not re-decided today.
+
+    Rejected candidates are left alone. A rejection is a later statement than
+    the promotion it contradicts, and while that pair is odd enough to want
+    looking at, resolving it by overwriting the more recent decision is not
+    this function's business.
+    """
+    found = [row for row in promotions_without_flag(conn, kind)
+              if not row["rejected"]]
+    if dry_run or not found:
+        return found
+
+    for row in found:
+        spec = KINDS[row["kind"]]
+        conn.execute(
+            f"UPDATE {spec['candidate_table']} SET verified = 1, verified_at = ? "
+            f"WHERE {spec['candidate_url_column']} = ?",
+            (row["promoted_at"], row["url"]))
+    conn.commit()
+    log.info("promote.flags_restored", count=len(found),
+              kinds=sorted({row["kind"] for row in found}))
+    return found
+
+
 def reset(conn: sqlite3.Connection, kind: str, url: str) -> None:
     """Back to undecided. Does not remove evidence already promoted — that row
     has its own provenance and its own promotion record, and deleting evidence

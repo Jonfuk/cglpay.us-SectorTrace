@@ -572,11 +572,14 @@ def write_findings(conn, module_name: str, findings: AuthorityFindings) -> int:
             "matched_terms": merge_matched_terms(
                 conn, findings.ons_code, row["document_url"], term),
             "committee_system": findings.system,
+            # Initial values for a candidate nobody has seen yet, and
+            # preserved so re-finding the link cannot un-promote it.
             "verified": 0,
             "verified_at": None,
             "rejected": 0,
             "discovered_at": datetime.now(timezone.utc).isoformat(),
-        }, natural_key=["authority_ons_code", "document_url"])
+        }, natural_key=["authority_ons_code", "document_url"],
+            preserve=db.DECISION_COLUMNS)
         documents.add(row["document_url"])
 
         if snippet:

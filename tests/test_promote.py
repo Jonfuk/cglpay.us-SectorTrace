@@ -333,3 +333,81 @@ def test_promoted_urls_lets_a_list_say_so(seeded, settings, document):
 
     assert promote.promoted_urls(seeded, "cdp_document") == {
         "https://kent.gov.uk/cdp.pdf"}
+
+
+# --- putting back what a re-run took (issue #2) ---------------------------------
+
+
+def test_a_rerun_no_longer_un_promotes_a_candidate(seeded, settings, document):
+    """The bug itself, at the level the module writes: re-upserting a promoted
+    candidate with the collection defaults must leave the decision standing.
+    """
+    from pipeline import db
+
+    promote.promote(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf",
+                     promoted_by="Jon", fields={"document_type": "strategy"},
+                     settings=settings)
+
+    db.upsert(seeded, "cdp_document_candidates", {
+        "authority_ons_code": "E10000016",
+        "candidate_url": "https://kent.gov.uk/cdp.pdf",
+        "title": "Kent CDP strategy",
+        "discovered_at": "2026-09-01T00:00:00Z",
+        "verified": 0, "verified_at": None, "rejected": 0,
+        "source_url": "https://kent.gov.uk/list",
+        "retrieved_at": "2026-09-01T00:00:00Z",
+        "http_status": 200, "source_system": "m09", "payload_sha256": "second-run",
+    }, natural_key=["authority_ons_code", "candidate_url"],
+        preserve=db.DECISION_COLUMNS)
+
+    row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()
+    assert row["verified"] == 1
+    assert row["verified_at"] is not None
+    # The re-observation is still recorded — only the decision is protected.
+    assert row["payload_sha256"] == "second-run"
+    assert promote.promotions_without_flag(seeded) == []
+
+
+def test_a_flag_a_rerun_already_cleared_is_reported(seeded, settings, document):
+    promote.promote(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf",
+                     promoted_by="Jon", fields={"document_type": "strategy"},
+                     settings=settings)
+    seeded.execute("UPDATE cdp_document_candidates SET verified = 0, verified_at = NULL")
+
+    found = promote.promotions_without_flag(seeded)
+    assert [row["kind"] for row in found] == ["cdp_document"]
+    assert found[0]["url"] == "https://kent.gov.uk/cdp.pdf"
+    assert found[0]["promotions"] == 1
+
+
+def test_restore_flags_reports_before_it_writes(seeded, settings, document):
+    promote.promote(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf",
+                     promoted_by="Jon", fields={"document_type": "strategy"},
+                     settings=settings)
+    seeded.execute("UPDATE cdp_document_candidates SET verified = 0, verified_at = NULL")
+
+    assert len(promote.restore_flags(seeded, dry_run=True)) == 1
+    assert seeded.execute(
+        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+
+    restored = promote.restore_flags(seeded)
+    row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()
+    assert row["verified"] == 1
+    # Restored to what the flag said, not re-decided today.
+    assert row["verified_at"] == restored[0]["promoted_at"]
+    assert promote.restore_flags(seeded) == []
+
+
+def test_restore_flags_leaves_a_rejection_alone(seeded, settings, document):
+    """A rejection is a later statement than the promotion it contradicts.
+    Worth a look; not worth overwriting from a repair command.
+    """
+    promote.promote(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf",
+                     promoted_by="Jon", fields={"document_type": "strategy"},
+                     settings=settings)
+    promote.reject(seeded, "cdp_document", ["https://kent.gov.uk/cdp.pdf"],
+                    rejected_by="Sam")
+
+    assert promote.restore_flags(seeded) == []
+    row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()
+    assert (row["verified"], row["rejected"]) == (0, 1)

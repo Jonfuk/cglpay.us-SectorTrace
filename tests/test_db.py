@@ -33,6 +33,70 @@ def test_upsert_dedupes_on_natural_key(conn: sqlite3.Connection):
     assert rows[0]["name"] == "Updated"
 
 
+def test_upsert_preserve_keeps_a_decision_across_a_rerun(conn: sqlite3.Connection):
+    """The candidate modules re-upsert every link they find, carrying
+    verified = 0. Without `preserve` that un-promotes anything re-found.
+    """
+    conn.execute(
+        "CREATE TABLE gadgets (url TEXT PRIMARY KEY, title TEXT, "
+        "verified INTEGER NOT NULL DEFAULT 0, verified_at TEXT, "
+        "rejected INTEGER NOT NULL DEFAULT 0)")
+    db.upsert(conn, "gadgets",
+               {"url": "https://x/a.pdf", "title": "First",
+                "verified": 0, "verified_at": None, "rejected": 0},
+               natural_key=["url"], preserve=db.DECISION_COLUMNS)
+    conn.execute("UPDATE gadgets SET verified = 1, verified_at = '2026-01-01'")
+
+    db.upsert(conn, "gadgets",
+               {"url": "https://x/a.pdf", "title": "Re-found",
+                "verified": 0, "verified_at": None, "rejected": 0},
+               natural_key=["url"], preserve=db.DECISION_COLUMNS)
+
+    row = conn.execute("SELECT * FROM gadgets").fetchone()
+    assert row["verified"] == 1
+    assert row["verified_at"] == "2026-01-01"
+    # Everything else still refreshes: only the decision is protected.
+    assert row["title"] == "Re-found"
+
+
+def test_upsert_preserve_still_writes_on_insert(conn: sqlite3.Connection):
+    conn.execute(
+        "CREATE TABLE doodads (url TEXT PRIMARY KEY, verified INTEGER NOT NULL DEFAULT 0)")
+    db.upsert(conn, "doodads", {"url": "https://x/a.pdf", "verified": 1},
+               natural_key=["url"], preserve=db.DECISION_COLUMNS)
+    assert conn.execute("SELECT verified FROM doodads").fetchone()["verified"] == 1
+
+
+def test_candidate_modules_preserve_the_decision_columns():
+    """Pinned by source, because the bug was one missing keyword argument in
+    a call that otherwise looked right (issue #2).
+    """
+    import ast
+    from pathlib import Path
+
+    tables = {"cdp_document_candidates", "committee_paper_candidates",
+               "foi_request_candidates", "workforce_census_metrics"}
+    found = set()
+    for path in sorted((Path(__file__).resolve().parents[1] / "pipeline" / "modules").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "upsert"):
+                continue
+            if not (node.args and isinstance(node.args[1], ast.Constant)
+                     and node.args[1].value in tables):
+                continue
+            table = node.args[1].value
+            found.add(table)
+            preserved = [kw for kw in node.keywords if kw.arg == "preserve"]
+            assert preserved, (
+                f"{path.name}: upsert into {table} must pass "
+                f"preserve=db.DECISION_COLUMNS, or a re-run resets a person's "
+                f"verification")
+    assert found == tables
+
+
 def test_record_parse_failure_and_review_item(conn: sqlite3.Connection):
     db.record_parse_failure(conn, "m01_procurement", "value_core", "£not-a-number", "could not parse currency amount")
     db.record_review_item(conn, "m01_procurement", "buyer_name", "Some Unmatched Council")

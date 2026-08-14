@@ -296,11 +296,15 @@ def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: st
                         "snippet": rec["snippet"],
                         "discovered_at": datetime.now(timezone.utc).isoformat(),
                         "discovery_source": "wdtk_feed_search",
+                        # Initial values for a candidate nobody has seen yet,
+                        # and preserved so re-finding a request in a later
+                        # feed page cannot un-promote it.
                         "verified": 0,
                         "verified_at": None,
                         "rejected": 0,
                         **provenance,
-                    }, natural_key=["ons_code", "candidate_url"])
+                    }, natural_key=["ons_code", "candidate_url"],
+                        preserve=db.DECISION_COLUMNS)
                     candidates += 1
 
                 if not ctx.dry_run:
@@ -424,10 +428,13 @@ def run(ctx: ModuleContext) -> None:
                     **candidate,
                     "discovered_at": datetime.now(timezone.utc).isoformat(),
                     "discovery_source": "disclosure_log",
+                    # Initial values for a candidate nobody has seen yet, and
+                    # preserved so re-finding the link cannot un-promote it.
                     "verified": 0,
                     "verified_at": None,
                     "rejected": 0,
-                }, natural_key=["ons_code", "candidate_url"])
+                }, natural_key=["ons_code", "candidate_url"],
+                    preserve=db.DECISION_COLUMNS)
                 candidates_found += 1
 
             if not ctx.dry_run:

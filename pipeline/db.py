@@ -10,6 +10,7 @@ import re
 import sqlite3
 import threading
 from collections import deque
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -346,21 +347,45 @@ def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path | None = Non
     return newly_applied
 
 
+# The columns that carry a *person's* decision about a row — set by promotion,
+# by rejection, or by a hand-run UPDATE off a verification worklist, and never
+# by collection. Pass them as `preserve` from any module that re-upserts a row
+# a reviewer may already have decided on; see the note on `preserve` below for
+# what happens when you don't.
+DECISION_COLUMNS = ("verified", "verified_at", "rejected")
+
+
 def upsert(
     conn: sqlite3.Connection,
     table: str,
     row: dict,
     natural_key: list[str],
+    preserve: Sequence[str] = (),
 ) -> None:
     """Insert row, or update all non-key columns on a natural-key conflict.
 
     table must have a UNIQUE constraint (or be the PRIMARY KEY) over exactly
     the natural_key columns — that's what makes re-runs idempotent.
+
+    `preserve` names columns written when the row is new and left alone on
+    conflict. It exists for one specific failure: the candidate modules
+    re-upsert every link they find on every run, carrying `verified = 0`, so a
+    link re-found after somebody had opened the document and promoted it had
+    that decision silently reset and reappeared in the review worklist. The
+    evidence row and its `evidence_promotions` record survived — only the
+    candidate's flag was lost, which is the part the worklist reads. Same
+    protection `record_review_item` gives a decided review item.
+
+    Provenance columns are deliberately *not* preservable this way: a
+    re-observation is a real new fetch and the row should carry its hash and
+    its time, not the first run's.
     """
     columns = list(row.keys())
     placeholders = ", ".join(f":{c}" for c in columns)
     column_list = ", ".join(columns)
-    update_columns = [c for c in columns if c not in natural_key]
+    protected = set(preserve)
+    update_columns = [c for c in columns
+                       if c not in natural_key and c not in protected]
     conflict_cols = ", ".join(natural_key)
 
     if update_columns:
