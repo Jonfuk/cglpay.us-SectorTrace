@@ -14,7 +14,7 @@ filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
 comparison filed seventeen new findings (W-05–W-21, §3F), none yet worked,
-plus thirteen possible futures (§3J). On the same day four proposed
+plus fifteen possible futures (§3J). On the same day four proposed
 workstreams — new evidence terrain, the claims-to-evidence index, the sector
 universe, and further sources — were filed as §8; the third workstream of the
 first review, the verification campaign, is the register's own F-01 and F-03,
@@ -377,6 +377,14 @@ somewhere it survives.
 **Cross-table duplicate candidates · M**
 - What: a flag when the same document URL already appears in another candidate table — a URL found by m09 (CDP), m10 (committee papers) and m15 (FOI) is currently three unconnected rows.
 - Why it is here rather than in the register: each table dedupes internally on its natural key, but "duplicate" across tables *is* a judgement here — the same URL found in two roles may be two evidence rows. What counts as a duplicate is a decision to make before a flag means anything. Filed so the definition is settled before the button is.
+
+**Real-terms pay analysis (CPIH via the ONS API) · S–M — needs a decision**
+- What: deflating pay figures with the consumer price index to ask whether sector pay has kept pace.
+- Why it is here rather than in the register: deflation is arithmetic across evidence layers, which `docs/CAVEATS.md` governs, and the census-differencing lesson is the house rule in miniature — settle the inference before the visual. Filed together with the decision it needs: whether real-terms statements are ever claims this corpus may make.
+
+**NHS England workforce data products · S — needs a claim**
+- What: the workforce statistics data products behind NHS England's publications, for an NHS-workforce denominator.
+- Why it is here rather than in the register: it overlaps m06 (benchmarking) and m16 (NHS Jobs) context, and its value depends entirely on a claim that needs an NHS denominator — no claim, no module. Filed so the conditional is remembered rather than re-derived.
 
 ## 4. Quick wins
 
@@ -865,9 +873,10 @@ lives in a new `sector_universe` table or extends `providers`
 
 ### Workstream G — Further sources and expansions
 
-Five additions from the sources review: two comparator markets, two expansions
-of existing modules, and one harvest module. Filed with the shape of the
-claim each would support; each passes the same filter as every module —
+Eight additions from the sources review: two comparator markets, two
+expansions of existing modules, a harvest module, a discovery API, a
+statutory reference table, and an advert aggregator. Filed with the shape of
+the claim each would support; each passes the same filter as every module —
 public licence, robots respected, process-wide rate limit, provenance or
 NULL.
 
@@ -911,3 +920,28 @@ Line-item quality varies council to council, so the NULL discipline does
 real work here: an unreadable file is a `parse_failures` row and a review
 item, not a zero. Also feeds F1 (awardees from spend) and C (claims about
 real payments).
+
+**G6. data.gov.uk CKAN API · M** — the central open-data catalogue: datasets
+searchable by organisation and keyword, with resource URLs, for every council
+and department. Claim shape: discovery — which public datasets exist for an
+authority and where their resources live. Why it earns its place here: one
+module that multiplies four existing items — G5 (many councils catalogue
+their spend files there), B4 (website-registry cross-check), W-13 (what each
+authority publishes) and the sector universe (F1). Public, no key,
+documented, OGL.
+
+**G7. National Living Wage and National Minimum Wage reference · S —
+deliberately not an API** — the statutory floor as a small annual reference
+table from the gov.uk rates pages: one row per year, updated once a year,
+citable. Claim shape: the anchor for every "advertised band versus the
+floor" statement the campaign will draft. The gate G1 flagged applies here
+too: the comparison itself is side-by-side, and any ratio ("X% above the
+NLW") is the CAVEATS reading's decision, not the module's.
+
+**G8. Adzuna API · M — conditional** — third-sector and provider job adverts
+with advertised pay: the widest non-NHS window on what the sector advertises.
+Conditional on two reviews before the module starts: the API's terms
+(commercial — robots and rate limits as it sets them), and the reliability
+of its parsed salary fields, where an unparseable salary is `NULL` plus a
+`parse_failures` row, not a guess. If the terms fail, drop it — m16 and B3
+already own the NHS and provider-site halves.
