@@ -150,8 +150,14 @@ function renderTimeline(container, data) {
         note ? note.button : null),
       event.value_summary
         ? el('div', { class: 'detail', text: truncate(event.value_summary, 160) }) : null,
-      event.source_url
-        ? el('div', { class: 'small' }, sourceLink(event.source_url, 'source ↗')) : null,
+      // A contract event links to the notice, not to the API page it was
+      // parsed from — that one is a paginated cursor. Everything else has
+      // only the one address.
+      event.notice_link
+        ? el('div', { class: 'small' }, sourceLink(event.notice_link,
+            event.notice_link_basis === 'constructed' ? 'notice ↗ (built from id)' : 'notice ↗'))
+        : (event.source_url
+          ? el('div', { class: 'small' }, sourceLink(event.source_url, 'source ↗')) : null),
       note ? note.body : null));
   }
 

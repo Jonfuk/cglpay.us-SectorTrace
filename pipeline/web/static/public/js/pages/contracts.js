@@ -185,11 +185,35 @@ function renderNotices(container, data) {
       { title: 'Value', field: 'value_core', width: 120,
         formatter: (c) => gbp(c.getValue(), { compact: false }) },
       { title: 'Procedure', field: 'procedure_type', width: 130 },
-      { title: 'Source', field: 'source_url', width: 80,
+      // Two links, because they are two different things and the useful one
+      // used to be missing. "Notice" is the notice's own page on Find a
+      // Tender or Contracts Finder — what a reader wants. "Data" is
+      // `source_url`: the API page these bytes came from, which is the
+      // provenance and is a paginated cursor nobody can read.
+      //
+      // A constructed link says so on hover. 84% of rows have one, because
+      // most releases do not publish their own address; the mapping from the
+      // notice id is verified but it is still not something the source said.
+      { title: 'Notice', field: 'notice_link', width: 90,
+        formatter: (c) => {
+          const url = c.getValue();
+          if (!url) return '';
+          const built = c.getData().notice_link_basis === 'constructed';
+          const title = built
+            ? 'Built from the notice id — the release did not publish its own address'
+            : 'The address published by the release itself';
+          return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"`
+            + ` title="${escapeHtml(title)}"${built ? ' style="border-bottom:1px dotted"' : ''}>`
+            + `notice ↗</a>`;
+        },
+        // Tabulator renders this cell as HTML, so everything in it is escaped
+        // above. Nothing here is concatenated from a value that was not.
+        formatterParams: {}, htmlOutput: true },
+      { title: 'Data', field: 'source_url', width: 70,
         formatter: (c) => (c.getValue()
-          ? `<a href="${escapeHtml(c.getValue())}" target="_blank" rel="noopener noreferrer">open ↗</a>`
+          ? `<a href="${escapeHtml(c.getValue())}" target="_blank" rel="noopener noreferrer"`
+            + ` title="The API response this row was parsed from">api ↗</a>`
           : ''),
-        // Tabulator renders this cell as HTML, so the URL is escaped above.
         formatterParams: {}, htmlOutput: true },
     ], notices, {
       height: 520,

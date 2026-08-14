@@ -151,6 +151,69 @@ def test_unverified_census_figures_are_marked_as_such(ro):
     assert all(row["verified"] == 0 for row in pay["workforce_census"])
 
 
+# --- the address a reader follows ---------------------------------------------
+
+
+def test_a_notice_link_is_offered_and_the_provenance_is_left_alone(ro):
+    """`source_url` is the API cursor these bytes came from. It is provenance,
+    it is not a destination, and for five years it was the only link the
+    portal offered."""
+    notices = public_queries.contracts(ro)["notices"]
+    assert notices
+
+    for notice in notices:
+        assert notice["source_url"] == "https://find.example/n", (
+            "the provenance column must survive untouched")
+        assert notice["notice_link"] == (
+            f"https://www.find-tender.service.gov.uk/Notice/{notice['notice_id']}")
+
+
+def test_a_constructed_link_says_that_it_is_constructed(ro):
+    """The fixture rows publish no notice URL of their own, which is the
+    ordinary case -- 84% of the collected corpus. The link is still built, and
+    still labelled, because a reader about to cite one deserves to know which
+    of the two they followed."""
+    for notice in public_queries.contracts(ro)["notices"]:
+        assert notice["notice_web_url"] is None
+        assert notice["notice_link_basis"] == "constructed"
+
+
+def test_a_published_notice_url_is_preferred_and_marked_as_published(warehouse, settings):
+    warehouse.execute(
+        "UPDATE contracts SET notice_web_url = "
+        "'https://www.find-tender.service.gov.uk/Notice/n1' WHERE notice_id = 'n1'")
+    warehouse.commit()
+
+    connection = queries.readonly_connection(settings)
+    try:
+        notices = {n["notice_id"]: n
+                    for n in public_queries.contracts(connection)["notices"]}
+    finally:
+        connection.close()
+
+    assert notices["n1"]["notice_link_basis"] == "published"
+    assert notices["n2"]["notice_link_basis"] == "constructed"
+
+
+def test_the_export_keeps_its_existing_columns_where_they_were(ro):
+    """A CSV consumer who counted columns must not have them move. New fields
+    are appended; nothing is inserted before them."""
+    from pipeline.web import public_export
+
+    rows, _ = public_export.rows_for("contracts", public_queries.contracts(ro))
+    columns = list(rows[0])
+
+    expected_prefix = [
+        "notice_id", "title", "buyer_name", "buyer_ons_code", "supplier_name_raw",
+        "value_core", "value_max", "currency", "date_published", "date_start",
+        "date_end", "procedure_type", "psr_basis", "psr_direct_award_option",
+        "source_url", "retrieved_at", "payload_sha256",
+    ]
+    assert columns[:len(expected_prefix)] == expected_prefix
+    assert set(columns[len(expected_prefix):]) == {
+        "source_system", "notice_web_url", "notice_link", "notice_link_basis"}
+
+
 # --- the framework-ceiling problem -------------------------------------------
 
 

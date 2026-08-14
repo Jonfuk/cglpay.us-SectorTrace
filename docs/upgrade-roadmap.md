@@ -144,6 +144,15 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **U-01 · No bulk path for the queue's bulk · M — closed in Phase 4** — the operational half of F-01/D-04. Deciding a filtered set exists ([README.md:440](README.md:440)); *answering* one does not.
 
+**U-03 · Promotion works and is never used · M — closed 2026-08-14** (`1a84e69`)
+- Evidence **[live, at filing]**: 2,462 undecided candidates (423 CDP, 1,194 committee papers, 845 FOI) and **zero** rows in `evidence_promotions`, `cdp_documents`, `committee_papers` and `foi_requests`. Phase 4 built the path across and nothing had ever crossed it.
+- Cause: the screen offered one row, one form, one click, 2,462 times. The rule that promotion needs a person was doing no protecting — it was keeping the evidence base empty.
+- **Fix:** batch the clicking, not the deciding. Only candidates opened in this session are eligible; excluded rows are named with the reason and there is no override; requests go one at a time through the unchanged single-URL route, so there is still one fetch, one archived payload and one `evidence_promotions` row per document. A failure is recorded and the run continues.
+- Verified by: three tests pinning the shipped script (one URL per request, the opened-check present, no `Promise.all` in the loop), and a stubbed-transport run in the browser where item 2 fails and items 1 and 3 still promote.
+
+**U-04 · No link from the operator UI to the portal · S — closed 2026-08-14** (`859cf2e`)
+- The portal has linked to `/admin` since it was built ([pipeline/web/static/public/index.html:42](pipeline/web/static/public/index.html:42)); nothing linked back. Also closed: the undecided candidate count now reaches the tab strip on load, and a candidate is linkable.
+
 **U-02 · Job history dies with the process · S — closed in Phase 1**
 - Evidence: [pipeline/web/jobs.py:192](pipeline/web/jobs.py:192) — the registry is in-memory, log lines in a ring buffer.
 - After a restart there is no record that a run happened; `logs/` has the lines but nothing ties them to a job. A row per job in the warehouse would close it.
@@ -156,6 +165,12 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **W-02 · No print stylesheet · S — closed in Phase 2**
 - Evidence: `@media print` appears zero times in either [pipeline/web/static/public/styles.css](pipeline/web/static/public/styles.css) or the admin sheet. This evidence gets printed and taken into rooms; a caveat that does not survive printing is a caveat that got separated from its figure, which is the failure [README.md:381](README.md:381) is written against.
+
+**W-04 · Every "open the source" link went to a paginated API cursor · M — closed 2026-08-14**
+- Evidence **[live, at filing]**: all 98,636 `contracts.source_url` values are OCDS API request URLs — `…/ocdsReleasePackages?updatedFrom=…&cursor=dXBkYXRlZEZyb…`. Following one re-runs a page of a bulk feed, and after the window moves it does not return the same releases. This was the only link the contracts table and the provider timeline offered.
+- Not a storage bug: `source_url` is provenance for the exact bytes, and rewriting it to make an anchor work would trade the thing the warehouse is for.
+- **Fix:** migration `0032` adds `contracts.notice_web_url` for the address *the release published*; m01 fills it going forward and a one-shot filled 15,736 rows from bytes already in `data/raw/`, fetching nothing. Where a release published none, the portal constructs the link at read time from the notice id and says that it did. Both link kinds now appear next to the API link rather than instead of it.
+- The construction rule was verified against every archived page, not assumed: 117,317 of 117,365 published notice URLs follow it, and every exception is an attachment path or a release citing a different notice.
 
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
 

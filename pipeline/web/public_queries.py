@@ -33,6 +33,7 @@ import sqlite3
 from typing import Any
 
 from pipeline.exports import guard_columns, guard_not_restricted
+from pipeline.notice_urls import notice_page_url
 from pipeline.web.queries import QueryError, _run
 
 # Caveats that must travel with particular figures. Kept here, in one place,
@@ -358,10 +359,15 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
                c.supplier_name_raw, c.value_core, c.value_max, c.currency,
                c.date_published, c.date_start, c.date_end, c.procedure_type,
                c.psr_basis, c.psr_direct_award_option, c.source_url,
-               c.retrieved_at, c.payload_sha256
+               c.retrieved_at, c.payload_sha256,
+               -- Appended, not inserted. The CSV export takes its column
+               -- order from these keys, and a downstream reader who counted
+               -- columns should not have them move underneath them.
+               c.source_system, c.notice_web_url
         FROM contracts c{clause}
         ORDER BY c.date_published DESC, c.notice_id
         LIMIT :limit""", {**params, "limit": max(1, min(int(limit), 5000))})
+    _add_notice_links(notices)
 
     return {
         **totals,
@@ -385,6 +391,35 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
             "window": CAVEATS["contract_window"],
         },
     }
+
+
+def _add_notice_links(notices: list[dict]) -> None:
+    """Give every notice row the address a reader should follow, and say where
+    that address came from.
+
+    Three fields, and they are three different claims:
+
+      * `source_url` is untouched. It is the API page these bytes came from --
+        a paginated OCDS cursor, which is provenance and not a destination.
+      * `notice_web_url` is what the release itself published, or NULL.
+      * `notice_link` is what to put in front of a reader, with
+        `notice_link_basis` saying whether it was published or constructed.
+
+    The construction is a documented mapping from the notice id, verified
+    against every archived page (see pipeline/notice_urls.py). It still gets
+    labelled, because 84% of rows use it and a reader deserves to know which
+    of the two they are following before they cite it.
+    """
+    for notice in notices:
+        published = notice.get("notice_web_url")
+        if published:
+            notice["notice_link"] = published
+            notice["notice_link_basis"] = "published"
+            continue
+        constructed = notice_page_url(notice.get("source_system"),
+                                       notice.get("notice_id"))
+        notice["notice_link"] = constructed
+        notice["notice_link_basis"] = "constructed" if constructed else None
 
 
 def _value_concentration(conn, clause: str, params: dict) -> dict:
@@ -899,16 +934,24 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
 
     for row in _rows(conn, """
         SELECT c.date_published AS date, c.buyer_name, c.value_core, c.title,
+               c.notice_id, c.source_system, c.notice_web_url,
                c.source_url, c.retrieved_at
         FROM contracts c
         JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
         WHERE sa.supplier_key = ?""", (provider_key,)):
         value = f" — £{row['value_core']:,.0f}" if row["value_core"] else ""
+        # The timeline's "source" link is the one a reader actually follows,
+        # so it gets the notice rather than the API cursor the row came from.
+        # source_url stays in the payload for anyone checking provenance.
+        link = dict(row)
+        _add_notice_links([link])
         events.append({
             "date": row["date"], "event_type": "contract_award",
             "label": f"Contract with {row['buyer_name']}{value}",
             "value_summary": row["title"],
             "source_url": row["source_url"], "retrieved_at": row["retrieved_at"],
+            "notice_link": link["notice_link"],
+            "notice_link_basis": link["notice_link_basis"],
         })
 
     events = [e for e in events if e["date"]]
