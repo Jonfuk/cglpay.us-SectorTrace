@@ -14,7 +14,11 @@ filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
 comparison filed seventeen new findings (W-05–W-21, §3F), none yet worked,
-plus thirteen possible futures (§3J).
+plus thirteen possible futures (§3J). On the same day two proposed
+workstreams — new evidence terrain, the claims-to-evidence index, and the
+sector universe — were filed as §8; the third workstream of the first review,
+the verification campaign, is the register's own F-01 and F-03, already
+there.
 
 | | Finding | What it needs |
 |---|---|---|
@@ -748,3 +752,112 @@ anyone is waiting on.
 
 6. **Should a review resolution write to the codebase as well as the warehouse (D-05)?** Recommendation: yes. The UI already confirms a URL responds before storing it, which is the same standard `authority_websites.py` sets — so the answer is registry-quality at the moment it is given, and only its filing is not. Losing 86 of them proved the point.
 7. **How often should `pipeline backup` run, and who deletes old ones (D-06)?** Recommendation: before every `run all` and on a daily schedule, keeping the last seven plus any labelled one. The failure was not that backups did not work; it was that the only one on disk had been taken after the damage.
+
+## 8. Proposed workstreams — filed 2026-08-14, not yet started
+
+Two of the three workstreams from the "large upgrade" review, filed so the
+thinking survives, plus one from the longer-term workstreams review.
+Workstream A (the verification campaign) is not a section here — it is F-01,
+F-03 and the queue itself, already in the register, and its cost is labour and
+the open-question-1 decision, not code. Workstreams D and E are existing
+entries: D is F-05 and P-03, E is W-13, the §3J search entry and the unfiled
+prerender idea.
+
+The thesis the workstreams share: the project's ceiling is the number of
+verified, cited rows — today zero — and the portal is presentable but
+secondary. B widens what verification has to work on; C makes what it produces
+legible as claims.
+
+### Workstream B — New evidence terrain
+
+Three sources, all public, all pay-relevant, each filed with the shape of the
+claim it would support.
+
+**B1. Gender pay gap reports · M** — mandatory annual public filings by
+employers with 250+ staff. A new module over the government filing site, each
+filing archived like every other source. Claim shape: "of the tracked
+providers that must file, X report a mean gender pay gap of Y%". Depends on
+the provider → employer mapping m04 already builds; needs a decision on the
+scope rule — a provider under 250 staff is outside the law's reach, so its
+absence must read as out-of-scope, not as a zero.
+
+**B2. Living Wage Foundation registrations · S** — one public lookup per
+provider, binary, citable. Claim shape: "N of 13 tracked providers are
+accredited living wage employers". Fetch, archive, record accreditation date
+and status like any other source.
+
+**B3. Provider career and reward pages, and a sustained m16 crawl · M–L** —
+`nhs_job_adverts` holds 35 rows **[live]**: the "only direct pay evidence"
+([README.md:144](README.md:144)) is a sliver. A provider-side module over
+career and reward pages — advertised bands, "rewards package" pages, listed
+rates — plus a sustained crawl of the NHS Jobs feed the module already reads.
+Claim shape: the advertised band and rate per provider per period — and the
+F-05 decision (open question 2) is what turns that snapshot into the time
+series the campaign's "the change is the claim" argument needs.
+
+**B4. Authority-website registry to full coverage · M** — m09/m10/m15 are
+coverage-limited by the hand-verified registry in `authority_websites.py`, and
+the ~86 council URLs answered in the UI before D-05's fix were lost with the
+override table ([§3B, D-05](docs/upgrade-roadmap.md)). Full 347-council
+coverage means candidate discovery everywhere rather than on the verified
+handful — the difference between searching one council and 315 that the
+README records m09/m10 once paying for ([README.md:163](README.md:163)).
+
+### Workstream C — The claims-to-evidence index
+
+The difference between a data portal and an evidence portfolio: claims as
+rows, each linked to the verified evidence that supports it, with the caveats
+that travel with it. Changes no CAVEATS — it packages them.
+
+**C1. A claim registry (migration) · M** — a sanctioned table where campaign
+claims are rows: the claim's text, the verified evidence rows supporting it,
+the caveats attached, the reviewer and the date. Nothing in it is computed —
+a claim is a statement linked to rows, and the linkage is a human judgement
+recorded like every other decision. The promotion guarantee (migration `0030`)
+sets the standard: a claim without a recorded reviewer and decision history
+is not a claim.
+
+**C2. The "What we can say" portal page · M** — renders the registry: each
+claim with its citations and its "you may not compute this from it" lines.
+Read-only like every portal surface; the claims themselves are maintained in
+the same review-and-decide workflow as everything else.
+
+Open question folded in: who writes claims, and does a claim need one named
+reviewer per row, the same identity `review_decisions` already records? The
+recommendation is the one open question 1 already makes for candidates.
+
+### Workstream F — The sector universe (the population workstream)
+
+The thesis: the pipeline tracks 13 providers and 347 authorities, but the
+denominator — how many organisations make up the sector — is unknown. Every
+coverage statement needs a universe to be measured against, and none exists.
+The universe is the upstream condition for W-12's matrix meaning anything
+beyond the 347, for Workstream C's sector-level claims, and for any sentence
+of the form "we track N of the sector's ~M".
+
+**F1. The universe build · L** — reconstruct the complete provider and funder
+population from sources the pipeline already reads: CQC registrations, the
+charity register, Companies House, and the awardees in the 98,636 notices.
+The work is reconciliation, not new collection: hundreds of organisations
+joined by company and charity number where they exist, name-matched where
+they do not — the same labour `unmatched_buyer_name` and
+`possible_group_company` (D-04, still pending) already represent, done
+systematically once rather than one review item at a time.
+
+**F2. Coverage denominators · M** — with the universe in place, every
+coverage statement gains a denominator: "we track N of the sector's ~M
+providers", "contracts are observed for X of M". Universe membership must
+keep the match-basis discipline m04 already sets — name-only matches stay
+name-only, unconfirmed matches stay unconfirmed — or the universe becomes a
+larger, unverifiable version of the problem it solves.
+
+**F3. Sector shape as a publication · M** — the universe is itself an
+evidence product: sizes, funder→provider relationships, concentration. An
+export with its own provenance and match-basis columns gives the campaign its
+first whole-sector figure.
+
+Dependencies: none blocking — every input is a source already collected. One
+design question, recorded rather than decided here: whether the universe
+lives in a new `sector_universe` table or extends `providers`
+([README.md:122](README.md:122)); organisations are not personal data, so the
+`restricted_` discipline does not touch it.
