@@ -223,12 +223,80 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
+# --- storage ----------------------------------------------------------------------
+#
+# W-21: the health cards reported the warehouse's own size and nothing else,
+# while the raw archive beside it is 3.5 GiB and growing -- and P-02's answer
+# to that growth is not deletion, because the archive *is* the audit trail. It
+# is "measure it until it hurts", and the only instrument was a one-off audit
+# written into the roadmap. The operator got no signal at all until a disk
+# filled.
+#
+# So these are stat-ed on every visit rather than once. Four directories, each
+# with a different reason to be watched: the archive grows without bound by
+# design, backups are pruned by a retention rule that could be wrong, exports
+# are rewritten, and logs now rotate and can be checked against the ceiling
+# that rotation sets.
+
+STORAGE_DIRS: tuple[tuple[str, str, str], ...] = (
+    ("raw_archive", "raw_archive_dir",
+      "The audit trail: the exact bytes behind every row. Grows without bound "
+      "by design — deletion would break the provenance chain."),
+    ("backups", "backup_dir",
+      "VACUUM INTO snapshots. Pruned by --keep; labelled backups are never "
+      "pruned."),
+    ("exports", "export_output_dir",
+      "What the export targets wrote. Rewritten, not accumulated."),
+    ("logs", "logs_dir",
+      "The per-module audit log. Rotated at a fixed ceiling per module."),
+)
+
+
+def storage(settings) -> list[dict]:
+    """Bytes and file counts for the directories this pipeline writes into.
+
+    A walk rather than a cached figure: the number that matters is the one now,
+    and a growth curve nobody can see is a growth curve measured once.
+
+    On its own route, and not in `health()`, for the same reason `freshness` is
+    — measured in a browser against the real archive, this is **six seconds**:
+    8,502 files and 4.5 GB, stat-ed one at a time. It was in the cheap half
+    first, and making the whole Health tab wait six seconds to render a size in
+    megabytes is precisely the shape that docstring warns about.
+    """
+    out = []
+    for key, attribute, note in STORAGE_DIRS:
+        directory = Path(getattr(settings, attribute))
+        entry = {"key": key, "path": str(directory), "note": note,
+                  "exists": directory.is_dir(), "files": 0, "bytes": 0,
+                  "newest": None}
+        if entry["exists"]:
+            newest = None
+            for path in directory.rglob("*"):
+                # `is_file()` follows links, and a link out of the tree is
+                # somebody else's bytes: counted where it points, not here.
+                if not path.is_file() or path.is_symlink():
+                    continue
+                stat = path.stat()
+                entry["files"] += 1
+                entry["bytes"] += stat.st_size
+                newest = max(newest or 0.0, stat.st_mtime)
+            if newest:
+                from datetime import datetime, timezone
+
+                entry["newest"] = datetime.fromtimestamp(
+                    newest, tz=timezone.utc).isoformat(timespec="seconds")
+        out.append(entry)
+    return out
+
+
 def health(conn: sqlite3.Connection, settings) -> dict:
     """The cheap half: size, migrations, and which hosts were last asked.
 
-    Freshness is not here. See its docstring -- it is seconds of table scans,
-    and making the whole tab wait for it to render a size in megabytes was the
-    wrong shape.
+    Neither freshness nor storage is here, and for the same reason: one is
+    seconds of table scans and the other is seconds of stat calls over 8,502
+    archived files. Making the whole tab wait for either to render a size in
+    megabytes is the wrong shape, and each is served on its own route.
     """
     return {
         "warehouse": warehouse(conn, settings),

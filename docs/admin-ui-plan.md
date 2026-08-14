@@ -309,6 +309,26 @@ A "Health" tab answering "is the warehouse fresh, complete, and clean?"
   publishes, against the name of whoever checked. Read-only here: it is
   written by resolving a review item, which is where the audit trail belongs.
 
+Added later (roadmap Phase 10, 2026-08-14):
+
+- **A staleness line per export directory.** It compares the files against the
+  pipeline's own activity record — the conditional-request cache, the module
+  cursors, the job history — and *not* against the warehouse file's mtime,
+  which was the first implementation and was useless: the server writes to the
+  warehouse as it starts, so every directory read stale a second after the tab
+  was opened. The fetch record is also what catches a command-line run, which
+  leaves no `job_runs` row at all.
+- **A `bundle` target**, the only one that reads the export directory rather
+  than the warehouse, with a manifest naming every file, its SHA-256 and the
+  provenance companion that belongs to it — and naming any file that has none.
+  It is offered here and not on the public portal: the portal's surface is a
+  frozen list of routes, and a zip of a directory publishes whatever is in
+  that directory.
+- **A storage panel on the Health tab** over the raw archive, backups, exports
+  and logs. On its own route, like freshness: against the real archive it is
+  six seconds of stat calls over 8,502 files, and the cards have no reason to
+  wait for it.
+
 ### Phase 4 — original sketch, for reference
 
 - **Exports tab:** trigger `export` targets (sheets/geojson/echarts/docs) as

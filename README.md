@@ -57,7 +57,7 @@ Task Scheduler or CI.
 | --- | --- |
 | `data/raw/` | Raw response bytes, addressed by SHA-256 — the audit trail behind every figure |
 | `data/warehouse.db` | The canonical SQLite warehouse |
-| `logs/` | Structured JSON logs, one file per module |
+| `logs/` | Structured JSON logs, one file per module, rotated at 10 MB × 5 |
 | `docs/verification/` | Human-review markdown (document candidates, resolved URLs) |
 | `exports/output/` | Generated exports, each with a `.provenance.json` |
 | `.env` | Configuration and API keys — never committed |
@@ -263,11 +263,12 @@ the parser understands) and `committee_system_unsupported`.
 ## Exports
 
 ```bash
-./start.sh export all        # sheets, geojson, echarts, docs
+./start.sh export all        # sheets, geojson, echarts, docs, then bundle
 ./start.sh export sheets     # nine CSV tabs
 ./start.sh export geojson    # four Leaflet layers
 ./start.sh export echarts    # dashboard series
 ./start.sh export docs       # regenerate DATA_DICTIONARY.md
+./start.sh export bundle     # zip what is in exports/output, with a manifest
 ./start.sh export sheets --push   # also push to Google Sheets (needs credentials)
 ```
 
@@ -279,10 +280,26 @@ Output goes to `exports/output/` (gitignored — regenerate any time).
 | `geojson` | `contracts`, `cqc_locations`, `treatment_numbers`, `pfd_reports` — separate FeatureCollections so a map can toggle them independently |
 | `echarts` | Pre-shaped series, each with a `meta` block carrying source, retrieval date and caveats |
 | `docs` | `docs/DATA_DICTIONARY.md`, generated from the live schema |
+| `bundle` | One zip of everything above, with `manifest.json` and a README |
 
 **Every export file is written with a companion `.provenance.json`** listing
 contributing tables, source systems, retrieval window and row counts. A test
 asserts none can be produced without one.
+
+`bundle` is the one target that reads the export directory rather than the
+warehouse, so under `all` it runs last. Its `manifest.json` names every file
+with its SHA-256 and the provenance companion that belongs to it — and names
+any file that has none, because a data file with no provenance must not look
+like the rest. It refuses an empty directory rather than writing a zip that
+holds a README and nothing else. Whether the *public* portal should serve a
+bundle was decided against: the portal's surface is a frozen list of routes,
+and a zip of a directory publishes whatever happens to be in that directory.
+Public readers get complete per-section CSVs instead (see below).
+
+The Exports tab says whether what is on disk predates the last collection —
+compared against the pipeline's own activity record (the conditional-request
+cache, the module cursors, the job history) rather than against the warehouse
+file, which the server itself writes to on startup.
 
 The treatment statistics (~40,000 rows) are deliberately *not* a Sheets tab —
 they are map and chart data, and go to the GeoJSON and ECharts targets. A tab
@@ -390,6 +407,14 @@ the evidence. A job still marked running when the server starts is recorded as
 `interrupted`, so a crawl killed by a crash reads as an interrupted crawl
 rather than as nothing at all.
 
+The log files are bounded now: 10 MB per module, five generations kept, both
+settings (`LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`). Discarding the oldest
+generation costs the ability to reconstruct a months-old run; it costs nothing
+a published figure rests on, because the provenance that matters is in the
+warehouse and in `data/raw/`. The Health tab's storage panel shows what all
+four directories are holding — the raw archive is the audit trail and grows
+without bound by design, so watching it is the whole strategy.
+
 ```bash
 sqlite3 data/warehouse.db "SELECT module, reason, COUNT(*) FROM parse_failures GROUP BY 1,2;"
 sqlite3 data/warehouse.db "SELECT module, item_type, COUNT(*) FROM review_queue WHERE status='pending' GROUP BY 1,2;"
@@ -429,6 +454,12 @@ Three properties it is built around:
   and the pinned caveat are drawn into the picture rather than left behind in
   the page.
 
+  **A download is the whole dataset, not the page's window.** The contracts
+  table shows 1,000 of 98,636 notices; its Download CSV streams all 98,636,
+  and the `# rows:` line in the file says how many, so the file can be checked
+  against itself long after it has left. A `limit` in the query is ignored by
+  the export.
+
   The licence is one table, `pipeline/licences.py`, read from
   `docs/SOURCES.md` one module at a time. Most of this material is OGL v3;
   the workforce census and council documents are not, and the portal says so
@@ -465,6 +496,14 @@ Third-party JavaScript is committed under
 `pipeline/web/static/public/vendor/` with its versions and sources recorded,
 so the portal renders wherever the pipeline runs rather than only where there
 is internet.
+
+**The API is documented at `/api`** — every route, its parameters, its
+response shape and an example URL, on a page that itself needs no JavaScript.
+That page and the `<noscript>` block on the portal are both pinned by
+`tests/test_portal_isolation.py` against the server's own route table: a
+published endpoint list that has gone stale is worse than none, and the
+`<noscript>` one had already gone stale by one endpoint before the test
+existed.
 
 ## The review UI
 

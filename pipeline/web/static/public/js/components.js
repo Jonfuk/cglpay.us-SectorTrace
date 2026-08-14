@@ -273,10 +273,23 @@ export function registerLinks(pairs) {
     el('span', { class: 'muted', text: 'Verify at source: ' }), links);
 }
 
-export function exportButton(endpoint, params = {}, label = 'Download CSV') {
+/* The download is not the table.
+ *
+ * A page asks for a window — 1,000 notices of 98,636 — and this button asks
+ * the server for every row matching the same filters. Saying so on the button
+ * matters because the previous behaviour was the opposite and silent: the CSV
+ * carried the page's first 500 rows with nothing in the file admitting it.
+ * `total`, where the caller knows it, puts the number the reader is about to
+ * receive next to the number they can see. */
+export function exportButton(endpoint, params = {}, label = 'Download CSV',
+                             { total = null } = {}) {
   return el('a', {
     class: 'btn tiny', href: exportUrl(endpoint, params, 'csv'),
-    title: 'Downloads with its provenance written into the file',
+    title: total
+      ? `Downloads all ${num(total)} rows matching these filters — not just the `
+        + 'rows on this page — with its provenance written into the file'
+      : 'Downloads every row matching these filters, with its provenance '
+        + 'written into the file',
   }, label);
 }
 
@@ -585,7 +598,8 @@ export function tableCard(title, columns, rows, options = {}) {
       }),
       el('span', { class: 'spacer' }),
       options.exportEndpoint
-        ? exportButton(options.exportEndpoint, options.exportParams || {})
+        ? exportButton(options.exportEndpoint, options.exportParams || {},
+                       'Download CSV', { total: options.total ?? rows.length })
         : null),
     holder);
   // Tabulator needs the element in the document before it measures.

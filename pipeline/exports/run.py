@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-TARGETS: tuple[str, ...] = ("sheets", "geojson", "echarts", "docs")
+# Order matters, and only for the last one: `bundle` zips what is in the export
+# directory, so under `all` it must run after the three targets that put files
+# there. A bundle taken first would be a zip of the previous run.
+TARGETS: tuple[str, ...] = ("sheets", "geojson", "echarts", "docs", "bundle")
 
 
 class ExportError(ValueError):
@@ -30,6 +33,7 @@ def run_targets(conn, targets: list[str], base: Path, docs_dir: Path, settings,
     export modules pull in the whole schema layer, and `pipeline web` should
     not pay for that at startup to serve a review queue.
     """
+    from pipeline.exports import bundle as bundle_export
     from pipeline.exports import docs as docs_export
     from pipeline.exports import echarts as echarts_export
     from pipeline.exports import geojson as geojson_export
@@ -52,6 +56,16 @@ def run_targets(conn, targets: list[str], base: Path, docs_dir: Path, settings,
         elif name == "echarts":
             paths = echarts_export.export_all(conn, base / "echarts")
             noun = "charts"
+        elif name == "bundle":
+            # The only target that reads the export directory rather than the
+            # warehouse. Refusing an empty one is deliberate: a zip holding a
+            # README and nothing else is an artefact that looks like a
+            # successful export.
+            try:
+                paths = bundle_export.write_bundle(base)
+            except bundle_export.BundleError as exc:
+                raise ExportError(str(exc)) from None
+            noun = "bundles"
         else:
             paths = [docs_export.write_data_dictionary(
                 conn, settings.migrations_dir, docs_dir)]

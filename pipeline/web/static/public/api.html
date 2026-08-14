@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<!--
+  The public API, documented.
+
+  W-09: the only description of /api/v1/* was the <noscript> block on the
+  portal, which most readers never see — and which was wrong, because it had
+  not gained /api/v1/ndtms when that endpoint shipped. A published endpoint
+  list that is out of date is worse than none: it sends a researcher to build
+  against something that does not exist, and it makes the ones that do exist
+  look unreliable.
+
+  So this page and that block are both pinned by tests/test_portal_isolation.py
+  against the same frozen route list the boundary tests use. Adding a route
+  means editing three places, and that is the point — the third is the moment
+  someone decides the published surface really should be different.
+
+  No JavaScript at all on this page, deliberately. It documents the thing a
+  reader needs when the portal's charts are not what they want, and it must
+  work in the case where the portal does not.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SectorTrace API — read-only JSON and CSV over the evidence warehouse</title>
+<meta name="description" content="Routes, parameters and response shapes for the SectorTrace public API: read-only JSON over England-wide substance misuse treatment evidence, with provenance on every figure.">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <a class="brand" href="/">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-text">Sector<strong>Trace</strong></span>
+  </a>
+  <nav class="mainnav" aria-label="Sections">
+    <a href="/">&larr; Back to the portal</a>
+  </nav>
+</header>
+
+<main id="main" tabindex="-1" class="apidoc">
+
+<h1>The API</h1>
+
+<p class="lede">
+  Everything on this portal is drawn from a read-only JSON API on this same
+  server. It is documented here so that the audience most likely to want the
+  numbers — people working in a notebook, a spreadsheet or R — does not have to
+  reverse-engineer it from the pages.
+</p>
+
+<div class="caveat-pinned">
+  <strong>Read this with the figures.</strong>
+  Every response carries the caveats that govern the numbers in it, in a
+  <code>caveat</code> or <code>caveats</code> key. They are not boilerplate:
+  they lead with the things that must <strong>not</strong> be computed from
+  this data — no arithmetic across evidence layers, no differencing of
+  workforce census years, no defensible total contract value. A figure quoted
+  without its caveat is a figure this project cannot defend, and it will be
+  disputed by whoever it is quoted at.
+</div>
+
+<section class="apisection">
+  <h2>How it behaves</h2>
+  <ul>
+    <li><strong>Read-only.</strong> <code>GET</code> and <code>HEAD</code>
+      only. There is no write route under <code>/api/v1/</code> and a
+      <code>POST</code> to one is a 404.</li>
+    <li><strong>No authentication and no API key.</strong> The security model
+      is the bind address: this server is meant to run on a machine or a
+      network you trust. Nothing here is rate-limited, so please be no less
+      polite than the pipeline is to its own sources.</li>
+    <li><strong>Same-origin.</strong> No CORS headers are ever sent, so a page
+      on another site cannot read these responses from a browser. A script, a
+      notebook or <code>curl</code> is unaffected.</li>
+    <li><strong>Cached for five minutes.</strong> These answers change only
+      when a pipeline module runs, which is hours apart at best.</li>
+    <li><strong>Errors are JSON.</strong> A failure returns
+      <code>{"error": "…"}</code> with a 4xx status and a message meant for a
+      person.</li>
+    <li><strong>Personal data is unreachable.</strong> Every query behind these
+      routes declares the tables it reads and is refused if one of them holds
+      personal data. That is enforced in code, not asserted in a policy.</li>
+    <li><strong>Nothing is inferred.</strong> A value that could not be parsed
+      is <code>null</code> with a logged reason, never a guess or a zero. Do
+      not read <code>null</code> as "none".</li>
+  </ul>
+</section>
+
+<section class="apisection">
+  <h2>The routes</h2>
+
+  <article class="apiroute" data-route="summary">
+    <h3><code>/api/v1/summary</code></h3>
+    <p>
+      Headline counts across the corpus: providers, authorities, contract
+      notices and their values, the latest workforce census metrics, and the
+      pipeline's own collection state.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>providers</code>, <code>authorities</code>,
+      <code>contracts</code> (with <code>value_is_concentrated</code>, which is
+      why this portal publishes no headline contract total),
+      <code>workforce</code>, <code>pipeline</code>.
+    </p>
+    <p><a href="/api/v1/summary"><code>/api/v1/summary</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="providers">
+    <h3><code>/api/v1/providers</code></h3>
+    <p>
+      One row per provider, with matched contract value, tribunal and CQC
+      counts, latest charity income, and the register identifiers
+      (<code>company_number</code>, <code>charity_number</code>) so a reader can
+      verify at source.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">Returns <code>providers</code>: an array.</p>
+    <p><a href="/api/v1/providers"><code>/api/v1/providers</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="providers/{provider_key}/timeline"
+           data-route-pattern="providers/([a-z0-9_]+)/timeline">
+    <h3><code>/api/v1/providers/{provider_key}/timeline</code></h3>
+    <p>
+      The deep dive on one provider: dated events from charity financials,
+      tribunal decisions, NHS job adverts and contract awards, plus its CQC
+      locations and the entity edges that link it to companies and charities.
+      <code>provider_key</code> is the <code>provider_key</code> field from
+      <code>/api/v1/providers</code>.
+    </p>
+    <p class="small">
+      Returns <code>provider</code>, <code>events</code>,
+      <code>cqc_locations</code>, <code>entity_edges</code>,
+      <code>tribunal_cases</code>, <code>caveats</code>.
+    </p>
+    <p><code>/api/v1/providers/change_grow_live/timeline</code></p>
+  </article>
+
+  <article class="apiroute" data-route="authorities">
+    <h3><code>/api/v1/authorities</code></h3>
+    <p>
+      Every commissioning authority: <code>ons_code</code>, <code>name</code>,
+      <code>type</code>, <code>region</code>. The ONS code is the join key for
+      the geography, contracts and NDTMS routes.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p><a href="/api/v1/authorities"><code>/api/v1/authorities</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="contracts">
+    <h3><code>/api/v1/contracts</code></h3>
+    <p>
+      Contract notices, with aggregates computed over the whole filtered corpus
+      and a <em>window</em> of individual notices. The aggregates are complete;
+      the <code>notices</code> array is not, and
+      <code>total</code> says how many rows the filters actually match. For
+      every row, use the export route below.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Only notices whose supplier name matches a known alias of this provider.</td></tr>
+        <tr><td><code>buyer_ons_code</code></td><td>Only notices let by this authority.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Publication year bounds, inclusive.</td></tr>
+        <tr><td><code>psr_only</code></td><td><code>1</code> for notices let under the Provider Selection Regime only.</td></tr>
+        <tr><td><code>limit</code></td><td>Rows in the <code>notices</code> window. Default 500, maximum 5,000. Ignored by the export, which reads every row.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>total</code>, <code>total_value_gbp</code>,
+      <code>value_concentration</code>, <code>matched_to_provider</code>,
+      <code>date_range</code>, <code>by_year</code>, <code>by_provider</code>,
+      <code>by_procedure_type</code>, <code>top_buyers</code>,
+      <code>notices</code>, <code>caveats</code>.
+    </p>
+    <p>
+      Each notice carries three link fields and they are three different
+      claims: <code>source_url</code> is the API page the bytes came from — a
+      paginated cursor, which is provenance and not a destination;
+      <code>notice_web_url</code> is the address the release itself published,
+      or <code>null</code>; <code>notice_link</code> is the one to put in front
+      of a reader, with <code>notice_link_basis</code> saying whether it was
+      <code>published</code> or <code>constructed</code>.
+    </p>
+    <p><a href="/api/v1/contracts?psr_only=1&amp;year_from=2025"><code>/api/v1/contracts?psr_only=1&amp;year_from=2025</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="pay">
+    <h3><code>/api/v1/pay</code></h3>
+    <p>
+      The pay evidence, and the most caveat-heavy payload here: indicative wage
+      per employee from charity accounts, NHS job adverts by band, repeatedly
+      advertised roles, and the workforce census metrics with their
+      verification flags.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>One provider's series only.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Financial year bounds, inclusive.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>charity_wage_series</code>, <code>nhs_job_adverts</code>,
+      <code>nhs_job_by_band</code>, <code>repeat_advertised_roles</code>,
+      <code>workforce_census</code>, <code>census_verified_count</code>,
+      <code>census_total</code>, <code>caveats</code>.
+    </p>
+    <p>
+      The wage figure is wages and salaries divided by an average employee
+      count. It is not a pay scale, a median salary or anyone's earnings, and
+      the caveat saying so travels in the payload.
+    </p>
+    <p><a href="/api/v1/pay"><code>/api/v1/pay</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="geography">
+    <h3><code>/api/v1/geography</code></h3>
+    <p>
+      One value per authority for a chosen metric — the choropleth's data,
+      without the geometry. Geometry is 14 MB and does not change between
+      metrics, so it is fetched once from <code>/api/v1/boundaries</code> and
+      joined on <code>ons_code</code>.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>metric</code></td><td>One of <code>grant_total</code> (the default), <code>grant_drug_alcohol</code>, <code>grant_per_head</code>, <code>budget_public_health</code>, <code>treatment_numbers</code>, <code>contract_value</code>.</td></tr>
+        <tr><td><code>year</code></td><td>Financial year. Omit for the latest available.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>metric</code>, <code>metric_label</code>,
+      <code>year</code>, <code>unit</code>, <code>allocation_status</code>,
+      <code>features</code>, <code>authority_mean</code>, <code>min</code>,
+      <code>max</code>, <code>available_years</code>, <code>caveat</code>.
+    </p>
+    <p>
+      <code>authority_mean</code> is the mean across authorities and is
+      labelled as such. It is not "the England figure", which is a different
+      number published separately.
+      A grant allocation and a budgeted spend are different figures from
+      different documents: do not substitute one for the other, and do not
+      compute a ratio between them.
+    </p>
+    <p><a href="/api/v1/geography?metric=grant_per_head"><code>/api/v1/geography?metric=grant_per_head</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="boundaries">
+    <h3><code>/api/v1/boundaries</code></h3>
+    <p>
+      Authority boundary geometry as a GeoJSON <code>FeatureCollection</code>,
+      keyed by <code>ons_code</code>. Large, and cached: fetch it once.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>type</code>, <code>features</code>, <code>meta</code>
+      (<code>source_url</code>, <code>retrieved_at</code>,
+      <code>count</code>).
+    </p>
+    <p><a href="/api/v1/boundaries"><code>/api/v1/boundaries</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="fingertips">
+    <h3><code>/api/v1/fingertips</code></h3>
+    <p>
+      Treatment demand indicators from OHID Fingertips: the indicator
+      catalogue, the per-authority series, and the England series alongside it.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>indicator_id</code></td><td>One Fingertips indicator.</td></tr>
+        <tr><td><code>topic</code></td><td>Indicators under one topic.</td></tr>
+        <tr><td><code>substance</code></td><td>Indicators about one substance.</td></tr>
+        <tr><td><code>ons_code</code></td><td>One authority's values.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>indicators</code>, <code>series</code>,
+      <code>england_series</code>, <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/fingertips"><code>/api/v1/fingertips</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="ndtms">
+    <h3><code>/api/v1/ndtms</code></h3>
+    <p>
+      Local-authority NDTMS figures. Called without an authority it returns the
+      catalogue — which sheets exist, how many authorities and publications
+      each covers — rather than 17,231 rows.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ons_code</code></td><td>One authority's rows. Without it, only the catalogue is returned.</td></tr>
+        <tr><td><code>table_ref</code></td><td>One published sheet.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>datasets</code>, <code>authority</code>,
+      <code>estimates</code>, <code>other_rows</code>.
+    </p>
+    <p>
+      These are modelled estimates published with 95% confidence intervals, and
+      the interval is part of the figure. An estimate in <code>estimates</code>
+      carries <code>lower</code>, <code>upper</code> and
+      <code>has_interval</code>; where the publication printed bounds that
+      cannot be attached to one estimate unambiguously, they are left
+      unattached and <code>has_interval</code> is false. A confidence interval
+      on the wrong estimate is invented, which is worse than an absent one.
+      <code>other_rows</code> holds the rows with no number in them —
+      suppression markers kept verbatim. A marker is not a zero.
+    </p>
+    <p><a href="/api/v1/ndtms"><code>/api/v1/ndtms</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="export">
+    <h3><code>/api/v1/export</code></h3>
+    <p>
+      The same figures as a file, with the provenance written <em>into</em> it.
+      A CSV gets separated from any accompanying note within about a day of
+      leaving this server, so the endpoint it came from, the filters that
+      produced it, the number of rows it holds and the licence terms are all
+      comment lines at the top of the file — and the same object is in the
+      <code>X-Provenance</code> response header.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>endpoint</code></td><td>One of <code>summary</code>, <code>providers</code>, <code>authorities</code>, <code>contracts</code>, <code>pay</code>, <code>geography</code>, <code>fingertips</code>, <code>ndtms</code>.</td></tr>
+        <tr><td><code>format</code></td><td><code>csv</code> (the default) or <code>json</code>.</td></tr>
+        <tr><td>any filter</td><td>Every parameter the underlying route accepts is forwarded, and is recorded in the file's <code>filters_applied</code> line.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>An export is complete for its filters.</strong> It is not the
+      page's window: a contracts export reads every notice the filters match,
+      streamed, however many that is, and the <code>#&nbsp;rows:</code> line
+      says how many so the file can be checked against itself. A
+      <code>limit</code> in the query is ignored here.
+    </p>
+    <p><a href="/api/v1/export?endpoint=contracts&amp;format=csv&amp;psr_only=1"><code>/api/v1/export?endpoint=contracts&amp;format=csv&amp;psr_only=1</code></a></p>
+  </article>
+</section>
+
+<section class="apisection">
+  <h2>Provenance, in every row</h2>
+  <p>
+    Most rows carry <code>source_url</code>, <code>retrieved_at</code> and
+    <code>payload_sha256</code>: the document the value came from, when it was
+    fetched, and the SHA-256 of the exact bytes, which are archived. That is
+    what makes a figure from here checkable by someone who does not trust it —
+    which is the only kind of checking that matters.
+  </p>
+  <p>
+    Licence terms are per source and not uniform. Most of this material is
+    under the Open Government Licence v3.0, which requires attribution; the
+    workforce census is NHS Benchmarking Network content with its own terms,
+    and council documents vary by council. Every CSV export names the licences
+    its rows can be under, in <code>#&nbsp;licence:</code> lines.
+  </p>
+</section>
+
+</main>
+
+<footer class="sitefoot">
+  <p>
+    <a href="/">The portal</a> renders these same responses as charts and
+    tables, each with the caveat that governs it pinned beside it.
+  </p>
+  <p class="muted">
+    Read the caveats before quoting anything. They lead with the things that
+    must <strong>not</strong> be computed from this data.
+  </p>
+</footer>
+
+</body>
+</html>

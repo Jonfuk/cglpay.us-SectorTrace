@@ -30,7 +30,7 @@ Three rules hold everywhere in this file:
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, Iterator
 
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.notice_urls import notice_page_url
@@ -336,6 +336,30 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
 # --- contracts ----------------------------------------------------------------
 
 
+# The notice row, written once and read twice: by the page's table, which sees
+# a window onto it, and by the complete CSV export, which sees all of it. They
+# were separate SELECTs for exactly one commit, and that is one commit longer
+# than two column lists stay identical -- an export whose columns differ from
+# the ones the reader was looking at is a different dataset wearing the same
+# name.
+#
+# `{clause}` is the filter fragment `_contract_filters` builds, which is
+# assembled from fixed strings with bound parameters. Nothing from a request
+# reaches this string.
+_NOTICE_SELECT = """
+        SELECT c.notice_id, c.title, c.buyer_name, c.buyer_ons_code,
+               c.supplier_name_raw, c.value_core, c.value_max, c.currency,
+               c.date_published, c.date_start, c.date_end, c.procedure_type,
+               c.psr_basis, c.psr_direct_award_option, c.source_url,
+               c.retrieved_at, c.payload_sha256,
+               -- Appended, not inserted. The CSV export takes its column
+               -- order from these keys, and a downstream reader who counted
+               -- columns should not have them move underneath them.
+               c.source_system, c.notice_web_url
+        FROM contracts c{clause}
+        ORDER BY c.date_published DESC, c.notice_id"""
+
+
 def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only):
     where, params = [], {}
     if provider_key:
@@ -399,19 +423,8 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         GROUP BY c.buyer_name, c.buyer_ons_code
         ORDER BY value_gbp DESC LIMIT 25""", params)
 
-    notices = _rows(conn, f"""
-        SELECT c.notice_id, c.title, c.buyer_name, c.buyer_ons_code,
-               c.supplier_name_raw, c.value_core, c.value_max, c.currency,
-               c.date_published, c.date_start, c.date_end, c.procedure_type,
-               c.psr_basis, c.psr_direct_award_option, c.source_url,
-               c.retrieved_at, c.payload_sha256,
-               -- Appended, not inserted. The CSV export takes its column
-               -- order from these keys, and a downstream reader who counted
-               -- columns should not have them move underneath them.
-               c.source_system, c.notice_web_url
-        FROM contracts c{clause}
-        ORDER BY c.date_published DESC, c.notice_id
-        LIMIT :limit""", {**params, "limit": max(1, min(int(limit), 5000))})
+    notices = _rows(conn, _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT :limit",
+                     {**params, "limit": max(1, min(int(limit), 5000))})
     _add_notice_links(notices)
 
     return {
@@ -436,6 +449,52 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
             "window": CAVEATS["contract_window"],
         },
     }
+
+
+def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
+                          buyer_ons_code=None, year_from=None, year_to=None,
+                          psr_only=False, batch: int = 2000
+                          ) -> tuple[int, Iterator[dict]]:
+    """Every notice matching these filters, counted first and then streamed.
+
+    `contracts()` above returns a window — 500 rows by default, 5,000 at most —
+    because it is answering a page that has to draw charts beside the table.
+    This answers a download, where the window is the bug: an export that ships
+    the first 500 of 98,636 rows and says nothing looks complete and is 0.5%
+    of the corpus.
+
+    The count comes back separately and first, because it has to be written
+    into the file's header line before a single row is serialised. Two queries
+    over the same filters, so on a warehouse being written to they could in
+    principle disagree; the export is taken against a read-only connection and
+    the write slot is held by whatever module is running, so in practice they
+    see the same snapshot.
+
+    No `deadline()` here, unlike every other read in this file. That guard
+    exists to stop a mis-typed operator query hanging a page; a complete export
+    of a six-figure corpus is *meant* to take as long as it takes, and the rows
+    are handed to the socket as they arrive rather than assembled in memory.
+    """
+    _public(["contracts", "supplier_aliases"])
+    clause, params = _contract_filters(
+        provider_key, buyer_ons_code, year_from, year_to, psr_only)
+    total = _one(conn, f"SELECT COUNT(*) AS n FROM contracts c{clause}",
+                  params).get("n", 0)
+
+    def rows() -> Iterator[dict]:
+        cursor = conn.execute(_NOTICE_SELECT.format(clause=clause), params)
+        try:
+            while True:
+                fetched = cursor.fetchmany(batch)
+                if not fetched:
+                    return
+                chunk = [dict(row) for row in fetched]
+                _add_notice_links(chunk)
+                yield from chunk
+        finally:
+            cursor.close()
+
+    return total, rows()
 
 
 def _add_notice_links(notices: list[dict]) -> None:

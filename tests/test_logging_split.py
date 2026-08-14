@@ -155,6 +155,81 @@ def test_the_column_renders_the_live_total():
     http.REQUESTS.reset()
 
 
+# --- rotation (O-03) ------------------------------------------------------------------
+#
+# Nothing ever pruned these files. The half of the finding that closed in
+# Phase 2 was tests writing into the operator's logs/; this is the other half.
+
+
+def test_the_log_file_is_bounded_and_keeps_generations(configured):
+    from logging.handlers import RotatingFileHandler
+
+    _, files = _handlers_by_kind()
+    handler = files[0]
+
+    assert isinstance(handler, RotatingFileHandler)
+    assert handler.maxBytes == configured.log_max_bytes > 0
+    assert handler.backupCount == configured.log_backup_count > 0
+
+
+def test_a_log_that_passes_the_ceiling_rolls_over_rather_than_growing(
+        tmp_path, monkeypatch):
+    """Written small enough to roll in a test, because the real ceiling is
+    10 MB and asserting on it would mean writing 10 MB."""
+    import logging as logging_module
+
+    from pipeline import config, logging_conf
+    from pipeline.config import Settings
+
+    settings = Settings(contact_email="t@example.com", logs_dir=tmp_path / "logs",
+                         raw_archive_dir=tmp_path / "raw",
+                         database_path=tmp_path / "w.db",
+                         log_max_bytes=2_000, log_backup_count=2, _env_file=None)
+    monkeypatch.setattr(logging_conf, "get_settings", lambda: settings)
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+    logging_conf.configure_logging("rolling_module")
+
+    try:
+        log = logging_module.getLogger("rolling")
+        for index in range(400):
+            log.info("x" * 100 + str(index))
+        for handler in logging_module.getLogger().handlers:
+            handler.flush()
+
+        directory = settings.logs_dir
+        assert (directory / "rolling_module.log").stat().st_size <= 2_200
+        assert (directory / "rolling_module.log.1").is_file()
+        # Bounded: the ceiling is the point, so the generation past the count
+        # must be gone rather than merely old.
+        assert not (directory / "rolling_module.log.3").exists()
+        assert sum(p.stat().st_size for p in directory.glob("rolling_module.log*")) \
+            <= 2_200 * 3
+    finally:
+        logging_module.getLogger().handlers.clear()
+
+
+def test_configuring_logging_does_not_create_a_file_for_a_module_that_never_ran(
+        tmp_path, monkeypatch):
+    """Several commands configure logging as a matter of course. An empty file
+    per module name they passed is how a log directory stops being readable."""
+    from pipeline import config, logging_conf
+    from pipeline.config import Settings
+
+    settings = Settings(contact_email="t@example.com", logs_dir=tmp_path / "logs",
+                         raw_archive_dir=tmp_path / "raw",
+                         database_path=tmp_path / "w.db", _env_file=None)
+    monkeypatch.setattr(logging_conf, "get_settings", lambda: settings)
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+
+    try:
+        logging_conf.configure_logging("quiet_module")
+        assert not (settings.logs_dir / "quiet_module.log").exists()
+    finally:
+        import logging as logging_module
+
+        logging_module.getLogger().handlers.clear()
+
+
 def test_the_suite_does_not_write_into_the_repos_log_directory(tmp_path):
     """The conftest autouse fixture, asserted rather than assumed.
 

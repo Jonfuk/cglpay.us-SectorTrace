@@ -99,6 +99,41 @@ function downloadLink(entry, label) {
   });
 }
 
+/* Whether these files predate the last thing that changed the warehouse.
+ *
+ * The line is written to be read by someone about to send one of these files
+ * to a person outside the team, so it names the runs rather than showing a
+ * badge: "stale" invites a shrug, "the sheets predate two runs of
+ * m01_procurement" does not. Where the job record cannot name what changed —
+ * a run started from the command line leaves no row — it says that instead of
+ * implying nothing happened.
+ */
+function stalenessLine(group, active) {
+  if (!group) return null;
+  // Seconds, not microseconds: these stamps come from three different writers
+  // and only one of them truncates.
+  const when = (stamp) => String(stamp || '')
+    .replace('T', ' ').replace(/\.\d+/, '').replace('+00:00', 'Z');
+
+  if (!group.stale) {
+    return el('p', { class: 'muted small',
+      text: 'Written after the last thing the pipeline collected.' });
+  }
+
+  const runs = group.since || [];
+  const named = runs.length
+    ? `${runs.length} job${runs.length === 1 ? '' : 's'} finished since: `
+      + runs.map((r) => r.label).join(', ') + '.'
+    : 'The job record does not say what changed — a run started from the '
+      + 'command line leaves no row in it.';
+
+  return el('p', { class: 'warn small' },
+    el('strong', { text: 'These files predate the last collection. ' }),
+    `Oldest written ${when(group.oldest_file)}; ${(active || {}).what || 'the pipeline last ran'} `
+      + `${when((active || {}).at)}. ${named} `
+      + 'Re-export before quoting anything from these.');
+}
+
 async function loadFiles() {
   let data;
   try { data = await api('/api/admin/exports'); }
@@ -123,11 +158,15 @@ async function loadFiles() {
     groups.get(key).push(file);
   }
 
+  const staleness = new Map(
+    ((data.staleness || {}).groups || []).map((g) => [g.group, g]));
+
   const sections = [...groups.entries()].map(([group, files]) => el('div', {},
     el('h2', {}, group,
       el('span', { class: 'muted small',
         text: ` — ${files.length} file${files.length === 1 ? '' : 's'}, `
           + bytes(files.reduce((n, f) => n + f.bytes, 0)) })),
+    stalenessLine(staleness.get(group), (data.staleness || {}).pipeline_last_active),
     el('table', {},
       el('thead', {}, el('tr', {},
         el('th', { text: 'File' }), el('th', { class: 'num', text: 'Size' }),

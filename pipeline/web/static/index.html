@@ -197,6 +197,18 @@
     <div class="cards" id="health-cards"></div>
 
     <div class="panel" style="margin-top: 12px">
+      <h2>Storage</h2>
+      <p class="muted small">
+        What this pipeline is holding on disk beside the warehouse. The raw
+        archive is the audit trail — the exact bytes behind every row — so it
+        grows without bound by design and deleting it would break the
+        provenance chain. Watching it is the whole strategy, and until this
+        card existed the only measurement was a one-off audit.
+      </p>
+      <div id="health-storage"></div>
+    </div>
+
+    <div class="panel" style="margin-top: 12px">
       <div class="row">
         <h2 style="margin: 0">Coverage</h2>
         <span class="spacer"></span>
@@ -391,12 +403,18 @@
       <button class="btn" data-export="geojson">GeoJSON</button>
       <button class="btn" data-export="echarts">Charts</button>
       <button class="btn" data-export="docs">Data dictionary</button>
+      <button class="btn" data-export="bundle">Bundle</button>
       <button class="btn primary" data-export="all">Everything</button>
       <span class="spacer"></span>
       <span id="export-status" class="muted small"></span>
     </div>
     <p class="muted small">
       Every file is written with a companion <code>.provenance.json</code>.
+      <strong>Bundle</strong> zips whatever is in this directory now — with a
+      manifest naming every file, its SHA-256 and the companion that belongs to
+      it — so "the evidence" is one download rather than eighteen. It reads the
+      directory, not the warehouse: if these files are stale the bundle is
+      stale by exactly the same amount.
       Pushing Sheets tabs to Google stays on the command line: it writes to a
       shared document and needs credentials and someone watching.
     </p>

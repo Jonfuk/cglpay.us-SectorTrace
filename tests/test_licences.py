@@ -78,20 +78,26 @@ def test_every_exportable_endpoint_has_at_least_one_licence():
 
 def test_every_export_header_carries_a_licence_line():
     """The finding, stated directly: a CSV that leaves this server is
-    separated from any accompanying note within a day."""
+    separated from any accompanying note within a day.
+
+    Against `header()` rather than `to_csv`, because since W-06 there are two
+    writers over one header — the in-memory one and the streamed one — and the
+    licence has to be on both. `to_csv` now refuses the streamed endpoints
+    outright, so testing through it would have quietly stopped covering
+    contracts, which is the largest export this server offers.
+    """
     for endpoint in public_export.EXPORTABLE:
-        csv = public_export.to_csv(
-            [{"a": 1}], public_export.provenance(endpoint, {}))
-        lines = [line for line in csv.splitlines() if line.startswith("# licence:")]
+        text = public_export.header(public_export.provenance(endpoint, {}), 1)
+        lines = [line for line in text.splitlines() if line.startswith("# licence:")]
         assert lines, f"the {endpoint} export names no licence"
         assert all(len(line) > len("# licence: ") for line in lines)
 
 
 def test_the_licence_line_names_the_deed_where_there_is_one():
-    csv = public_export.to_csv([{"a": 1}], public_export.provenance("contracts", {}))
-    assert "# licence: Open Government Licence v3.0" in csv
-    assert "nationalarchives.gov.uk/doc/open-government-licence" in csv
-    assert "Contains public sector information" in csv, "attribution is a condition"
+    text = public_export.header(public_export.provenance("contracts", {}), 1)
+    assert "# licence: Open Government Licence v3.0" in text
+    assert "nationalarchives.gov.uk/doc/open-government-licence" in text
+    assert "Contains public sector information" in text, "attribution is a condition"
 
 
 def test_a_caution_travels_with_the_licence_it_belongs_to():

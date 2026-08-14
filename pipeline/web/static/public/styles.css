@@ -396,10 +396,49 @@ main:focus { outline: none; }
   color: var(--text-secondary); font-size: 14.5px; line-height: 1.6;
 }
 .noscript h1 { color: var(--text-primary); font-size: 20px; margin: 0 0 var(--space-4); }
-.noscript ul { padding-left: var(--space-5); }
+/* --space-6, not --space-5: there is no --space-5 token, and an undefined
+ * custom property makes the whole declaration invalid, so this list had no
+ * indent at all. Found while adding the API page's list beside it. */
+.noscript ul { padding-left: var(--space-6); }
 .noscript li { margin-bottom: var(--space-2); }
 .noscript code { font-family: var(--mono); color: var(--accent-teal); }
 .noscript strong { color: var(--accent-amber); }
+
+/* The API documentation at /api.
+ *
+ * A document rather than an application: no script on that page at all, so
+ * everything here is layout for prose, and it reuses the portal's tokens so
+ * the two do not look like different sites. Measure is capped at ~78ch —
+ * these are paragraphs a researcher reads, not a dashboard they scan. */
+.apidoc { max-width: 900px; }
+.apidoc .lede { font-size: 17px; color: var(--text-secondary); max-width: 72ch; }
+.apidoc p, .apidoc li { max-width: 78ch; }
+.apidoc h1 { margin-bottom: var(--space-4); }
+.apisection { margin: var(--space-12) 0 0; }
+.apisection > h2 {
+  padding-bottom: var(--space-2); border-bottom: 1px solid var(--border-subtle);
+}
+.apisection > ul { padding-left: var(--space-6); color: var(--text-secondary); }
+.apisection > ul li { margin-bottom: var(--space-2); }
+
+.apiroute {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-surface); padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+.apiroute h3 { margin-bottom: var(--space-2); font-size: 15px; }
+.apiroute h3 code { font-size: 15px; color: var(--text-primary); }
+.apiroute code { font-family: var(--mono); font-size: 13px; color: var(--accent-teal); }
+.apiroute p { color: var(--text-secondary); }
+
+.params { width: 100%; border-collapse: collapse; margin: 0 0 var(--space-3); }
+.params th, .params td {
+  text-align: left; padding: 6px 10px 6px 0; vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle); font-size: 13.5px;
+}
+.params th { color: var(--text-muted); font-weight: 600; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.params td:first-child { white-space: nowrap; width: 1%; padding-right: var(--space-4); }
 
 /* Print.
  *

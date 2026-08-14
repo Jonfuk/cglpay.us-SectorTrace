@@ -119,6 +119,18 @@ class Settings(BaseSettings):
     # above: that is the whole point of it. See pipeline/authority_websites.py.
     verified_websites_path: Path = REPO_ROOT / "pipeline" / "verified_websites.json"
 
+    # How much log a module may keep. Nothing pruned these until now, and the
+    # directory had reached 7.2 MB with no ceiling of any kind (O-03). 10 MB
+    # per generation and five kept is roughly a full crawl's worth of `http.get`
+    # lines several times over, and bounds each module at 60 MB.
+    #
+    # Settings rather than constants because discarding the oldest generation
+    # is a deletion, and an operator who wants a longer operational record
+    # should be able to say so without editing pipeline/logging_conf.py. See
+    # its docstring for what a discarded generation does and does not cost.
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+
     charity_commission_api_key: str | None = None
     companies_house_api_key: str | None = None
     cqc_subscription_key: str | None = None
