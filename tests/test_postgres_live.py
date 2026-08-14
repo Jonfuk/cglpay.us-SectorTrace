@@ -13,7 +13,7 @@ having to be re-exported into each shell:
     POSTGRES_TEST_URL=postgresql://sectortrace_app:pw@host:5432/sectortrace
     POSTGRES_TEST_RO_URL=postgresql://sectortrace_reader:pw@host:5432/sectortrace
 
-    uv run python -m pytest tests/test_postgres_live.py -q
+    uv run python -m pytest -m postgres -q
 
 What this covers that `test_migration_equivalence.py` cannot: that one diffs
 the two trees as *text*, offline, which catches a file added to one tree and
@@ -63,9 +63,17 @@ def _configured_url(name: str) -> str | None:
 POSTGRES_TEST_URL = _configured_url("POSTGRES_TEST_URL")
 POSTGRES_TEST_RO_URL = _configured_url("POSTGRES_TEST_RO_URL")
 
-pytestmark = pytest.mark.skipif(
-    not POSTGRES_TEST_URL,
-    reason="POSTGRES_TEST_URL is not set; the offline suite does not need a server")
+# Two gates, and they answer different questions. The marker keeps these out
+# of `uv run python -m pytest`, which is documented as offline: a developer who
+# has configured a server should not have the default suite quietly start
+# depending on it being up. The skipif is for when the marker has been asked
+# for and there is still no URL to use.
+pytestmark = [
+    pytest.mark.postgres,
+    pytest.mark.skipif(
+        not POSTGRES_TEST_URL,
+        reason="POSTGRES_TEST_URL is not set; set it in .env or the environment"),
+]
 
 
 @pytest.fixture(scope="module")

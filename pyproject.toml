@@ -159,5 +159,12 @@ packages = ["pipeline"]
 testpaths = ["tests"]
 markers = [
     "integration: hits live external sources, skipped by default",
+    # Deselected for the same reason `integration` is, though not the same
+    # risk: these need a PostgreSQL server on the LAN, and they write to it.
+    # `uv run python -m pytest` is documented as offline and fixture-backed,
+    # and a suite that silently starts needing a second machine to be up --
+    # and takes longer, and writes to a real database -- is not that, however
+    # convenient it is for whoever configured the server.
+    "postgres: needs a PostgreSQL server (POSTGRES_TEST_URL), skipped by default",
 ]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not postgres'"
