@@ -75,6 +75,12 @@ class FetchResult:
     payload_sha256: str
     not_modified: bool
     archived_path: Path | None
+    # Where the request actually landed, redirects followed. Distinct from
+    # `url`, which is what was asked for: a council that has moved domain
+    # answers on the old one and serves from the new, and a caller storing a
+    # base URL needs the one that will still answer when paths are joined to
+    # it. None on a 304 served from the archive, where nothing was fetched.
+    final_url: str | None = None
 
     @property
     def content_type(self) -> str | None:
@@ -561,4 +567,5 @@ class PipelineHTTPClient:
             payload_sha256=sha256,
             not_modified=not_modified,
             archived_path=archived_path,
+            final_url=str(response.url),
         )
