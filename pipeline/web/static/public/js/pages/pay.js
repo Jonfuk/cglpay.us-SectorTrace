@@ -200,6 +200,24 @@ function renderAdverts(container, data, charts) {
 
 // --- 2c. workforce census ----------------------------------------------------
 
+/** The verification caveat that is true right now, or none once all of them
+ *  have been checked.
+ *
+ *  Three states rather than two, because a census metric became something a
+ *  person can check one at a time (migration 0033) and a corpus that is partly
+ *  checked is the state it will be in for most of its life. */
+function censusCaveat(data) {
+  const total = data.census_total ?? (data.workforce_census || []).length;
+  const verified = data.census_verified_count ?? 0;
+  if (!total || verified >= total) return null;
+  return verified === 0
+    ? pinnedCaveat(data.caveats?.census_unverified_note,
+                    'Every figure below is unverified')
+    : pinnedCaveat(data.caveats?.census_partly_verified_note,
+                    `${verified} of ${total} figures below `
+                    + `${verified === 1 ? 'has' : 'have'} been checked`);
+}
+
 function renderCensus(container, data, charts) {
   const rows = data.workforce_census || [];
   const holder = el('div', {});
@@ -210,9 +228,13 @@ function renderCensus(container, data, charts) {
     + 'workforce census.',
     el('div', { class: 'panel' },
       pinnedCaveat(data.caveats?.census_comparability_note, 'Not comparable between years'),
-      data.census_all_unverified
-        ? pinnedCaveat(data.caveats?.census_unverified_note, 'Every figure below is unverified')
-        : null,
+      // Pinned until nothing below is unverified, not until something is
+      // verified. The chart draws every figure whatever its flag, so the
+      // caveat that used to vanish the moment one figure was checked would
+      // have left the other sixty-seven on screen with nothing said about
+      // them. The verified count goes in the heading so the reader can see
+      // which way the number is moving.
+      censusCaveat(data),
       holder,
       provenanceFromRows(rows, { tables: ['workforce_census_metrics'], module: 'm06_workforce_census' }))));
 
@@ -243,8 +265,14 @@ function renderCensus(container, data, charts) {
       }),
     })),
   }, {
+    // The screen-reader description carries the verification state too. A
+    // caveat that only exists as a visual panel beside the chart is a caveat
+    // half the audience does not get.
     aria: 'Grouped bar chart of workforce census metrics by census year. '
-      + 'All values are unverified pending a human check against the source tables.',
+      + `${data.census_verified_count ?? 0} of `
+      + `${data.census_total ?? rows.length} figures have been checked against `
+      + 'the page they were parsed from; the rest are unverified. Figures are '
+      + 'not comparable between census years.',
   }));
 
   container.append(tableCard('Census metrics', [

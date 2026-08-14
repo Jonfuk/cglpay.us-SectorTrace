@@ -58,7 +58,7 @@ Task Scheduler or CI.
 | `data/raw/` | Raw response bytes, addressed by SHA-256 — the audit trail behind every figure |
 | `data/warehouse.db` | The canonical SQLite warehouse |
 | `logs/` | Structured JSON logs, one file per module |
-| `docs/verification/` | Human-review markdown (census value checks, document candidates) |
+| `docs/verification/` | Human-review markdown (document candidates, resolved URLs) |
 | `exports/output/` | Generated exports, each with a `.provenance.json` |
 | `.env` | Configuration and API keys — never committed |
 
@@ -214,9 +214,13 @@ you want to discover that; raise it deliberately once you trust it.
 `m06`, `m09` and `m10` produce material for review rather than finished
 evidence:
 
-- **`m06`** writes `docs/verification/census_{year}_tables.md`, pairing every
-  parsed value with the source line it came from. Metrics stay
-  `verified = 0` until you say otherwise.
+- **`m06`** stores every figure with the verbatim line it was parsed from and
+  the full text of every page it read. Metrics stay `verified = 0` until
+  somebody checks one on the **Census tab** of `/admin`, which shows the figure
+  beside the archived page it came from. The database refuses `verified = 1`
+  without a `census_verifications` row behind it (migration `0033`) — including
+  the bulk `UPDATE` this module used to print into a generated markdown
+  worklist, which set twenty flags at once and attributed them to nobody.
 - **`m09`** writes `docs/verification/cdp_candidates.md`, grouped by region.
   Nothing reaches `cdp_documents` unverified.
 - **`m10`** finds committee papers the same way. Nothing reaches
@@ -431,9 +435,11 @@ the data on each request rather than by a hardcoded rule:
   £1bn account for 99.7% of the total — so the sum describes those frameworks
   rather than this sector. The page leads with the median notice and shows the
   concentration. A corpus without that problem gets its total back.
-- **Workforce census figures are shown as awaiting verification**, because
-  every one of them is `verified = 0` and `docs/CAVEATS.md` says to filter on
-  that before publishing.
+- **Workforce census figures carry their verification state per figure**,
+  because `docs/CAVEATS.md` says to filter on `verified` before publishing and
+  a partly-checked census is the normal state. The pinned caveat says how many
+  of them have been checked and stays up until none is outstanding — it does
+  not disappear the moment the first figure is signed off.
 
 The boundary geometry for the map comes from `authorities.geometry_geojson`,
 which `m00_geography` already collected with provenance, rather than from a
@@ -464,9 +470,11 @@ It binds every interface, so another machine on the network reaches it at
 start.cmd web
 ```
 
-Four screens: an overview of what is pending by module and item type; the
+Five screens: an overview of what is pending by module and item type; the
 queue itself, filterable and searchable, with approve/reject/reset per item or
-across a selection; a browser for every table and view; and a SQL box.
+across a selection; the Candidates tab, where a document becomes evidence; the
+Census tab, where a parsed figure is checked against the archived page it came
+from; a browser for every table and view; and a SQL box.
 
 Three things exist because the queue is thousands of rows and two item types
 are 72% of it:

@@ -173,8 +173,8 @@ function replace(container, ...children) {
  * the routing, so the name has to be known to it; what happens next is the
  * module's business, and it finds out through the event at the end of
  * showTab rather than by being called. */
-const TABS = ['overview', 'review', 'pipeline', 'health', 'candidates', 'exports',
-               'database', 'sql'];
+const TABS = ['overview', 'review', 'pipeline', 'health', 'candidates', 'census',
+               'exports', 'database', 'sql'];
 let currentTab = 'overview';
 
 function showTab(name) {

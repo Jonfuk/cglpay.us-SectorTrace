@@ -2,21 +2,24 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **All seven phases have been worked**:
-1–3, 5 and 6 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
-(D-04 followed on 2026-08-13); Phase 7 measured P-01 and F-04 and left P-03
-open. Each phase records what changed from the plan as it landed.
+1 skipped, 18 deselected, 422s**). **Eight phases have been worked**: 1–3, 5,
+6 and 8 are done; Phase 4 delivered F-01 and U-01 and left F-03 open (D-04
+followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01 and
+F-04 and left P-03 open. Each phase records what changed from the plan as it
+landed.
 
-**Everything still open is now sequenced as Phases 8–19**, at the end of §5 —
-twenty-one findings, four workstreams and three standing decisions, in the
-order to take them and with the reasons for that order. None has been started.
+**Everything still open is now sequenced as Phases 9–19**, at the end of §5 —
+twenty findings, four workstreams and two standing decisions, in the order to
+take them and with the reasons for that order. **Phase 8 is delivered**; none
+of 9–19 has been started.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
 
 **What is left, as of 2026-08-14.** Everything the audit filed has been
-delivered, measured and declined, or is listed here. **Three remain**, and
-none is blocked on effort — each needs a decision first. D-05 and D-06, both
+delivered, measured and declined, or is listed here. **Two remain**, and
+neither is blocked on effort — each needs a decision first. F-03, the third,
+was closed by Phase 8 the same day. D-05 and D-06, both
 filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
@@ -31,7 +34,7 @@ already there.
 
 | | Finding | What it needs |
 |---|---|---|
-| **F-03** | Workforce census stays unverified — 68 metrics, all `verified = 0` | A design. The census is a different shape from candidate promotion: no URL per row, a markdown worklist, and a caveat forbidding cross-year differencing. |
+| ~~**F-03**~~ | *Closed 2026-08-14 (Phase 8)* — `census_verifications`, two triggers, and a Census tab that shows each figure beside the archived page it was parsed from. | |
 | **F-05** | Nothing is tracked over time | A decision before a design, and my recommendation is still *not yet* — history invites exactly the differencing `docs/CAVEATS.md` forbids. Add it to one table if one specific claim needs it. |
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
@@ -39,11 +42,11 @@ already there.
 | **W-05 – W-27** | Twenty-one open portal and operator findings from the 2026-08-14 comparison | Not decisions — work, and now sequenced. Phases 9–13. |
 | **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
 
-The three decisions above are the only things in this register still waiting on
-somebody rather than on a session. F-03 opens Phase 8 (its design is the
-phase); F-05 and P-03 are Phase 14, together, because both are gated on your
-say-so and neither should be started inside a phase that is about something
-else.
+**Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
+exists, so the verification campaign is no longer waiting on a session — it is
+waiting on people, which is open question 1. F-05 and P-03 are Phase 14,
+together, because both are gated on your say-so and neither should be started
+inside a phase that is about something else.
 
 Also standing, and deliberately: **O-03** is half done — tests no longer write
 into `logs/`, but nothing rotates them (Phase 10).
@@ -94,9 +97,10 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Most likely a `--dry-run` (the commit guard at [pipeline/modules/m13_la_budgets.py:391](pipeline/modules/m13_la_budgets.py:391) is correct, and the runner rolls back at [pipeline/runner.py:120](pipeline/runner.py:120)). **Not proven** — see D-02, which is why it cannot be proven.
 - Verified by: a real run writing rows, plus D-02 making the next one self-evident.
 
-**F-03 · Workforce census stays unverified · M — still open; deferred from Phase 4**
-- Evidence **[live]**: `workforce_census_metrics` 68 rows, all `verified = 0`. Portal correctly renders them as awaiting verification ([README.md:396](README.md:396)).
-- Same shape as F-01 — a markdown worklist and manual SQL. Fold into the same promotion mechanism rather than building a second one.
+**F-03 · Workforce census stays unverified · M — closed in Phase 8**
+- Evidence **[live, at filing]**: `workforce_census_metrics` 68 rows, all `verified = 0`. Portal correctly rendered them as awaiting verification ([README.md:396](README.md:396)).
+- The audit predicted "same shape as F-01 — fold into the same promotion mechanism rather than building a second one". **That prediction was wrong, and the phase's first job was establishing why.** Promotion *creates* an evidence row in another table by fetching a document; census verification raises a flag on a row that already exists and whose bytes m06 already fetched, hashed and archived. There is no candidate, no target and no fetch — so a fourth `KINDS` entry would have needed `candidate_url`, `target_key` and four fetch-provenance columns to be either faked or permanently `NULL`. Sibling table, own triggers. See `pipeline/migrations/0033_census_verifications.sql`, which carries the argument.
+- **Fix:** `census_verifications` records who, when, the value and unit as they read at the time, and the URL and SHA-256 of the report the check was taken against — named `checked_against_*` because nothing was retrieved. Two triggers refuse `verified = 1` without a decision row, on `UPDATE` and on `INSERT`. The Census tab shows each figure beside the archived text of the page it was parsed from, which is what makes the screen a replacement for the markdown worklist rather than a copy of it: the line is what was parsed, the page is what it meant. `workforce_census_page_text` had been collected since m06 was written and never read.
 
 **F-04 · Resumability is real for one module · S to establish — closed in Phase 7** (confirmed: 1 of 17; README corrected)
 - Evidence **[live]**: `module_cursors` holds 2 rows, both `m01_procurement`. [README.md:108](README.md:108) describes resumable cursors as a property of modules generally.
@@ -861,7 +865,8 @@ is introduced in two phases (11 and 12) rather than in seven.
 1. **F-03's mechanism before everything.** Everything downstream of it is a
    person's labour, and labour that could have started is the only cost a
    phase plan can waste outright. It is Phase 8 because it is the gate, not
-   because it is large or urgent.
+   because it is large or urgent. *Delivered 2026-08-14; the gate is open and
+   the labour is now the only thing between here and a verified census.*
 2. **W-13 (an authority page) before W-14 and W-17.** Both are entry points
    to a page that does not exist. Built first, each needs a temporary
    destination and then rework when the real one lands.
@@ -896,7 +901,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 
 | Phase | Delivers | Effort | Gate |
 |---|---|---|---|
-| **8** | F-03 — census verification, and the campaign starts | M | Open question 1 |
+| ~~**8**~~ | F-03 — census verification, and the campaign starts | M | **done** |
 | **9** | W-18, W-08, W-10, W-05, W-15 — the shared furniture | S–M | none |
 | **10** | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | none |
 | **11** | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | Phase 9 |
@@ -917,9 +922,82 @@ list, and concurrent sessions have collided on this file before.
 
 ---
 
-### Phase 8 — Unblock the verification campaign · M — **planned**
+### Phase 8 — Unblock the verification campaign · M — **done** (2026-08-14)
 
-Delivers **F-03**. The only phase that gates a person rather than a session.
+Delivered **F-03**. The only phase that gates a person rather than a session.
+Suite green: 1476 passed, 2 skipped, 18 deselected.
+
+**What changed from the plan.** The design question the phase opened with was
+posed as a choice between "a fourth `KINDS` entry with the fetch made
+conditional" and "a sibling table with its own trigger". It went the second
+way, and the reason is stronger than the framing allowed for: the two acts are
+not the same act with an optional fetch. A promotion *creates* an evidence row
+in a second table; a census verification raises a flag on a row that already
+exists. There is no candidate, no target and no `<authority>|<url>` key — a
+census metric is identified by four columns, one of them a whole verbatim line
+of PDF prose. Fitting that into `evidence_promotions` would have meant a
+`candidate_url` holding something that is not a URL and four fetch-provenance
+columns permanently `NULL`. The argument is written into
+`0033_census_verifications.sql`, at the point somebody would go looking.
+
+**Two triggers, not one.** The plan said "the trigger discipline of `0030`
+extends to whatever this writes", and `0030`'s triggers all fire `BEFORE
+INSERT` on a target table. That shape does not transfer: the flag is normally
+raised by an `UPDATE`. So there is a `BEFORE UPDATE OF verified` with the
+`OLD`/`NEW` pair in its `WHEN` (re-writing an already-verified row is not a new
+decision and must not need a second one), *and* a `BEFORE INSERT`, because a
+rule enforced on one route is not enforced.
+
+**The screen turned out to be the design.** The phase brief said the mechanism
+records "who verified, when, against what, and on what note", and *against
+what* is where the work was. The markdown worklist could pair a value with the
+line it was parsed from; only the page around that line says whether the line
+meant what the parser took it to mean. `workforce_census_page_text` has held
+every page m06 read since m06 was written and nothing had ever queried it. So
+the Census tab serves the page, and a figure becomes verifiable once its page
+has been expanded in that session — the census analogue of the Candidates tab
+requiring the document to be opened. One page carries several figures and is
+read once, which is why the worklist is ordered by page and why the batch
+verifies per figure off a page read once.
+
+**Three things the phase found on the way and did not leave alone:**
+
+- **The portal had a hole this work would have opened.** `census_all_unverified`
+  drove a pinned caveat reading "every figure below is unverified", and it goes
+  false the moment one figure is checked — which would have left the other 67
+  charted with nothing said about them. There is now a third state:
+  `census_verified_count` of `census_total`, pinned until none is outstanding.
+  A portal edit inside an otherwise admin-side phase, done deliberately rather
+  than deferred: shipping the mechanism without it would have been shipping a
+  known regression.
+- **A verification can go stale, and silently.** It records the value, unit and
+  the report's SHA-256, so `census_verify.stale()` catches both ways it
+  happens — a parser revision reading a different number off the same line
+  (`raw_text` is in the key and the value is not, so that updates in place), and
+  the publisher reissuing the PDF at the same URL. Listed at the top of the tab,
+  not in a query nobody runs.
+- **`preserve=DECISION_COLUMNS` had been protecting one column out of three.**
+  `db.DECISION_COLUMNS` names `verified`, `verified_at` and `rejected`;
+  `workforce_census_metrics` had only the first. `0033` adds the other two, so
+  the re-run protection m06 already asked for now actually covers what it
+  names.
+
+**Also delivered:** rejecting a figure files a `parse_failures` row as well as
+a decision, so a bad parse is findable from the parser's side rather than only
+from the figure's; and `source_page` is documented as the zero-based index it
+has always been, said out loud in the UI rather than quietly incremented for
+display, which would have made the screen disagree with the database, the
+exports and the portal.
+
+**The markdown worklist is gone, not supplemented.** `m06` no longer writes
+`docs/verification/census_{year}_tables.md` and the three generated files are
+deleted; `docs/verification/census_metrics.md` replaces them with a pointer and
+the reason. Leaving them would have left a documented instruction — the bulk
+`UPDATE` — that the database now aborts.
+
+Below is the plan as written.
+
+---
 
 **Why this first, and alone.** The promotion path exists and now gets used
 (F-01, U-03); the census does not have one. 68 metrics sit at `verified = 0`

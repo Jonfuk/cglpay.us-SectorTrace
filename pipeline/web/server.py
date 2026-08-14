@@ -39,12 +39,13 @@ from urllib.parse import parse_qs, urlparse
 
 import structlog
 
-from pipeline import db, promote
+from pipeline import census_verify, db, promote
 from pipeline.config import Settings, get_settings
 from pipeline.web import (
     admin,
     artefacts,
     candidates,
+    census,
     health,
     public_export,
     public_queries,
@@ -92,7 +93,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
 for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "candidates"):
+                 "exports", "candidates", "census"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -741,6 +742,36 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError("No such candidate.", status=404)
             return found
 
+        # The census worklist. Separate from /api/admin/candidates because the
+        # act is different -- nothing is fetched and nothing crosses into
+        # another table; a figure already in the warehouse is checked against a
+        # page already archived. See pipeline/census_verify.py.
+        if path == "/api/admin/census":
+            try:
+                return census.listing(
+                    conn,
+                    year=_int(params, "year", 0) or None,
+                    status=_str(params, "status") or "unchecked",
+                    offset=_int(params, "offset", 0),
+                    limit=_int(params, "limit", census.PAGE))
+            except census_verify.VerificationError as exc:
+                raise ApiError(str(exc), status=400) from None
+
+        if path == "/api/admin/census/counts":
+            return {**census.counts(conn),
+                     "stale": census_verify.stale(conn),
+                     "decisions": census_verify.history(conn, limit=20)}
+
+        # The archived page text a figure is checked against. The whole reason
+        # this screen can replace the markdown worklist rather than duplicate
+        # it: the line is what was parsed, the page is what it meant.
+        if path == "/api/admin/census/page":
+            try:
+                return census.page_text(conn, _int(params, "year", 0),
+                                         _int(params, "page", -1))
+            except census_verify.VerificationError as exc:
+                raise ApiError(str(exc), status=404) from None
+
         if path == "/api/admin/exports":
             return artefacts.listing(self.settings)
 
@@ -867,7 +898,62 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/candidates/promote": self._promote,
             "/api/admin/candidates/reject": self._reject_candidates,
             "/api/admin/candidates/reset": self._reset_candidate,
+            "/api/admin/census/verify": self._verify_census,
+            "/api/admin/census/reject": self._reject_census,
+            "/api/admin/census/reset": self._reset_census,
         }
+
+    def _verify_census(self, body: dict) -> Any:
+        """Record that one census figure was checked against its page.
+
+        One, never a list, the same rule `_promote` follows -- and for a reason
+        that is not the fetch, because there is no fetch here. What is being
+        recorded is that a person read a page and agreed with a number, and a
+        route taking an array would be a route that made claiming that cheap.
+        Bulk rejection has its own endpoint: see census_verify.reject.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            result = census_verify.verify(
+                conn,
+                key=str(body.get("key", "")),
+                verified_by=str(body.get("verified_by", "")),
+                note=body.get("note"))
+        except census_verify.VerificationError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+        log.info("web.census_verified", key=result["key"],
+                  year=result["census_year"], metric=result["metric"],
+                  by=result["decided_by"])
+        return result
+
+    def _reject_census(self, body: dict) -> Any:
+        keys = body.get("keys")
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise ApiError("keys must be a list of strings.", status=400)
+        conn = db.get_connection(self.settings)
+        try:
+            count = census_verify.reject(
+                conn, keys=keys,
+                rejected_by=str(body.get("rejected_by", "")),
+                note=body.get("note"))
+        except census_verify.VerificationError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.census_rejected", count=count)
+        return {"rejected": count}
+
+    def _reset_census(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            return census_verify.reset(conn, key=str(body.get("key", "")))
+        except census_verify.VerificationError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
 
     def _promote(self, body: dict) -> Any:
         """Promote one candidate into the evidence base.

@@ -24,7 +24,12 @@ census are kept in separate tables deliberately.
 
 **Do not difference two workforce census years.** Provider participation
 varies between rounds. The 2023 report states in terms that its data "should
-not be used to infer that the workforce size overall" changed.
+not be used to infer that the workforce size overall" changed. **This survives
+verification.** A metric with `verified = 1` has been read off its source page
+by a named person and transcribed correctly, and that is the whole of what the
+flag says; it is not a statement that the year is comparable with the year
+before. Two verified figures are still two figures from two differently
+participating samples.
 
 **Do not attribute any census figure to a named provider.** The census
 publishes sector aggregates only; there is no provider-level breakdown. The
@@ -136,8 +141,23 @@ pay scale, and not the pay of anyone currently in post.
 
 - Years are not like-for-like (see above).
 - **Every metric is unverified until a human checks it.** `verified = 0` is the
-  default; `docs/verification/census_{year}_tables.md` pairs each parsed value
-  with the source line it came from. Filter on `verified` before publishing.
+  default, and the database refuses `verified = 1` without a
+  `census_verifications` row behind it (migration `0033`). Checking happens on
+  the Census tab of `/admin`, which shows each figure beside the archived text
+  of the page it was parsed from; see
+  [`verification/census_metrics.md`](verification/census_metrics.md). Filter on
+  `verified` before publishing.
+- **`verified` means transcribed correctly, and nothing else.** Not comparable,
+  not attributable to a provider, not a statement about the census's own
+  methodology. The two caveats above apply to a checked figure exactly as they
+  apply to an unchecked one.
+- **A verification can go stale.** It records the value, unit and the SHA-256
+  of the report it was taken against. If a parser revision reads a different
+  number off the same line, or the publisher reissues the PDF, the flag is
+  still up over something nobody checked. `census_verify.stale()` finds those
+  and the Census tab lists them at the top.
+- `source_page` is a **zero-based** index into the extracted pages. A PDF
+  viewer's page numbers are one higher.
 - `workforce_segment = 'ambiguous'` means the source line named more than one
   segment and attribution was not guessed. A live 2022 line naming all three
   segments would otherwise have attributed an all-sectors total of 11,851 WTE

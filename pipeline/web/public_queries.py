@@ -57,10 +57,21 @@ CAVEATS = {
         "must not be used to infer overall workforce size, or change over "
         "time, by comparing one year with another."
     ),
+    # Two texts, because the honest sentence changed once some figures were
+    # checked and others were not. The old single caveat said "every metric is
+    # unverified", which stops being true the moment one is -- and a pinned
+    # caveat that disappears when it becomes partly wrong leaves the remaining
+    # unverified figures charted with nothing said about them at all.
     "census_unverified": (
         "Every workforce census metric is unverified until a human checks it "
-        "against the source table. docs/verification/ pairs each parsed value "
-        "with the line it came from. Filter on `verified` before publishing."
+        "against the page it was parsed from. Filter on `verified` before "
+        "publishing; the Verified column below says which is which."
+    ),
+    "census_partly_verified": (
+        "Some workforce census metrics have been checked against their source "
+        "page and some have not. Verified means transcribed correctly — it "
+        "does not mean comparable between years. Filter on `verified` before "
+        "publishing; the Verified column below says which is which."
     ),
     "grant_not_budget": (
         "A grant allocation is what an authority was allocated by DHSC. A "
@@ -593,18 +604,27 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
         FROM workforce_census_metrics
         ORDER BY census_year, metric, workforce_segment""")
 
+    census_verified = sum(1 for row in census if row["verified"])
+
     return {
         "charity_wage_series": charity_wage_series,
         "nhs_job_adverts": adverts,
         "nhs_job_by_band": by_band,
         "repeat_advertised_roles": repeat_roles,
         "workforce_census": census,
-        "census_all_unverified": bool(census) and all(not c["verified"] for c in census),
+        "census_all_unverified": bool(census) and census_verified == 0,
+        # The counts, so the page can pin the caveat that is true rather than
+        # only the one that is true while nothing has been checked. The chart
+        # draws every figure whatever its flag, so "some of these are
+        # unverified" has to stay pinned until none of them is.
+        "census_verified_count": census_verified,
+        "census_total": len(census),
         "caveats": {
             "indicative_wage_note": CAVEATS["indicative_wage"],
             "nhs_jobs_floor_note": CAVEATS["nhs_jobs_floor"],
             "census_comparability_note": CAVEATS["census_comparability"],
             "census_unverified_note": CAVEATS["census_unverified"],
+            "census_partly_verified_note": CAVEATS["census_partly_verified"],
         },
     }
 
