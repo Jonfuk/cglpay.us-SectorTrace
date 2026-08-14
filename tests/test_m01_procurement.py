@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline import db
+from pipeline import db, notice_urls
 from pipeline.http import PipelineHTTPClient
 from pipeline.modules import m01_procurement as proc
 from pipeline.registry import ModuleContext
@@ -186,6 +186,91 @@ def test_process_release_against_real_fts_fixture(conn):
     assert row["value_core"] == 90000
     assert row["cpv_codes"] == "60000000"
     assert row["date_start"] == "2026-09-02T00:00:00Z"
+    # The notice's own page, published by the release. The API cursor stays in
+    # source_url, where the provenance belongs.
+    assert row["notice_web_url"] == "https://www.find-tender.service.gov.uk/Notice/072960-2026"
+    assert row["source_url"] == _FakeResult.url
+
+
+# --- the notice's address, as distinct from the fetch's ----------------------
+#
+# All of these are about one thing: a link a reader follows must reach the
+# notice this row is about. The documents array in a release is not a list of
+# notice pages -- it carries attachments, bidding packs on third-party
+# portals, and sometimes a link to a different notice entirely.
+
+
+@pytest.mark.parametrize("notice_id, expected", [
+    # Find a Tender: the release id is the notice.
+    ("076079-2026", "076079-2026"),
+    # Contracts Finder: notice GUID, then the release sequence.
+    ("5f01b648-fca2-4a25-abed-09d788ae4cc2-910254",
+      "5f01b648-fca2-4a25-abed-09d788ae4cc2"),
+    ("", None),
+])
+def test_notice_slug(notice_id, expected):
+    assert notice_urls.notice_slug(notice_id) == expected
+
+
+def _release(notice_id: str, *urls: str) -> dict:
+    return {"id": notice_id,
+             "contracts": [{"documents": [{"url": u} for u in urls]}]}
+
+
+def test_notice_url_is_taken_only_when_the_release_publishes_it():
+    release = _release("076079-2026",
+                        "https://www.find-tender.service.gov.uk/Notice/076079-2026")
+    assert notice_urls.published_notice_url(release, proc.SOURCE_FTS) == (
+        "https://www.find-tender.service.gov.uk/Notice/076079-2026")
+
+
+def test_a_release_with_no_notice_link_gets_null_not_a_guess():
+    """NULL is the normal case here, not a failure. The portal constructs a
+    labelled link at read time; nothing is invented into the table."""
+    release = _release("076079-2026",
+                        "https://in-tendhost.co.uk/milton-keynes")
+    assert notice_urls.published_notice_url(release, proc.SOURCE_FTS) is None
+
+
+@pytest.mark.parametrize("url", [
+    # Both share the /Notice/ prefix and neither is a notice. Every one of the
+    # 18,048 archived URLs that failed the id rule was one of these.
+    "https://www.find-tender.service.gov.uk/Notice/Attachment/A-13118",
+    "https://www.contractsfinder.service.gov.uk/Notice/SupplierAttachment/"
+    "c12c7b6f-4626-4877-8926-828643887b97",
+    # A release citing a different notice. Following it would show a reader a
+    # document about something else.
+    "https://www.find-tender.service.gov.uk/Notice/000822-2022",
+])
+def test_an_attachment_or_another_notice_is_not_this_notice(url):
+    assert notice_urls.published_notice_url(_release("033897-2022", url), proc.SOURCE_FTS) is None
+
+
+def test_a_notice_url_on_another_host_is_refused():
+    """The host is half the check: only the publishing service serves the
+    notice, whatever a document on somebody else's portal is called."""
+    release = _release("076079-2026",
+                        "https://example.org/Notice/076079-2026")
+    assert notice_urls.published_notice_url(release, proc.SOURCE_FTS) is None
+
+
+def test_the_contracts_finder_notice_is_found_from_an_award_document():
+    release = {
+        "id": "ae57c38a-0427-41e1-9c23-25b094277d3d-906531",
+        "awards": [{"documents": [
+            {"documentType": "awardNotice",
+              "url": "https://www.contractsfinder.service.gov.uk/Notice/"
+                     "ae57c38a-0427-41e1-9c23-25b094277d3d"}]}],
+    }
+    assert notice_urls.published_notice_url(release, proc.SOURCE_CF) == (
+        "https://www.contractsfinder.service.gov.uk/Notice/"
+        "ae57c38a-0427-41e1-9c23-25b094277d3d")
+
+
+def test_an_unknown_source_system_has_no_notice_host():
+    release = _release("076079-2026",
+                        "https://www.find-tender.service.gov.uk/Notice/076079-2026")
+    assert notice_urls.published_notice_url(release, "some_other_feed") is None
 
 
 def test_process_release_logs_review_item_for_unmatched_buyer(conn):

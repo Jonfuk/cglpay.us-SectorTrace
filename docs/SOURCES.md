@@ -36,6 +36,38 @@ contact email from `.env`, so any operator can reach the person running it.
 | Licence | OGL v3.0 |
 | Key | None |
 | Rate limit | FTS default; **Contracts Finder 5s** — it imposes a multi-minute block on repeat rate-limit violations, unlike FTS's simple `Retry-After` |
+| Notice pages | `https://www.find-tender.service.gov.uk/Notice/{notice_id}`; `https://www.contractsfinder.service.gov.uk/Notice/{notice_guid}` |
+
+### The notice's address is not the address it was fetched from
+
+`contracts.source_url` is the OCDS API page a row was parsed from — a
+paginated cursor. It is provenance and it is not a destination: following it
+re-runs a page of a bulk feed, and once the window has moved it does not
+return the same releases.
+
+Two other columns answer "where is this notice?", and they are different
+claims:
+
+- **`contracts.notice_web_url`** — the address the release itself published,
+  taken from `contracts[].documents[].url`, `awards[].documents[].url` or
+  `tender.documents[].url`, and only when that URL is exactly this notice's
+  page on the publishing service's own host. NULL where the release named
+  none, which is the ordinary case: 15,736 of 98,636 collected rows carry one
+  (98% of Contracts Finder rows, 15% of Find a Tender).
+- **A constructed link**, computed at read time by
+  [`pipeline/notice_urls.py`](../pipeline/notice_urls.py) and never stored.
+  Find a Tender's notice id is used unchanged; a Contracts Finder release id
+  is the notice GUID with a release sequence appended (`{guid}-{sequence}`)
+  and the page is the GUID alone.
+
+The mapping was verified against every OCDS page in `data/raw/` rather than
+assumed: of 117,365 published notice URLs, 117,317 follow it exactly. The
+exceptions are all `/Notice/Attachment/…`, `/Notice/SupplierAttachment/…`, or
+a release citing a *different* notice — none of which is this row's notice
+page, and all of which are excluded.
+
+The portal shows both links (`notice ↗` and `api ↗`) and marks a constructed
+one as constructed wherever it appears.
 
 ## Module 2 — Employment tribunals
 

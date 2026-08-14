@@ -1,0 +1,27 @@
+-- The address of the notice, as distinct from the address it was fetched from.
+--
+-- `contracts.source_url` is provenance: with `retrieved_at`, `http_status`
+-- and `payload_sha256` it records the exact bytes that produced the row. For
+-- Find a Tender that is a paginated OCDS cursor --
+--
+--   .../api/1.0/ocdsReleasePackages?updatedFrom=...&cursor=dXBkYXRlZEZyb...
+--
+-- -- which is correct, and useless to a reader. Following it does not reach
+-- the notice; it re-runs a page of a bulk feed, and after the window moves it
+-- does not even return the same releases. Every "open the source" link on the
+-- portal pointed at one of these for 98,636 rows.
+--
+-- So this column holds the notice's own page, and `source_url` is left
+-- exactly where it is. Two different facts, two columns; overwriting the
+-- provenance to make a link work would trade the thing this warehouse is for
+-- against a nicer anchor tag.
+--
+-- Nullable, and NULL is the normal case rather than a failure: it is filled
+-- only where the release itself published the address, from
+-- `contracts[].documents[].url`, `awards[].documents[].url` or
+-- `tender.documents[].url`, and only when that URL is on the publishing
+-- service's own host. A release that names no notice page leaves this NULL
+-- and nothing is invented to fill it -- see pipeline/web/public_queries.py
+-- for the constructed fallback, which is computed at read time, labelled as
+-- constructed, and never stored here.
+ALTER TABLE contracts ADD COLUMN notice_web_url TEXT;

@@ -38,6 +38,7 @@ from pipeline.keywords import (
     SUBSTANCE_MISUSE_KEYWORDS,
     SUPPLIER_NAME_VARIANTS,
 )
+from pipeline.notice_urls import published_notice_url
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -250,6 +251,7 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
     extension_text = _extension_terms(tender)
     tender_value = tender.get("value") or {}
     provenance = _provenance(result, source_system)
+    notice_web_url = published_notice_url(release, source_system)
 
     rows_written = 0
     for supplier_row in _iter_supplier_rows(release):
@@ -287,6 +289,9 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
             "procedure_type": procedure_type,
             "psr_basis": 1 if psr_basis else 0,
             "psr_direct_award_option": psr_option,
+            # Distinct from source_url in **provenance, which is the API page
+            # these bytes came from. Migration 0032 says why both exist.
+            "notice_web_url": notice_web_url,
             **provenance,
         }, natural_key=["notice_id", "supplier_id"])
         rows_written += 1

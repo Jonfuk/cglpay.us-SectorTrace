@@ -56,6 +56,12 @@ pay scale, and not the pay of anyone currently in post.
 - `buyer_ons_code` is NULL where a free-text buyer name could not be matched
   deterministically. Those names are in `review_queue` — they are unmatched,
   not absent.
+- **A `notice ↗` link may be constructed rather than published.**
+  `notice_web_url` holds the address the release itself gave, and is NULL for
+  84% of rows; for those the portal builds the link from the notice id under
+  a mapping verified against every archived page, and labels it as built.
+  Both reach the notice. Only the first is something the source stated, so
+  cite `source_url` and the payload hash as provenance, never the link.
 
 ### Employment tribunals (Module 2)
 
