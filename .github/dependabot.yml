@@ -1,0 +1,30 @@
+version: 2
+
+# Actions only, deliberately.
+#
+# `pip` is not listed. This project keeps its dependency set small on purpose —
+# no framework, no ASGI, no build step — and the value of a monthly pull
+# request bumping a library the suite already pins is lower than the cost of
+# reviewing it. Dependabot *security* updates are enabled at the repository
+# level and cover the case that actually matters: a published advisory against
+# something we depend on.
+#
+# What is not covered without this file is the workflow actions themselves.
+# `actions/checkout` and `astral-sh/setup-uv` are pinned to major versions and
+# nothing moves them, so a deprecated runner or a retired node version arrives
+# as a red build on an unrelated push rather than as a pull request.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    groups:
+      # One pull request a month rather than one per action. The reason to read
+      # it is the same either way.
+      actions:
+        patterns:
+          - "*"

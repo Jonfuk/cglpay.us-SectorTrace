@@ -1,0 +1,66 @@
+name: codeql
+
+# Static analysis, for the class of defect the offline suite cannot reach.
+#
+# The argument for it here is specific rather than general: S-01 was a real
+# server-side request forgery that shipped — `check-url` would fetch any host
+# whose netloc contained a dot, including `192.168.1.1` — and it was found by
+# an audit rather than by a test. `pipeline/netguard.py` is the fix, and it is
+# the shape of thing CodeQL's `python-security-extended` suite exists to catch
+# before an audit does.
+#
+# Expect findings that are correct by design on the first run. This project
+# composes SQL by string interpolation in `pipeline/web/public_queries.py` and
+# elsewhere, with the values bound as parameters and the composed fragments
+# coming from module-level constants rather than from requests. Where a result
+# is wrong, dismiss it in the Security tab **with a reason** — a dismissal
+# without one is indistinguishable next quarter from a defect nobody looked at.
+#
+# Nothing here reaches a real source. CodeQL reads the checkout; it does not
+# run the pipeline.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly, because a query suite that only runs on push tells you about the
+    # code you changed and never about the advisory published on Tuesday.
+    - cron: '17 4 * * 1'
+
+# Cancel a superseded analysis, as the test workflow already does. Several
+# sessions commit to this repo in a day.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      # The only write this workflow needs. `contents: read` is not the default
+      # once any permission is named, so it is named.
+      security-events: write
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # The default suite is the quiet one. This project's whole posture is
+          # that a defensible result is worth more than a convenient one, and
+          # the extended suite is where the request-forgery and path-traversal
+          # queries live.
+          queries: security-extended
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:python
