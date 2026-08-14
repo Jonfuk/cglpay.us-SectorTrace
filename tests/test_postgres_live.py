@@ -6,7 +6,13 @@ developer happened to have configured would eventually write to a real one.
 Two different variables means pointing the tests at a database is a separate,
 deliberate act. Everything here writes, and cleans up after itself.
 
-    $env:POSTGRES_TEST_URL = 'postgresql://user:pw@host:5432/sectortrace'
+Either as environment variables or as lines in `.env` — both are read, so
+the credentials can live in the same file as everything else rather than
+having to be re-exported into each shell:
+
+    POSTGRES_TEST_URL=postgresql://sectortrace_app:pw@host:5432/sectortrace
+    POSTGRES_TEST_RO_URL=postgresql://sectortrace_reader:pw@host:5432/sectortrace
+
     uv run python -m pytest tests/test_postgres_live.py -q
 
 What this covers that `test_migration_equivalence.py` cannot: that one diffs
@@ -27,7 +33,35 @@ from pipeline import catalog, db
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
 
-POSTGRES_TEST_URL = os.environ.get("POSTGRES_TEST_URL")
+
+def _configured_url(name: str) -> str | None:
+    """A live-test URL from the environment, or failing that from `.env`.
+
+    The `.env` fallback exists because leaving it out was a trap: these are
+    read with `os.environ.get`, and `.env` is only ever read by
+    pydantic-settings, so putting `POSTGRES_TEST_RO_URL` in `.env` — the
+    obvious place, and where the application's own database settings live —
+    did nothing at all and skipped the tests silently. A configuration that
+    is ignored without saying so is the failure mode this whole port keeps
+    running into.
+
+    What does NOT change is the variable names. These stay distinct from
+    `DATABASE_URL` and `DATABASE_RO_URL`, so pointing the suite at a database
+    is still a deliberate act and can never happen by inheriting a working
+    application configuration — everything in this file writes.
+    """
+    from dotenv import dotenv_values
+
+    value = os.environ.get(name)
+    if value and value.strip():
+        return value.strip()
+    from_file = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
+    value = (from_file or {}).get(name)
+    return value.strip() if value and value.strip() else None
+
+
+POSTGRES_TEST_URL = _configured_url("POSTGRES_TEST_URL")
+POSTGRES_TEST_RO_URL = _configured_url("POSTGRES_TEST_RO_URL")
 
 pytestmark = pytest.mark.skipif(
     not POSTGRES_TEST_URL,
@@ -303,7 +337,7 @@ class TestTheReadPath:
         from pipeline.web import queries
 
         settings = Settings(contact_email="t@e.com", database_url=POSTGRES_TEST_URL,
-                             database_ro_url=os.environ.get("POSTGRES_TEST_RO_URL") or None)
+                             database_ro_url=POSTGRES_TEST_RO_URL)
         conn = queries.readonly_connection(settings)
         try:
             yield conn
@@ -387,7 +421,7 @@ class TestTheReadPath:
         for. This goes underneath both and writes directly, which is what a bug
         in either would amount to.
         """
-        ro_url = os.environ.get("POSTGRES_TEST_RO_URL")
+        ro_url = POSTGRES_TEST_RO_URL
         if not ro_url:
             pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
         from pipeline import pg as pg_module
@@ -401,7 +435,7 @@ class TestTheReadPath:
             conn.close()
 
     def test_the_reader_can_still_read_everything_it_needs(self):
-        ro_url = os.environ.get("POSTGRES_TEST_RO_URL")
+        ro_url = POSTGRES_TEST_RO_URL
         if not ro_url:
             pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
         from pipeline import pg as pg_module
