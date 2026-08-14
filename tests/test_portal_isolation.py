@@ -36,6 +36,8 @@ PUBLIC_STATIC_PATHS = {
     "/index.html",
     "/app.js",
     "/styles.css",
+    "/api",
+    "/api.html",
     "/js/theme.js",
     "/js/components.js",
     "/js/pages/overview.js",
@@ -67,6 +69,12 @@ PUBLIC_API_ROUTES = {
 
 # Route patterns under /api/v1/ that take a parameter.
 PUBLIC_API_PATTERNS = {r"providers/([a-z0-9_]+)/timeline"}
+
+# Published under /api/v1/ and dispatched before the table above, so it is not
+# a `route ==` literal in `_public_api` and would otherwise be absent from
+# every list here. It is part of the same public surface and the documentation
+# must cover it.
+PUBLIC_API_EXTRA = {"export"}
 
 # Files the portal is made of. Admin work does not edit these, and no admin
 # module may import from them -- see test_the_admin_ui_does_not_import_portal_code.
@@ -135,6 +143,55 @@ def test_the_public_api_routes_have_not_changed():
         "The portal's API surface changed. Admin endpoints belong under "
         "/api/admin/, not /api/v1/.")
     assert patterns == PUBLIC_API_PATTERNS
+
+
+# --- and what the portal says the API is --------------------------------------
+#
+# Two places publish a list of endpoints: the /api documentation page and the
+# <noscript> block, which is the only description a reader with JavaScript off
+# ever sees. Both are pinned against the frozen list above, because a published
+# endpoint list that is out of date is worse than none — it sends someone to
+# build against a route that does not exist, and makes the ones that do exist
+# look unreliable. This is not hypothetical: the <noscript> block did not gain
+# /api/v1/ndtms when that endpoint shipped, and nothing noticed for a day.
+
+
+def _documented_routes(html: str) -> set[str]:
+    return set(re.findall(r'data-route="([^"]+)"', html))
+
+
+def _mentioned_routes(text: str) -> set[str]:
+    return {match for match in re.findall(r"/api/v1/([a-z_]+)", text)}
+
+
+def test_the_api_page_documents_every_public_route_and_no_other():
+    html = (PUBLIC_DIR / "api.html").read_text(encoding="utf-8")
+    documented = _documented_routes(html)
+    patterns = set(re.findall(r'data-route-pattern="([^"]+)"', html))
+
+    parameterised = {route for route in documented if "{" in route}
+    assert documented - parameterised == PUBLIC_API_ROUTES | PUBLIC_API_EXTRA, (
+        "The API documentation and the portal's routes disagree. Whichever "
+        "changed, the other has to: a published endpoint list that is wrong is "
+        "worse than no list at all.")
+    assert patterns == PUBLIC_API_PATTERNS, (
+        "A parameterised route is documented with a shape the server does not "
+        "match, or one it does match is undocumented.")
+
+
+def test_the_noscript_block_names_every_public_route():
+    """The only description of the API a reader with JavaScript off sees."""
+    html = (PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+    block = html[html.index("<noscript>"):html.index("</noscript>")]
+
+    assert _mentioned_routes(block) == PUBLIC_API_ROUTES | PUBLIC_API_EXTRA
+
+
+def test_the_api_page_needs_no_javascript():
+    """It documents the API for the case where the portal is not what the
+    reader wants, which includes the case where the portal does not run."""
+    html = (PUBLIC_DIR / "api.html").read_text(encoding="utf-8")
+    assert "<script" not in html.lower()
 
 
 def test_public_api_dispatch_is_reachable_only_through_the_v1_prefix():
@@ -253,6 +310,21 @@ def test_the_admin_modules_are_served(client):
         response = client.get(f"/admin/js/{name}.js")
         assert response.status_code == 200, f"/admin/js/{name}.js is not served"
         assert response.headers["Content-Type"].startswith("text/javascript")
+
+
+def test_the_api_documentation_answers_at_the_address_a_reader_would_guess(client):
+    """`/api` is a static page and `/api/v1/...` is the API. The dispatcher
+    checks the static map first, which is what makes that possible; a change
+    to that order would document the API at an address nobody would try."""
+    page = client.get("/api")
+    assert page.status_code == 200
+    assert page.headers["Content-Type"].startswith("text/html")
+    assert "/api/v1/summary" in page.text
+    assert client.get("/api.html").text == page.text
+
+    # And the prefix underneath it is untouched.
+    assert client.get("/api/v1/summary").status_code == 200
+    assert client.get("/api/v1/nonesuch").status_code == 404
 
 
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):

@@ -83,6 +83,45 @@ async function loadHealth() {
   renderHosts(data.hosts);
 }
 
+/* What this pipeline is holding on disk, beside the warehouse.
+ *
+ * The archive is the audit trail and cannot be deleted, so the answer to its
+ * growth is to watch it — and until now the only instrument was a one-off
+ * measurement written into the roadmap. A table rather than cards: the
+ * interesting comparison is between the four directories, and four numbers
+ * that have to be read against each other belong in rows.
+ *
+ * On its own request, like freshness: stat-ing 8,502 archived files takes six
+ * seconds on the real archive, and the cards above have no reason to wait.
+ */
+async function loadStorage() {
+  $('health-storage').replaceChildren(
+    el('div', { class: 'muted small', text: 'measuring…' }));
+  try { renderStorage((await api('/api/admin/storage')).storage); }
+  catch (e) {
+    $('health-storage').replaceChildren(el('div', { class: 'warn', text: e.message }));
+  }
+}
+
+function renderStorage(rows) {
+  const target = $('health-storage');
+  if (!target) return;
+
+  target.replaceChildren(el('table', {},
+    el('thead', {}, el('tr', {},
+      el('th', { text: 'Directory' }), el('th', { class: 'num', text: 'Files' }),
+      el('th', { class: 'num', text: 'Size' }), el('th', { text: 'Newest' }),
+      el('th', { text: 'What it is' }))),
+    el('tbody', {}, rows.map((row) => el('tr', {},
+      el('td', {},
+        el('div', { class: 'mono small', text: row.path }),
+        row.exists ? null : el('div', { class: 'muted small', text: 'not created yet' })),
+      el('td', { class: 'num', text: num(row.files) }),
+      el('td', { class: 'num', text: bytes(row.bytes) }),
+      el('td', {}, when(row.newest)),
+      el('td', { class: 'muted small', text: row.note }))))));
+}
+
 /* Separately, and last. On the real warehouse this is a couple of seconds of
  * table scans, and the rest of the tab has no reason to wait for it. */
 async function loadFreshness() {
@@ -293,6 +332,7 @@ function loadAll() {
   loadHealth();
   loadCoverage();
   loadFailures();
+  loadStorage();
   loadFreshness();
 }
 

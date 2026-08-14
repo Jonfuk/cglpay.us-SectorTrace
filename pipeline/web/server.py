@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 import socket
+from datetime import datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -78,6 +79,14 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
     "/index.html": ("index.html", HTML, PUBLIC_DIR),
     "/app.js": ("app.js", JS, PUBLIC_DIR),
     "/styles.css": ("styles.css", CSS, PUBLIC_DIR),
+
+    # The API documentation. `/api` is the address a reader would guess, and it
+    # reaches this page rather than the API dispatcher because _dispatch checks
+    # this map before it checks the /api/ prefix — deliberately, and pinned by
+    # a test, because the alternative is documenting the API at an address
+    # nobody would try.
+    "/api": ("api.html", HTML, PUBLIC_DIR),
+    "/api.html": ("api.html", HTML, PUBLIC_DIR),
 
     # Operator UI: the review queue and the raw warehouse browser. Unchanged
     # in every respect except the prefix it answers on.
@@ -244,6 +253,23 @@ def _int(params: dict[str, list[str]], name: str, default: int) -> int:
 
 def _str(params: dict[str, list[str]], name: str, default: str = "") -> str:
     return (params.get(name, [default])[0] or "").strip()
+
+
+def _contract_query(params: dict[str, list[str]]) -> dict:
+    """The contract filters a request carries, as query keyword arguments.
+
+    Here rather than inline in the route because two callers need exactly the
+    same set: the page's windowed read and the export's complete one. A filter
+    understood by one and not the other would produce a download that does not
+    match the table it was offered beneath.
+    """
+    return {
+        "provider_key": _str(params, "provider_key") or None,
+        "buyer_ons_code": _str(params, "buyer_ons_code") or None,
+        "year_from": _str(params, "year_from") or None,
+        "year_to": _str(params, "year_to") or None,
+        "psr_only": _flag(params, "psr_only"),
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -579,23 +605,31 @@ class Handler(BaseHTTPRequestHandler):
 
         The provenance travels in the file, not beside it. An exported CSV
         gets separated from any accompanying note within about a day of
-        leaving here, so the filters that produced it and the corpus it came
-        from are written into the download itself.
+        leaving here, so the filters that produced it, the corpus it came from
+        and how many rows it holds are written into the download itself.
+
+        Two paths, and which one an endpoint takes is a property of the
+        endpoint rather than of the request. Everything whose `/api/v1` payload
+        *is* the dataset is built in memory and sent with a Content-Length.
+        Everything whose payload is a window onto something larger — see
+        `public_export.WINDOWED` — is read again, in full, by its own query and
+        streamed. A download must never be the page's slice: that was W-06,
+        where the contracts CSV shipped 500 rows of 98,636 and said nothing.
         """
         endpoint = _str(params, "endpoint") or "summary"
         fmt = (_str(params, "format") or "csv").lower()
         if fmt not in ("csv", "json"):
             raise ApiError(f"format must be csv or json, got {fmt!r}.")
 
+        filters = {k: v[0] for k, v in params.items()
+                    if k not in ("endpoint", "format")}
+
+        if endpoint in public_export.WINDOWED:
+            return self._export_complete(endpoint, fmt, filters, params, conn)
+
         payload = self._public_api(f"/api/v1/{endpoint}", params, conn)
         rows, label = public_export.rows_for(endpoint, payload)
-        provenance = public_export.provenance(
-            endpoint, {k: v[0] for k, v in params.items()
-                        if k not in ("endpoint", "format")})
-
-        stamp = provenance["exported_at"][:10].replace("-", "")
-        parts = [p for p in (_str(params, "provider_key"), _str(params, "metric")) if p]
-        name = "_".join(["sectorTrace", label, *parts, stamp])
+        provenance = public_export.provenance(endpoint, filters, row_count=len(rows))
 
         if fmt == "json":
             body = json.dumps({"_provenance": provenance, label: rows},
@@ -609,7 +643,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Content-Disposition", f'attachment; filename="{name}.{fmt}"')
+        self.send_header("Content-Disposition",
+                          f'attachment; filename="{self._export_name(label, params)}.{fmt}"')
         self.send_header("X-Provenance", json.dumps(provenance, default=str))
         self.send_header("Cache-Control", "no-store")
         self._send_security_headers()
@@ -618,6 +653,93 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def _export_complete(self, endpoint: str, fmt: str, filters: dict,
+                          params: dict[str, list[str]], conn) -> None:
+        """Every row of a windowed endpoint, streamed.
+
+        The count is taken first, because it goes in the header line above rows
+        that have not been read yet, and it is what makes this file honest: a
+        reader can see that 98,636 is the number of notices matching these
+        filters and that 98,636 is what they were sent.
+        """
+        if endpoint != "contracts":  # pragma: no cover - WINDOWED has one member
+            raise ApiError(f"No complete reader for {endpoint!r}.", status=500)
+
+        total, rows = public_queries.all_contract_notices(
+            conn, **_contract_query(params))
+        _, label = public_export.rows_for(endpoint, {"notices": []})
+        provenance = public_export.provenance(endpoint, filters, row_count=total)
+        name = f"{self._export_name(label, params)}.{fmt}"
+
+        if fmt == "json":
+            # JSON is one document, so it is built rather than streamed. The
+            # audience for a 40 MB JSON array is a program, and a program that
+            # cannot hold it cannot parse it either.
+            body = json.dumps({"_provenance": provenance, label: list(rows)},
+                               indent=2, default=str).encode("utf-8")
+            self._responded = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("X-Provenance", json.dumps(provenance, default=str))
+            self.send_header("Cache-Control", "no-store")
+            self._send_security_headers()
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+
+        self._send_chunked(
+            public_export.stream_csv(rows, provenance, total),
+            "text/csv; charset=utf-8", name, provenance)
+
+    def _export_name(self, label: str, params: dict[str, list[str]]) -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+        parts = [p for p in (_str(params, "provider_key"), _str(params, "metric")) if p]
+        return "_".join(["sectorTrace", label, *parts, stamp])
+
+    def _send_chunked(self, chunks, content_type: str, filename: str,
+                       provenance: dict) -> None:
+        """A response whose length is not known when the headers go out.
+
+        Chunked transfer encoding rather than `Connection: close`, because this
+        is an HTTP/1.1 server and a keep-alive connection that ends by hanging
+        up is indistinguishable from a truncated one at the far end.
+
+        Which is also the reason the terminating chunk is only written after
+        the producer finishes: if the export raises part-way — and
+        `stream_csv` deliberately raises when the rows it wrote disagree with
+        the count in the header it already sent — the response ends without its
+        terminator, and every HTTP client treats that as a failed download.
+        A broken download is recoverable. A complete-looking file with the
+        wrong rows in it is not.
+        """
+        self._responded = True
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("X-Provenance", json.dumps(provenance, default=str))
+        self.send_header("Cache-Control", "no-store")
+        self._send_security_headers()
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+
+        if self.command == "HEAD":
+            return
+
+        for chunk in chunks:
+            if not chunk:
+                continue
+            self.wfile.write(f"{len(chunk):x}\r\n".encode("ascii"))
+            self.wfile.write(chunk)
+            self.wfile.write(b"\r\n")
+        self.wfile.write(b"0\r\n\r\n")
 
     def _download_export(self, params: dict[str, list[str]]) -> None:
         """Hand back one export file, streamed.
@@ -697,6 +819,12 @@ class Handler(BaseHTTPRequestHandler):
             # health.freshness for why that is not fixed with an index.
             return {"freshness": health.freshness(conn)}
 
+        if path == "/api/admin/storage":
+            # And this one because it is seconds of stat calls over the raw
+            # archive -- 8,502 files and 4.5 GB on the warehouse it was
+            # measured against.
+            return {"storage": health.storage(self.settings)}
+
         if path == "/api/admin/coverage":
             return health.coverage(conn, tier=_str(params, "tier") or "upper")
 
@@ -773,7 +901,10 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(str(exc), status=404) from None
 
         if path == "/api/admin/exports":
-            return artefacts.listing(self.settings)
+            listed = artefacts.listing(self.settings)
+            return {**listed,
+                     "staleness": artefacts.staleness(
+                         self.settings, conn, listed["files"])}
 
         if path == "/api/admin/jobs":
             running = self.jobs.running()
@@ -844,13 +975,7 @@ class Handler(BaseHTTPRequestHandler):
             return {"authorities": public_queries.authorities(conn)}
         if route == "contracts":
             return public_queries.contracts(
-                conn,
-                provider_key=_str(params, "provider_key") or None,
-                buyer_ons_code=_str(params, "buyer_ons_code") or None,
-                year_from=_str(params, "year_from") or None,
-                year_to=_str(params, "year_to") or None,
-                psr_only=_flag(params, "psr_only"),
-                limit=_int(params, "limit", 500))
+                conn, **_contract_query(params), limit=_int(params, "limit", 500))
         if route == "pay":
             return public_queries.pay(
                 conn,

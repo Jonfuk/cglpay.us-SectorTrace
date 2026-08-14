@@ -31,6 +31,7 @@ CONTENT_TYPES = {
     ".csv": "text/csv",
     ".md": "text/markdown",
     ".txt": "text/plain",
+    ".zip": "application/zip",
 }
 
 
@@ -94,6 +95,148 @@ def listing(settings) -> dict:
         "files": files,
         "bytes": sum(entry["bytes"] for entry in files),
     }
+
+
+# --- staleness -----------------------------------------------------------------
+#
+# W-20: the listing carried file mtimes and nothing else, so an export written
+# before a warehouse-changing run looked exactly like one written after it. A
+# figure taken from stale sheets looks current, which is the shape D-02 existed
+# to kill -- for artefacts instead of runs.
+#
+# The question is "could the evidence behind these files have changed since
+# they were written", and the signal has to be the *pipeline's* own activity
+# rather than the warehouse's.
+#
+# The first version of this compared the export files against the mtime of
+# `warehouse.db` and its WAL, on the reasoning that every write touches the
+# file and the check could then only err towards stale. That reasoning is
+# sound and the result was useless, which the browser showed in one look: the
+# server writes to the warehouse as it starts -- applying migrations, marking
+# a job left running as interrupted -- so every directory read "stale" a
+# second after the page was opened. A warning that is always on is not a
+# warning, and it would have trained its reader to skip the line.
+#
+# So the verdict comes from three records of the pipeline having *done*
+# something, each of which is a single indexed-or-tiny read:
+#
+#   * `http_cache.updated_at` -- written on every conditional request by the
+#     shared client, so it moves whenever any module spoke to any source. This
+#     is the one that catches a command-line run, which leaves no job row.
+#   * `module_cursors.updated_at` -- where a module resumes from.
+#   * `job_runs.finished_at` -- runs started from the browser. Used to *name*
+#     what happened, since it is the only one of the three that knows.
+#
+# None of them moves because somebody opened the operator UI, which is the
+# whole point. What they can miss is a module that wrote rows without fetching
+# anything at all; the note travelling with the answer says so rather than
+# leaving the reader to assume a completeness this does not have.
+
+ACTIVITY_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("http_cache", "SELECT MAX(updated_at) FROM http_cache",
+      "a source was last fetched"),
+    ("module_cursors", "SELECT MAX(updated_at) FROM module_cursors",
+      "a module last recorded its position"),
+    ("job_runs", "SELECT MAX(finished_at) FROM job_runs",
+      "a run started from this UI last finished"),
+)
+
+
+def _parse(stamp: str | None):
+    from datetime import datetime
+
+    if not stamp:
+        return None
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+
+
+def pipeline_last_active(conn) -> dict:
+    """When the pipeline last did something, and which record says so."""
+    newest: tuple = ()
+    for source, sql, phrase in ACTIVITY_SOURCES:
+        try:
+            stamp = conn.execute(sql).fetchone()[0]
+        except Exception:  # pragma: no cover - a warehouse without the table
+            continue
+        parsed = _parse(stamp)
+        if parsed is None:
+            continue
+        if not newest or parsed > newest[0]:
+            newest = (parsed, stamp, source, phrase)
+    if not newest:
+        return {"at": None, "source": None, "what": None}
+    return {"at": newest[1], "source": newest[2], "what": newest[3]}
+
+
+def staleness(settings, conn, files: list[dict]) -> dict:
+    """Per export directory: does anything on disk predate the last collection?
+
+    `files` is the listing's own output, so the two cannot disagree about what
+    is on disk.
+    """
+    active = pipeline_last_active(conn)
+    changed = _parse(active["at"])
+
+    groups: dict[str, list[dict]] = {}
+    for entry in files:
+        groups.setdefault(entry["group"] or "(root)", []).append(entry)
+
+    out = []
+    for group, entries in sorted(groups.items()):
+        # The *oldest* file in the directory, not the newest: a target writes
+        # nine files in one pass, and the question is whether any of them
+        # predates the change, not whether the last one did.
+        oldest = min(entry["modified"] for entry in entries)
+        newest = max(entry["modified"] for entry in entries)
+        written = _parse(oldest)
+        stale = bool(changed and written and changed > written)
+        out.append({
+            "group": group,
+            "files": len(entries),
+            "oldest_file": oldest,
+            "newest_file": newest,
+            "stale": stale,
+            "since": _runs_since(conn, oldest) if stale else [],
+        })
+
+    return {
+        "pipeline_last_active": active,
+        "groups": out,
+        # Stated rather than left for a reader to infer from an empty `since`.
+        "record_note": (
+            "Staleness compares these files against the pipeline's own record "
+            "of activity — the conditional-request cache, the module cursors "
+            "and the job history. Runs started from the command line leave no "
+            "job row, so a stale directory may not be able to name what "
+            "changed."
+        ),
+    }
+
+
+def _runs_since(conn, when: str) -> list[dict]:
+    """Jobs that finished after these files were written, oldest first."""
+    cutoff = _parse(when)
+    if cutoff is None:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT label, state, finished_at FROM job_runs "
+            "WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 50"
+        ).fetchall()
+    except Exception:  # pragma: no cover - a warehouse without the table
+        return []
+
+    since = []
+    for row in rows:
+        finished = _parse(row["finished_at"])
+        if finished is None or finished <= cutoff:
+            continue
+        since.append({"label": row["label"], "state": row["state"],
+                       "finished_at": row["finished_at"]})
+    return list(reversed(since))
 
 
 def resolve_for_download(settings, wanted: str) -> Path | None:

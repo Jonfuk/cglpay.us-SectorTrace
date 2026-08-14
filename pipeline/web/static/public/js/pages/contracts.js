@@ -181,7 +181,8 @@ function renderNotices(container, data) {
     notices.length < (data.total || 0)
       ? 'The most recent notices behind the charts above. The charts are '
         + 'computed over the whole corpus; this list is the page\'s share of '
-        + 'it. Search a column, or narrow the filters, to reach the rest.'
+        + 'it. Search a column, or narrow the filters, to reach the rest — or '
+        + 'download the CSV, which carries every row these filters match.'
       : 'The full list behind the charts above, downloadable with its provenance.',
     tableCard('Published notices', [
       { title: 'Published', field: 'date_published', width: 110,

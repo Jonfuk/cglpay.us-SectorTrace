@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -191,6 +192,73 @@ def test_an_unapplied_migration_is_visible(client, conn, settings):
 
     payload = client.get("/api/admin/health").json()["warehouse"]
     assert len(payload["unapplied"]) == 1
+
+
+# --- storage ----------------------------------------------------------------------
+#
+# W-21: the cards reported the warehouse's own size and nothing else, while the
+# raw archive beside it is 3.5 GiB. The archive is the audit trail, so the
+# answer to its growth is to watch it — and the only instrument was a one-off
+# measurement in the roadmap.
+
+
+def _fill(directory, files: dict[str, bytes]):
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, content in files.items():
+        path = directory / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def test_the_storage_card_equals_a_direct_listing_of_the_directories(
+        client, settings):
+    """The whole value of the card is that the number is right. Computed here
+    the other way round — walk the directories and add them up."""
+    _fill(settings.raw_archive_dir, {"m01/a.json": b"x" * 100,
+                                      "m01/b.json": b"y" * 250})
+    _fill(settings.backup_dir, {"warehouse-2026.db": b"z" * 4096})
+    _fill(settings.export_output_dir, {"sheets/01.csv": b"a,b\n"})
+
+    rows = {row["key"]: row for row in
+             client.get("/api/admin/storage").json()["storage"]}
+
+    for key, attribute in (("raw_archive", "raw_archive_dir"),
+                            ("backups", "backup_dir"),
+                            ("exports", "export_output_dir"),
+                            ("logs", "logs_dir")):
+        directory = Path(getattr(settings, attribute))
+        on_disk = [p for p in directory.rglob("*") if p.is_file()]
+        assert rows[key]["files"] == len(on_disk), key
+        assert rows[key]["bytes"] == sum(p.stat().st_size for p in on_disk), key
+        assert rows[key]["path"] == str(directory)
+
+
+def test_a_directory_that_does_not_exist_yet_reports_zero_rather_than_failing(
+        client, settings):
+    """A fresh checkout has none of these. The card is where an operator finds
+    out that nothing has been collected, so it has to render."""
+    rows = {row["key"]: row for row in
+             client.get("/api/admin/storage").json()["storage"]}
+
+    assert rows["backups"]["exists"] is False
+    assert rows["backups"]["bytes"] == 0
+    assert rows["backups"]["files"] == 0
+
+
+def test_the_storage_card_names_the_archive_as_the_thing_not_to_delete(client):
+    """P-02's conclusion travels with the number: the archive is the audit
+    trail, so the answer to its growth is measurement, not deletion."""
+    rows = {row["key"]: row for row in
+             client.get("/api/admin/storage").json()["storage"]}
+    assert "audit trail" in rows["raw_archive"]["note"]
+
+
+def test_storage_is_its_own_route_and_not_in_the_cheap_half(client):
+    """Six seconds of stat calls over 8,502 archived files, measured against
+    the real archive. The Health tab's cards must not wait for it — the same
+    call `freshness` already forced."""
+    assert "storage" not in client.get("/api/admin/health").json()
+    assert client.get("/api/admin/storage").json()["storage"]
 
 
 def test_freshness_reads_the_rows_not_the_cursor(client, geography):

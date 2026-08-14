@@ -39,6 +39,7 @@
     <a href="#/treatment" data-route="treatment">Treatment demand</a>
     <a href="#/providers" data-route="providers">Providers</a>
   </nav>
+  <a class="adminlink" href="/api" title="The read-only JSON API behind these pages">API</a>
   <a class="adminlink" href="/admin/" title="Pipeline operator tools">Admin &rarr;</a>
 </header>
 
@@ -84,6 +85,13 @@
       read-only JSON API on this same server, and every response carries the
       source URL, retrieval time and payload hash of the figures in it:
     </p>
+    <!--
+      This list is pinned against the server's own route table by
+      tests/test_portal_isolation.py, and so is the fuller one at /api. It was
+      not, and it went stale: /api/v1/ndtms shipped and this block did not gain
+      it, so the only published description of the API was quietly missing an
+      endpoint. A published endpoint list that is wrong is worse than none.
+    -->
     <ul>
       <li><code>/api/v1/summary</code> — headline counts and their caveats</li>
       <li><code>/api/v1/pay</code> — pay evidence</li>
@@ -93,11 +101,19 @@
       <li><code>/api/v1/geography</code> — evidence coverage per authority</li>
       <li><code>/api/v1/boundaries</code> — authority boundary geometry</li>
       <li><code>/api/v1/fingertips</code> — treatment demand indicators</li>
+      <li><code>/api/v1/ndtms</code> — NDTMS estimates with their confidence intervals</li>
+      <li><code>/api/v1/export</code> — any of the above as CSV or JSON</li>
     </ul>
     <p>
-      <code>/api/v1/export</code> returns the same figures as CSV or JSON with
-      that provenance written <em>into</em> the file, because a CSV gets
-      separated from any accompanying note within a day of leaving the server.
+      <code>/api/v1/export</code> returns the same figures with that provenance
+      written <em>into</em> the file, because a CSV gets separated from any
+      accompanying note within a day of leaving the server. An export is
+      complete for its filters — it is not the window a page was showing.
+    </p>
+    <p>
+      <a href="/api">The API is documented at <code>/api</code></a>: parameters,
+      response shapes and example URLs, on a page that needs no JavaScript
+      either.
     </p>
     <p>
       <strong>Read the caveats before quoting any of it.</strong> They lead with
@@ -117,6 +133,12 @@
   <p class="muted">
     Read the caveats before quoting anything. They lead with the things that
     must <strong>not</strong> be computed from this data.
+  </p>
+  <p class="muted">
+    Every figure on this site is read from a documented read-only API:
+    <a href="/api">the routes, their parameters and their response shapes are
+    at <code>/api</code></a>. Each section's Download CSV carries every row its
+    filters match, with the provenance and the row count written into the file.
   </p>
   <!--
     Named here in general and per source everywhere it matters: the licence is

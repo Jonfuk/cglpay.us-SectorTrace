@@ -35,7 +35,8 @@ def list_modules() -> None:
 
 @app.command()
 def export(
-    target: str = typer.Argument(..., help="sheets | geojson | echarts | docs | all"),
+    target: str = typer.Argument(
+        ..., help="sheets | geojson | echarts | docs | bundle | all"),
     output_dir: str = typer.Option(
         None, help="Where to write export files. Defaults to the configured "
                     "export_output_dir, which is also the only directory the "

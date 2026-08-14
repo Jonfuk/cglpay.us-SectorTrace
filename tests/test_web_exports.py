@@ -10,6 +10,7 @@ reason, which is that they are not in the listing.
 from __future__ import annotations
 
 import json
+import os
 import threading
 
 import httpx
@@ -175,6 +176,123 @@ def test_resolve_for_download_agrees_with_the_listing(settings, exports):
     for path in listed:
         assert artefacts.resolve_for_download(settings, path) is not None
     assert artefacts.resolve_for_download(settings, "nope.csv") is None
+
+
+# --- staleness ------------------------------------------------------------------------
+#
+# W-20: the listing carried mtimes and nothing else, so sheets written before a
+# warehouse-changing run looked exactly like sheets written after one.
+
+
+def _touch(path, when: str) -> None:
+    """Set a file's mtime from an ISO stamp, so a test can place an export
+    before or after a collection without sleeping."""
+    from datetime import datetime
+
+    stamp = datetime.fromisoformat(when).timestamp()
+    os.utime(path, (stamp, stamp))
+
+
+def _fetched_at(conn, when: str) -> None:
+    """A row in the conditional-request cache: the pipeline spoke to a source."""
+    conn.execute(
+        "INSERT OR REPLACE INTO http_cache (url, host, updated_at) "
+        "VALUES ('https://find.example/a', 'find.example', ?)", (when,))
+    conn.commit()
+
+
+def test_a_fresh_export_reports_current(client, exports, conn):
+    """Written after the last thing the pipeline collected."""
+    _fetched_at(conn, "2026-01-01T00:00:00+00:00")
+    for path in exports.rglob("*"):
+        if path.is_file():
+            _touch(path, "2026-06-01T00:00:00+00:00")
+
+    groups = client.get("/api/admin/exports").json()["staleness"]["groups"]
+    assert groups, "nothing was grouped"
+    assert not any(group["stale"] for group in groups)
+
+
+def test_opening_the_operator_ui_does_not_make_every_export_stale(
+        client, exports, conn):
+    """The first version of this compared file mtimes against the warehouse
+    file's own, and the server writes to the warehouse as it starts — so
+    everything read stale a second after the page was opened. A warning that
+    is always on is not a warning."""
+    _fetched_at(conn, "2026-01-01T00:00:00+00:00")
+    for path in exports.rglob("*"):
+        if path.is_file():
+            _touch(path, "2026-06-01T00:00:00+00:00")
+
+    # Writes of the kind the UI itself makes, after the exports were written.
+    conn.execute("INSERT INTO review_queue (module, item_type, raw_value, "
+                  " created_at) VALUES ('m01', 'x', 'y', '2026-07-01T00:00:00Z')")
+    conn.commit()
+
+    groups = client.get("/api/admin/exports").json()["staleness"]["groups"]
+    assert not any(group["stale"] for group in groups)
+
+
+def test_an_older_export_is_stale_and_names_what_finished_since(
+        client, exports, conn):
+    for path in exports.rglob("*"):
+        if path.is_file():
+            _touch(path, "2020-01-01T00:00:00+00:00")
+    conn.execute(
+        "INSERT INTO job_runs (id, kind, label, args_json, state, started_at, "
+        " finished_at) VALUES (1, 'run', 'run m01_procurement', '{}', "
+        " 'finished', '2026-08-01T09:00:00+00:00', '2026-08-01T10:00:00+00:00')")
+    conn.commit()
+
+    staleness = client.get("/api/admin/exports").json()["staleness"]
+    sheets = next(g for g in staleness["groups"] if g["group"] == "sheets")
+
+    assert sheets["stale"] is True
+    assert [run["label"] for run in sheets["since"]] == ["run m01_procurement"]
+    assert staleness["pipeline_last_active"]["at"] > sheets["oldest_file"]
+    assert staleness["pipeline_last_active"]["source"] == "job_runs"
+
+
+def test_a_command_line_run_is_caught_by_the_fetch_record(client, exports, conn):
+    """`job_runs` holds only runs started from the browser, so a command-line
+    run leaves no row there. The conditional-request cache moves whenever any
+    module speaks to any source, which is what catches it."""
+    for path in exports.rglob("*"):
+        if path.is_file():
+            _touch(path, "2020-01-01T00:00:00+00:00")
+    _fetched_at(conn, "2026-08-01T10:00:00+00:00")
+
+    staleness = client.get("/api/admin/exports").json()["staleness"]
+    sheets = next(g for g in staleness["groups"] if g["group"] == "sheets")
+
+    assert sheets["stale"] is True
+    assert sheets["since"] == [], "no job row exists for a command-line run"
+    assert staleness["pipeline_last_active"]["source"] == "http_cache"
+    assert "command line" in staleness["record_note"]
+
+
+def test_the_oldest_file_in_a_directory_decides(client, exports, conn):
+    """A target writes several files in one pass. One of them being recent
+    does not make the directory current."""
+    _fetched_at(conn, "2026-01-01T00:00:00+00:00")
+    for path in exports.rglob("*"):
+        if path.is_file():
+            _touch(path, "2026-06-01T00:00:00+00:00")
+    _touch(exports / "sheets" / "01_Authorities.csv", "2020-01-01T00:00:00+00:00")
+
+    groups = {g["group"]: g for g in
+               client.get("/api/admin/exports").json()["staleness"]["groups"]}
+    assert groups["sheets"]["stale"] is True
+    assert groups["geojson"]["stale"] is False
+
+
+def test_a_warehouse_that_has_never_run_anything_claims_nothing(client, exports):
+    """No activity record at all is not evidence that these files are current,
+    but it is not evidence that they are stale either."""
+    staleness = client.get("/api/admin/exports").json()["staleness"]
+
+    assert staleness["pipeline_last_active"]["at"] is None
+    assert not any(group["stale"] for group in staleness["groups"])
 
 
 # --- running an export ---------------------------------------------------------------

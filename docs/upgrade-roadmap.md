@@ -2,17 +2,17 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Nine phases have been worked**: 1–3, 5,
-6, 8 and 9 are done; Phase 4 delivered F-01 and U-01 and left F-03 open (D-04
-followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01 and
-F-04 and left P-03 open. Each phase records what changed from the plan as it
-landed.
+1 skipped, 18 deselected, 422s**). **Ten phases have been worked**: 1–3, 5,
+6, 8, 9 and 10 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
+(D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
+and F-04 and left P-03 open. Each phase records what changed from the plan as
+it landed.
 
-**Everything still open is now sequenced as Phases 10–19**, at the end of §5 —
-fifteen findings, four workstreams and two standing decisions, in the order to
-take them and with the reasons for that order. **Phases 8 and 9 are
-delivered**, both on 2026-08-14 and in parallel by two sessions, which is what
-the phase plan said they could be; none of 10–19 has been started.
+**Everything still open is sequenced as Phases 11–19**, at the end of §5 — in
+the order to take them and with the reasons for that order. **Phases 8, 9 and
+10 are delivered**, all on 2026-08-14; 8 and 9 ran in parallel by two
+sessions, which is what the phase plan said they could be. Phases 11 and 12
+are unblocked and none of 11–19 has been started.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -25,7 +25,8 @@ filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
 comparison filed seventeen new findings (W-05–W-21, §3F) — of which W-07 was
-closed the same day — plus fifteen possible futures (§3J). A second strand
+closed the same day and five more by Phase 10 that evening (W-06, W-09, W-16,
+W-20, W-21) — plus fifteen possible futures (§3J). A second strand
 that day closed U-03, U-04 and W-04 and delivered NDTMS (W-22), and filed the
 five sections of portal work it did not build as W-23–W-27. On the same day four proposed
 workstreams — new evidence terrain, the claims-to-evidence index, the sector
@@ -40,7 +41,7 @@ already there.
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
-| **W-05 – W-27** | **Sixteen** open portal and operator findings from the 2026-08-14 comparison, down from twenty-one | Not decisions — work, and now sequenced. Phases 10–13. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below). |
+| **W-05 – W-27** | **Eleven** open portal and operator findings from the 2026-08-14 comparison, down from twenty-one | Not decisions — work, and now sequenced. Phases 11–13. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21). |
 | **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
@@ -56,8 +57,9 @@ clients, so the shape could not be verified from a session, and the portal
 links the other two registers and not that one (W-15). One look in a browser
 at a location id from `cqc_locations` closes it.
 
-Also standing, and deliberately: **O-03** is half done — tests no longer write
-into `logs/`, but nothing rotates them (Phase 10).
+**O-03 is closed** (Phase 10): logs rotate at 10 MB × 5 generations, both
+settings, and the trade — what a discarded generation costs and what it does
+not — is written into `pipeline/logging_conf.py` rather than left implied.
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -232,8 +234,10 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: consume it — filter contract notices by buyer region, which is one join to the `authorities.region` the warehouse already holds — or remove the control. Removing is the cheaper honest fix.
 - Verified by: a test asserting every filter control the portal renders is read by at least one page.
 
-**W-06 · Contract exports silently truncate at 500 rows · S — filed 2026-08-14**
-- Evidence **[live]**: `contracts` holds 98,636 rows; `/api/v1/contracts` defaults `limit` to 500 and caps it at 5,000 ([pipeline/web/public_queries.py:338](pipeline/web/public_queries.py:338), [:391](pipeline/web/public_queries.py:391)); the "Every notice" table asks for 1,000 ([pipeline/web/static/public/js/pages/contracts.js:20](pipeline/web/static/public/js/pages/contracts.js:20)) but its Download CSV passes no limit at all ([contracts.js:221](pipeline/web/static/public/js/pages/contracts.js:221)) — so the export ships the first 500 rows of 98,636 with nothing in the file saying so.
+**W-06 · Contract exports silently truncate at 500 rows · S — closed in Phase 10**
+- **Fix:** the download reads its own query rather than the page's payload. `public_queries.all_contract_notices` counts first and then streams every matching row through one cursor; `public_export.stream_csv` writes a `# rows: 98,636 — every row matching these filters` line above them and **raises if what it wrote disagrees with what it claimed**, so the response ends without its chunked terminator rather than arriving complete and wrong. Verified against Jon's warehouse: 64.4 MB, 98,636 data rows, header count matching, and a `psr_only=1&year_from=2025` export at 45,999 rows against an API `total` of 45,999.
+- The part worth keeping is the refusal. `to_csv` now raises for any endpoint in `public_export.WINDOWED`, so the easy path — flatten the page payload, write it out — is closed to the next caller rather than left as the obvious thing to do. One SELECT feeds both the table and the export, so a column added to one reaches the other; they were separate for exactly one commit.
+- Evidence **[live, at filing]**: `contracts` holds 98,636 rows; `/api/v1/contracts` defaults `limit` to 500 and caps it at 5,000 ([pipeline/web/public_queries.py:338](pipeline/web/public_queries.py:338), [:391](pipeline/web/public_queries.py:391)); the "Every notice" table asks for 1,000 ([pipeline/web/static/public/js/pages/contracts.js:20](pipeline/web/static/public/js/pages/contracts.js:20)) but its Download CSV passes no limit at all ([contracts.js:221](pipeline/web/static/public/js/pages/contracts.js:221)) — so the export ships the first 500 rows of 98,636 with nothing in the file saying so.
 - Costs today: a researcher's CSV looks complete and is 0.5% of the corpus. The one export that must not lie is lying structurally, and the table and its download disagree about what "the notices" are.
 - Fix: a complete-download path with the row count written into the `#` header line — chunked CSV streaming, or a raised cap the export states. The count must travel in the provenance line, not beside it.
 - Verified by: a test that a full export of a corpus larger than 500 rows contains every row and names the count.
@@ -260,8 +264,10 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a per-chart menu — PNG via the canvas `toDataURL` ECharts already owns, next to the section CSV that already exists — with the caption and its caveat rendered into the download.
 - Verified by: a browser check that a downloaded chart image carries its pinned caveat, which a header test cannot tell you.
 
-**W-09 · The public API has no documentation page · M — filed 2026-08-14**
-- Evidence: the only description of `/api/v1/*` is the `<noscript>` block ([pipeline/web/static/public/index.html:74](pipeline/web/static/public/index.html:74)) and the whitelist in ([pipeline/web/server.py:74](pipeline/web/server.py:74)). ONS runs a developer hub; Fingertips publishes request URLs meant to be embedded straight into notebooks and Power BI.
+**W-09 · The public API has no documentation page · M — closed in Phase 10**
+- **Fix:** `/api` (and `/api.html`), a static page with no script on it at all: every route, its parameters, its response keys, an example URL that is a link, and the caveat rules restated where they govern a payload. It reaches a static file rather than the API dispatcher because `_dispatch` checks the static map before the `/api/` prefix — deliberate, and pinned, because documenting the API at an address nobody would guess is most of the way to not documenting it.
+- **The pin found the finding's own prediction coming true.** Both published lists — the new page and the `<noscript>` block — are compared against the frozen route list in `tests/test_portal_isolation.py`, and the `<noscript>` block was already **wrong**: `/api/v1/ndtms` had shipped that week and the block never gained it. So the only description of the API a reader with JavaScript off could see was missing an endpoint, exactly as "a published endpoint list that is wrong is worse than none" predicted. Three places now have to agree: the dispatcher, the docs page, the noscript block.
+- Evidence **[at filing]**: the only description of `/api/v1/*` was the `<noscript>` block ([pipeline/web/static/public/index.html:74](pipeline/web/static/public/index.html:74)) and the whitelist in ([pipeline/web/server.py:74](pipeline/web/server.py:74)). ONS runs a developer hub; Fingertips publishes request URLs meant to be embedded straight into notebooks and Power BI.
 - Costs today: the audience most likely to consume the API — researchers working in notebooks — must reverse-engineer it from a page they only see with JS off.
 - Fix: a static `/api/v1` docs page: routes, parameters, example URLs, response shapes, the export endpoint's filter forwarding, and the caveats. Pinned by a test against the same route list `test_portal_isolation.py` uses — a published list of endpoints is a promise, and a wrong one is worse than none.
 - Verified by: the route-list pin above.
@@ -331,8 +337,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: `company_number` → Companies House, `charity_number` → Charity Commission, each CQC location → its CQC profile, labelled "verify at source" so the link is understood as an offer, not a claim.
 - Verified by: a test that the links are built from the registers' public URL shapes.
 
-**W-16 · No single bundle of the evidence exists · S — filed 2026-08-14**
-- Evidence: no zip anywhere in `pipeline/exports/` or `pipeline/web/` (verified by search); the admin Exports tab writes the four targets and offers per-file downloads; the public `/api/v1/export` serves one endpoint at a time.
+**W-16 · No single bundle of the evidence exists · S — closed in Phase 10**
+- **Fix:** a fifth export target, `bundle`, which is the only one that reads the export directory rather than the warehouse and therefore runs last under `all`. `manifest.json` names every file with its SHA-256 **and the provenance companion that belongs to it**, so the bundle can be checked after it has travelled; a README says what the reader is holding, where the caveats are, and that the licences are per source. On Jon's own exports: 18 data files, 25.9 MB, 9.3 MB zipped, every file paired, nothing unaccounted for.
+- The pairing check is new work, not packaging. The export writers pair a file with its companion at write time and **nothing had ever looked afterwards** — a data file with no provenance is now named in the manifest and in the README rather than sitting among the rest looking identical. An orphaned companion travels too, named as one.
+- **The public portal does not serve it, and that is the decision this phase was asked to take.** The portal's surface is a frozen list of routes; a zip of a directory publishes whatever happens to be in that directory at the time, which is not a surface anyone has decided on, and it can be stale in a way a per-endpoint export cannot. Public readers get complete per-section CSVs instead — which is what W-06 was for, and why it came first.
+- Evidence **[at filing]**: no zip anywhere in `pipeline/exports/` or `pipeline/web/` (verified by search); the admin Exports tab writes the four targets and offers per-file downloads; the public `/api/v1/export` serves one endpoint at a time.
 - Costs today: a researcher who wants "the evidence" clicks nine CSVs, four GeoJSONs and five JSONs separately; the bundle that would travel with a citation is assembled by hand, which is how companions get lost.
 - Fix: an export target that zips the sheets, geojson and echarts outputs with their `.provenance.json` companions and a README naming the contents; offered from the admin exports tab, and a decision on whether the public portal serves it.
 - Verified by: a test that the zip contains every file its manifest names, and no file the manifest does not.
@@ -367,8 +376,10 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: layer toggles on the geography page (contracts, CQC, boundaries, coverage) reusing the export layers' shapes, each carrying the caveat discipline its layer already has.
 - Verified by: a test that every toggled layer carries its own caveat text, and a browser check of the overlay.
 
-**W-20 · Nothing tells the operator the exports are stale · S — filed 2026-08-14**
-- Evidence: the exports listing carries file mtimes and nothing else ([pipeline/web/artefacts.py:75](pipeline/web/artefacts.py:75)); nothing compares them against `module_cursors` or `job_runs`. The Exports tab can show sheets written before a warehouse-changing re-run, and the README's "regenerate any time" is the only signal.
+**W-20 · Nothing tells the operator the exports are stale · S — closed in Phase 10**
+- **Fix:** a line per export directory, from the pipeline's own activity record — the newest of `http_cache.updated_at`, `module_cursors.updated_at` and `job_runs.finished_at`, all sub-millisecond reads. The *oldest* file in a directory decides, because a target writes nine files in one pass. Where the job record can name what finished since, it does; where it cannot, the line says so rather than implying nothing happened.
+- **The first version was correct and useless, and only the browser could show it.** It compared the files against the mtime of `warehouse.db` and its WAL, reasoning that every write touches the file so the check could only err towards stale. True — and the server writes to the warehouse as it starts, applying migrations and marking interrupted jobs, so every directory read "stale" a second after the page was opened. A warning that is always on is not a warning; it trains its reader to skip the line. The fetch record is what catches a command-line run, which is the case `job_runs` alone misses and the reason the file mtime looked necessary in the first place. On the real exports the line now reads: *oldest written 2026-08-11 07:22, a source was last fetched 2026-08-13 12:13* — stale, for a reason, and the bundle written minutes earlier reads current.
+- Evidence **[at filing]**: the exports listing carried file mtimes and nothing else ([pipeline/web/artefacts.py:75](pipeline/web/artefacts.py:75)); nothing compared them against `module_cursors` or `job_runs`. The Exports tab could show sheets written before a warehouse-changing re-run, and the README's "regenerate any time" was the only signal.
 - Costs today: a figure exported from stale sheets looks current — the shape D-02 existed to kill, for artefacts instead of runs.
 - Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
 - Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
@@ -412,8 +423,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a per-authority drill-down by `section` and `line_code` for a chosen ONS code and financial year. **No per-capita, no deflation, no ratio against grants or contracts** — [docs/CAVEATS.md:14](docs/CAVEATS.md:14) forbids cross-layer arithmetic and the grant/budget distinction is already one of the register's caveats. If a comparison looks irresistible, put the two figures side by side and let the reader make it explicitly.
 - Verified by: a test that the drill-down endpoint computes no ratio, and that grant and budget figures are never returned as a single derived number.
 
-**W-21 · Storage costs are invisible on the Health tab · S — filed 2026-08-14**
-- Evidence: the health cards report warehouse size, page size and free bytes and nothing else ([pipeline/web/health.py:141](pipeline/web/health.py:141)); the 3.5 GiB raw archive, the backups directory and the exports output are measured nowhere in the UI. P-02's growth curve was measured once for the audit ([docs/upgrade-roadmap.md §C](docs/upgrade-roadmap.md)) and is otherwise invisible.
+**W-21 · Storage costs are invisible on the Health tab · S — closed in Phase 10**
+- **Fix:** a storage panel over four directories — raw archive, backups, exports, logs — each with its file count, bytes, newest file and a sentence saying what it is and why it grows. The archive's sentence carries P-02's conclusion so the number and the reason not to delete it arrive together.
+- **It is on its own route, and that is a correction the browser forced.** It went into the cheap half of the health query as the finding says; against the real archive that is **six seconds** — 8,502 files and 4.5 GB, stat-ed one at a time — so the whole Health tab sat waiting to render a size in megabytes, which is exactly the shape `health.freshness`'s docstring was written against. `/api/admin/storage`, loaded like freshness is, and a test now asserts `health()` does not carry it.
+- The first measurement is itself a finding: the archive is **4.5 GB across 8,502 files**, against the 3.6 GB across 6,322 the audit measured on 2026-08-13, and `data/backups/` holds 1.4 GB in 9 files. The growth curve the roadmap said to watch is now visible on every visit rather than once an audit.
+- Evidence **[at filing]**: the health cards reported warehouse size, page size and free bytes and nothing else ([pipeline/web/health.py:141](pipeline/web/health.py:141)); the raw archive, the backups directory and the exports output were measured nowhere in the UI. P-02's growth curve was measured once for the audit and was otherwise invisible.
 - Costs today: the archive is the audit trail with a growth curve the roadmap itself says should be measured until it hurts — and the only instrument is a one-off audit. The operator gets no signal until a disk fills.
 - Fix: a storage card — raw archive bytes, backup count and bytes, exports bytes — stat-ing the three directories in the cheap half of the health query, so the curve is visible on every visit rather than once an audit.
 - Verified by: a test that the card's numbers equal a direct listing of the three directories.
@@ -424,9 +438,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 
 **O-02 · No backup or restore · M — closed in Phase 3** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
-**O-03 · Logs never rotate, and tests write into the real `logs/` · S — half closed in Phase 2** (tests no longer write there; rotation is still absent)
-- Evidence: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` is 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` is 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
-- A test run polluting the operator's log directory is the kind of thing that erodes trust in the directory.
+**O-03 · Logs never rotate, and tests write into the real `logs/` · S — closed in Phase 10** (tests stopped writing there in Phase 2; rotation landed here)
+- **Fix:** `RotatingFileHandler` at 10 MB per generation, five kept, both settings (`LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`) rather than constants — discarding a generation is a deletion, and an operator who wants a longer operational record should not have to edit the logging module to get one. By size, not by day: these logs are written in bursts, so a daily roll produces a directory of empty files and still lets one four-hour crawl write without limit.
+- The trade is written into the docstring rather than left implied. The provenance a figure rests on is in the warehouse and in `data/raw/`; this file is the operational record of what ran. Losing the oldest of it costs the ability to reconstruct a months-old run and costs nothing a published figure depends on.
+- `delay=True` came out of the same pass: several commands configure logging as a matter of course, and each was creating an empty file named after a module that never ran.
+- Evidence **[at filing]**: no rotation in [pipeline/logging_conf.py](pipeline/logging_conf.py); `logs/` was 7.2 MB **[live]** of which `fake_insert_only_for_tests.log` was 5.0 MB, alongside `bogus_module.log` and `fake_writer_for_tests.log`.
 
 **O-04 · No root `CLAUDE.md` · S — closed in Phase 6** — the conventions are real, enforced and currently learned by reading `docs/admin-ui-plan.md` §2 and this file. Several sessions a day re-derive them.
 
@@ -978,7 +994,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 |---|---|---|---|
 | ~~**8**~~ | F-03 — census verification, and the campaign starts | M | **done** |
 | ~~**9**~~ | W-05, W-18, W-08, W-10, W-15 — the shared furniture | S–M | **done** |
-| **10** | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | none |
+| ~~**10**~~ | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | **done** |
 | **11** | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | Phase 9 |
 | **12** | W-23, W-26, W-25, W-24 — show what is already collected | M–L | Phase 9 |
 | **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
@@ -996,11 +1012,14 @@ register — and nothing else: the two touched `public_queries.py` and
 `README.md` in different places and both auto-merged. That is the shape the
 warning below is about, and it was cheap.
 
-Phase 10 is independent of both and can run in a session that is not the one
-doing the campaign. Phases 11 and 12 depended on 9 and on nothing else, so
-both are now unblocked and can be taken in either order or in parallel by two
-sessions — with the caveat that both edit the frozen route list, and
-concurrent sessions have collided on this file before.
+Phase 10 was independent of both and was taken in a session that was not the
+one doing the campaign; it landed the same day. Phases 11 and 12 depended on 9
+and on nothing else, so both are now unblocked and can be taken in either
+order or in parallel by two sessions — with the caveat that both edit the
+frozen route list, and concurrent sessions have collided on this file before.
+Phase 10 added two entries to it (`/api`, `/api.html`) and one to
+`PUBLIC_API_EXTRA`, so a session starting 11 or 12 should read that file
+before appending to it.
 
 ---
 
@@ -1246,9 +1265,15 @@ The plan held. Five things it did not anticipate:
   `company` edge from Companies House. Deduplication moved onto the resolved
   register URL, which is the thing that is actually the same.
 
-### Phase 10 — The artefacts and the machine tell the truth · S–M — **planned**
+### Phase 10 — The artefacts and the machine tell the truth · S–M — **done** (2026-08-14)
 
-Delivers **W-06**, **W-16**, **W-09**, **W-20**, **W-21**, **O-03**.
+Delivered **W-06**, **W-16**, **W-09**, **W-20**, **W-21** and **O-03**, in
+that order. 1,518 → **1,557 passed** (39 new), 3 skipped, 18 deselected; ruff
+clean; the portal, the API page, the Exports tab and the Health tab all loaded
+in a browser against Jon's own warehouse with no console errors.
+
+What follows is the plan; the record of what changed as it landed is at the
+end of the entry.
 
 **Why these together:** every one is about a promise something on disk or on
 a route makes and does not keep. W-06's export ships 500 rows of 98,636 and
@@ -1285,6 +1310,53 @@ manifest and the route list are three pins on the same contract.
   names and no file it does not; the route-list pin; a fresh export reporting
   current and an older one naming its predecessor; the storage card's numbers
   equalling a direct listing of the three directories.
+
+#### What changed as it landed
+
+The order held and every "verified by" above is a test. Five things the plan
+did not anticipate, three of which only the browser could have shown:
+
+- **W-06's real fix is a refusal, not a stream.** Streaming was the easy half.
+  The finding was caused by a caller flattening a page's payload into a file,
+  so `to_csv` now *raises* for any endpoint in `public_export.WINDOWED` and the
+  export goes through a query of its own. `stream_csv` also refuses to finish
+  when the rows it wrote disagree with the count in the header it already
+  sent: the response then ends without its chunked terminator and every client
+  reports a failed download. A broken download is recoverable; a
+  complete-looking file with the wrong rows in it is not. Measured on the real
+  corpus: 64.4 MB, 98,636 rows, and a filtered export of 45,999 against an API
+  `total` of 45,999.
+- **W-09's pin caught the thing W-09 is about, immediately.** The finding says
+  a published endpoint list that is wrong is worse than none. The
+  `<noscript>` block — the only description of the API a reader with
+  JavaScript off ever saw — had not gained `/api/v1/ndtms` when that endpoint
+  shipped the week before. The test that compares both published lists against
+  the dispatcher's own routes failed on its first run, on the list that already
+  existed.
+- **W-20's first version was correct and useless.** Comparing the export files
+  against the mtime of `warehouse.db` can only err towards stale, which is the
+  safe direction — and the server writes to the warehouse as it starts, so
+  every directory read "stale" a second after the page was opened. That is a
+  warning nobody would read twice. It now compares against the pipeline's own
+  activity record: the conditional-request cache (which catches a command-line
+  run, the case `job_runs` misses), the module cursors, and the job history.
+- **W-21 belongs on its own route, and the finding said otherwise.** "The
+  cheap half of the health query" is where it went; on the real archive that
+  is six seconds of stat calls over 8,502 files, so the Health tab sat waiting
+  to render a size in megabytes — the exact shape `health.freshness` exists to
+  avoid. A test now asserts `health()` does not carry it.
+- **W-16 found that nothing had ever checked the pairing.** The export writers
+  pair each file with its `.provenance.json` at write time and nothing looked
+  afterwards. The manifest names the companion for each file and names any file
+  that has none, which is the difference between a bundle and a zip. **The
+  public portal does not serve the bundle** — the decision this phase was asked
+  to take and record: the portal's surface is a frozen list of routes, and a
+  zip of a directory publishes whatever is in that directory. Public readers
+  get complete per-endpoint CSVs, which is what W-06 was for.
+
+One thing found in passing and fixed: `.noscript ul` used `var(--space-5)`,
+which does not exist, so an undefined custom property made the declaration
+invalid and that list had no indent at all.
 
 ### Phase 11 — The authority spine · M–L — **planned**
 
