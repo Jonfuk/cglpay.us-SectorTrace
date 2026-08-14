@@ -26,6 +26,22 @@ from pipeline import db
 _SQLITE_INTERNAL = "sqlite_%"
 
 
+def quote(identifier: str) -> str:
+    """A SQL identifier, quoted, for the places a name reaches an f-string.
+
+    Table and column names are never taken from a caller directly — they are
+    matched against the live schema first — but they are still interpolated,
+    and doubling an embedded quote keeps that safe for names this schema does
+    not happen to contain today.
+
+    Here rather than in `web/queries.py`, where it was, because the Phase 2
+    loader needs it too and `catalog.py` is where the schema vocabulary lives.
+    Double quotes mean the same thing to both engines, so one spelling
+    serves both — which is the whole argument of this module.
+    """
+    return '"' + identifier.replace('"', '""') + '"'
+
+
 def list_objects(conn) -> list[dict]:
     """Every table and view, as `{"name": ..., "type": "table"|"view"}`.
 
@@ -98,9 +114,7 @@ def columns_of(conn, name: str) -> list[dict]:
             for r in rows
         ]
 
-    from pipeline.web import queries
-
-    rows = conn.execute(f"PRAGMA table_info({queries._quote(name)})").fetchall()
+    rows = conn.execute(f"PRAGMA table_info({quote(name)})").fetchall()
     return [
         {
             "name": r["name"],
@@ -134,6 +148,39 @@ def primary_key(conn, name: str) -> list[str]:
         return [r["name"] for r in rows]
 
     return [c["name"] for c in columns_of(conn, name) if c["pk"]]
+
+
+def foreign_keys(conn) -> list[tuple[str, str]]:
+    """Every `(child, parent)` foreign-key edge, deduplicated and sorted.
+
+    What the Phase 2 loader orders its tables by: a child row cannot be
+    inserted before the parent it references exists. Composite keys and two
+    columns of one table pointing at the same parent are one edge here,
+    because the only question being asked is which table goes first.
+
+    Self-references are dropped. A table whose rows point at other rows of the
+    same table (none do today) would otherwise be its own predecessor and make
+    the graph unsortable, when in fact it just needs its rows in the right
+    order within one load — a different problem, and not one this warehouse
+    has.
+    """
+    edges: set[tuple[str, str]] = set()
+    if db.backend_of(conn) == "postgres":
+        rows = conn.execute(
+            "SELECT c.conrelid::regclass::text AS child, "
+            "       c.confrelid::regclass::text AS parent "
+            "FROM pg_constraint c "
+            "JOIN pg_class r ON r.oid = c.conrelid "
+            "WHERE c.contype = 'f' "
+            "  AND r.relnamespace = current_schema()::regnamespace"
+        ).fetchall()
+        edges = {(r["child"], r["parent"]) for r in rows}
+    else:
+        for child in table_names(conn):
+            for row in conn.execute(
+                    f"PRAGMA foreign_key_list({quote(child)})").fetchall():
+                edges.add((child, row["table"]))
+    return sorted((child, parent) for child, parent in edges if child != parent)
 
 
 def tables_with_column(conn, column: str) -> list[str]:

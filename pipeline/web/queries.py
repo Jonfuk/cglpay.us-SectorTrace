@@ -188,13 +188,16 @@ def escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _quote(identifier: str) -> str:
-    """A SQL identifier, quoted. Table and column names are never accepted
-    from the caller directly — they are matched against the live schema first
-    — but they still reach an f-string, and doubling embedded quotes keeps
-    that true of names this schema does not happen to contain today.
-    """
-    return '"' + identifier.replace('"', '""') + '"'
+# A SQL identifier, quoted. Table and column names are never accepted from
+# the caller directly — they are matched against the live schema first — but
+# they still reach an f-string, and doubling embedded quotes keeps that true
+# of names this schema does not happen to contain today.
+#
+# Moved to `pipeline/catalog.py` when the Phase 2 loader needed the same
+# thing. The name stays here because eight call sites in this file and one in
+# health.py use it, and a second spelling of a quoting rule is exactly what
+# catalog.py exists to prevent.
+_quote = catalog.quote
 
 
 def is_restricted(name: str) -> bool:

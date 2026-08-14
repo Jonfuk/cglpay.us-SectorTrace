@@ -281,6 +281,159 @@ def list_backups() -> None:
         typer.echo(f"{entry['name']}  {human_bytes(entry['bytes'])}  {rows}")
 
 
+def _postgres_target(settings, what: str):
+    """The configured PostgreSQL warehouse, with its migrations applied.
+
+    Refuses rather than falling back. Both commands below exist to move data
+    between two named databases, and "there is no URL set, so I used the file
+    for both" is a sentence with no useful ending.
+    """
+    if settings.database_backend != "postgres":
+        ui.error(f"{what} needs a PostgreSQL warehouse to talk to, and "
+                  "DATABASE_URL is not set.")
+        ui.muted("  Set it in .env — see pipeline/migrations/postgres/README.md "
+                  "for creating the database and its two roles.")
+        raise typer.Exit(code=1)
+    target = db.get_connection(settings)
+    applied = db.apply_migrations(target, db.migrations_dir_for(settings))
+    if applied:
+        typer.echo(f"Applied migrations: {', '.join(applied)}")
+    target.commit()
+    return target
+
+
+@app.command("migrate-data")
+def migrate_data(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Say what would be loaded, in what order, "
+                                  "and write nothing"),
+    resume: bool = typer.Option(
+        False, "--resume", help="Carry on from an interrupted migration, "
+                                 "skipping the tables it finished"),
+    truncate: bool = typer.Option(
+        False, "--truncate",
+        help="Empty the target's tables first. This discards whatever is in "
+              "them; the SQLite warehouse is never touched."),
+    table: list[str] = typer.Option(
+        None, "--table", help="Load only these tables. For recovering a load, "
+                               "not for performing one."),
+    verify: bool = typer.Option(
+        True, "--verify/--no-verify",
+        help="Run the full row-by-row verification afterwards"),
+) -> None:
+    """Copy the SQLite warehouse into PostgreSQL, and prove it arrived.
+
+    The source is opened read-only and stays authoritative: nothing here can
+    write to it, and the way back from a bad migration is to unset
+    DATABASE_URL rather than to restore anything.
+
+    Refuses a target that already holds rows unless --truncate says otherwise,
+    checks the schemas and the source's storage types before writing anything,
+    and records each table in a state file so an interrupted run resumes.
+    """
+    from pipeline import pgload, pgverify
+
+    configure_logging("pgload")
+    settings = get_settings()
+    target = _postgres_target(settings, "migrate-data")
+    source = pgload.open_source(settings.database_path)
+
+    try:
+        if dry_run:
+            rows = pgload.plan(source, target)
+            problems = pgload.preflight(source, target)
+            ui.heading(f"{len(rows)} tables, "
+                        f"{sum(r['rows'] for r in rows):,} rows, in this order")
+            for entry in rows:
+                ui.info(f"  {entry['rows']:>9,}  {entry['table']}")
+            if problems:
+                ui.error("preflight found problems:")
+                for problem in problems:
+                    ui.warn(f"  {problem}")
+                raise typer.Exit(code=1)
+            ui.success("preflight is clean; nothing was written.")
+            return
+
+        def announce(name: str, expected: int, written: int | None) -> None:
+            if written is None:
+                ui.info(f"  {name} ({expected:,} rows)…")
+            else:
+                ui.success(f"  {name}: {written:,} rows")
+
+        summary = pgload.migrate(
+            source, target, settings=settings, resume=resume,
+            truncate=truncate, only=list(table) if table else None,
+            on_table=announce)
+    except pgload.LoadError as exc:
+        ui.error(str(exc))
+        raise typer.Exit(code=1) from None
+    else:
+        ui.heading(f"{summary['rows']:,} rows in {summary['tables']} tables, "
+                    f"{summary['elapsed_seconds']:,}s")
+        ui.muted(f"  state: {summary['state_path']}")
+        moved = [s for s in summary["sequences"] if s["next_value"] > 1]
+        if moved:
+            ui.muted(f"  {len(moved)} identity sequence(s) moved past the "
+                      "loaded ids")
+
+        if verify:
+            ui.heading("Verifying")
+            report = pgverify.verify(source, target)
+            _report_verification(report)
+            if not report["ok"]:
+                raise typer.Exit(code=1)
+    finally:
+        source.close()
+        target.close()
+
+
+@app.command("verify-migration")
+def verify_migration(
+    quick: bool = typer.Option(
+        False, "--quick",
+        help="Counts, NULL counts and per-column minima and maxima only — "
+              "skip the row-by-row comparison"),
+    table: list[str] = typer.Option(
+        None, "--table", help="Only these tables"),
+) -> None:
+    """Check the PostgreSQL warehouse against the SQLite one.
+
+    Reads both and changes neither. Every check that can run does, so the
+    output is the complete list of what is wrong rather than the first thing.
+    """
+    from pipeline import pgverify
+
+    configure_logging("pgverify")
+    settings = get_settings()
+    target = _postgres_target(settings, "verify-migration")
+
+    from pipeline import pgload
+
+    source = pgload.open_source(settings.database_path)
+    try:
+        report = pgverify.verify(source, target, deep=not quick,
+                                  tables=list(table) if table else None)
+    finally:
+        source.close()
+        target.close()
+
+    _report_verification(report)
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
+def _report_verification(report: dict) -> None:
+    depth = "every value" if report["checks"].get("rows") else "counts and aggregates"
+    if report["ok"]:
+        ui.success(f"{report['rows']:,} rows across {report['tables']} tables "
+                    f"agree, compared by {depth}.")
+        return
+    ui.error(f"{len(report['problems'])} problem(s) across "
+              f"{report['tables']} tables:")
+    for problem in report["problems"]:
+        ui.warn(f"  {problem}")
+
+
 @app.command()
 def web(
     port: int = typer.Option(1801, help="Port to listen on"),

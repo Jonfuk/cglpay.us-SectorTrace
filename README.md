@@ -631,6 +631,40 @@ deletes the warehouse it replaces.
 Both directories sit on the same disk, so this covers a bad migration and not
 a dead drive. See [`docs/BACKUP.md`](docs/BACKUP.md).
 
+## PostgreSQL
+
+SQLite is the backend of record and the default. Setting `DATABASE_URL` in
+`.env` points every command at a PostgreSQL warehouse instead — same SQL, same
+migrations under a second dialect tree, same behaviour. Nothing else changes,
+and unsetting the variable puts it back.
+
+```bash
+./start.sh migrate-data --dry-run   # the load order, and every preflight check
+./start.sh migrate-data             # load, then compare every value
+./start.sh verify-migration         # compare the two again, any time later
+```
+
+The SQLite warehouse is opened `mode=ro` throughout and stays authoritative:
+the way back from a bad migration is to unset the URL, not to restore
+anything. Before writing a row, the loader checks that both schemas hold the
+same tables, columns and foreign keys, that no value is stored as a type its
+column did not declare, and that no primary key contains a `NULL` — SQLite
+permits all three and PostgreSQL permits none of them.
+
+Tables are loaded parents-first, which is also what lets the five promotion
+and verification triggers stay armed through the load rather than being
+disabled for it: `evidence_promotions` and `census_verifications` go across
+before the rows that need them, so each trigger's own question answers yes.
+`verify-migration` then re-asks those questions as queries, compares row
+counts and per-column `NULL`s, minima and maxima, and — unless you pass
+`--quick` — every value of every row in primary-key order.
+
+Each table is one transaction and one line in a state file beside the
+warehouse, so an interrupted load resumes with `--resume` and never leaves a
+half-loaded table. See
+[`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md)
+for creating the database, its two roles, and why the collation matters.
+
 ## Documentation
 
 | Document | Contents |
@@ -639,6 +673,7 @@ a dead drive. See [`docs/BACKUP.md`](docs/BACKUP.md).
 | [`docs/SOURCES.md`](docs/SOURCES.md) | Each source's URL, licence, key requirement and applied rate limit |
 | [`docs/CAVEATS.md`](docs/CAVEATS.md) | Known limitations, and what must not be computed |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | Backing the warehouse up, restoring it, and how big the archive gets |
+| [`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md) | The PostgreSQL dialect tree, the conversions it makes, and moving the data across |
 | `docs/verification/` | Per-run review worklists produced by `m06`, `m09` and `m10` |
 
 ## Development
