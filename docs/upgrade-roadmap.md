@@ -7,14 +7,23 @@ baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 (D-04 followed on 2026-08-13); Phase 7 measured P-01 and F-04 and left P-03
 open. Each phase records what changed from the plan as it landed.
 
+**Everything still open is now sequenced as Phases 8–19**, at the end of §5 —
+twenty-one findings, four workstreams and three standing decisions, in the
+order to take them and with the reasons for that order. None has been started.
+Read [the ordering principle](#the-ordering-principle) before picking one up:
+the plan's whole value is that the shared machinery lands before the five
+sections that would otherwise each retrofit it.
+
 **What is left, as of 2026-08-14.** Everything the audit filed has been
 delivered, measured and declined, or is listed here. **Three remain**, and
 none is blocked on effort — each needs a decision first. D-05 and D-06, both
 filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
-comparison filed seventeen new findings (W-05–W-21, §3F), none yet worked,
-plus fifteen possible futures (§3J). On the same day four proposed
+comparison filed seventeen new findings (W-05–W-21, §3F) — of which W-07 was
+closed the same day — plus fifteen possible futures (§3J). A second strand
+that day closed U-03, U-04 and W-04 and delivered NDTMS (W-22), and filed the
+five sections of portal work it did not build as W-23–W-27. On the same day four proposed
 workstreams — new evidence terrain, the claims-to-evidence index, the sector
 universe, and further sources — were filed as §8; the third workstream of the
 first review, the verification campaign, is the register's own F-01 and F-03,
@@ -27,9 +36,17 @@ already there.
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
+| **W-05 – W-27** | Twenty-one open portal and operator findings from the 2026-08-14 comparison | Not decisions — work, and now sequenced. Phases 9–13. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
+
+The three decisions above are the only things in this register still waiting on
+somebody rather than on a session. F-03 opens Phase 8 (its design is the
+phase); F-05 and P-03 are Phase 14, together, because both are gated on your
+say-so and neither should be started inside a phase that is about something
+else.
 
 Also standing, and deliberately: **O-03** is half done — tests no longer write
-into `logs/`, but nothing rotates them.
+into `logs/`, but nothing rotates them (Phase 10).
 
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
@@ -180,11 +197,12 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - **Fix:** migration `0032` adds `contracts.notice_web_url` for the address *the release published*; m01 fills it going forward and a one-shot filled 15,736 rows from bytes already in `data/raw/`, fetching nothing. Where a release published none, the portal constructs the link at read time from the notice id and says that it did. Both link kinds now appear next to the API link rather than instead of it.
 - The construction rule was verified against every archived page, not assumed: 117,317 of 117,365 published notice URLs follow it, and every exception is an attachment path or a release citing a different notice.
 
-**W-05 · Collected and never shown · L — NDTMS done 2026-08-14, the rest open**
+**W-22 · Collected and never shown · L — NDTMS done 2026-08-14, the rest filed as W-23–W-27**
 - The portal reads what is named in `_public([...])` in `public_queries.py` and nothing else. Tables collected, caveated and never displayed **[live]**: `ndtms_la_statistics` 17,231, `la_revenue_budgets` 477,199 (one metric used), `pfd_reports` 1,539 with 214 concern terms and 57 provider mentions, `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180.
 - **Done:** NDTMS reaches the treatment page. `/api/v1/ndtms` returns estimates with their bounds attached, and the page charts only the figures the source published an interval for — these sheets print an estimate, its denominator population and a rate side by side, and one axis carrying 1,363 and 73,236 and 1.86 says nothing about any of them.
 - The pairing rule is the part worth knowing: bounds attach within a publication, sheet, area, period and age group, and a standalone pair attaches only where exactly one measure in the group is a point estimate. Where a sheet has several, the bounds are left unattached and the estimate is drawn without a band. A confidence interval on the wrong estimate is invented, which is worse than an absent one.
-- Still open: PFD, budget lines, CQC inspection history, filings, disclosure gaps, and the candidate-to-evidence funnel on the overview.
+- Still open, and now filed one apiece rather than as a list here: the contracts corpus has no shape (W-23), the provider deep dive stops at four sources (W-24), PFD is invisible (W-25), the overview shows neither the funnel nor freshness (W-26), and 477,199 budget lines sit behind one metric (W-27).
+- Numbered W-22, not W-05. It was filed as W-05 by a session that had not seen the portal comparison land the same day, and collided with the real W-05 below. Renumbered rather than left doubled — two findings sharing an id is how one of them stops being tracked.
 
 **W-03 · Accessibility is in good shape — no action.** `lang="en-GB"`, a skip link, `aria-label`led nav, `role="combobox"`/`listbox` on the typeahead, `:focus-visible` styles and `prefers-reduced-motion` handling are all present. Spot-checked, not audited against WCAG 2.2 line by line.
 
@@ -200,11 +218,9 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a complete-download path with the row count written into the `#` header line — chunked CSV streaming, or a raised cap the export states. The count must travel in the provenance line, not beside it.
 - Verified by: a test that a full export of a corpus larger than 500 rows contains every row and names the count.
 
-**W-07 · NDTMS data has no download path · S — filed 2026-08-14**
-- Evidence: `EXPORTABLE` has no `ndtms` entry ([pipeline/web/public_export.py:26](pipeline/web/public_export.py:26)), so `/api/v1/export` refuses it, while the treatment page renders NDTMS estimates with paired 95% CIs and hollow markers where a CI could not be paired ([pipeline/web/static/public/js/pages/treatment.js:264](pipeline/web/static/public/js/pages/treatment.js:264)). The Fingertips card next to it has a Download CSV button; the NDTMS card has none.
-- Costs today: the section with the most careful visualisation is the only one whose data cannot leave the server — a reader who wants to cite a point estimate must retype it.
-- Fix: add `ndtms` to `EXPORTABLE`, exporting the row shape the page renders (estimate, `lower`/`upper`, `has_interval`, `value_text`), with the "why some points are hollow" note in the file header.
-- Verified by: the export tests gaining the new endpoint, and a test that its rows carry the same paired-CI fields the page draws.
+**W-07 · NDTMS data has no download path · S — closed 2026-08-14** (`043df19`)
+- **Fix:** `EXPORTABLE` gained `"ndtms": ("estimates", "ndtms")` and the section a Download CSV button. The file carries the shape the chart draws — `value`, `lower`, `upper`, `has_interval`, `value_text` and both years — so a reader can cite a point estimate with the interval that belongs to it rather than retyping the number without it. Verified against the running server: 57 estimate rows for Hartlepool, provenance in the `#` header.
+- Filed and closed within the same hour, from opposite directions: this entry was written while the NDTMS section was still uncommitted, which is also why it describes hollow markers for unpairable CIs. The shipped version does not draw those — it charts only the figures the source published an interval for, because these sheets print an estimate, its denominator population and a rate side by side and one axis cannot carry all three. The unpairable ones are in the table beneath with the reason. See W-22.
 
 **W-08 · Charts cannot be exported as images · M — filed 2026-08-14**
 - Evidence: ECharts is vendored and every chart is drawn client-side ([pipeline/web/static/public/index.html:19](pipeline/web/static/public/index.html:19)); no page calls `getDataURL()`. Fingertips offers "More options > Download image/CSV" on every chart, and the WHO Global Health Observatory does the same.
@@ -283,6 +299,45 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Costs today: a figure exported from stale sheets looks current — the shape D-02 existed to kill, for artefacts instead of runs.
 - Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
 - Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
+
+**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — filed 2026-08-14**
+- Evidence **[live]**: the page carries a procedure donut, a matched-provider bar and a buyer treemap. Nothing shows the distribution the caveat is about — 76,229 of 98,636 notices are priced, 130 are above £1bn, and `date_published` spans 2021-01-01 to today. The page tells the reader there is no defensible total ([contracts.js:68](pipeline/web/static/public/js/pages/contracts.js:68)) and then gives them nothing to look at instead.
+- Costs today: "why is there no total?" is answered in prose and refuted by nothing. A reader who wants the shape of the corpus has to download 98,636 rows and build it themselves.
+- Fix, three charts on the existing `/api/v1/contracts` payload, no new route:
+  - **Notices per quarter, with the priced count as a second series.** The gap between the two lines is the coverage story; one line invites the reader to assume the unpriced notices were worth nothing.
+  - **Value distribution by order of magnitude** — fixed bands (under £10k, £10k–£100k, … , £1bn and above), never computed from the filtered data, so the same notice sits in the same band whatever filter is applied. A histogram whose buckets move when filtered cannot be compared with itself. This is the honest replacement for the total the page refuses.
+  - **Contract-end runway** — notices whose published `date_end` falls in the next two years, by quarter, with the matched-to-provider count alongside. Needs a caveat of its own, and one was drafted: an end date is the period *as published at notice stage*, extensions in `extension_terms_text` are not applied, a framework's end is not a call-off's end, and none of it is a retendering forecast.
+- Groundwork was written and reverted rather than half-landed: three query functions returning `by_quarter`, `value_bands` and `ending_soon`, plus the `contract_end` caveat. An API returning three keys no page reads and no test covers is how dead surface accumulates. Reconstructing it from this entry is an hour.
+- Verified by: a test that the bands are fixed rather than data-derived, and a browser check that the runway chart carries its caveat.
+
+**W-24 · The provider deep dive stops at four sources · M — filed 2026-08-14**
+- Evidence **[live]**: `provider_timeline` reads charity financials, tribunals, NHS adverts and contracts. Sitting unread beside them: `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180 with the `v_provider_disclosure_gaps` view already built over it, and `charity_financials` reduced to one column on the list page.
+- Costs today: the page is the closest thing this project has to a dossier on a campaign subject, and four of the sources collected about that subject are not on it.
+- Fix, four sections, each single-source and each with its own caveat:
+  - **CQC inspection history** from `cqc_location_reports` — report dates per location. A report date is an inspection published, not a rating change.
+  - **Charity finance** — income against expenditure by year, plus `income_from_govt_contracts` and `income_from_govt_grants` as a share of `total_income`. That share is within one row of one source and is allowed; combining it with `contracts.value_core` is a cross-layer ratio and is not.
+  - **Disclosure gaps** from `v_provider_disclosure_gaps` — a topic-by-year matrix of what an annual report does *not* discuss. The most campaign-relevant chart on this list and the easiest to overstate: "not matched" means the search terms did not appear in the extracted text, which is a statement about the PDF and the terms, not about the provider.
+  - **Filing history** from `company_filings`, each linking to `document_url`.
+- Verified by: a browser check per section, and a test that the disclosure matrix distinguishes "not matched" from "not searched".
+
+**W-25 · 1,539 PFD reports are collected and invisible · M — filed 2026-08-14**
+- Evidence **[live]**: `pfd_reports` 1,539, `pfd_concern_terms` 214, `pfd_provider_mentions` 57, `pfd_recipients` 5,788. `_public([...])` names none of them. Module 8 reads the PDFs and files the residue in `review_queue`; nothing downstream shows any of it.
+- Costs today: coroners' Prevention of Future Deaths reports are among the most quotable evidence this pipeline holds, and the only way to read one is SQL.
+- Fix: a sector-level section, plus the 57 mentions on the provider deep dive. Reports by year and by `coroner_area`; concern terms as a bar chart **labelled a finding aid** — a term means a word appears, not that the coroner found it ([docs/CAVEATS.md:165](docs/CAVEATS.md:165)). Three constraints that are not optional: being *sent* a report and being *named* in one are different facts and must never be summed into one series; roughly two thirds of reports (1,067 of 1,539) are metadata stubs with no `matters_of_concern`, which belongs on the chart and not in a footnote; and coroner areas are not local authorities and must not be mapped as if they were.
+- `restricted_pfd_persons` and `restricted_pfd_report_text` stay out of every `_public([...])`. `guard_columns` will stop it; do not look for a way around it.
+- Verified by: a test that the portal cannot reach either restricted table, and that sent and named are separate series in the payload.
+
+**W-26 · The overview shows neither the funnel nor what is stale · S — filed 2026-08-14**
+- Evidence **[live]**: 2,462 undecided candidates against 0 promotions was the finding behind U-03, and the public overview says nothing about it. Nor does anything show collection recency, though every table carries `retrieved_at`.
+- Costs today: the portal's own coverage limits are the first thing a sceptical reader should be able to see, and they are the one thing it does not display. Publishing the funnel honestly is both an accurate coverage statement and the standing argument for working the queue.
+- Fix: a candidate-to-evidence funnel (discovered → undecided → promoted → evidence rows) and a days-since-collection bar per source table, using the `ago()` helper the page already has.
+- Verified by: a browser check that a zero-promotion funnel renders as zero rather than as an empty chart.
+
+**W-27 · 477,199 budget lines sit behind one metric · M — filed 2026-08-14**
+- Evidence **[live]**: `la_revenue_budgets` holds 477,199 rows and the portal reads them only through `v_la_public_health_budget`, as one of the geography page's metrics.
+- Costs today: the single largest table in the warehouse is reachable as one number per authority.
+- Fix: a per-authority drill-down by `section` and `line_code` for a chosen ONS code and financial year. **No per-capita, no deflation, no ratio against grants or contracts** — [docs/CAVEATS.md:14](docs/CAVEATS.md:14) forbids cross-layer arithmetic and the grant/budget distinction is already one of the register's caveats. If a comparison looks irresistible, put the two figures side by side and let the reader make it explicitly.
+- Verified by: a test that the drill-down endpoint computes no ratio, and that grant and budget figures are never returned as a single derived number.
 
 **W-21 · Storage costs are invisible on the Health tab · S — filed 2026-08-14**
 - Evidence: the health cards report warehouse size, page size and free bytes and nothing else ([pipeline/web/health.py:141](pipeline/web/health.py:141)); the 3.5 GiB raw archive, the backups directory and the exports output are measured nowhere in the UI. P-02's growth curve was measured once for the audit ([docs/upgrade-roadmap.md §C](docs/upgrade-roadmap.md)) and is otherwise invisible.
@@ -394,29 +449,39 @@ somewhere it survives.
 
 ## 4. Quick wins
 
-Small, safe, independently shippable, no dependencies:
+Small, safe, independently shippable, no dependencies. The **Phase** column is
+where each open one now sits — a quick win is still a quick win, but W-17
+lands on a page that does not exist yet and W-06 extends a header W-10 has not
+given a licence line to, so "no dependencies" was true of the finding and is
+not quite true of the work.
 
-| ID | What | Why now |
-|---|---|---|
-| D-02 | Log run parameters and stamp dry runs | Makes F-02 diagnosable instead of mysterious |
-| D-01 | Apply `0028` to the working warehouse | One command; the drift is live |
-| P-04 | `timeout` on the handler | One class attribute |
-| S-02 | CSP, `X-Frame-Options`, `Referrer-Policy` | Three headers next to the one already there |
-| W-01 | `<noscript>` on the portal | A few lines, and it is a public site |
-| O-03 | Point test logging at a temp dir | Stops tests writing 5 MB into `logs/` |
-| S-03 | Bring the README's warning up to date | Text only, and it is currently understated |
-| W-05 | Wire or remove the Region filter | A visible control that does nothing is the one failure the portal's honesty rules do not cover |
-| W-06 | Make contract exports complete | The table shows 1,000 rows, its CSV ships 500 of 98,636, and nothing says so |
-| W-07 | NDTMS download path | One section whose data cannot leave the server |
-| W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence |
-| W-15 | Link providers to their registers | The cheapest verification affordance is a link |
-| W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today |
-| W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point |
-| W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it |
-| W-20 | Stale-exports warning on the Exports tab | A state that looks fine and isn't — the D-02 shape, for artefacts |
-| W-21 | Storage card on the Health tab | The only instrument for P-02's growth curve is a one-off audit |
+| ID | What | Why now | Phase |
+|---|---|---|---|
+| D-02 | Log run parameters and stamp dry runs | Makes F-02 diagnosable instead of mysterious | *done, 1* |
+| D-01 | Apply `0028` to the working warehouse | One command; the drift is live | *done, 1* |
+| P-04 | `timeout` on the handler | One class attribute | *done, 2* |
+| S-02 | CSP, `X-Frame-Options`, `Referrer-Policy` | Three headers next to the one already there | *done, 2* |
+| W-01 | `<noscript>` on the portal | A few lines, and it is a public site | *done, 2* |
+| O-03 | Point test logging at a temp dir | Stops tests writing 5 MB into `logs/` | *half done, 2* — rotation in **10** |
+| S-03 | Bring the README's warning up to date | Text only, and it is currently understated | *done, 2* |
+| W-05 | Wire or remove the Region filter | A visible control that does nothing is the one failure the portal's honesty rules do not cover | **9** — first, because it is a deletion |
+| W-06 | Make contract exports complete | The table shows 1,000 rows, its CSV ships 500 of 98,636, and nothing says so | **10** — after W-10's header |
+| W-07 | NDTMS download path | One section whose data cannot leave the server | *done, 2026-08-14* |
+| W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence | **9** — two consumers, one lookup |
+| W-15 | Link providers to their registers | The cheapest verification affordance is a link | **9** — reused by 11 and 12 |
+| W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today | **10** — after W-06 |
+| W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point | **11** — needs W-13 to land on |
+| W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it | **9** — every later table inherits it |
+| W-20 | Stale-exports warning on the Exports tab | A state that looks fine and isn't — the D-02 shape, for artefacts | **10** |
+| W-21 | Storage card on the Health tab | The only instrument for P-02's growth curve is a one-off audit | **10** |
 
 ## 5. Phases
+
+Phases 1–7 are done and each records what changed from its plan as it landed —
+read them for the shape a phase entry takes, and for the four defects CI found
+in code that had passed on the machine it was written on. **Phases 8–19 follow
+them and none has been started**; they are a plan, and the reasons for their
+order matter more than their contents.
 
 ### Phase 1 — Make a run's outcome unambiguous · S — **done** (`7f457fd` and this commit)
 
@@ -562,6 +627,11 @@ convenience, as planned.
   asserts there is not. Rejection *is* bulk — deciding a link is not what it
   looked like is reachable from the listing, and being wrong leaves a
   candidate a candidate.
+  *Superseded in part on 2026-08-14 (U-03): the UI now batches the clicking.
+  It still calls the single-URL route once per candidate, and only for
+  candidates it watched the operator open, so `promote_many` still does not
+  exist and the test still holds. What changed is that the screen stopped
+  being unusable enough that nothing was ever promoted through it.*
 
 **Done — U-01, the Candidates tab:** counts per kind, filters by authority and
 status, the document URL as the most prominent thing in each row, the
@@ -742,6 +812,475 @@ remains the right default — and my recommendation is still that it stays,
 since the run is not interactive and the conservative default costs nothing
 anyone is waiting on.
 
+---
+
+### Phases 8–19 — the plan for what is left · none started
+
+Twenty-one open portal and operator findings (W-05 – W-27), three standing
+decisions (F-03, F-05, P-03), the half-closed O-03, and four workstreams —
+sequenced. Nothing below has been begun; this section is the order to begin
+them in and the reasons for it, so that the next session picks up a plan
+rather than a list.
+
+#### The ordering principle
+
+**Build the shared thing before the things that use it.** Every open portal
+finding lands on one of four pieces of shared machinery:
+
+| Shared thing | Where | Who is waiting on it |
+|---|---|---|
+| `table()` — no search, no pager, no row count | [components.js:183](pipeline/web/static/public/js/components.js:183) | W-18, and every table in W-23–W-27 |
+| `mountChart()` — no image export, no caption in the download | [components.js:146](pipeline/web/static/public/js/components.js:146) | W-08, and every chart in W-11, W-19, W-23–W-26 |
+| The CSV header — no licence line, no row count | [public_export.py:86](pipeline/web/public_export.py:86) | W-06, W-10, W-16 |
+| The two frozen lists — public routes and public static paths | [tests/test_portal_isolation.py:110](tests/test_portal_isolation.py:110), [:127](tests/test_portal_isolation.py:127) | every new page or endpoint, one edit each |
+
+Five new portal sections and one new route are planned. Build the machinery
+first and each of them inherits search, paging, image export and a licence
+line for nothing. Build it second and the same retrofit is paid five times,
+in five files, by whoever notices the inconsistency last. That is the whole
+argument for the order below, and it is the one thing in this plan not to
+rearrange.
+
+The frozen lists are the second reason to batch. A new route costs a line in
+`test_the_public_api_routes_have_not_changed` and a new page costs one in
+`test_the_set_of_public_static_paths_has_not_changed` — trivial individually,
+but they are the file that says what the portal *is*, and five sessions each
+appending one line to it is five chances to append the wrong one. New surface
+is introduced in two phases (11 and 12) rather than in seven.
+
+#### Three orderings that are not preference
+
+1. **F-03's mechanism before everything.** Everything downstream of it is a
+   person's labour, and labour that could have started is the only cost a
+   phase plan can waste outright. It is Phase 8 because it is the gate, not
+   because it is large or urgent.
+2. **W-13 (an authority page) before W-14 and W-17.** Both are entry points
+   to a page that does not exist. Built first, each needs a temporary
+   destination and then rework when the real one lands.
+3. **Phase 9's furniture before Phases 11 and 12's sections.** As above.
+
+#### Three that are judgement, and are the recommendations here
+
+- **The verification campaign runs alongside the code phases, not after
+  them.** Workstream A is labour gated on open question 1, not on effort. The
+  §8 thesis — that the ceiling is the number of verified, cited rows, today
+  zero, and that the portal is secondary — is right, and the conclusion drawn
+  from it here is *not* "stop building the portal". It is that the campaign
+  starts the day Phase 8 lands and continues through Phases 9–14, because a
+  person deciding rows and a session writing JavaScript are not competing for
+  the same hours. What the campaign must not do is wait for the portal.
+- **D-04's remaining 3,160 items are not queue work — they are F1's input.**
+  `unmatched_buyer_name` (2,667) and `possible_group_company` (493) are, item
+  by item, the same reconciliation the sector universe does systematically
+  once ([§8, F1](docs/upgrade-roadmap.md)). Grinding them one at a time in the
+  review UI is that work done in its most expensive possible form, and it
+  produces no universe at the end. Deferred into Phase 18 deliberately, and
+  the queue count stays high in the meantime; that is the correct reading of
+  it, not a backlog.
+- **B4 (full council-website coverage) comes after the campaign shows
+  throughput, not before.** It multiplies candidate discovery from a verified
+  handful to 347 councils. With 2,462 undecided candidates against zero
+  promotions, widening discovery first makes the bottleneck worse and calls it
+  progress. Once the campaign is demonstrably clearing rows, the same change
+  is the highest-value collection work in the plan.
+
+#### The sequence
+
+| Phase | Delivers | Effort | Gate |
+|---|---|---|---|
+| **8** | F-03 — census verification, and the campaign starts | M | Open question 1 |
+| **9** | W-18, W-08, W-10, W-05, W-15 — the shared furniture | S–M | none |
+| **10** | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | none |
+| **11** | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | Phase 9 |
+| **12** | W-23, W-26, W-25, W-24 — show what is already collected | M–L | Phase 9 |
+| **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
+| **14** | P-03, F-05 — gated by runs and decisions, not by effort | M | yours |
+| **15** | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | none |
+| **16** | B3, G1, B1 — direct pay evidence and its comparators | M–L | none |
+| **17** | C1, C2 — the claims-to-evidence index | M | Phase 8's output |
+| **18** | F1, F2, F3, and D-04's remainder — the sector universe | L | Phase 15 |
+| **19** | B4, G5, G2, G8 — heavy, conditional, or gated on B4 | M–L | Phase 18 |
+
+Phases 9 and 10 are independent of each other and of Phase 8; either can run
+in a session that is not the one doing the campaign. Phases 11 and 12 both
+depend on 9 and on nothing else, so they can be taken in either order or in
+parallel by two sessions — with the caveat that both edit the frozen route
+list, and concurrent sessions have collided on this file before.
+
+---
+
+### Phase 8 — Unblock the verification campaign · M — **planned**
+
+Delivers **F-03**. The only phase that gates a person rather than a session.
+
+**Why this first, and alone.** The promotion path exists and now gets used
+(F-01, U-03); the census does not have one. 68 metrics sit at `verified = 0`
+and the portal correctly shows them as unverified, which it will keep doing
+for as long as there is no mechanism — not for want of a decision about any
+individual metric, but for want of anywhere to record the decision. Everything
+that follows in the campaign is somebody's afternoon, and afternoons cannot be
+scheduled behind a phase that has not been written.
+
+**The design question, stated rather than solved.** Promotion as built fetches
+the document and stores the hash of the bytes it retrieved — that is what
+makes an evidence row a claim about something that was read. The census has no
+URL per row: its provenance is the publication the 68 metrics were parsed
+from, already recorded. So census verification cannot reuse `promote.py`'s
+fetch, and must not pretend to: the mechanism records **who verified, when,
+against what, and on what note**, and stores no payload hash of its own,
+because none was retrieved. Whether that is a fourth `KINDS` entry with the
+fetch made conditional, or a sibling table with its own trigger, is the
+decision Phase 8 opens with. Phase 4 deferred this rather than bodging a
+fourth entry into `KINDS`; the deferral was right and the design is still
+owed.
+
+- **Not optional:** the trigger discipline of migration `0030` extends to
+  whatever this writes. A verified census metric without a recorded decision
+  must be refused by the database, not by `promote.py`.
+- **Also not optional:** the caveat forbidding cross-year differencing of
+  census metrics ([docs/CAVEATS.md:25](docs/CAVEATS.md:25)) survives
+  verification. Verified means checked against its source, not comparable
+  with the year before.
+- **Verified by:** a test that a census metric cannot reach `verified = 1`
+  without a decision row; a test that the mechanism records no payload hash
+  where nothing was fetched; and the markdown worklist replaced by, not
+  supplemented with, the UI path.
+
+**Deliberately not in this phase:** the labour itself, and D-04's 3,160
+unmatched-name items (Phase 18).
+
+**And then the campaign starts.** Workstream A is not a phase — it is
+open question 1 answered, and then people deciding rows, through the
+Candidates tab U-03 made usable. It runs from here to the end of the plan.
+
+### Phase 9 — The shared portal furniture · S–M — **planned**
+
+Delivers **W-18**, **W-08**, **W-10**, **W-05**, **W-15**. Five findings across
+three shared files, and every phase after this one is cheaper for it.
+
+**Why these together:** they are all edits to
+[components.js](pipeline/web/static/public/js/components.js),
+[app.js](pipeline/web/static/public/app.js) and
+[public_export.py](pipeline/web/public_export.py) — and every one of them is a
+thing five future sections would otherwise each implement, or each go
+without. Neither Tabulator's `headerFilter`/pagination nor ECharts'
+`getDataURL` is called anywhere in the portal's own code today, though both
+libraries are vendored and paid for.
+
+Order within the phase, because it is not arbitrary:
+
+1. **W-05 first, because it is a deletion.** The Region control writes
+   `state.region` and no page reads it. Recommendation stands: remove the
+   control rather than invent a use for it, and land the test that every
+   filter control the portal renders is read by at least one page — *before*
+   Phases 11–13 add controls to it.
+2. **W-18 — `table()` gains per-column search, a pager and a visible row
+   count.** The count is the honest half: "1,000 of 98,636" said out loud
+   rather than implied by a table that simply stops.
+3. **W-08 — `mountChart()` gains an image export** with the caption and the
+   pinned caveat rendered *into* the PNG. A chart whose caveat is a DOM
+   sibling loses it the moment the image is saved, which is the exact failure
+   [README.md:381](README.md:381) is written against.
+4. **W-10 — the licence, in both places at once.** One lookup from source to
+   licence (most are OGL v3, recorded in `docs/SOURCES.md`), consumed by the
+   `provenance()` drawer and by a `# Licence:` line in `to_csv`. Doing it as
+   one job is the reason it is here and not in Phase 10 with the rest of the
+   export work: two consumers, one table, one commit.
+5. **W-15 — a register-link helper**, used by the providers page now and by
+   W-13 and W-24 later. `company_number` → Companies House, `charity_number`
+   → Charity Commission, CQC location → its profile, each labelled *verify at
+   source* so it reads as an offer rather than a claim.
+
+- **Verified by:** the dead-control test above; a test that a table larger
+  than one page renders a pager and that search narrows the rows; a test that
+  every export header carries a licence line; a test that register links are
+  built from the registers' documented URL shapes. And a browser pass — a
+  vendored library that has stopped working is invisible to all four of those.
+
+**Deliberately not in this phase:** any new route, page or endpoint. This
+phase must not touch the frozen lists at all, which is what makes it safe to
+run concurrently with Phase 8 or 10.
+
+### Phase 10 — The artefacts and the machine tell the truth · S–M — **planned**
+
+Delivers **W-06**, **W-16**, **W-09**, **W-20**, **W-21**, **O-03**.
+
+**Why these together:** every one is about a promise something on disk or on
+a route makes and does not keep. W-06's export ships 500 rows of 98,636 and
+says nothing; W-16's bundle does not exist so "the evidence" is nine files
+clicked by hand; W-09's API is documented only in a `<noscript>` block most
+readers never see; W-20's exports can predate the run that changed the
+warehouse; W-21's growth curve has a one-off audit for an instrument; O-03's
+logs never rotate. They also share their tests — the export header, the
+manifest and the route list are three pins on the same contract.
+
+- **W-06 is the one that must not be got wrong.** A complete download with the
+  row count in the `#` header line, streaming rather than a raised cap
+  wherever the shape allows. The count travels *in* the provenance line, not
+  beside it. This is the same header W-10 just gave a licence line to, which
+  is why W-06 follows it rather than leading.
+- **W-16 after W-06**, because a bundle of truncated files is a worse artefact
+  than a truncated file. Manifest, `.provenance.json` companions, a README
+  naming the contents, offered from the admin Exports tab; whether the public
+  portal serves it is a decision to take in the phase and record here.
+- **W-09 last of the three**, because a docs page is a promise about routes and
+  export behaviour, and it should be written once both have stopped moving.
+  Pinned against the same frozen route list `test_portal_isolation.py` uses —
+  a published endpoint list that is wrong is worse than none, which Phase 2
+  already learned once with the `<noscript>` block.
+- **W-20 and W-21 are the operator's half** and are independent of the three
+  above: a staleness line per export directory read from `job_runs` and
+  `module_cursors`, and a storage card stat-ing the raw archive, the backups
+  and the exports directories in the cheap half of the health query.
+- **O-03 closes a half-open finding** — rotation on `pipeline/logging_conf.py`.
+  Tests stopped writing into `logs/` in Phase 2; nothing has ever pruned it.
+
+- **Verified by:** a full export of a corpus larger than 500 rows containing
+  every row and naming the count; the zip containing every file its manifest
+  names and no file it does not; the route-list pin; a fresh export reporting
+  current and an older one naming its predecessor; the storage card's numbers
+  equalling a direct listing of the three directories.
+
+### Phase 11 — The authority spine · M–L — **planned**
+
+Delivers **W-13**, **W-12**, **W-27**, **W-17**, **W-14**. Depends on Phase 9.
+
+**Why these together:** they are one page and its four feeders. "What does my
+authority get?" is the campaign's own question and the portal has no surface
+that answers it — while `/api/v1/contracts` has accepted `buyer_ons_code`
+since it was written and no control anywhere sets it. Four of the five
+findings here are cheap *given* an authority page and are rework without one.
+
+Order within the phase:
+
+1. **W-13 — the route, the endpoint and the page**, in the provider deep-dive
+   shape: grant allocation, budgeted spend, treatment estimates with their
+   paired CIs, contracts let. No new data; one frozen-route-list edit and one
+   frozen-static-path edit, made once for the whole phase.
+2. **W-12 — coverage ticks on it**, reusing the admin health tab's counts, so
+   a reader can tell absence of evidence from absence of collection. Carries
+   the caveat that absence is not evidence of absence.
+3. **W-27 — the budget drill-down as a section of it**, by `section` and
+   `line_code` for the chosen ONS code and year. **No per-capita, no
+   deflation, no ratio against grants or contracts.** If a comparison looks
+   irresistible, the two figures go side by side and the reader makes it
+   explicitly.
+4. **W-17 — "find my council"** in the global chrome, landing on the page that
+   now exists. 347 rows, Fuse.js already vendored. The postcode half stays
+   unfiled: NSPD is a large quarterly source with its own archive cost, and
+   the name search covers the common case for free.
+5. **W-14 — the map click** carries an ONS code through to the same page.
+
+- **Verified by:** a test that the authority page shows the same figures the
+  existing endpoints return for that authority; that the public coverage
+  endpoint and the admin one agree row for row; that the drill-down endpoint
+  computes no ratio and never returns grant and budget as one derived number;
+  that every authority name in the corpus resolves through the new control;
+  and a browser check of the map click carrying the code.
+
+**Deliberately not in this phase:** comparison between authorities. One
+authority at a time here; two is Phase 13 and is a different kind of claim.
+
+### Phase 12 — Show what is already collected · M–L — **planned**
+
+Delivers **W-23**, **W-26**, **W-25**, **W-24**. Depends on Phase 9.
+Independent of Phase 11.
+
+**Why these together:** all four are sections over tables the warehouse
+already holds, caveated already, displayed nowhere — the remainder of W-22
+after NDTMS. They share the `_public([...])` allowlist edits, the caveat
+discipline, and Phase 9's tables and charts. None needs a new module, a new
+fetch or a schema change.
+
+Order within the phase, and the first entry has a clock on it:
+
+1. **W-23 — the contracts corpus gets a shape.** Its groundwork was written
+   and reverted rather than half-landed, and the entry says reconstructing it
+   is an hour. That estimate decays: **if this phase has not started within a
+   fortnight of 2026-08-14, pull W-23 forward into whatever phase is running**,
+   because an hour's reconstruction becomes a day's rediscovery. Three charts,
+   no new route — notices per quarter against the priced count, value
+   distribution in **fixed** bands, and the contract-end runway with its own
+   drafted caveat.
+2. **W-26 — the funnel and the freshness bars on the overview**, the smallest
+   of the four and the one that makes the portal state its own limits. A
+   zero-promotion funnel must render as *zero*, visibly, not as an empty
+   chart — which is also the standing argument for the campaign running in
+   Phase 8's background.
+3. **W-25 — PFD becomes visible.** Three constraints that are not negotiable:
+   *sent* and *named* are different facts and never one series; the ~1,067
+   metadata stubs belong on the chart and not in a footnote; coroner areas are
+   not local authorities and are not mapped as if they were.
+   `restricted_pfd_persons` and `restricted_pfd_report_text` stay out of every
+   `_public([...])` — `guard_columns` will stop it, and nobody looks for a way
+   around it.
+4. **W-24 — the provider deep dive gains its four missing sources**, last
+   because it reuses W-25's mentions and W-15's register links, both of which
+   exist by then.
+
+- **Verified by:** a test that the value bands are fixed rather than
+  data-derived; a browser check that the runway chart carries its caveat and
+  that a zero funnel renders as zero; a test that the portal cannot reach
+  either restricted PFD table and that sent and named are separate series; a
+  test that the disclosure matrix distinguishes "not matched" from "not
+  searched".
+
+### Phase 13 — Comparison, and the inferences it forces · M — **planned**
+
+Delivers **W-11**, **W-19**, and settles three §3J entries that ride with
+them.
+
+**Why last of the portal phases.** Everything in Phases 9–12 is descriptive:
+it shows a figure with its caveat. Comparison is the first thing the portal
+would do that is an *inference* — two authorities on shared axes invites a
+conclusion about the difference between them, and `docs/CAVEATS.md` decides
+which inferences this project makes. That decision is cheaper to take against
+a portal that already renders every series it would compare.
+
+- **W-11 — compare two or more authorities or providers** on the existing
+  series (grant, budget, treatment, contracts). No new data; the
+  no-cross-layer-arithmetic caveats reapply on each shared axis.
+- **W-19 — layer toggles on the geography map**, reusing the four layer
+  shapes `pipeline/exports/geojson.py` already produces, each carrying its own
+  layer's caveat.
+- **Three §3J entries are decided here or explicitly deferred again**, because
+  each is the same question wearing a different hat: the **matrix / tartan
+  rug** view (the same comparison without the axes — whichever of it and W-11
+  ships first shapes the other), **significance-aware colouring** (the
+  warehouse holds the CIs, so the work is implementation and the *colour* is
+  the inference), and **peer-group benchmarking** (comparability is a claim,
+  and which authorities are comparable is a method decision). Settle them in
+  the phase's first hour, in writing, before any of the three is coded.
+
+- **Verified by:** a browser check of a two-area comparison with the
+  cross-layer caveat present on the shared axis; a test that every toggled
+  layer carries its own caveat text.
+
+### Phase 14 — Gated by runs and decisions, not by effort · M — **planned**
+
+Delivers **P-03** and **F-05**, or records their refusal again.
+
+Neither is blocked on code, and neither should be started inside another
+phase — which is why they are a phase and not a footnote to one.
+
+- **P-03** needs two complete collections, several hours each, ~6,300 requests
+  each, against live public bodies, the second existing only to be compared
+  with the first. It is a deliberate act to schedule. The recommendation is
+  unchanged: `--jobs 1` stays the default, and the comparison is worth running
+  once anyway so the default is *evidenced* rather than merely conservative.
+- **F-05** needs the decision in open question 2 before any design. The
+  recommendation is unchanged and is still *not yet*: history multiplies rows
+  and invites precisely the cross-year differencing the census caveat forbids.
+  If it is taken, it is taken **on one table, for one named claim** —
+  advertised bands over time being the plausible one, and the one Workstream
+  B3 would feed. The §3J "versioned datasets, ONS-style" entry is this same
+  decision with a delivery shape attached, and is decided here or not at all.
+
+**If the answer to both is no, this phase is a paragraph in the register and a
+day.** That is a successful outcome, not a skipped phase — Phase 7 ended the
+same way and the numbers it wrote down are why nobody has to re-derive P-01.
+
+---
+
+### Phases 15–19 — the workstreams
+
+§8 files four workstreams with their reasoning; this is the order to take them
+in and what each unlocks. They are coarser than Phases 8–14 on purpose — every
+one begins with a design session, and pre-specifying past that point would be
+inventing detail the source review has not earned yet.
+
+### Phase 15 — The cheap sources that feed everything else · S–M — **planned**
+
+**G7** (NLW/NMW reference), **B2** (Living Wage registrations), **G3**
+(Companies House PSC), **G4** (GOV.UK content API / EAT), **G6** (data.gov.uk
+CKAN).
+
+**Why these five, and why first among the workstreams:** all are S or small M,
+none opens a new politeness surface — G3 is m04's API family and key, G4 is
+m02's host, G7 is one annual reference table, B2 is thirteen lookups — and
+between them they unblock three later phases. G7 is the anchor for every
+"advertised band versus the statutory floor" statement Phase 17's claims index
+will want to make. G3 supplies the ownership edges Phase 18's universe needs.
+G6 multiplies G5, B4 and W-13 at the cost of one keyless documented API.
+
+The gate G1 flags applies to G7 in advance: a floor comparison is
+**side-by-side**, and any ratio ("X% above the NLW") is the CAVEATS reading's
+decision, not the module's.
+
+### Phase 16 — Direct pay evidence and its comparators · M–L — **planned**
+
+**B3** (provider career and reward pages, plus a sustained m16 crawl), **G1**
+(ONS ASHE), **B1** (gender pay gap filings).
+
+**Why this is the highest-value collection work in the plan:** this is a pay
+campaign, and `nhs_job_adverts` holds **35 rows** — the README's "only direct
+pay evidence" is a sliver. B3 widens the sector's own half; G1 supplies the
+comparator market the sector is measured against; B1 is a mandatory annual
+public filing with a claim shape already written. B1 needs its scope rule
+decided before collection: a provider under 250 staff is outside the law's
+reach, and its absence must read as *out of scope*, never as a zero.
+
+B3 is also where the F-05 decision becomes load-bearing — an advertised band
+per provider per period is a snapshot until history exists, and "the change is
+the claim" is the campaign's own argument. Phase 14 before this one, then, if
+the answer is going to be yes.
+
+### Phase 17 — The claims-to-evidence index · M — **planned**
+
+**C1** (the claim registry migration), **C2** (the "What we can say" page).
+
+**Gated on Phase 8's output, not on its code.** A claims index over zero
+verified rows is a schema with nothing in it. Start it once the campaign has
+produced enough verified evidence for the first claims to be real, and take
+open question 1's answer straight into it: a claim without a recorded reviewer
+and decision history is not a claim, the same standard migration `0030` sets
+for promotion. Nothing in the registry is computed — a claim is a statement
+linked to rows, and the linkage is a human judgement recorded like every other.
+
+### Phase 18 — The sector universe · L — **planned**
+
+**F1** (the universe build), **F2** (coverage denominators), **F3** (sector
+shape as a publication) — **and D-04's remaining 3,160 review items, done here
+rather than in the queue.**
+
+That last part is the point of putting these together. `unmatched_buyer_name`
+(2,667) and `possible_group_company` (493) are the universe's reconciliation
+labour arriving one review item at a time, in the form that produces no
+universe at the end of it. Done here they are the same hours spent once, with
+a `sector_universe` (or extended `providers`) table to show for them.
+
+Universe membership keeps m04's match-basis discipline exactly — name-only
+matches stay name-only, unconfirmed stay unconfirmed — or the universe becomes
+a larger and less verifiable version of the problem it was built to solve. The
+one recorded-not-decided design question stands: new table, or extension of
+`providers`. Organisations are not personal data, so the `restricted_`
+discipline does not reach this.
+
+### Phase 19 — Heavy, conditional, or gated · M–L — **planned**
+
+**B4** (authority-website registry to full 347-council coverage), **G5**
+(council spend-transparency files), **G2** (Skills for Care), **G8** (Adzuna).
+
+**B4 is gated on campaign throughput**, per the judgement above: it multiplies
+candidate discovery, and multiplying discovery into a queue that is the
+bottleneck is not progress. D-05's fix means answers now survive in
+`pipeline/verified_websites.json`, so the ~86 URLs lost with the override
+table cannot be lost the same way twice — the registry can be built up
+incrementally from here rather than in one campaign.
+
+**G5 depends on B4** and is the strongest procurement evidence the corpus
+could hold — "council X paid provider Y £Z" is actual money, not a notice.
+Line-item quality varies council to council, so the NULL discipline does real
+work: an unreadable file is a `parse_failures` row and a review item, never a
+zero.
+
+**G2 and G8 each begin with a review, not a module.** G2's machine-readable
+access is partial and the access shape is the first task; G8's terms are
+commercial and its parsed salary fields need a reliability check before
+anything is built on them. If either review fails, drop it and say so here —
+m16 and B3 already own the NHS and provider-site halves of the advert
+question.
+
 ## 6. Rejected
 
 | Idea | Why not |
@@ -768,6 +1307,12 @@ anyone is waiting on.
 7. **How often should `pipeline backup` run, and who deletes old ones (D-06)?** Recommendation: before every `run all` and on a daily schedule, keeping the last seven plus any labelled one. The failure was not that backups did not work; it was that the only one on disk had been taken after the damage.
 
 ## 8. Proposed workstreams — filed 2026-08-14, not yet started
+
+**Sequenced as Phases 15–19** at the end of §5; this section keeps the
+reasoning for each item, that one keeps the order and what each unlocks. Two
+sequencing judgements made there change how these read: D-04's remaining 3,160
+review items are folded into F1 rather than ground through the queue, and B4
+waits until the verification campaign is demonstrably clearing rows.
 
 Two of the three workstreams from the "large upgrade" review, filed so the
 thinking survives, plus one from the longer-term workstreams review and one
