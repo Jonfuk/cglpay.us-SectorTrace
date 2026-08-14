@@ -94,11 +94,11 @@ class TestTheTreesMatch:
             f"only in SQLite tree: {sorted(sqlite_names - postgres_names)}; "
             f"only in PostgreSQL tree: {sorted(postgres_names - sqlite_names)}")
 
-    def test_thirty_three_of_them(self):
+    def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
         # through.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 33
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 34
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):
@@ -132,6 +132,12 @@ class TestTheTreesMatch:
 
 
 class TestPostgresTreeSpecifics:
+    # The one file allowed to say `group_concat`, because defining that name
+    # for PostgreSQL is its entire job. Scoped to the filename rather than
+    # relaxed for the whole tree, and paired with the test below so the
+    # exemption cannot quietly start covering a real use of SQLite's aggregate.
+    DEFINES_GROUP_CONCAT = "0034_group_concat_compat.sql"
+
     def test_no_sqlite_only_constructs_survive(self):
         """Checked against code, not comments — several of the comments in
         that tree name the construct they replaced, on purpose."""
@@ -140,11 +146,41 @@ class TestPostgresTreeSpecifics:
             re.IGNORECASE)
         offenders = []
         for path in sorted(POSTGRES.glob("*.sql")):
+            if path.name == self.DEFINES_GROUP_CONCAT:
+                continue
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 code = line.split("--", 1)[0]
                 if banned.search(code):
                     offenders.append(f"{path.name}:{number}")
         assert not offenders, f"SQLite-only constructs in the PostgreSQL tree: {offenders}"
+
+    def test_the_exempt_file_only_defines_group_concat(self):
+        """The exemption above is for a definition, not for a call.
+
+        If this file ever grows a `SELECT ... GROUP_CONCAT(...)` — or any of
+        the other banned constructs — the skip in the previous test would hide
+        it, so the same ban is applied here minus the two forms that declare
+        the aggregate.
+        """
+        path = POSTGRES / self.DEFINES_GROUP_CONCAT
+        banned = re.compile(
+            r"\b(AUTOINCREMENT|sqlite_master|PRAGMA)\b|RAISE\s*\(\s*ABORT", re.IGNORECASE)
+        declaring = re.compile(
+            r"CREATE\s+(OR\s+REPLACE\s+)?(AGGREGATE|FUNCTION)\s+_?group_concat", re.IGNORECASE)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.split("--", 1)[0]
+            assert not banned.search(code), f"{path.name}:{number}"
+            if re.search(r"\bgroup_concat\b", code, re.IGNORECASE):
+                assert declaring.search(code), (
+                    f"{path.name}:{number} mentions group_concat without declaring it: "
+                    f"{code.strip()}")
+
+    def test_both_arities_are_defined(self):
+        """SQLite's GROUP_CONCAT takes one argument (comma-separated) or two
+        (explicit separator), and the export layer uses both."""
+        sql = (POSTGRES / self.DEFINES_GROUP_CONCAT).read_text(encoding="utf-8")
+        assert "AGGREGATE group_concat(text, text)" in sql
+        assert "AGGREGATE group_concat(text)" in sql
 
     def test_triggers_raise_an_integrity_error(self):
         """The five refusals are settled decision 4's mechanism.

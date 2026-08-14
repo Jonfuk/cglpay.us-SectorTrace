@@ -1,0 +1,21 @@
+-- Deliberately empty. See ../migrations/postgres/0034_group_concat_compat.sql.
+--
+-- That file defines a `group_concat` aggregate for PostgreSQL, which already
+-- exists in SQLite under exactly that name. There is nothing for this side to
+-- do, and this file exists so that there is still nothing for it to do in a
+-- way that is visible.
+--
+-- The two migration trees hold the same filenames, in the same order, applied
+-- through the same ledger. `tests/test_migration_equivalence.py` enforces it,
+-- and the reason it does is that a file present in one tree and missing from
+-- the other is the failure mode of keeping two trees at all -- it produces two
+-- databases that both report the same schema version and are not the same
+-- schema.
+--
+-- The alternative was to let the PostgreSQL tree carry files the SQLite tree
+-- does not, under some naming convention the test learns to ignore. That
+-- weakens the invariant to buy nothing: a comment costs less than an
+-- exception, and an exception is a thing the next person has to know about.
+--
+-- So when a migration is needed on one backend only, it lands as a pair, and
+-- the empty half says which backend needed it and why.

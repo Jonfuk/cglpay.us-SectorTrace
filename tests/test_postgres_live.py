@@ -289,6 +289,69 @@ class TestRowsAndCountersBehave:
         assert row["n"] > 50
 
 
+class TestGroupConcatMatchesSqlite:
+    """The compatibility aggregate from 0034.
+
+    Nine export queries call `GROUP_CONCAT` from application SQL and stay one
+    query each because PostgreSQL is taught the name. Every assertion here
+    runs against both engines, so SQLite is the specification rather than my
+    recollection of it.
+    """
+
+    ROWS = ("SELECT 'b' AS x UNION ALL SELECT 'a' UNION ALL SELECT 'b'")
+
+    def test_two_argument_form(self, pg, lite):
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(x, ', ') FROM ({self.ROWS}) t").fetchone()[0]
+            assert sorted(got.split(", ")) == ["a", "b", "b"], db.backend_of(conn)
+
+    def test_one_argument_form_separates_with_a_comma(self, pg, lite):
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(x) FROM ({self.ROWS}) t").fetchone()[0]
+            assert sorted(got.split(",")) == ["a", "b", "b"], db.backend_of(conn)
+
+    def test_distinct(self, pg, lite):
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(DISTINCT x) FROM ({self.ROWS}) t").fetchone()[0]
+            assert sorted(got.split(",")) == ["a", "b"], db.backend_of(conn)
+
+    def test_nulls_are_skipped_not_stringified(self, pg, lite):
+        """A NULL must not end the string or arrive as the text 'NULL'."""
+        rows = "SELECT 'a' AS x UNION ALL SELECT NULL UNION ALL SELECT 'b'"
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
+            assert sorted(got.split("|")) == ["a", "b"], db.backend_of(conn)
+
+    def test_all_nulls_gives_null_not_empty_string(self, pg, lite):
+        rows = "SELECT NULL AS x UNION ALL SELECT NULL"
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
+            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+
+    def test_no_rows_gives_null(self, pg, lite):
+        for conn in (pg, lite):
+            got = conn.execute(
+                "SELECT GROUP_CONCAT(x, '|') FROM "
+                "(SELECT 'a' AS x WHERE 1 = 0) t").fetchone()[0]
+            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+
+    def test_a_concatenated_expression_as_the_value(self, pg, lite):
+        """`exports/schema.py:223` builds its value with `||` over a text and
+        an integer column, which is the one call site that is not a plain
+        column reference."""
+        rows = "SELECT 'term' AS t, 3 AS n"
+        for conn in (pg, lite):
+            got = conn.execute(
+                f"SELECT GROUP_CONCAT(t || ' (' || n || ')', ', ') "
+                f"FROM ({rows}) x").fetchone()[0]
+            assert got == "term (3)", db.backend_of(conn)
+
+
 class TestOrderingMatchesSqlite:
     def test_nulls_sort_to_the_same_end(self, pg, lite):
         """SQLite puts NULLs first ascending, PostgreSQL last. The export
