@@ -14,11 +14,11 @@ filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
 uses — Fingertips, LG Inform, WhatDoTheyKnow, the ONS developer hub — and the
 comparison filed seventeen new findings (W-05–W-21, §3F), none yet worked,
-plus thirteen possible futures (§3J). On the same day two proposed
-workstreams — new evidence terrain, the claims-to-evidence index, and the
-sector universe — were filed as §8; the third workstream of the first review,
-the verification campaign, is the register's own F-01 and F-03, already
-there.
+plus thirteen possible futures (§3J). On the same day four proposed
+workstreams — new evidence terrain, the claims-to-evidence index, the sector
+universe, and further sources — were filed as §8; the third workstream of the
+first review, the verification campaign, is the register's own F-01 and F-03,
+already there.
 
 | | Finding | What it needs |
 |---|---|---|
@@ -756,7 +756,8 @@ anyone is waiting on.
 ## 8. Proposed workstreams — filed 2026-08-14, not yet started
 
 Two of the three workstreams from the "large upgrade" review, filed so the
-thinking survives, plus one from the longer-term workstreams review.
+thinking survives, plus one from the longer-term workstreams review and one
+from the sources review (Workstream G).
 Workstream A (the verification campaign) is not a section here — it is F-01,
 F-03 and the queue itself, already in the register, and its cost is labour and
 the open-question-1 decision, not code. Workstreams D and E are existing
@@ -861,3 +862,52 @@ design question, recorded rather than decided here: whether the universe
 lives in a new `sector_universe` table or extends `providers`
 ([README.md:122](README.md:122)); organisations are not personal data, so the
 `restricted_` discipline does not touch it.
+
+### Workstream G — Further sources and expansions
+
+Five additions from the sources review: two comparator markets, two expansions
+of existing modules, and one harvest module. Filed with the shape of the
+claim each would support; each passes the same filter as every module —
+public licence, robots respected, process-wide rate limit, provenance or
+NULL.
+
+**G1. ONS Data Explorer API (ASHE) · M** — the Annual Survey of Hours and
+Earnings, via the ONS developer hub ([developer.ons.gov.uk](https://developer.ons.gov.uk/)):
+median pay by industry (SIC) and occupation, public and OGL. Claim shape:
+"median pay for [occupation] in England is £X, against which the sector's
+advertised bands sit at Y%" — the strongest missing comparator market for
+what the sector pays versus comparable work. One discipline to settle when
+the claims index (C1) meets it: an ASHE-versus-adverts statement is a
+side-by-side comparison, not an arithmetic ratio, and the CAVEATS reading
+decides which of those a claim may make.
+
+**G2. Skills for Care workforce intelligence · M** — adult social care pay
+and headcount benchmarks; substance misuse sits between health and social
+care, and its workforce market is largely the care workforce. Claim shape:
+contextual pay and turnover comparators. **The access shape is the first
+task, not the module**: the intelligence service publishes reports, and its
+machine-readable access is partial — verify what is fetchable and at what
+terms before committing to a module.
+
+**G3. Companies House PSC register · S** — People of Significant Control,
+the same API family and key m04 already holds. Claim shape: ownership edges
+for the entity graph — "who owns whom" for the 13 providers and, later, for
+the universe (F1). No new politeness surface, no new key; the same fetch,
+archive and match-basis disciplines as m04.
+
+**G4. GOV.UK content API · S** — expand m02 to Employment Appeal Tribunal
+decisions alongside the current tribunal feed. Same host, same client,
+incremental. Claim shape: appeals and their outcomes deepen the tribunal
+evidence layer — a decision affirmed or overturned is a materially different
+datum from the first-instance judgment.
+
+**G5. Council spend-transparency files · M–L — deliberately not an API** —
+councils publish £500+ spend as files on their own sites, and there is no
+central API for them. A harvest module in the m09/m10 shape: discover the
+file (depends on B4's full website coverage), fetch, archive, parse line
+items. Claim shape: "council X paid provider Y £Z in [period]" — actual
+money flows, the strongest procurement evidence the corpus could hold.
+Line-item quality varies council to council, so the NULL discipline does
+real work here: an unreadable file is a `parse_failures` row and a review
+item, not a zero. Also feeds F1 (awardees from spend) and C (claims about
+real payments).
