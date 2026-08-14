@@ -59,6 +59,14 @@ at a location id from `cqc_locations` closes it.
 Also standing, and deliberately: **O-03** is half done — tests no longer write
 into `logs/`, but nothing rotates them (Phase 10).
 
+And newly standing, from **O-05**: CodeQL's first green run left **21 open
+alerts** (14 high, 7 medium). Several will be the by-design ones the
+workflow's header predicted — this project composes SQL from module-level
+constants with the values bound — but none has been read yet, and an
+untriaged alert list becomes indistinguishable from an ignored one within a
+month. Dismissals need a reason, which is the rule the workflow already
+states.
+
 Numbers marked **[live]** come from Jon's own `data/warehouse.db`, read
 read-only. Numbers marked **[measured]** were timed here. Everything else is
 inferred from the code and says so.
@@ -421,6 +429,33 @@ Effort: S = under a day, M = a few days, L = a week or more.
 ### G. Operations
 
 **O-01 · No CI · M — closed in Phase 6** — no `.github/`. 1,215 tests, 7 minutes **[measured]**, Windows-only development, a repo several sessions commit to concurrently.
+
+**O-05 · The CodeQL check was red on every run for a reason that was not the code · S — filed and closed 2026-08-14**
+- Evidence: every push and pull request from 2026-08-13 carried a failing
+  `analyze`, including both phase PRs merged that afternoon. The repository had
+  **both** CodeQL configurations enabled — `.github/workflows/codeql.yml` and
+  the Settings "default setup" — and GitHub refuses an advanced
+  configuration's results while default setup is on. The job ran the whole
+  analysis and failed at the upload step, which is why the cause was only
+  visible at the end of a log.
+- Costs while it lasted: a check that is always red is a check nobody reads,
+  and it was the one check reading the code for the class of defect the
+  offline suite cannot reach.
+- **Fix** (`#18`): default setup off, the workflow kept. Not
+  interchangeable — default setup runs the `default` query suite and the
+  workflow runs `security-extended`, which is where the request-forgery
+  queries live. **S-01 was that shape**, and it shipped.
+- The part worth keeping in mind: default setup was also scanning
+  `javascript-typescript` and `actions`, and turning it off alone would have
+  dropped both front ends and the workflows out of analysis *while the tick
+  went green*. They are in the workflow's matrix now, so coverage went up —
+  three languages on the extended suite rather than three on the default one.
+  Vendored minified builds are excluded: a finding in ECharts is not this
+  project's to fix or to dismiss.
+- First green run found **21 alerts** (14 high, 7 medium) — SQL injection,
+  path injection, response splitting, and workflow permissions. Several are
+  the by-design ones the workflow's own header predicted. **None has been
+  triaged yet**, and that is the open work this finding leaves behind.
 
 **O-02 · No backup or restore · M — closed in Phase 3** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
