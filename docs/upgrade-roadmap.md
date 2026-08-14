@@ -483,7 +483,15 @@ in code that had passed on the machine it was written on. **Phases 8–19 follow
 them and none has been started**; they are a plan, and the reasons for their
 order matter more than their contents.
 
-### Phase 1 — Make a run's outcome unambiguous · S — **done** (`7f457fd` and this commit)
+Each delivered phase is tagged at the commit that completed it — `phase-1`
+through `phase-7`, annotated with what it delivered and what it found on the
+way. `git describe` therefore names the phase any commit belongs to, and
+`git log phase-2..phase-3` is the phase's actual diff. The tags carry the real
+commit dates, which is why they exist and why the delivered phases were not
+backfilled as closed issues: a closed issue would date this history to the
+afternoon somebody wrote it down.
+
+### Phase 1 — Make a run's outcome unambiguous · S — **done** (`7f457fd`, `3ceb4db`)
 
 Delivered D-02, D-01, F-02, U-02. Suite green throughout: 1215 → **1229
 passed**, 1 skipped.
