@@ -94,7 +94,11 @@ def resolve_answered(
     configure_logging("review_sweep")
     settings = get_settings()
     conn = db.get_connection(settings)
-    db.apply_migrations(conn, settings.migrations_dir)
+    # migrations_dir_for, not settings.migrations_dir: the latter is always
+    # the SQLite tree, so naming it here would apply SQLite DDL to a
+    # PostgreSQL warehouse. The other four call sites pass nothing and get the
+    # right tree by default; these two were explicit and had to be corrected.
+    db.apply_migrations(conn, db.migrations_dir_for(settings))
     conn.commit()
     try:
         if reopen:
@@ -144,7 +148,11 @@ def restore_promotion_flags(
     configure_logging("promote")
     settings = get_settings()
     conn = db.get_connection(settings)
-    db.apply_migrations(conn, settings.migrations_dir)
+    # migrations_dir_for, not settings.migrations_dir: the latter is always
+    # the SQLite tree, so naming it here would apply SQLite DDL to a
+    # PostgreSQL warehouse. The other four call sites pass nothing and get the
+    # right tree by default; these two were explicit and had to be corrected.
+    db.apply_migrations(conn, db.migrations_dir_for(settings))
     conn.commit()
     try:
         rows = promote.restore_flags(conn, kind=kind, dry_run=not apply)
