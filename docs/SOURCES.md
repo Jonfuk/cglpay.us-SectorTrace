@@ -364,6 +364,16 @@ invisible here.
 | Rate limit | Default; a robots.txt disallow is recorded as a review item |
 | Notes | Pay figures on career and reward pages — advertised bands, rewards pages, listed rates. Attribution is exact by construction: the page is the provider's own site (`match_basis = 'site_owned'`). A page that answered with no figures is recorded with `pay_mentions = 0` — an answer about that page; a page that did not answer is a review item, never a zero row. Coverage is a floor, the same caveat as Module 16: a provider whose site publishes no figures here may publish them on a jobs board or in PDFs this module does not read |
 
+## Module 23 — The sector universe (Phase 18, F1)
+
+| | |
+| --- | --- |
+| Source | **None — fetches nothing.** A reconciliation over what the other modules collected: `contracts` awardees, `charity_financials`, `companies`, `cqc_providers`, the tracked `providers`, and the `review_queue` items m01 and m04 filed |
+| Licence | OGL v3.0 — every row is derived from sources that are themselves OGL v3.0 (the universe invents no data of its own) |
+| Key | None |
+| Rate limit | None — no requests are made |
+| Notes | Reconstructs the sector population: the tracked providers, the companies/charities/CQC registrations collected about them, every distinct awardee in the notices, and every buyer no authority matched (captured as funders). `match_basis` keeps m04's discipline exactly — 'seed' (config or authoritative cross-reference), 'register' (source-published identifier), 'ppon' (the buyer platform's supplier registration id, never a legal-entity claim), 'name_only_unconfirmed' (captured from a name; never linked to a provider). The universe is a capture of who shows up in the corpus, never a complete list of the sector — the notices were matched by CPV prefix and keyword, so one-off awardees of in-scope lots appear. The 3,160 `unmatched_buyer_name` / `possible_group_company` review items are answered by `resolve-answered` once their rows exist; every closure is recorded in `review_resolutions` and reversible |
+
 ---
 
 ## Viability checks

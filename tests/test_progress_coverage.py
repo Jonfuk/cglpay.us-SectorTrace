@@ -1,6 +1,6 @@
 """Every module must report progress.
 
-The original failure was not that the display was broken — it worked
+The original failure was not that the display was broken â€” it worked
 perfectly for the three modules that used it. It was that nobody noticed the
 other thirteen reported nothing, so `run all` showed a blank screen for its
 entire first wave. Nothing in the test suite could have caught that, because
@@ -41,7 +41,7 @@ def test_all_twenty_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 23
+    assert len(_real_modules()) == 24
 
 
 @pytest.mark.parametrize("name", [
@@ -50,7 +50,7 @@ def test_all_twenty_modules_are_covered():
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages", "m23_sector_universe",
 ])
 def test_the_tracked_loop_carries_a_label(name):
     """A bar labelled with the module name twice tells a reader nothing about
@@ -66,7 +66,7 @@ def test_the_tracked_loop_carries_a_label(name):
 
 def test_progress_never_changes_what_a_module_collects():
     """ctx.track is a pass-through. If it ever filtered, sliced or reordered,
-    a display setting would change the evidence — which is the one thing this
+    a display setting would change the evidence â€” which is the one thing this
     layer must never do.
     """
     from pipeline.console import NULL_REPORTER, ProgressReporter, progress
@@ -86,19 +86,19 @@ def test_progress_never_changes_what_a_module_collects():
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages", "m23_sector_universe",
 ])
 def test_each_module_registers_its_run_function(name):
     """m15_foi was registered to crawl_disclosure_log(profile, client).
 
     A helper had been inserted between @register_module and `run`, so the
     decorator landed on the helper. `run m15_foi` would have called it with a
-    ModuleContext and died on the missing second argument — a module broken in
+    ModuleContext and died on the missing second argument â€” a module broken in
     production that every existing test missed, because they all call
     foi.run(...) directly rather than through the registry.
     """
     assert MODULE_REGISTRY[name].__name__ == "run", (
-        f"{name} is registered to {MODULE_REGISTRY[name].__name__!r}, not run() — "
+        f"{name} is registered to {MODULE_REGISTRY[name].__name__!r}, not run() â€” "
         "check whether a helper was inserted between the decorator and run")
 
 
@@ -108,7 +108,7 @@ def test_each_module_registers_its_run_function(name):
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages", "m23_sector_universe",
 ])
 def test_each_module_takes_exactly_a_context(name):
     """The signature the CLI calls with. Catches the same class of mistake
@@ -145,7 +145,7 @@ def test_phase_relabels_the_modules_own_bar():
 
 def test_the_slowest_modules_say_what_they_are_doing():
     """A module whose counted loop starts a minute in showed a bare "0/?"
-    until then — the same "working or stuck?" question the display exists to
+    until then â€” the same "working or stuck?" question the display exists to
     answer. These are the ones with the longest silent stretches.
     """
     import inspect

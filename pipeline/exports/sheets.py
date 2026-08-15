@@ -34,6 +34,7 @@ TAB_TABLES: dict[str, list[str]] = {
     "07_Tribunal_Cases": ["tribunal_cases"],
     "08_PFD_Reports": ["pfd_reports", "pfd_concern_terms", "pfd_provider_mentions"],
     "09_Workforce_Census": ["workforce_census_metrics"],
+    "10_Sector_Universe": ["sector_universe"],
 }
 
 

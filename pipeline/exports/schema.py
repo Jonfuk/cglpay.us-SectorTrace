@@ -79,7 +79,7 @@ TABS: list[TabSpec] = [
         caveats=[
             "Contract values are estimates at notice stage and may differ from actual spend.",
             "Coverage is incomplete before 24 February 2025 for below-threshold contracts, which were published on Contracts Finder rather than Find a Tender.",
-            "buyer_ons_code is NULL where the free-text buyer name could not be matched deterministically; those names are in review_queue.",
+            "buyer_ons_code is NULL where the free-text buyer name could not be matched deterministically; those names are in review_queue, and since Phase 18 they are also captured, name-only, in sector_universe as funders.",
         ],
         sql="""
             SELECT notice_id, ocid, notice_type, buyer_name, buyer_ons_code,
@@ -247,6 +247,30 @@ TABS: list[TabSpec] = [
                    verified, source_page, raw_text
               FROM workforce_census_metrics
              ORDER BY census_year DESC, metric, workforce_segment
+        """,
+    ),
+    TabSpec(
+        name="10_Sector_Universe",
+        description="The sector population as reconstructed from what the pipeline already collects (Phase 18, F1): the tracked providers, the companies, charities and CQC registrations collected about them, every distinct awardee in the contract notices, and every buyer no authority could be matched to.",
+        columns=["entity_key", "canonical_name", "entity_type", "company_number",
+                  "charity_number", "cqc_provider_id", "ppon", "provider_key",
+                  "match_basis", "first_seen", "last_seen", "notices_count",
+                  "source_system"],
+        caveats=[
+            "The universe is a capture of who shows up in the corpus, never a complete list of the sector. Awardees enter through notices matched by CPV prefix or keyword, so care, support and other companies that won one in-scope lot appear here; the tracked handful of CQC providers is a floor, not a census.",
+            "match_basis 'name_only_unconfirmed' rows were captured from a name alone. Sharing a name is not sharing an identity, and these rows are never linked to a provider; treat them as candidates.",
+            "match_basis 'ppon' rows are identified only by the supplier's GB-PPON registration id, self-declared by the buyer's platform. It identifies the registration, not the legal entity.",
+            "provider_key is set only through an identifier a source published (provider_identifiers, or a company row m04 seeded) — never on a name.",
+            "A funder is a buyer name that matched no authority. Funders include NHS bodies, police and other public bodies, suppliers that also commission, and names that are simply unidentifiable.",
+            "notices_count counts distinct notices naming the organisation, by ppon or exact normalised name. It is one layer (contracts) and may be used as a share of that layer; it is not a size measure of the organisation.",
+        ],
+        sql="""
+            SELECT entity_key, canonical_name, entity_type, company_number,
+                   charity_number, cqc_provider_id, ppon, provider_key,
+                   match_basis, first_seen, last_seen, notices_count,
+                   source_system
+              FROM sector_universe
+             ORDER BY COALESCE(notices_count, 0) DESC, canonical_name
         """,
     ),
 ]
