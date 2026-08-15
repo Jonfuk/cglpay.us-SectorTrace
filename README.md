@@ -113,7 +113,7 @@ safe to repeat.
 **Re-runs are cheap, but only `m01_procurement` truly resumes.** It is the one
 module that records a cursor (`module_cursors`), because Find a Tender is
 paged and picking the page back up is the difference between minutes and
-hours. The other twenty-two restart from the beginning — what makes that
+hours. The other twenty-three restart from the beginning — what makes that
 acceptable rather than wasteful is the conditional-request cache: a document
 that has not changed answers `304` and is read from the raw archive instead of
 downloaded again. The requests are still made, at the same one per two seconds
@@ -148,6 +148,7 @@ one or both.
 | `m20_gender_pay_gap` | Gender Pay Gap service | Statutory gender pay gap filings matched to the tracked providers — company number first, exact name second; an absent provider is a review item, never a zero |
 | `m21_ons_ashe` | ONS developer API | Median gross hourly pay (excl. overtime) by occupation and industry, UK and England — the comparator market for the sector's advertised pay, side-by-side only |
 | `m22_provider_pay_pages` | The tracked providers' own websites | Pay figures published on provider career and reward pages — advertised bands and listed rates, attributed exactly (the page is the provider's own site) |
+| `m23_sector_universe` | *(fetches nothing)* | The sector population reconstructed from what is collected: the tracked providers, their companies/charities/CQC registrations, every distinct awardee in the notices, and unmatched buyers captured as funders — the denominator for every "we track N of the sector's ~M" statement, with m04's match-basis discipline on every row |
 
 ### Run order
 
@@ -169,6 +170,7 @@ deterministic and two logs are comparable). Three orderings matter:
 | `m09`, `m10` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched |
 | `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
 | `m20_gender_pay_gap` | `m04_companies` | company-number matching reads the identifiers `m04` discovered |
+| `m23_sector_universe` | `m01_procurement`, `m03_charity_finance`, `m04_companies`, `m05_cqc` | it reconciles their output — awardees, charities, companies, CQC providers — into one population; without them it is a capture of nothing |
 
 Alphabetical order breaks the second and third of these. Neither failed
 loudly when it did — `m04` simply confirmed nothing, and `m09`/`m10` searched
@@ -201,6 +203,7 @@ the next only begins once it has finished — `m04` still never starts before
 | 1 | `m00`, `m02`, `m03`, `m06`, `m08` | ArcGIS, GOV.UK, Charity Commission, NHS, Judiciary — all different |
 | 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15` | FTS/CF, CQC, GOV.UK ×3, Fingertips, local, WDTK |
 | 3 | `m04`, `m09`, `m10` | Companies House, council sites |
+| 4 | `m23` | none — reconciliation only |
 
 This is safe because the per-host rate limit is enforced **process-wide**. The
 four modules that share `www.gov.uk` queue behind each other on that host and

@@ -68,7 +68,9 @@ anyone using it.
   Tender.
 - `buyer_ons_code` is NULL where a free-text buyer name could not be matched
   deterministically. Those names are in `review_queue` — they are unmatched,
-  not absent.
+  not absent — and since Phase 18 (F1) they are also captured, name-only, in
+  `sector_universe` as funders, where the systematic record replaces the
+  item-by-item queue.
 - **A `notice ↗` link may be constructed rather than published.**
   `notice_web_url` holds the address the release itself gave, and is NULL for
   84% of rows; for those the portal builds the link from the notice id under
@@ -493,6 +495,46 @@ anyone using it.
   Humankind's careers pages are Waythrough's (the October 2024 merger), and
   WDP's are Via's (the 2020 merger); the registry notes say which, and rows
   stay under the provider_key that searched its own site.
+
+### Sector universe (Module 23)
+
+- **The universe is a capture, never a census.** Every row was derived from
+  what the pipeline already collects: awardees of notices matched by CPV
+  prefix or keyword, the tracked providers' companies/charities/CQC
+  registrations, and unmatched buyer names. An organisation that never
+  appears in the corpus is not in the universe, and an organisation that
+  appears is not thereby a substance misuse service — a care provider that
+  won one in-scope lot is captured like any other. **Do not read a universe
+  count as the size of the sector.**
+- **`match_basis` says how a row entered the universe, and the rows you may
+  call providers are the identified ones.** 'seed' and 'register' rows are
+  identified by an identifier a source published. 'ppon' rows carry the
+  buyer platform's supplier registration id — it identifies the
+  registration, not the legal entity. 'name_only_unconfirmed' rows were
+  captured from a name alone: sharing a name is not sharing an identity
+  (m04's rule verbatim), and such a row is never linked to a tracked
+  provider. A coverage statement ("we track N of the sector's ~M") must
+  count identified rows for N and name its basis, or it is not the statement
+  it looks like.
+- **`provider_key` is set only through an identifier** in
+  `provider_identifiers` (or a company row m04 seeded) — never through a
+  name. This is the one rule the whole universe exists to enforce.
+- **A funder is a buyer that matched no authority.** The funder rows include
+  NHS bodies, police and other public bodies, suppliers that also
+  commission, and names that are simply unidentifiable; they were captured
+  from the name as published. A funder that is also an awardee appears under
+  its awardee row.
+- **The 3,160 `unmatched_buyer_name` and `possible_group_company` items
+  were answered, not decided.** Phase 18 captured their names
+  systematically; `resolve-answered` then marked each item answered with its
+  evidence in `review_resolutions`, and `--reopen` undoes it. An answered
+  `possible_group_company` is still NOT a confirmed group company — the
+  evidence says so, and confirmation remains a human decision recorded on
+  the universe row.
+- **`notices_count` is one layer and nothing more.** It counts distinct
+  notices naming the organisation, by ppon or exact normalised name. It may
+  be used as a share of that layer; it is not a size measure of the
+  organisation, and it is never combined with figures from any other layer.
 
 ---
 

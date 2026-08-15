@@ -153,6 +153,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m20_gender_pay_gap": "ogl_v3",
     "m21_ons_ashe": "ogl_v3",
     "m22_provider_pay_pages": "provider_own",
+    "m23_sector_universe": "ogl_v3",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
