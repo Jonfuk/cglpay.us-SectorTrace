@@ -190,6 +190,34 @@ def test_the_pending_queue_count_uses_an_index(ro):
     assert "INDEX" in plan, plan
 
 
+def test_the_sidebar_asks_for_its_counts_once(ro):
+    """The other half of "add an index" is "ask fewer times".
+
+    This is the one case in the Phase 3 baseline where PostgreSQL was slower
+    for a reason that had nothing to do with the query: a `COUNT(*)` per
+    table, on every page load of the operator UI, is 82 cheap reads of a local
+    file and 82 round-trips to a server on the LAN — 39ms against 320ms.
+
+    Asserted by counting statements rather than by timing, because a timing
+    test on a fixture database would pass either way.
+    """
+    statements: list[str] = []
+    ro.set_trace_callback(statements.append)
+    try:
+        objects = queries.list_objects(ro)
+    finally:
+        ro.set_trace_callback(None)
+
+    counted = [o for o in objects if o["rows"] is not None]
+    assert len(counted) > 3, "too few tables here for this to be a test"
+
+    counting = [s for s in statements if "COUNT(*)" in s]
+    assert len(counting) == 1, (
+        f"{len(counting)} counting statements for {len(counted)} tables. The "
+        "sidebar counts every table in the warehouse on every page load; one "
+        "statement per table is free on a file and 5-15ms each over a LAN.")
+
+
 def test_freshness_scans_and_that_is_the_accepted_cost(ro):
     """Documented rather than fixed.
 

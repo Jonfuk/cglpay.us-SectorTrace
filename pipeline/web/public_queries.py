@@ -34,6 +34,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Iterator
 
+from pipeline import catalog
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.exports.geojson import LAYER_CAVEATS
 from pipeline.notice_urls import notice_page_url
@@ -1833,23 +1834,37 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
     from health.py rather than re-declared here — a second copy of what
     "covered" means would be a second statement free to drift. W-12's pin is
     that the two answers agree row for row.
-    """
-    def exists(name: str) -> bool:
-        return conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (name,)).fetchone() is not None
 
-    cells: dict[str, int] = {}
-    for label, table, column, _module in health.COVERAGE_COLUMNS:
-        if not exists(table):
-            cells[label] = 0
-            continue
-        # Table and column names come from health.COVERAGE_COLUMNS, which is
-        # code, not a request, so interpolating them is the same trust as the
-        # admin matrix.
-        cells[label] = _one(
-            conn, f"SELECT COUNT(*) AS n FROM {table} WHERE {column} = ?",
-            (ons_code,)).get("n", 0)
+    Thirteen statements until Phase 4 — one asking which tables exist, per
+    column, plus a count per column — and one now. The authority page is the
+    heaviest payload the portal serves (40 statements, of which round-trips
+    over a LAN were most of the 380ms), and this was the only part of it that
+    could be folded: everything else here is `fingertips`, `ndtms` and
+    `contracts` composed rather than re-written, which is a guarantee that a
+    figure on this page matches the page it came from and worth more than the
+    statements it costs.
+    """
+    # `sqlite_master` was named here directly until Phase 4, which made this
+    # route fail outright on the PostgreSQL backend.
+    present = set(catalog.table_names(conn))
+
+    # Table and column names come from health.COVERAGE_COLUMNS, which is code,
+    # not a request, so interpolating them is the same trust as the admin
+    # matrix. The ordinal carries the position back: `UNION ALL` does not
+    # promise to return branches in the order they were written.
+    counted = [(label, table, column)
+                for label, table, column, _module in health.COVERAGE_COLUMNS
+                if table in present]
+    cells = {label: 0 for label, _t, _c, _m in health.COVERAGE_COLUMNS}
+    if not counted:
+        return cells
+
+    sql = " UNION ALL ".join(
+        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = ?"
+        for i, (_label, table, column) in enumerate(counted)
+    ) + " ORDER BY i"
+    for row in conn.execute(sql, tuple(ons_code for _ in counted)):
+        cells[counted[row["i"]][0]] = row["n"]
     return cells
 
 
@@ -2254,13 +2269,13 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
     a statement about the pipeline's own knowledge, not about the authority —
     the caveat is the whole point of the layer.
     """
-    exists = {row["name"] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")}
-    names = dict(conn.execute("SELECT ons_code, name FROM authorities"))
+    present = set(catalog.table_names(conn))
+    names = {row["ons_code"]: row["name"] for row in
+              conn.execute("SELECT ons_code, name FROM authorities")}
 
     held: dict[str, set[str]] = {}
     for label, table, column, _module in health.COVERAGE_COLUMNS:
-        if table not in exists:
+        if table not in present:
             continue
         # Table and column names come from health.COVERAGE_COLUMNS, which is
         # code, not a request — the same trust as the admin matrix.

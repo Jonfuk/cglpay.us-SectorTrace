@@ -439,7 +439,84 @@ def applied_migrations(conn) -> set[str]:
     return {row["filename"] for row in conn.execute("SELECT filename FROM schema_migrations")}
 
 
-def apply_migrations(conn, migrations_dir: Path | None = None) -> list[str]:
+def reader_role(settings: Settings | None = None) -> str | None:
+    """The role `DATABASE_RO_URL` connects as, or None if reads use the owner.
+
+    Parsed out of the URL rather than configured separately because there is
+    only one right answer and two settings would be two things to keep in
+    agreement.
+    """
+    settings = settings or get_settings()
+    if not settings.database_ro_url or settings.database_ro_url == settings.database_url:
+        return None
+    from urllib.parse import unquote, urlsplit
+
+    username = urlsplit(settings.database_ro_url).username
+    return unquote(username) if username else None
+
+
+def grant_reader_access(conn, settings: Settings | None = None) -> str | None:
+    """Let the reader role see the tables that now exist. Returns the role
+    granted to, or None if there is nothing to do.
+
+    This exists because of a defect Phase 4 found rather than a design: the
+    reader role was created with one `GRANT SELECT ON ALL TABLES`, which
+    grants on the tables existing *at that moment*. Nine migrations later,
+    thirteen tables were invisible to every read the portal and the operator
+    UI make — and invisible is the exact word, because `information_schema`
+    is privilege-filtered. The sidebar listed 69 of 82 objects with no gap in
+    it, `object_type()` reported the other thirteen as not existing, and a
+    portal query on one got a permission error. Nothing was wrong-looking.
+
+    So the grant travels with the thing that caused it. A migration that adds
+    a table is what makes the grant stale, and this runs when one does.
+
+    `ALTER DEFAULT PRIVILEGES` as well, for the table created by some route
+    other than a migration: it applies to future tables only, which is why it
+    cannot replace the catch-up grant beside it.
+
+    Restricted tables are granted along with the rest, which is deliberate and
+    is how the role was already set up: the personal-data boundary is
+    `guard_columns()` and the reveal gate (settled decision 3), and the reveal
+    gate reads through this very connection. A role that could not see
+    `restricted_*` would not tighten that boundary — it would break the one
+    path that is allowed to cross it, and leave the boundary where it already
+    is.
+    """
+    if backend_of(conn) != "postgres":
+        return None
+    role = reader_role(settings)
+    if role is None:
+        return None
+
+    # Deferred: `catalog` imports this module, and its `quote` is the one
+    # spelling of the quoting rule the project keeps.
+    from pipeline.catalog import quote
+
+    if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = ?", (role,)).fetchone() is None:
+        # Named in the settings and absent from the server. Not fatal here —
+        # the read path will fail to connect at all and say so — but silence
+        # is what produced the defect this function exists for.
+        import structlog
+
+        structlog.get_logger().warning(
+            "db.reader_role_missing", role=role,
+            note="DATABASE_RO_URL names a role this server does not have; "
+                 "tables added by these migrations were not granted to it")
+        return None
+
+    grantee = quote(role)
+    schema = quote(conn.execute("SELECT current_schema()").fetchone()[0])
+    with conn:
+        conn.execute(f"GRANT USAGE ON SCHEMA {schema} TO {grantee}")
+        conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {grantee}")
+        conn.execute(f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} "
+                      f"GRANT SELECT ON TABLES TO {grantee}")
+    return role
+
+
+def apply_migrations(conn, migrations_dir: Path | None = None, *,
+                      settings: Settings | None = None) -> list[str]:
     """Apply any .sql files in migrations_dir not yet recorded as applied,
     in filename order. Returns the list of filenames newly applied. Safe to
     call on every run — a no-op once the schema is current.
@@ -447,10 +524,16 @@ def apply_migrations(conn, migrations_dir: Path | None = None) -> list[str]:
     The directory defaults to the dialect tree matching the *connection*, not
     the settings, so a test that opens a SQLite connection with `DATABASE_URL`
     set still gets the SQLite migrations.
+
+    On PostgreSQL, applying anything re-grants the reader role — see
+    `grant_reader_access`, and the defect that made it necessary. `settings`
+    is where the reader's name comes from; it is a parameter rather than
+    always the process-wide settings so that a caller working against a
+    warehouse other than the configured one (the live suite's scratch schemas,
+    `migrate-data`) grants to the role it is actually using.
     """
     if migrations_dir is None:
-        settings = get_settings()
-        migrations_dir = settings.migrations_dir
+        migrations_dir = (settings or get_settings()).migrations_dir
         if backend_of(conn) == "postgres":
             migrations_dir = migrations_dir / "postgres"
     already = applied_migrations(conn)
@@ -471,6 +554,14 @@ def apply_migrations(conn, migrations_dir: Path | None = None) -> list[str]:
                 (path.name, _utcnow()),
             )
         newly_applied.append(path.name)
+
+    if newly_applied:
+        granted = grant_reader_access(conn, settings)
+        if granted:
+            import structlog
+
+            structlog.get_logger().info("db.reader_granted", role=granted,
+                                         after=len(newly_applied))
 
     return newly_applied
 

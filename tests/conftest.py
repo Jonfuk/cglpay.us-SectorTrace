@@ -197,8 +197,14 @@ def scratch_schema(url: str, ro_url: str | None = None):
     tests check the read path through a role that cannot write, and a grant
     on a schema that is about to be dropped is narrower than the alternative
     of pointing those tests at the working warehouse.
+
+    The grant is `apply_migrations`' own, not one this fixture performs
+    afterwards. It used to be the latter, and that is precisely why the live
+    suite never noticed the working warehouse's reader losing sight of
+    thirteen tables: the fixture granted after every migration and the server
+    did not. A harness that repairs what production leaves broken tests the
+    harness.
     """
-    from urllib.parse import urlsplit
     from uuid import uuid4
 
     from pipeline import pg
@@ -212,15 +218,14 @@ def scratch_schema(url: str, ro_url: str | None = None):
         conn = pg.connect(pg.with_schema(url, name),
                            application_name="sectortrace-tests")
         try:
-            db.apply_migrations(conn, MIGRATIONS_DIR / "postgres")
+            from pipeline.config import Settings
+
+            db.apply_migrations(
+                conn, MIGRATIONS_DIR / "postgres",
+                settings=Settings(contact_email="test@example.com",
+                                   database_url=url, database_ro_url=ro_url,
+                                   _env_file=None) if ro_url else None)
             conn.commit()
-            reader = urlsplit(ro_url).username if ro_url else None
-            if reader:
-                safe = '"' + reader.replace('"', '""') + '"'
-                admin.execute(f"GRANT USAGE ON SCHEMA {quoted} TO {safe}")
-                admin.execute(
-                    f"GRANT SELECT ON ALL TABLES IN SCHEMA {quoted} TO {safe}")
-                admin.commit()
             yield SimpleNamespace(conn=conn, schema=name,
                                    url=pg.with_schema(url, name),
                                    ro_url=pg.with_schema(ro_url, name) if ro_url else None)

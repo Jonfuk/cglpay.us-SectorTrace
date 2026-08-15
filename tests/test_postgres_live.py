@@ -499,6 +499,134 @@ class TestTheReadPath:
         assert rows, "no tables carry retrieved_at"
         assert all("newest" in r for r in rows)
 
+    def test_the_reader_sees_every_object_the_owner_does(self, readonly, pg):
+        """The defect Phase 4 found, pinned.
+
+        `information_schema` is privilege-filtered, so a table the reader role
+        holds no `SELECT` on is not listed as inaccessible — it is not listed
+        at all. On the working warehouse that meant thirteen tables, every one
+        added by a migration after the role was granted its one-off
+        `GRANT SELECT ON ALL TABLES`, were absent from the sidebar with no gap
+        in it, reported by `object_type()` as not existing, and a permission
+        error to any portal query that named one.
+
+        Nothing failed. That is the whole reason this test is here rather
+        than a comment in the README.
+        """
+        if not POSTGRES_TEST_RO_URL:
+            pytest.skip("POSTGRES_TEST_RO_URL is not set")
+
+        owner = {o["name"] for o in catalog.list_objects(pg)}
+        reader = {o["name"] for o in catalog.list_objects(readonly)}
+        assert owner - reader == set(), (
+            "the reader role cannot see: " + ", ".join(sorted(owner - reader)))
+
+
+class TestMigrationsKeepTheReaderCurrent:
+    """A migration adds a table; the reader has to be able to read it.
+
+    Separate from `TestTheReadPath` because it needs a schema it can migrate
+    twice, which the module-scoped one is not.
+    """
+
+    def test_a_table_from_a_later_migration_is_readable(self, tmp_path):
+        if not POSTGRES_TEST_RO_URL:
+            pytest.skip("POSTGRES_TEST_RO_URL is not set")
+
+        from pipeline import pg as pg_module
+        from pipeline.config import Settings
+
+        with scratch_schema(POSTGRES_TEST_URL, POSTGRES_TEST_RO_URL) as made:
+            later = tmp_path / "later"
+            later.mkdir()
+            (later / "9999_a_table_added_afterwards.sql").write_text(
+                "CREATE TABLE IF NOT EXISTS added_afterwards "
+                "(id bigint PRIMARY KEY, note text);", encoding="utf-8")
+
+            settings = Settings(contact_email="t@e.com", database_url=made.url,
+                                 database_ro_url=made.ro_url, _env_file=None)
+            applied = db.apply_migrations(made.conn, later, settings=settings)
+            made.conn.commit()
+            assert applied == ["9999_a_table_added_afterwards.sql"]
+
+            reader = pg_module.connect(made.ro_url, readonly=True)
+            try:
+                names = {o["name"] for o in catalog.list_objects(reader)}
+                assert "added_afterwards" in names, (
+                    "a table added by a migration is invisible to the reader "
+                    "role — the grant did not travel with the migration")
+                assert reader.execute(
+                    "SELECT COUNT(*) FROM added_afterwards").fetchone()[0] == 0
+            finally:
+                reader.close()
+
+
+class TestThePortalRunsOnPostgres:
+    """Every portal query, executed against a real PostgreSQL server.
+
+    Phase 1 left `pipeline/web/public_queries.py` deliberately untouched, on
+    the grounds that settled decision 7 puts the portal off-limits to admin
+    work and whether a backend port counts was the owner's call. The cost of
+    leaving it was found in Phase 4 by running it: `/api/v1/layers` and the
+    coverage half of `/api/v1/authorities/{code}` queried `sqlite_master` by
+    name and failed outright on PostgreSQL. Nothing had ever executed them
+    against a server, so nothing said so.
+
+    The schema is empty, and that is enough: what is under test is whether the
+    SQL a portal route sends is SQL this engine accepts.
+
+    Which makes the pass condition the delicate part. `QueryError` cannot
+    simply be tolerated: most of the portal reads through `queries._run`,
+    which turns *any* driver error into one, so "ignore QueryError" would
+    ignore precisely the failure this class exists to catch — the version of
+    this test that did was green against a route that could not run at all.
+    What separates them is the cause: a refusal this codebase raises on
+    purpose ("No authority 'E08000025'") has none, and a translated driver
+    error is chained to the exception the server sent.
+    """
+
+    @pytest.fixture(scope="module")
+    def portal(self, scratch):
+        from pipeline import pg as pg_module
+
+        conn = pg_module.connect(scratch.ro_url or scratch.url, readonly=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @pytest.mark.parametrize("route", [
+        "summary", "providers", "authorities", "contracts", "pay", "geography",
+        "boundaries", "ndtms", "fingertips", "pfd", "freshness", "compare",
+        "layers", "provider_timeline", "authority", "geography_years",
+        "all_contract_notices",
+    ])
+    def test_the_route_runs(self, portal, route):
+        from pipeline.web import public_queries
+        from pipeline.web.public_queries import QueryError
+
+        calls = {
+            "geography_years": lambda c: public_queries.geography_years(
+                c, "grant_total"),
+            "provider_timeline": lambda c: public_queries.provider_timeline(
+                c, "a_provider"),
+            "authority": lambda c: public_queries.authority(c, "E08000025"),
+            "compare": lambda c: public_queries.compare(
+                c, ons_codes=("E08000025",)),
+        }
+        call = calls.get(route, getattr(public_queries, route))
+        try:
+            call(portal)
+        except QueryError as exc:
+            if isinstance(exc.__cause__, db.Error):
+                pytest.fail(f"/api/v1/{route} does not run on PostgreSQL: "
+                            f"{type(exc.__cause__).__name__}: {exc.__cause__}")
+            # Otherwise a refusal this codebase means: "No authority …" on a
+            # schema with no rows in it.
+        except db.Error as exc:
+            pytest.fail(f"/api/v1/{route} does not run on PostgreSQL: "
+                        f"{type(exc).__name__}: {exc}")
+
 
 class TestGroupConcatMatchesSqlite:
     """The compatibility aggregate from 0034.
