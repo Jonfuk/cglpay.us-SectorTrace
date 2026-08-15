@@ -523,7 +523,7 @@ def web(
     """
     import webbrowser
 
-    from pipeline.web.server import build_server, reachable_urls
+    from pipeline.web.server import build_server, close_read_pools, reachable_urls
 
     configure_logging("web")
     settings = get_settings()
@@ -577,6 +577,7 @@ def web(
         ui.muted("\n  stopped.")
     finally:
         server.server_close()
+        close_read_pools()
 
 
 _audit_counts = runner.audit_counts

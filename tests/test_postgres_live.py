@@ -561,6 +561,151 @@ class TestMigrationsKeepTheReaderCurrent:
                 reader.close()
 
 
+class TestTheReadPoolHandsBackWhatItPromised:
+    """A borrowed connection is the same connection the callers had.
+
+    Opening a reader to this server is 68ms, and the web layer opened one per
+    request — so the pool is the largest single win in Phase 4. It is also the
+    change with the most ways to be quietly wrong, because every one of them
+    shows up as two requests interfering with each other rather than as an
+    error: session settings that only apply to a connection's first use, a
+    connection returned twice and then held by two requests at once, a
+    transaction left open on the way back.
+
+    Each of those is a test here rather than a paragraph in a docstring.
+    """
+
+    @pytest.fixture
+    def settings(self, scratch):
+        from pipeline.config import Settings
+
+        return Settings(contact_email="t@e.com", database_url=scratch.url,
+                         database_ro_url=scratch.ro_url or scratch.url,
+                         _env_file=None)
+
+    def test_a_reused_connection_is_still_read_only(self, settings):
+        """`configure` runs once per connection, not once per checkout — so
+        the settings that make a read connection read-only have to survive
+        being handed to the next request. If they did not, the fifth caller
+        of the day would get a writable one."""
+        from pipeline.web import queries
+
+        for _ in range(4):
+            conn = queries.readonly_connection(settings)
+            try:
+                assert conn.execute(
+                    "SHOW default_transaction_read_only").fetchone()[0] == "on"
+                assert conn.execute("SHOW statement_timeout").fetchone()[0] == "20s"
+                with pytest.raises(db.Error):
+                    conn.execute("CREATE TABLE pooled_write_probe (x int)")
+            finally:
+                conn.close()
+
+    def test_closing_twice_does_not_hand_one_connection_to_two_callers(self, settings):
+        """The callers were written against sqlite3, where a second `close()`
+        is harmless. A second `putconn` is not: it puts a connection back that
+        somebody else is already using."""
+        from pipeline.web import queries
+
+        first = queries.readonly_connection(settings)
+        first.close()
+        first.close()
+
+        second = queries.readonly_connection(settings)
+        third = queries.readonly_connection(settings)
+        try:
+            assert second._conn is not third._conn
+            assert second.execute("SELECT 1").fetchone()[0] == 1
+            assert third.execute("SELECT 2").fetchone()[0] == 2
+        finally:
+            second.close()
+            third.close()
+
+    def test_a_closed_connection_says_so(self, settings):
+        from pipeline.web import queries
+
+        conn = queries.readonly_connection(settings)
+        conn.close()
+        with pytest.raises(db.Error, match="closed"):
+            conn.execute("SELECT 1")
+
+    def test_a_failed_statement_does_not_poison_the_next_borrower(self, settings):
+        """The autocommit decision, asked again now that connections are
+        reused. A read connection that came back mid-transaction would hand
+        the next request an `InFailedSqlTransaction` it did nothing to earn."""
+        from pipeline.web import queries
+
+        conn = queries.readonly_connection(settings)
+        try:
+            with pytest.raises(db.Error):
+                conn.execute("SELECT * FROM no_such_table_at_all")
+        finally:
+            conn.close()
+
+        after = queries.readonly_connection(settings)
+        try:
+            assert after.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            after.close()
+
+    def test_more_callers_than_the_pool_holds_all_get_served(self, settings):
+        """Beyond `max_size` a request waits rather than opening another
+        connection. Sixteen threads against a pool of eight is the shape a
+        browser with several tabs open produces."""
+        import threading
+
+        from pipeline import pg as pg_module
+        from pipeline.web import queries
+
+        failures: list[BaseException] = []
+
+        def worker(n: int) -> None:
+            try:
+                for _ in range(4):
+                    conn = queries.readonly_connection(settings)
+                    try:
+                        assert conn.execute("SELECT ?", (n,)).fetchone()[0] == n
+                    finally:
+                        conn.close()
+            except BaseException as exc:   # noqa: BLE001 - reported below
+                failures.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(16)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+        assert not failures, failures[:3]
+        pool = next(iter(pg_module._pools.values()))
+        assert pool.get_stats()["pool_size"] <= pg_module.POOL_MAX_SIZE
+
+    def test_the_pool_is_shared_rather_than_made_per_request(self, settings):
+        from pipeline import pg as pg_module
+        from pipeline.web import queries
+
+        pg_module.close_pools()
+        for _ in range(3):
+            queries.readonly_connection(settings).close()
+        assert len(pg_module._pools) == 1
+
+    def test_closing_the_pools_leaves_the_next_caller_working(self, settings):
+        """`close_pools` runs at exit and when the web server stops. A caller
+        afterwards should get a new pool, not a closed one."""
+        from pipeline import pg as pg_module
+        from pipeline.web import queries
+
+        queries.readonly_connection(settings).close()
+        pg_module.close_pools()
+
+        conn = queries.readonly_connection(settings)
+        try:
+            assert conn.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            conn.close()
+            pg_module.close_pools()
+
+
 class TestThePortalRunsOnPostgres:
     """Every portal query, executed against a real PostgreSQL server.
 

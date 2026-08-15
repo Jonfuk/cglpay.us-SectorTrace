@@ -98,9 +98,13 @@ def readonly_connection(settings: Settings | None = None):
                      "to a SELECT-only role so a write is refused by the server "
                      "rather than by a session setting")
         try:
-            return pg.connect(url, readonly=True,
-                               application_name="sectortrace-web",
-                               statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
+            # Borrowed, not opened: `close()` gives it back. Opening one to
+            # the LAN server is 68ms, which the web layer was paying on every
+            # request — more than most of the queries it then ran. See
+            # `pg.read_pool`.
+            return pg.connect_pooled(
+                url, application_name="sectortrace-web",
+                statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
         except db.Error as exc:
             raise QueryError(
                 f"Could not reach the PostgreSQL warehouse at "
