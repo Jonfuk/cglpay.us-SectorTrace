@@ -47,6 +47,14 @@ hourly with hourly and annual with annual, or say plainly that you cannot.
 employer is offering a new starter on a date. It is not a spine point, not a
 pay scale, and not the pay of anyone currently in post.
 
+**Do not compute a ratio between an advertised band and the statutory
+floor.** "X% above the NLW" is arithmetic across two layers with different
+reference periods and populations (Module 16's adverts, Module 17's rates).
+The comparison is side-by-side only: state the floor and the band, and let
+the reader do the arithmetic they can defend. The phase plan said this gate
+applies to Module 17 in advance; it is written here because it governs
+anyone using it.
+
 ---
 
 ## Per source
@@ -79,6 +87,18 @@ pay scale, and not the pay of anyone currently in post.
   always flagged low confidence.
 - `provider_match_basis = 'component'` means the provider was named alongside
   co-respondents; the case is not solely about them.
+- **Appeals are a different layer (G4, Phase 15).** EAT decisions live in
+  `eat_cases` and are never combined with first-instance cases — a decision
+  affirmed or overturned is a materially different datum, and the two layers
+  do not add up to anything. `provider_side` says which party the provider
+  was. `underlying_et_cases` lists the first-instance case numbers the
+  judgment text cites; it is a list from the judgment, not a joined record.
+- **An appeal that merely mentions a provider is not a provider case.** The
+  GOV.UK search engine indexes judgment bodies, so a hit can name a provider
+  without either party being one (the Attorney General's restriction-order
+  judgments list the target's litigation history, provider cases included, in
+  the body). Such hits are queued as `eat_body_mention_only` and never
+  attributed.
 
 ### Charity finance (Module 3)
 
@@ -128,6 +148,16 @@ pay scale, and not the pay of anyone currently in post.
   `unconfirmed_disqualification_name_match` — **those are not disqualified
   people**, they are names that happen to coincide, and the review rows
   deliberately carry none of the register's identifying detail.
+- **PSC rows are ownership edges, not provider links (G3, Phase 15).** A
+  person or company with significant control is recorded as a fact about the
+  company, and nothing in `company_psc` links anyone to a provider on a name.
+  A corporate PSC's company number arrives asserted by Companies House and is
+  authoritative as an identifier; whether it belongs to a provider's group is
+  the entity graph's question (F1). Individual PSCs are named only in
+  `restricted_company_psc`, with the month and year of birth the register
+  publishes. A company whose PSC register is redacted answers with a
+  statement: `psc_register_statement` review items mean the absence of rows
+  is a redaction, not a finding.
 
 ### CQC (Module 5)
 
@@ -333,6 +363,57 @@ pay scale, and not the pay of anyone currently in post.
   `nhs_jobs_search_no_matches` where the service itself said it found nothing,
   `nhs_jobs_search_matched_nothing` where it returned adverts that all belonged
   to somebody else. Neither is evidence that a provider is not recruiting.
+
+### Statutory pay rates (Module 17)
+
+- **The living wage band is identified by layout, not by law.** The page
+  always leads each rates table with the living wage column, and that
+  position is what sets `band_role = 'national_living_wage'`. The verbatim
+  `band_label` ("25 and over", "23 and over", "21 and over") is the record of
+  which band that was in each era, and the band set changing is itself the
+  finding — do not normalise it away.
+- **An unparseable amount is NULL plus a `parse_failures` row, and the cell is
+  kept verbatim in `value_text`.** The table is the source's own spelling;
+  never round, annualise or convert these rates — they are published as
+  hourly figures and that is all they are.
+- **The table holds every era the page publishes**, so "the current rate" is
+  the row whose period contains today, not the newest row. The page's
+  "current rates" block is the authoritative current state.
+
+### Living Wage Foundation (Module 18)
+
+- **`accredited = 0` means "no accredited employer under this name, as of
+  this fetch"** — never "this provider is not accredited". Accreditation can
+  sit under another legal name (a trading subsidiary, a holding company), and
+  that is exactly the case the review queue is for. A count of accredited
+  providers is a floor against the checked names, citable with its fetch
+  date.
+- **The check is a window, and truncation is said out loud.** The module
+  reads the first 3 result pages of the register's own search; where the
+  register's count line exceeds that window, a `living_wage_search_truncated`
+  review item attaches to the provider, so "not found" is never silently
+  "not in the checked window".
+- **A near-miss name is not accreditation.** Exact normalised match only;
+  anything else is an `unconfirmed_living_wage_name_match` review item.
+
+### data.gov.uk catalogue (Module 19)
+
+- **Discovery metadata, not data.** This module records that a dataset exists
+  and where its resources live. It never fetches or stores dataset contents;
+  a resource URL is a pointer to fetch with the dataset's own terms.
+- **The catalogue is only what data.gov.uk harvests.** A dataset that exists
+  but is not catalogued is invisible here. Absence from this table is absence
+  from the index — never evidence that the data does not exist.
+- **`matched_terms` is a record of discovery, not of relevance.** A term that
+  found a dataset means the catalogue's own search matched it; the terms
+  accumulate across runs and passes. `matched_ons_code` / `matched_provider_key`
+  are set only by exact organisation-name matches, and most authorities will
+  never have one — their catalogue sits under a differently-spelled
+  organisation, which is the universe work's (F1's) reconciliation, not a
+  gap in this table.
+- **Licences vary per dataset.** The catalogue mixes OGL and non-OGL; the
+  `license_*` columns carry each dataset's own published terms, and the OGL
+  line on the module applies only to the metadata rows themselves.
 
 ---
 

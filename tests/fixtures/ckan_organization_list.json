@@ -1,0 +1,9 @@
+{
+  "help": "https://ckan.publishing.service.gov.uk/api/3/action/help_show?name=organization_list",
+  "success": true,
+  "result": [
+    {"name": "london-borough-of-camden", "title": "London Borough of Camden", "type": "organization"},
+    {"name": "office-for-national-statistics", "title": "Office for National Statistics", "type": "organization"},
+    {"name": "wigan-council", "title": "Wigan Council", "type": "organization"}
+  ]
+}

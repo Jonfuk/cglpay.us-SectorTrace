@@ -18,6 +18,18 @@ def _allow_all_robots(httpx_mock, origin: str = "https://www.gov.uk") -> None:
     httpx_mock.add_response(url=f"{origin}/robots.txt", status_code=200, text="", is_reusable=True)
 
 
+def _no_eat_results(httpx_mock) -> None:
+    """The appeal pass runs in every end-to-end test. Keyed on its format
+    filter in the query string so it can never intercept the first-instance
+    search, which shares the URL; the register's own answer for most names
+    is an empty result set.
+    """
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_appeal_tribunal_decision.*"),
+        json={"total": 0, "results": []}, is_reusable=True)
+
+
 # --- case number parsing ------------------------------------------------------
 
 def test_parse_case_number_from_title():
@@ -209,6 +221,7 @@ def test_discovered_identifier_recorded_as_unverified(conn):
 
 def test_run_end_to_end_against_real_fixtures(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     # single variant keeps the mock accounting simple; multi-variant dedup
     # is covered separately below
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change, Grow, Live"])
@@ -247,6 +260,7 @@ def test_run_end_to_end_against_real_fixtures(httpx_mock, settings, conn, monkey
 
 def test_run_puts_claimant_name_only_in_restricted_table(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change, Grow, Live"])
 
     search_fixture = json.loads((FIXTURES / "govuk_search_tribunals.json").read_text())
@@ -270,6 +284,7 @@ def test_run_puts_claimant_name_only_in_restricted_table(httpx_mock, settings, c
 
 def test_run_dedupes_case_found_under_multiple_name_variants(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live",
                          ["Change, Grow, Live", "Change Grow Live"])
 
@@ -295,6 +310,7 @@ def test_run_skips_unmatched_respondent_and_logs_it(httpx_mock, settings, conn, 
     must never land in tribunal_cases, or COUNT(*) becomes indefensible.
     """
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["CGL"])
 
     unrelated = {"total": 1, "results": [{
@@ -319,6 +335,7 @@ def test_run_skips_unmatched_respondent_and_logs_it(httpx_mock, settings, conn, 
 
 def test_run_flags_component_match_for_review(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change Grow Live"])
 
     multi = {"total": 1, "results": [{
@@ -349,6 +366,7 @@ def test_documents_survive_a_304_on_rerun(httpx_mock, settings, conn, monkeypatc
     silently wiping every attachment on every re-run.
     """
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change, Grow, Live"])
 
     search_fixture = json.loads((FIXTURES / "govuk_search_tribunals.json").read_text())
@@ -378,6 +396,7 @@ def test_documents_survive_a_304_on_rerun(httpx_mock, settings, conn, monkeypatc
 
 def test_region_populated_when_prefix_mapping_verified(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _no_eat_results(httpx_mock)
     monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change, Grow, Live"])
     conn.execute(
         "INSERT INTO tribunal_office_regions (office_prefix, region, office_name, verified_source) "
@@ -398,3 +417,164 @@ def test_region_populated_when_prefix_mapping_verified(httpx_mock, settings, con
     assert conn.execute(
         "SELECT COUNT(*) c FROM review_queue WHERE item_type='unmapped_tribunal_office_prefix'"
     ).fetchone()["c"] == 0
+
+# --- Employment Appeal Tribunal (Phase 15 / G4) --------------------------------
+
+EAT_TITLE = "Change Grow Live v Ms A Person: [2024] EAT 12"
+EAT_BODY = (
+    "The Employment Appeal Tribunal received submissions from both parties.\r\n"
+    "The appeal is dismissed.\r\n"
+    "The judgment below was on a claim between Ms A Person and Change Grow "
+    "Live (Case No.: 2303961/2024). A further case (Case No. 1308908/2022) "
+    "was referred to.\r\n"
+)
+
+
+def test_extract_eat_citation_from_title():
+    assert trib.extract_eat_citation(EAT_TITLE) == "[2024] EAT 12"
+    assert trib.extract_eat_citation("No citation here") is None
+    assert trib.extract_eat_citation(None) is None
+
+
+def test_split_eat_parties():
+    assert trib.split_eat_parties(EAT_TITLE) == ("Change Grow Live", "Ms A Person")
+    assert trib.split_eat_parties("Single Name [2024] EAT 1") == (None, None)
+    assert trib.split_eat_parties(None) == (None, None)
+
+
+def test_extract_eat_outcome_phrases():
+    assert trib.extract_eat_outcome("The appeal is dismissed.") == "dismissed"
+    assert trib.extract_eat_outcome("We allow the appeal.") == "allowed"
+    assert trib.extract_eat_outcome("The appeal is allowed in part.") == "allowed_in_part"
+    assert trib.extract_eat_outcome("The appeal is remitted to the tribunal.") == "remitted"
+    assert trib.extract_eat_outcome("The appeal is withdrawn.") == "withdrawn"
+    assert trib.extract_eat_outcome("The tribunal made findings of fact.") is None
+    assert trib.extract_eat_outcome(None) is None
+
+
+def test_extract_underlying_et_cases_handles_real_punctuation():
+    body = ("Case No.: 2303961/2024 and Case No. : 3305345/2022 and "
+            "Case No. 2202400/2022 and Case No.: 2303961/2024 again")
+    assert trib.extract_underlying_et_cases(body) == "2303961/2024,3305345/2022,2202400/2022"
+    assert trib.extract_underlying_et_cases("no cases cited") is None
+    assert trib.extract_underlying_et_cases(None) is None
+
+
+def test_eat_pass_stores_an_appeal_with_both_parties_matched(httpx_mock, settings, conn, monkeypatch):
+    _allow_all_robots(httpx_mock)
+    monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change Grow Live"])
+
+    search = {"total": 1, "results": [{
+        "title": EAT_TITLE,
+        "link": "/employment-appeal-tribunal-decisions/change-grow-live-v-ms-a-person-2024-eat-12",
+        "tribunal_decision_categories": ["unfair-dismissal"],
+        "tribunal_decision_decision_date": "2024-06-01",
+    }]}
+    content = {"details": {
+        "metadata": {"hidden_indexable_content": EAT_BODY,
+                      "tribunal_decision_landmark": "not-landmark"},
+        "attachments": [{"url": "https://www.gov.uk/example.pdf", "title": "Judgment PDF",
+                          "content_type": "application/pdf"}],
+    }}
+    # the first-instance pass must find nothing; the appeal pass gets its own
+    # response, keyed on the format filter in the query string so the two can
+    # never cross
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_tribunal_decision.*"),
+        json={"total": 0, "results": []}, is_reusable=True)
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_appeal_tribunal_decision.*"),
+        json=search)
+    httpx_mock.add_response(url=re.compile(r"https://www\.gov\.uk/api/content/.*"), json=content)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    trib.run(ctx)
+
+    case = conn.execute("SELECT * FROM eat_cases").fetchone()
+    assert case["neutral_citation"] == "[2024] EAT 12"
+    assert case["provider_key"] == "change_grow_live"
+    assert case["provider_side"] == "appellant"
+    assert case["provider_match_basis"] == "exact"
+    assert case["decision_date"] == "2024-06-01"
+    assert case["outcome"] == "dismissed"
+    assert case["outcome_confidence"] == "low"
+    assert case["underlying_et_cases"] == "2303961/2024,1308908/2022"
+    assert case["document_count"] == 1
+    # the public row must not carry either party's name
+    public_blob = " ".join(str(v) for v in tuple(case) if v is not None)
+    assert "Person" not in public_blob and "Change Grow Live" not in public_blob
+
+    restricted = conn.execute("SELECT * FROM restricted_eat_parties").fetchone()
+    assert restricted["appellant_name_raw"] == "Change Grow Live"
+    assert restricted["respondent_name_raw"] == "Ms A Person"
+
+    doc = conn.execute("SELECT * FROM eat_documents").fetchone()
+    assert doc["document_url"] == "https://www.gov.uk/example.pdf"
+
+
+def test_eat_pass_matches_respondent_side_too(httpx_mock, settings, conn, monkeypatch):
+    _allow_all_robots(httpx_mock)
+    monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change Grow Live"])
+
+    search = {"total": 1, "results": [{
+        "title": "Ms A Person v Change Grow Live: [2025] EAT 3",
+        "link": "/employment-appeal-tribunal-decisions/ms-a-person-v-change-grow-live-2025-eat-3",
+        "tribunal_decision_decision_date": "2025-01-10",
+    }]}
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_tribunal_decision.*"),
+        json={"total": 0, "results": []}, is_reusable=True)
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_appeal_tribunal_decision.*"),
+        json=search)
+    httpx_mock.add_response(url=re.compile(r"https://www\.gov\.uk/api/content/.*"),
+                             json={"details": {"metadata": {}, "attachments": []}})
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    trib.run(ctx)
+
+    case = conn.execute("SELECT * FROM eat_cases").fetchone()
+    assert case["provider_key"] == "change_grow_live"
+    assert case["provider_side"] == "respondent"
+
+
+def test_eat_body_only_mention_is_queued_not_attributed(httpx_mock, settings, conn, monkeypatch):
+    """The GOV.UK search indexes judgment bodies, so a hit can mention a
+    provider without either party being one (the Attorney General's
+    restriction-order judgments list the target's litigation history,
+    provider cases included, in the body). That is a review item, never an
+    eat_cases row -- attribution rests on the title alone, and the module
+    does not fetch the decision page for a title it will not attribute.
+    """
+    _allow_all_robots(httpx_mock)
+    monkeypatch.setitem(trib.SUPPLIER_NAME_VARIANTS, "change_grow_live", ["Change Grow Live"])
+
+    search = {"total": 1, "results": [{
+        "title": "The Attorney General v Ms S Person: [2026] EAT 34",
+        "link": "/employment-appeal-tribunal-decisions/the-attorney-general-v-ms-s-person-2026-eat-34",
+        "tribunal_decision_decision_date": "2026-03-03",
+    }]}
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_tribunal_decision.*"),
+        json={"total": 0, "results": []}, is_reusable=True)
+    httpx_mock.add_response(
+        url=re.compile(r"https://www\.gov\.uk/api/search\.json.*"
+                       r"filter_format=employment_appeal_tribunal_decision.*"),
+        json=search)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    trib.run(ctx)
+
+    assert conn.execute("SELECT COUNT(*) c FROM eat_cases").fetchone()["c"] == 0
+    review = conn.execute("SELECT * FROM review_queue WHERE item_type='eat_body_mention_only'").fetchall()
+    assert len(review) == 1
+    assert "[2026] EAT 34" in review[0]["raw_value"]
+    assert conn.execute("SELECT COUNT(*) c FROM restricted_eat_parties").fetchone()["c"] == 0
+    # the decision page was never fetched: nothing would be attributed to it
+    assert [r for r in httpx_mock.get_requests()
+             if "/api/content/" in str(r.url)] == []
