@@ -34,12 +34,14 @@ export async function render(main) {
             + `the mean is ${gbp(concentration.mean_value_gbp)}.`
           : 'Nothing matches these filters.')),
     el('div', { id: 'shape' }),
+    el('div', { id: 'corpus' }),
     el('div', { id: 'breakdown' }),
     el('div', { id: 'buyers' }),
     el('div', { id: 'notices' }));
   replace(main, page);
 
   renderShape(page.querySelector('#shape'), data, charts);
+  renderCorpus(page.querySelector('#corpus'), data, charts);
   renderBreakdown(page.querySelector('#breakdown'), data, charts);
   renderBuyers(page.querySelector('#buyers'), data, charts);
   renderNotices(page.querySelector('#notices'), data);
@@ -75,6 +77,116 @@ function fact(value, label, sub) {
     el('div', { class: 'value plain', text: value }),
     el('div', { class: 'label', text: label }),
     sub ? el('div', { class: 'sub', text: sub }) : null);
+}
+
+/* W-23: the shape of the corpus, drawn instead of the total the page
+ * refuses. Three charts, all computed over the same filters as the rest of
+ * the page, so they follow the filter bar rather than silently ignoring it:
+ *
+ *   * notices per quarter against the priced count — the gap between the
+ *     lines is the coverage story, and the caveat for the window applies;
+ *   * value distribution in fixed bands — never derived from the data, so
+ *     the same notice sits in the same band whatever is filtered;
+ *   * the contract-end runway, with its own pinned caveat: an end date as
+ *     published at notice stage is not a retendering forecast.
+ */
+function renderCorpus(container, data, charts) {
+  const quarters = data.by_quarter || [];
+  const bands = data.value_bands || [];
+  const runway = data.ending_soon || {};
+  const runwayRows = runway.rows || [];
+
+  const qHolder = el('div', {});
+  const bHolder = el('div', {});
+  const rHolder = el('div', {});
+
+  replace(container, section(
+    'The shape of the corpus',
+    `What ${num((data.value_concentration || {}).priced_notices)} priced `
+    + 'notices actually look like. All three charts are computed over the '
+    + 'filtered corpus, so they follow the filters.',
+    el('div', { class: 'grid two' },
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Notices by quarter, priced or not' }), qHolder),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Published value, by fixed band' }), bHolder),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Contract-end runway' }), rHolder,
+        runway.caveat ? pinnedCaveat(runway.caveat,
+          'Read before calling anything retendered') : null))));
+
+  if (quarters.length) {
+    charts.push(mountChart(qHolder, {
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0 },
+      xAxis: { type: 'category', data: quarters.map((q) => q.quarter) },
+      yAxis: { type: 'value', name: 'notices' },
+      series: [
+        { name: 'notices published', type: 'bar',
+          data: quarters.map((q) => q.count), itemStyle: { color: '#38bdf8' } },
+        { name: 'with a published value', type: 'line', smooth: true,
+          data: quarters.map((q) => q.priced), itemStyle: { color: '#f59e0b' } },
+      ],
+    }, {
+      height: 'short',
+      aria: 'Bar chart of notices published per quarter, with a line for '
+        + 'those carrying a published value. The gap between the two is '
+        + 'notices with no value stated.',
+    }));
+  } else {
+    replace(qHolder, noData('notice dates', './start.sh run m01_procurement'));
+  }
+
+  if (bands.length) {
+    charts.push(mountChart(bHolder, {
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: {
+        type: 'category', name: 'band', nameLocation: 'middle', nameGap: 28,
+        data: bands.map((b) => b.band_label),
+        axisLabel: { interval: 0, rotate: 30, fontSize: 10 },
+      },
+      yAxis: { type: 'value', name: 'notices' },
+      series: [{
+        type: 'bar', data: bands.map((b) => b.count),
+        itemStyle: { color: '#38bdf8' },
+        label: { show: true, position: 'top', color: '#8b949e', fontSize: 10 },
+      }],
+    }, {
+      height: 'short',
+      aria: 'Histogram of notices by published value in fixed bands, from '
+        + 'under ten thousand pounds to one billion pounds and above. The '
+        + 'bands never change with the filters.',
+    }));
+  } else {
+    replace(bHolder, noData('priced notices', './start.sh run m01_procurement'));
+  }
+
+  if (runwayRows.length) {
+    charts.push(mountChart(rHolder, {
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0 },
+      xAxis: { type: 'category', data: runwayRows.map((r) => r.quarter) },
+      yAxis: { type: 'value', name: 'notices' },
+      series: [
+        { name: 'ending in quarter', type: 'bar',
+          data: runwayRows.map((r) => r.count), itemStyle: { color: '#38bdf8' } },
+        { name: 'matched to a tracked provider', type: 'line', smooth: true,
+          data: runwayRows.map((r) => r.matched), itemStyle: { color: '#f59e0b' } },
+      ],
+    }, {
+      height: 'short',
+      aria: `Bar chart of notices whose published end date falls between `
+        + `${runway.window_start} and ${runway.window_end}, by end quarter, `
+        + 'with the count matched to a tracked provider alongside. Extensions '
+        + 'are not applied and this is not a retendering forecast.',
+    }));
+  } else {
+    replace(rHolder, el('div', { class: 'chart-empty' },
+      el('strong', { text: 'No notices end within this window.' }),
+      el('span', { class: 'small', text:
+        `${runway.window_start} → ${runway.window_end}, as published at `
+        + 'notice stage.' })));
+  }
 }
 
 function renderBreakdown(container, data, charts) {

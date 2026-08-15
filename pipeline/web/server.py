@@ -109,7 +109,7 @@ for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
-              "authority", "compare"):
+              "pfd", "authority", "compare"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1002,6 +1002,13 @@ class Handler(BaseHTTPRequestHandler):
                 topic=_str(params, "topic") or None,
                 ons_code=_str(params, "ons_code") or None,
                 substance=_str(params, "substance") or None)
+        if route == "pfd":
+            return public_queries.pfd(conn)
+        if route == "freshness":
+            # Its own route rather than a key of `summary` for the same
+            # reason the admin one is: seconds of full table scans, and the
+            # landing page loads it lazily after first paint.
+            return public_queries.freshness(conn)
         if route == "compare":
             return public_queries.compare(
                 conn,

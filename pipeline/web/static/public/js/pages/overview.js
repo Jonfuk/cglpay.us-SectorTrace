@@ -20,7 +20,7 @@
 'use strict';
 
 import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
-import { statCard, section, caveat, noData, errorCard, mountChart,
+import { statCard, section, caveat, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml } from '/js/components.js';
 
 export async function render(main) {
@@ -45,11 +45,18 @@ export async function render(main) {
         'and every figure carries the document it came from.'),
       cards),
     el('div', { id: 'sources' }),
+    el('div', { id: 'funnel' }),
+    el('div', { id: 'freshness' }),
     el('div', { id: 'contracts-chart' }));
   replace(main, page);
 
   renderCards(cards, summary);
   renderSources(page.querySelector('#sources'), summary);
+  renderFunnel(page.querySelector('#funnel'), summary.funnel);
+  // Freshness is seconds of table scans, so it is fetched lazily after first
+  // paint and rendered in place when it arrives; the rest of the page does
+  // not wait for it. See the comment on the route in server.py.
+  renderFreshness(page.querySelector('#freshness'));
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
   return () => disposeCharts(charts);
@@ -137,6 +144,83 @@ function renderSources(container, summary) {
     el('p', { class: 'small muted' },
       `Fingertips: ${num(summary.fingertips?.indicators_collected)} indicators, `
       + `latest period ${summary.fingertips?.latest_period || '—'}.`)));
+}
+
+/* W-26: the verification funnel. Drawn as bars with the count as a label so
+ * that a zero is visibly a zero -- an empty chart reads as "no data", which
+ * is exactly the wrong reading for the campaign's standing argument. */
+function renderFunnel(container, funnel) {
+  if (!funnel) return;
+  const stages = [
+    ['discovered', 'discovered', 'candidates found by the modules'],
+    ['undecided', 'undecided', 'waiting for a human decision'],
+    ['promoted', 'promoted', 'verified by a named person'],
+    ['evidence_rows', 'evidence rows', 'verified documents in the evidence base'],
+  ];
+  const max = Math.max(...stages.map(([key]) => funnel[key] || 0), 1);
+  const rows = stages.map(([key, label, sub]) => {
+    const value = funnel[key] || 0;
+    return el('div', { class: 'flowrow' },
+      el('div', { class: 'flowlabel' },
+        el('span', { text: label }),
+        el('span', { class: 'flowvalue', text: num(value) })),
+      el('div', { class: 'flowbar', role: 'img',
+        'aria-label': `${label}: ${num(value)}` },
+        el('div', { class: 'flowbar-fill', style: `width: ${Math.round(value / max * 100)}%` })),
+      el('div', { class: 'small muted', text: sub }));
+  });
+
+  replace(container, section(
+    'From candidate to evidence',
+    'How much of what the modules found has been verified by a person. '
+    + 'Rejected candidates are the difference between discovered and the '
+    + 'rest of the funnel.',
+    el('div', { class: 'panel' },
+      funnel.caveat ? pinnedCaveat(funnel.caveat, 'A zero here means') : null,
+      el('div', { class: 'flowrows' }, rows))));
+}
+
+/* W-26: how fresh each source table is, per the rows' own retrieval stamps.
+ * The payload is fetched lazily (it is seconds of scans) and the bars use
+ * the same ago() helper as the sources strip. "Never" is drawn as a full
+ * muted track, never as a zero. */
+async function renderFreshness(container) {
+  let data;
+  try {
+    data = await fetchJSON('freshness');
+  } catch (error) {
+    replace(container, section('How fresh the evidence is',
+      'Days since each source table was last written by a pipeline run.',
+      el('p', { class: 'small muted', text: `Could not load: ${error.message}` })));
+    return;
+  }
+
+  const days = (stamp) => {
+    if (!stamp) return null;
+    const then = new Date(stamp).getTime();
+    if (Number.isNaN(then)) return null;
+    return Math.max(0, Math.round((Date.now() - then) / 86400000));
+  };
+  const rows = (data.tables || []).map((t) => ({ ...t, days: days(t.retrieved_at) }));
+  const maxDays = Math.max(...rows.map((r) => r.days || 0), 1);
+
+  const bars = rows.map((t) => el('div', { class: 'flowrow' },
+    el('div', { class: 'flowlabel' },
+      el('span', { text: t.label }),
+      el('span', { class: 'flowvalue', text: t.days === null ? 'never' : ago(t.retrieved_at) })),
+    el('div', { class: 'flowbar', role: 'img',
+      'aria-label': `${t.label}: ${t.days === null ? 'never collected' : `${t.days} days ago`}` },
+      t.days === null
+        ? el('div', { class: 'flowbar-fill never', style: 'width: 100%' })
+        : el('div', { class: 'flowbar-fill', style: `width: ${Math.round(t.days / maxDays * 100)}%` }))));
+
+  replace(container, section(
+    'How fresh the evidence is',
+    'Days since each source table was last written. A table that has never '
+    + 'been collected is drawn as \'never\', not as zero.',
+    el('div', { class: 'panel' },
+      data.caveat ? pinnedCaveat(data.caveat, 'Read before comparing tables') : null,
+      el('div', { class: 'flowrows' }, bars))));
 }
 
 async function renderTopContracts(container, charts) {

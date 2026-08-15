@@ -426,10 +426,28 @@ main:focus { outline: none; }
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
   border-radius: 999px; padding: 4px 12px; font-size: 12.5px;
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
-.dot.green { background: var(--accent-green); }
-.dot.amber { background: var(--accent-amber); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.green { background: var(--accent-green); }
+  .dot.amber { background: var(--accent-amber); }
 
+  /* The overview's flow bars (verification funnel and freshness). A plain
+   * div track rather than a chart on purpose: a zero renders as the text
+   * "0" next to an empty track, which an empty canvas would not say. */
+  .flowrows { display: grid; gap: var(--space-3); }
+  .flowrow { display: grid; grid-template-columns: minmax(180px, 1fr) 3fr;
+    gap: var(--space-3); align-items: center; }
+  .flowlabel { display: flex; justify-content: space-between; gap: var(--space-2);
+    font-size: 13.5px; }
+  .flowvalue { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .flowbar { height: 10px; border-radius: 5px; background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle); overflow: hidden; }
+  .flowbar-fill { height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #1f6feb, #38bdf8); }
+  .flowbar-fill.never { background: var(--border-subtle); }
+  @media (max-width: 720px) {
+    .flowrow { grid-template-columns: 1fr; gap: var(--space-1); }
+  }
+  
 .sitefoot {
   border-top: 1px solid var(--border-subtle); padding: var(--space-8) var(--space-6);
   color: var(--text-secondary); font-size: 13px; max-width: 1440px; margin: 0 auto;

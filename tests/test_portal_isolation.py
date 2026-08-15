@@ -46,6 +46,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/geography.js",
     "/js/pages/treatment.js",
     "/js/pages/providers.js",
+    "/js/pages/pfd.js",
     "/js/pages/authority.js",
     "/js/pages/compare.js",
     "/vendor/echarts.min.js",
@@ -69,6 +70,8 @@ PUBLIC_API_ROUTES = {
     "ndtms",
     "compare",
     "layers",
+    "pfd",
+    "freshness",
 }
 
 # Route patterns under /api/v1/ that take a parameter.

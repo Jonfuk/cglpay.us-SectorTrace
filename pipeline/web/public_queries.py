@@ -29,7 +29,9 @@ Three rules hold everywhere in this file:
 """
 from __future__ import annotations
 
+import re
 import sqlite3
+from datetime import date
 from typing import Any, Iterator
 
 from pipeline.exports import guard_columns, guard_not_restricted
@@ -144,6 +146,62 @@ CAVEATS = {
         "disclosure control, kept verbatim from the publication. It does not "
         "mean zero and must not be read, plotted or averaged as zero."
     ),
+    "contract_end": (
+        "An end date is the contract period as published at notice stage. "
+        "Extensions mentioned in the notice are not applied, a framework's "
+        "end is not a call-off's end, and none of this is a forecast of what "
+        "will be retendered."
+    ),
+    "evidence_funnel": (
+        "Every candidate, promotion and evidence row in this funnel records "
+        "a human decision, and who made it. A zero is zero decisions "
+        "recorded — it says nothing about the sector, and everything about "
+        "how much verification has been done."
+    ),
+    "collection_freshness": (
+        "The date each source table was last written by a pipeline run. A "
+        "table that never shows a date has never been collected — absence of "
+        "collection is not evidence of absence, and it is drawn as 'never' "
+        "rather than as zero."
+    ),
+    "pfd_stubs": (
+        "A large part of this corpus publishes only a metadata stub online, "
+        "with the report itself as a PDF that is not linked in the published "
+        "data. Those reports have no matters of concern to search. This is a "
+        "source limitation, not a finding about the reports."
+    ),
+    "pfd_mentions": (
+        "Being sent a report and being named in one are different facts, "
+        "recorded as different mention types. A report can be addressed to a "
+        "provider, or name one in its text, or both — and the two counts are "
+        "never added together on this page."
+    ),
+    "pfd_terms": (
+        "A term here means the word appears in a coroner's matters of "
+        "concern. It is a finding aid — it points at reports worth reading — "
+        "not a characterisation of what the coroner found. Read the report."
+    ),
+    "pfd_areas": (
+        "Coroner areas are the districts of the coronial service, not local "
+        "authorities. They do not share boundaries and are not mapped as if "
+        "they did."
+    ),
+    "cqc_inspection_dates": (
+        "A report date is when an inspection report was published, not when "
+        "a rating changed. The ratings beside it are CQC's own record; the "
+        "reports are the evidence behind them."
+    ),
+    "charity_share": (
+        "Income from government contracts and grants is shown as a share of "
+        "that year's own total income — both figures from the same row of "
+        "the same filed accounts. Do not combine it with procurement "
+        "contract values: that is arithmetic across different sources."
+    ),
+    "filing_records": (
+        "Filing dates and categories are Companies House's own record of "
+        "documents submitted. That a filing exists is a fact; what the "
+        "document says is for the reader."
+    ),
     "coverage_absence": (
         "A tick means the warehouse holds rows of this kind for this "
         "authority. Its absence is absence of collection, not evidence of "
@@ -199,10 +257,45 @@ def _one(conn: sqlite3.Connection, sql: str, params: Any = ()) -> dict:
 # --- summary ------------------------------------------------------------------
 
 
+def _evidence_funnel(conn: sqlite3.Connection) -> dict:
+    """Candidate discovery to evidence, in the four steps a person takes.
+
+    The same semantics as the admin Candidates tab (`candidates.counts`):
+    undecided is total minus promoted minus rejected, because a candidate
+    that was rejected is not waiting and a candidate that was promoted is
+    not undecided. Promoted means a human verified it, which is the only
+    way anything crosses into an evidence table (migration `0030`).
+    """
+    discovered = promoted = rejected = 0
+    for table in ("cdp_document_candidates", "committee_paper_candidates",
+                  "foi_request_candidates"):
+        row = _one(conn, f"SELECT COUNT(*) AS total, "
+                          f"SUM(CASE WHEN verified = 1 THEN 1 ELSE 0 END) AS promoted, "
+                          f"SUM(CASE WHEN rejected = 1 THEN 1 ELSE 0 END) AS rejected "
+                          f"FROM {table}")
+        discovered += row.get("total") or 0
+        promoted += row.get("promoted") or 0
+        rejected += row.get("rejected") or 0
+    evidence_rows = sum(
+        _one(conn, f"SELECT COUNT(*) AS n FROM {table}").get("n") or 0
+        for table in ("cdp_documents", "committee_papers", "foi_requests"))
+    return {
+        "discovered": discovered,
+        "undecided": discovered - promoted - rejected,
+        "promoted": promoted,
+        "rejected": rejected,
+        "evidence_rows": evidence_rows,
+        "caveat": CAVEATS["evidence_funnel"],
+    }
+
+
 def summary(conn: sqlite3.Connection) -> dict:
     """Landing-page figures. Every one carries what it is and what it is not."""
     _public(["providers", "authorities", "contracts", "workforce_census_metrics",
-              "fingertips_indicators", "schema_migrations"])
+              "fingertips_indicators", "schema_migrations",
+              "cdp_document_candidates", "committee_paper_candidates",
+              "foi_request_candidates", "cdp_documents", "committee_papers",
+              "foi_requests", "evidence_promotions"])
 
     providers = _one(conn, "SELECT COUNT(*) AS total, "
                             "SUM(is_target) AS targets FROM providers")
@@ -284,10 +377,60 @@ def summary(conn: sqlite3.Connection) -> dict:
             "last_run": max((m["last_retrieved"] for m in modules
                               if m["last_retrieved"]), default=None),
         },
+        # W-26: the overview's verification funnel. Loaded with the summary
+        # because it is cheap -- three small candidate tables and three small
+        # evidence tables, unlike freshness below, which is on its own route
+        # because it is not cheap.
+        "funnel": _evidence_funnel(conn),
     }
 
 
 # --- providers ----------------------------------------------------------------
+
+
+# The source tables whose collection recency the overview's freshness bars
+# show. An explicit list rather than a scan of the schema, for the same
+# reason the admin coverage matrix keeps one: what counts as a source is a
+# statement about what the pipeline is for, and a new table appearing should
+# not silently join the bars. Table names are module constants and never
+# come from a request, so they are safe to interpolate.
+FRESHNESS_TABLES: tuple[tuple[str, str], ...] = (
+    ("Procurement notices", "contracts"),
+    ("Public health grant", "public_health_grants"),
+    ("LA revenue budgets", "la_revenue_budgets"),
+    ("Fingertips values", "fingertips_la_values"),
+    ("Workforce census", "workforce_census_metrics"),
+    ("NDTMS statistics", "ndtms_la_statistics"),
+    ("PFD reports", "pfd_reports"),
+    ("CQC locations", "cqc_locations"),
+    ("Charity financials", "charity_financials"),
+    ("Company filings", "company_filings"),
+    ("Annual report disclosure", "provider_report_disclosure"),
+    ("NHS job adverts", "nhs_job_adverts"),
+    ("Tribunal cases", "tribunal_cases"),
+    ("Authorities", "authorities"),
+)
+
+
+def freshness(conn: sqlite3.Connection) -> dict:
+    """Newest `retrieved_at` per source table, for the overview's bars.
+
+    On its own route, not inside `summary`, for the same reason the admin
+    freshness panel is: on the real warehouse this is seconds of full table
+    scans -- contracts and la_revenue_budgets between them are most of it,
+    and neither carries a `retrieved_at` index by decision (P-05 priced and
+    declined the twenty-table index). The overview loads it lazily, after
+    first paint, so the landing page does not wait for it.
+    """
+    _public([table for _label, table in FRESHNESS_TABLES])
+    union = " UNION ALL ".join(
+        f"SELECT '{label}' AS label, '{table}' AS table_name, "
+        f"MAX(retrieved_at) AS retrieved_at FROM {table}"
+        for label, table in FRESHNESS_TABLES)
+    return {
+        "tables": _rows(conn, union),
+        "caveat": CAVEATS["collection_freshness"],
+    }
 
 
 def _value_is_concentrated(conn: sqlite3.Connection, threshold: float = 0.5) -> bool:
@@ -362,6 +505,85 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
 
 
 # --- contracts ----------------------------------------------------------------
+
+
+# The value bands W-23's distribution chart is drawn over, in order. Fixed on
+# purpose: a histogram whose buckets moved with the filters could not be
+# compared with itself, so the same notice sits in the same band whatever
+# filters are applied. This tuple is the single declaration -- the SQL CASE
+# below is built from it, and the test pins it.
+CONTRACT_VALUE_BANDS: tuple[tuple[int | None, int | None, str], ...] = (
+    (None, 10_000, "under £10k"),
+    (10_000, 100_000, "£10k–£100k"),
+    (100_000, 1_000_000, "£100k–£1m"),
+    (1_000_000, 10_000_000, "£1m–£10m"),
+    (10_000_000, 100_000_000, "£10m–£100m"),
+    (100_000_000, 1_000_000_000, "£100m–£1bn"),
+    (1_000_000_000, None, "£1bn and above"),
+)
+
+
+def _value_band_case() -> str:
+    """A CASE expression over `CONTRACT_VALUE_BANDS`.
+
+    Built from the tuple rather than written alongside it, so the SQL cannot
+    drift from the declaration the test pins. The boundaries are module-level
+    constants; nothing from a request reaches this string.
+    """
+    arms = []
+    for _lower, upper, label in CONTRACT_VALUE_BANDS:
+        if upper is None:
+            arms.append(f"ELSE '{label}'")
+        else:
+            arms.append(f"WHEN c.value_core < {upper} THEN '{label}'")
+    return "CASE " + " ".join(arms) + " END"
+
+
+def _quarter(column: str) -> str:
+    """SQLite expression turning an ISO date column into 'YYYY-Qn'."""
+    return (f"substr({column}, 1, 4) || '-Q' || "
+            f"((CAST(substr({column}, 6, 2) AS INTEGER) + 2) / 3)")
+
+
+def _ending_soon_window(now: date | None = None) -> tuple[str, str]:
+    """The runway window: the two calendar years from `now`, as ISO dates."""
+    if now is None:
+        now = date.today()
+    try:
+        end = now.replace(year=now.year + 2)
+    except ValueError:  # 29 February in a non-leap target year
+        end = now.replace(year=now.year + 2, day=28)
+    return now.isoformat(), end.isoformat()
+
+
+def ending_soon(conn: sqlite3.Connection, clause: str, params: dict,
+                now: date | None = None) -> dict:
+    """Notices whose published `date_end` falls within two years of `now`.
+
+    A runway, not a forecast: the end date is the period as published at
+    notice stage, and the caveat that travels with it says what is not
+    applied (extensions, call-offs, retendering). The matched count is the
+    provider-match floor the rest of the page uses, so it can be compared
+    with nothing it does not share a method with.
+    """
+    window_start, window_end = _ending_soon_window(now)
+    rows = _rows(conn, f"""
+        SELECT {_quarter('c.date_end')} AS quarter,
+               COUNT(*) AS count,
+               SUM(CASE WHEN c.supplier_name_raw IN
+                 (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END)
+                   AS matched
+        FROM contracts c{clause}
+        {'AND' if clause else 'WHERE'} c.date_end >= :window_start
+              AND c.date_end <= :window_end
+        GROUP BY quarter ORDER BY quarter""",
+        {**params, "window_start": window_start, "window_end": window_end})
+    return {
+        "rows": rows,
+        "window_start": window_start,
+        "window_end": window_end,
+        "caveat": CAVEATS["contract_end"],
+    }
 
 
 # The notice row, written once and read twice: by the page's table, which sees
@@ -444,6 +666,29 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         FROM contracts c{clause}
         GROUP BY procedure_type ORDER BY count DESC""", params)
 
+    # W-23: the corpus's shape, drawn on the contracts page. All three are
+    # computed over the same filters as everything else here, so the charts
+    # follow the page's controls rather than silently ignoring them.
+    by_quarter = _rows(conn, f"""
+        SELECT {_quarter('c.date_published')} AS quarter,
+               COUNT(*) AS count,
+               SUM(CASE WHEN c.value_core IS NOT NULL THEN 1 ELSE 0 END)
+                   AS priced
+        FROM contracts c{clause}
+        {'AND' if clause else 'WHERE'} c.date_published IS NOT NULL
+        GROUP BY quarter ORDER BY quarter""", params)
+
+    # Bands in the fixed canonical order, zero-filled: a band that no notice
+    # currently falls in renders as 0 rather than vanishing, and the axis
+    # cannot reorder with the data.
+    present = {row["band_label"]: row["count"] for row in _rows(conn, f"""
+        SELECT {_value_band_case()} AS band_label, COUNT(*) AS count
+        FROM contracts c{clause}
+        {'AND' if clause else 'WHERE'} c.value_core IS NOT NULL
+        GROUP BY band_label""", params)}
+    value_bands = [{"band_label": label, "count": present.get(label, 0)}
+                   for _lower, _upper, label in CONTRACT_VALUE_BANDS]
+
     top_buyers = _rows(conn, f"""
         SELECT c.buyer_name, c.buyer_ons_code, COUNT(*) AS count,
                COALESCE(SUM(c.value_core), 0) AS value_gbp
@@ -468,6 +713,9 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         "by_year": by_year,
         "by_provider": by_provider,
         "by_procedure_type": by_procedure,
+        "by_quarter": by_quarter,
+        "value_bands": value_bands,
+        "ending_soon": ending_soon(conn, clause, params),
         "top_buyers": top_buyers,
         "notices": notices,
         "caveats": {
@@ -475,6 +723,7 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
             "value_sum": CAVEATS["contract_value_sum"],
             "provider_match": CAVEATS["contract_provider_match"],
             "window": CAVEATS["contract_window"],
+            "contract_end": CAVEATS["contract_end"],
         },
     }
 
@@ -1223,6 +1472,111 @@ def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
     }
 
 
+# --- PFD reports --------------------------------------------------------------
+#
+# W-25: 1,539 coroners' Prevention of Future Deaths reports were collected,
+# caveated and never displayed. Three constraints from the finding are baked
+# into the payload shape rather than left to the page:
+#
+#   * `restricted_pfd_persons` and `restricted_pfd_report_text` are not read,
+#     not listed, and refused by `_public` if a future edit adds them. The
+#     names live only there, on purpose.
+#   * Being *sent* a report and being *named* in one are different facts
+#     (`pfd_provider_mentions.mention_type`) and stay separate keys in
+#     `mentions`, never one series.
+#   * The metadata stubs -- reports whose PDF-only text was never published
+#     as data -- are counted in `totals` and on the year chart, not in a
+#     footnote.
+
+
+def _pfd_year(report_date: str | None) -> int | None:
+    """The year in a report date as judiciary.uk wrote it.
+
+    `pfd_reports.report_date` is verbatim source text with no single shape
+    -- '10/04/2026', '12 March 2026', 'March 2026' -- so the year is read
+    with a pattern rather than assumed at a position, and the page shows the
+    verbatim text in its table. A year this cannot find is absent from the
+    year chart, not guessed.
+    """
+    if not report_date:
+        return None
+    match = re.search(r"\b(19|20)\d{2}\b", report_date)
+    return int(match.group(0)) if match else None
+
+
+def pfd(conn: sqlite3.Connection) -> dict:
+    """The sector-level view of the coroners' report corpus."""
+    _public(["pfd_reports", "pfd_concern_terms", "pfd_provider_mentions",
+              "pfd_recipients"])
+
+    reports = _rows(conn, """
+        SELECT report_ref, report_date, coroner_area, categories, report_url,
+               matters_of_concern IS NOT NULL AS has_concerns,
+               source_url, retrieved_at
+        FROM pfd_reports""")
+
+    by_year: dict[int, dict] = {}
+    by_area: dict[str, int] = {}
+    for report in reports:
+        year = _pfd_year(report["report_date"])
+        if year is not None:
+            bucket = by_year.setdefault(
+                year, {"year": year, "reports": 0, "with_concerns": 0})
+            bucket["reports"] += 1
+            bucket["with_concerns"] += int(report["has_concerns"])
+        if report["coroner_area"]:
+            by_area[report["coroner_area"]] = (
+                by_area.get(report["coroner_area"], 0) + 1)
+
+    mentions = _one(conn, """
+        SELECT SUM(CASE WHEN mention_type = 'recipient' THEN 1 ELSE 0 END) AS sent,
+               SUM(CASE WHEN mention_type = 'body_text' THEN 1 ELSE 0 END) AS named
+        FROM pfd_provider_mentions""")
+
+    return {
+        "totals": {
+            "reports": len(reports),
+            "with_concerns": sum(1 for r in reports if r["has_concerns"]),
+            # The rest are the metadata stubs: published as data without the
+            # matters of concern, which live in a PDF the publication does
+            # not link. Shown here and on the chart, never in a footnote.
+            "stubs": sum(1 for r in reports if not r["has_concerns"]),
+        },
+        "by_year": [by_year[y] for y in sorted(by_year)],
+        "by_coroner_area": [
+            {"coroner_area": area, "reports": count}
+            for area, count in sorted(by_area.items(),
+                                      key=lambda kv: -kv[1])[:25]],
+        # The finding aid: summed occurrences across reports, not a
+        # characterisation of any one report.
+        "concern_terms": _rows(conn, """
+            SELECT term, SUM(occurrences) AS occurrences
+            FROM pfd_concern_terms GROUP BY term
+            ORDER BY occurrences DESC, term LIMIT 25"""),
+        "mentions": {
+            "sent_to_providers": mentions.get("sent") or 0,
+            "naming_providers": mentions.get("named") or 0,
+            "recipient_organisations": _one(
+                conn, "SELECT COUNT(DISTINCT organisation_name) AS n "
+                      "FROM pfd_recipients").get("n", 0),
+        },
+        # Ordered by the coroner's own reference, which opens with the year
+        # ('2026-0213'), so newest-first is lexicographic rather than a sort
+        # over the source's varied date text.
+        "recent": _rows(conn, """
+            SELECT report_ref, report_date, coroner_area, categories,
+                   report_url, matters_of_concern IS NOT NULL AS has_concerns,
+                   source_url, retrieved_at
+            FROM pfd_reports ORDER BY report_ref DESC LIMIT 50"""),
+        "caveats": {
+            "stubs": CAVEATS["pfd_stubs"],
+            "mentions": CAVEATS["pfd_mentions"],
+            "terms": CAVEATS["pfd_terms"],
+            "areas": CAVEATS["pfd_areas"],
+        },
+    }
+
+
 # --- provider deep dive -------------------------------------------------------
 
 
@@ -1236,7 +1590,10 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     """
     _public(["providers", "charity_financials", "provider_identifiers",
               "tribunal_cases", "nhs_job_adverts", "contracts", "supplier_aliases",
-              "cqc_locations", "v_entity_edges"])
+              "cqc_locations", "v_entity_edges", "cqc_location_reports",
+              "provider_report_disclosure", "provider_annual_reports",
+              "v_provider_disclosure_gaps", "company_filings",
+              "pfd_provider_mentions", "pfd_reports"])
 
     provider = _one(conn, "SELECT * FROM providers WHERE provider_key = ?",
                      (provider_key,))
@@ -1330,15 +1687,123 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM tribunal_cases WHERE provider_key = ?
         ORDER BY decision_date DESC""", (provider_key,))
 
+    # --- W-24: the four sources the deep dive stopped at ---------------------
+    #
+    # Each is single-source and each carries its own caveat. The one rule
+    # that matters across them: the government-contract share below is
+    # computed within a single row of one source (filed accounts), which the
+    # finding explicitly allows -- combining it with procurement values would
+    # be the cross-source arithmetic docs/CAVEATS.md forbids, and the caveat
+    # says so next to the figure.
+
+    charity_finance = _rows(conn, """
+        SELECT cf.financial_year_end, cf.total_income, cf.total_expenditure,
+               cf.income_from_govt_contracts, cf.income_from_govt_grants,
+               cf.source_url, cf.retrieved_at
+        FROM charity_financials cf
+        JOIN provider_identifiers pi ON pi.identifier = cf.charity_number
+                                     AND pi.scheme = 'charity_number'
+        WHERE pi.provider_key = ?
+        ORDER BY cf.financial_year_end""", (provider_key,))
+    for row in charity_finance:
+        income = row["total_income"]
+        # The share of one row of one source, computed here so the page does
+        # not have to -- and NULL when there is no income to be a share of.
+        row["govt_contracts_share"] = (
+            (row["income_from_govt_contracts"] or 0) / income) if income else None
+        row["govt_grants_share"] = (
+            (row["income_from_govt_grants"] or 0) / income) if income else None
+
+    # Inspection reports, not ratings. `report_uri` is a relative address
+    # with no documented host (the CQC half of W-15), so the page shows the
+    # dates and does not build a link it cannot verify.
+    cqc_inspections = _rows(conn, """
+        SELECT l.location_name, r.report_date, r.first_visit_date, r.report_uri,
+               r.source_url, r.retrieved_at
+        FROM cqc_location_reports r
+        JOIN cqc_locations l ON l.location_id = r.location_id
+        WHERE l.provider_key = ?
+        ORDER BY r.report_date DESC""", (provider_key,))
+
+    # What each report *does not* discuss, from the view built over m14's
+    # disclosure summary. Every gap row carries the view's own caveat, which
+    # says in terms that "not matched" means the search terms did not appear
+    # in the extracted text -- a statement about the PDF and the terms, not
+    # about the provider.
+    disclosure_gaps = _rows(conn, """
+        SELECT d.financial_year_end, d.topic, d.search_terms, d.caveat
+        FROM v_provider_disclosure_gaps d
+        WHERE d.provider_key = ?
+        ORDER BY d.financial_year_end, d.topic""", (provider_key,))
+    disclosed = _rows(conn, """
+        SELECT d.financial_year_end, d.topic
+        FROM provider_report_disclosure d
+        WHERE d.provider_key = ? AND d.matched = 1
+        ORDER BY d.financial_year_end, d.topic""", (provider_key,))
+    # A year whose annual report was read but has no disclosure rows at all
+    # was never searched. Distinct from every "not matched" cell above, and
+    # carried under its own key so the matrix can draw it as its own state:
+    # a report m14 did not get to is not a report that said nothing.
+    disclosure_not_searched = _rows(conn, """
+        SELECT ar.financial_year_end, ar.document_url
+        FROM provider_annual_reports ar
+        LEFT JOIN provider_report_disclosure d
+               ON d.provider_key = ar.provider_key
+              AND d.financial_year_end = ar.financial_year_end
+        WHERE ar.provider_key = ? AND d.provider_key IS NULL
+        ORDER BY ar.financial_year_end""", (provider_key,))
+
+    filings = _rows(conn, """
+        SELECT f.filing_date, f.category, f.subcategory, f.description,
+               f.document_url, f.source_url, f.retrieved_at
+        FROM company_filings f
+        JOIN provider_identifiers pi ON pi.identifier = f.company_number
+                                     AND pi.scheme = 'company_number'
+        WHERE pi.provider_key = ?
+        ORDER BY f.filing_date DESC""", (provider_key,))
+
+    # --- W-25: the reports that mention this provider -------------------------
+    #
+    # The deep dive's half of the PFD finding: each report is linked to the
+    # coroner's published page, and the mention type says which of the two
+    # facts it is. The caveat about never summing them is pinned on the
+    # sector page and carried here too, because this list has the same
+    # trap in miniature.
+    pfd_mentions = _rows(conn, """
+        SELECT m.report_ref, m.mention_type, m.matched_name,
+               r.report_date, r.coroner_area, r.report_url
+        FROM pfd_provider_mentions m
+        JOIN pfd_reports r ON r.report_ref = m.report_ref
+        WHERE m.provider_key = ?
+        ORDER BY r.report_ref DESC""", (provider_key,))
+
     return {
         "provider": provider,
         "events": events,
         "cqc_locations": locations,
         "entity_edges": edges,
         "tribunal_cases": tribunals,
+        "charity_finance": charity_finance,
+        "cqc_inspections": cqc_inspections,
+        "disclosure": {
+            "gaps": disclosure_gaps,
+            "disclosed": disclosed,
+            "not_searched": disclosure_not_searched,
+            # The topics searched for this provider, for the matrix's rows.
+            # m14 writes every topic for every report it reads, so a topic
+            # absent from a searched year's cells is one that matched.
+            "topics": sorted({row["topic"] for row in disclosure_gaps}
+                             | {row["topic"] for row in disclosed}),
+        },
+        "filings": filings,
+        "pfd_mentions": pfd_mentions,
         "caveats": {
             "cqc_coverage": CAVEATS["cqc_coverage"],
             "tribunal_component": CAVEATS["tribunal_component"],
+            "cqc_inspection_dates": CAVEATS["cqc_inspection_dates"],
+            "charity_share": CAVEATS["charity_share"],
+            "filing_records": CAVEATS["filing_records"],
+            "pfd_mentions": CAVEATS["pfd_mentions"],
         },
     }
 
