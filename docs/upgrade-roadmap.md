@@ -2,17 +2,19 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Eleven phases have been worked**: 1–3, 5,
-6, 8, 9, 10 and 11 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
+1 skipped, 18 deselected, 422s**). **Thirteen phases have been worked**: 1–3, 5,
+6, 8–13 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
 (D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
 and F-04 and left P-03 open. Each phase records what changed from the plan as
 it landed.
 
-**Everything still open is sequenced as Phases 12–19**, at the end of §5 — in
-the order to take them and with the reasons for that order. **Phases 8, 9, 10
-and 11 are delivered**: 8 and 9 ran in parallel on 2026-08-14 by two sessions,
-which is what the phase plan said they could be; 10 landed the same day; 11
-landed on 2026-08-15. Phase 12 is unblocked and none of 12–19 has been started.
+**Everything still open is sequenced as Phases 14–19**, at the end of §5 — in
+the order to take them and with the reasons for that order. **Phases 8, 9, 10,
+11, 12 and 13 are delivered**: 8 and 9 ran in parallel on 2026-08-14 by two
+sessions, which is what the phase plan said they could be; 10 landed the same
+day; 11 and 12 landed on 2026-08-15; 13 landed the same day, on a branch off
+11, and closed the last two open portal findings (W-11, W-19). None of 14–19
+has been started.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -41,7 +43,7 @@ already there.
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
-| **W-05 – W-27** | **Six** open portal and operator findings from the 2026-08-14 comparison, down from twenty-one | Not decisions — work, and now sequenced. Phases 12–13. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine). |
+| **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
 | **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
@@ -299,11 +301,37 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: per-source licence lines in the provenance drawer (most sources are OGL v3), a `# Licence:` line in export headers, and a link to `docs/SOURCES.md`.
 - Verified by: a test that every export header carries a licence line.
 
-**W-11 · No way to compare areas or providers side by side · M — filed 2026-08-14**
-- Evidence: the portal shows one area at a time (choropleth, per-authority series) or one provider (deep-dive timeline). Fingertips leads with Compare areas; LG Inform's standard report is a comparison table with min/mean/max against a chosen peer group.
-- Costs today: the campaign's central question — "how does my authority compare?" — is answered only by the reader opening two tabs and aligning them by eye.
-- Fix: a compare view over data the portal already renders — pick two or more authorities (or providers) and draw the existing series (grant, budget, treatment, contracts) on shared axes. No new data, and the existing no-cross-layer-arithmetic caveats reapply on each shared axis.
-- Verified by: a browser check of a two-area comparison, with the cross-layer caveat present on the shared axis.
+**W-11 · No way to compare areas or providers side by side · M — closed in Phase 13**
+- **Fix:** `#/compare`, a page whose URL is the comparison —
+  `#/compare?ons_code=...&ons_code=...&provider_key=...`, named as the API
+  names its parameters. The reader picks the peers from two typeaheads; every
+  series is the existing endpoint's series composed rather than re-written
+  (grant and budget as the geography page draws them, treatment as the
+  treatment page draws it with its paired intervals, contracts by publication
+  year as the contracts page counts them), so a number here cannot disagree
+  with the page it came from — the pin test holds that composition, the same
+  way W-13's does. Each chart carries the caveat of its layer, the cross-layer
+  caveat is pinned above the whole page, and a series whose rows carry no
+  derived number is the test's own shape: grant and budget are separate
+  payload keys and nothing is per-capita, deflated or divided.
+- Evidence: the portal shows one area at a time (choropleth, per-authority
+  series) or one provider (deep-dive timeline). Fingertips leads with Compare
+  areas; LG Inform's standard report is a comparison table with min/mean/max
+  against a chosen peer group.
+- Costs today: the campaign's central question — "how does my authority
+  compare?" — is answered only by the reader opening two tabs and aligning
+  them by eye.
+- Fix: a compare view over data the portal already renders — pick two or more
+  authorities (or providers) and draw the existing series (grant, budget,
+  treatment, contracts) on shared axes. No new data, and the existing
+  no-cross-layer-arithmetic caveats reapply on each shared axis.
+- Verified by: a browser check of a two-area comparison, with the cross-layer
+  caveat present on the shared axis.
+- **Entry points:** the authority page and the provider deep dive each link
+  to the comparison seeded with themselves. **Also changed in passing:**
+  `writeStateToUrl` in app.js now preserves page-owned query keys, so a
+  filter-bar change cannot wipe the `ons_code` selection out of a shareable
+  compare URL.
 
 **W-12 · The coverage matrix never reaches the public · M — closed in Phase 11**
 - **Fix:** a coverage tick row on the authority page, computed from the admin
@@ -408,11 +436,35 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: enable the Tabulator features already vendored — per-column search, a pager, and the row count shown so "1,000 of 98,636" is visible rather than implied.
 - Verified by: a test that a table larger than one page renders a pager and that a search narrows the visible rows.
 
-**W-19 · The portal map shows one layer at a time · M — filed 2026-08-14**
-- Evidence: the geography page switches between six metrics over a single choropleth ([pipeline/web/static/public/js/pages/geography.js:19](pipeline/web/static/public/js/pages/geography.js:19), [:43](pipeline/web/static/public/js/pages/geography.js:43)); nothing overlays. The exports already produce four separate layers — contracts points, CQC locations, treatment polygons, PFD groupings ([pipeline/exports/geojson.py:48](pipeline/exports/geojson.py:48)) — for use elsewhere. Fingertips maps carry contextual layers and transparency; LG Inform layers metrics over boundaries.
-- Costs today: the readiest relationships — where the contracts cluster, where CQC-registered services sit — are invisible on the only public map.
-- Fix: layer toggles on the geography page (contracts, CQC, boundaries, coverage) reusing the export layers' shapes, each carrying the caveat discipline its layer already has.
-- Verified by: a test that every toggled layer carries its own caveat text, and a browser check of the overlay.
+**W-19 · The portal map shows one layer at a time · M — closed in Phase 13**
+- **Fix:** overlay layers on the geography map, toggled per kind of evidence:
+  contracts aggregated to one point per commissioning authority, CQC
+  locations, latest treatment rates per authority, and coverage — how many
+  evidence kinds the warehouse holds per authority. The toggles are built
+  from `/api/v1/layers`, whose caveats are read from the export layer
+  registry (`pipeline/exports/geojson.py`) rather than copied, so the portal
+  and the downloads cannot drift — the pin test holds the identity word for
+  word, and the treatment overlay is the export's data row for row. Each
+  layer's caveat is pinned beside its toggle the moment it is checked, so a
+  layer never appears without the warning that governs it. PFD reports are
+  deliberately not a layer: they have no geometry, and coroner areas are not
+  local authorities and must not be mapped as if they were — the absence is
+  pinned by a test, in the shape of W-15's CQC decision.
+- Evidence: the geography page switches between six metrics over a single
+  choropleth ([pipeline/web/static/public/js/pages/geography.js:19](pipeline/web/static/public/js/pages/geography.js:19),
+  [:43](pipeline/web/static/public/js/pages/geography.js:43)); nothing
+  overlays. The exports already produce four separate layers — contracts
+  points, CQC locations, treatment polygons, PFD groupings
+  ([pipeline/exports/geojson.py:48](pipeline/exports/geojson.py:48)) — for
+  use elsewhere. Fingertips maps carry contextual layers and transparency; LG
+  Inform layers metrics over boundaries.
+- Costs today: the readiest relationships — where the contracts cluster,
+  where CQC-registered services sit — are invisible on the only public map.
+- Fix: layer toggles on the geography page (contracts, CQC, boundaries,
+  coverage) reusing the export layers' shapes, each carrying the caveat
+  discipline its layer already has.
+- Verified by: a test that every toggled layer carries its own caveat text,
+  and a browser check of the overlay.
 
 **W-20 · Nothing tells the operator the exports are stale · S — closed in Phase 10**
 - **Fix:** a line per export directory, from the pipeline's own activity record — the newest of `http_cache.updated_at`, `module_cursors.updated_at` and `job_runs.finished_at`, all sub-millisecond reads. The *oldest* file in a directory decides, because a target writes nine files in one pass. Where the job record can name what finished since, it does; where it cannot, the line says so rather than implying nothing happened.
@@ -557,9 +609,10 @@ somewhere it survives.
 - What: ONS publishes editions and versions of each dataset; a re-run that changes rows is a new version, with the previous one still citable ([developer.ons.gov.uk](https://developer.ons.gov.uk/)). Under this shape, "the 2026-08 version of the contracts table" would be a real thing to link.
 - Why it is here rather than in the register: every domain table upserts on a natural key, so nothing can be cited as a version today. F-05's decision stands and the recommendation is unchanged: not yet, and as history on one table only if one specific claim needs it.
 
-**Matrix ("tartan rug") views · M**
+**Matrix ("tartan rug") views · M — decided in Phase 13: deferred**
 - What: Fingertips' Overview view — authorities × periods as a colour-coded matrix, one glance at the whole distribution (Fingertips calls it a tartan rug).
 - Why it is here rather than in the register: it overlaps W-11 (compare view) — the matrix is the same comparison without the axes, and whichever is built first shapes the other. Filed so the shape is remembered rather than re-invented. ECharts heatmap, no new dependency.
+- **Phase 13 settled it:** W-11 shipped first, so per the entry's own rule it shapes the matrix — and the matrix's cell colouring is the same inference surface as significance-aware colouring, which Phase 13 declined. The matrix is now buildable as a rendering of the compare payload; it is re-filed here rather than in the register, behind a named claim that needs it.
 
 **Trend markers in tables · S**
 - What: ▲▼ "direction of travel" per row against the previous period, as Fingertips' England view shows.
@@ -577,13 +630,15 @@ somewhere it survives.
 - What: after each module, run FK integrity, a no-row-without-provenance sweep and module-declared row-count floors, recording the results in the run summary.
 - Why it is here rather than in the register: the floors are a contract with each of seventeen modules — declaring and maintaining them is a design, not a button — and the integration suite already sweeps provenance once. Filed because D-02 showed the cost of a run whose record cannot be trusted.
 
-**Significance-aware colouring · M — needs a decision**
+**Significance-aware colouring · M — decided in Phase 13: declined**
 - What: colour treatment figures by whether an authority's paired CI overlaps the England value, as Fingertips' red-amber-green-vs-benchmark does throughout.
 - Why it is here rather than in the register: the warehouse already holds the CIs, so the work is implementation — but the colour *is* an inference, and `docs/CAVEATS.md` decides which inferences this project makes. The 2026 default for health data, and the decision it needs, filed together.
+- **Phase 13 declined it.** The register already states the counter-case in its own words: "two authorities whose intervals overlap have not been shown to differ". Colouring by overlap would be that sentence inverted — a claim of *shown to differ* — drawn over every figure without a decision. Nothing in Phase 13 colours by significance, and nothing built on its payloads is allowed to either. The entry stays here, filed as declined rather than deleted, so the inference is not re-adopted by default.
 
-**Peer-group benchmarking · M — needs a decision**
+**Peer-group benchmarking · M — decided in Phase 13: deferred**
 - What: LG Inform-style nearest-neighbour groups — "how does my authority compare with its peers".
 - Why it is here rather than in the register: comparability is a claim. Which authorities are comparable — type, region, deprivation? — is a method decision, and a group implies a fairness the caveats have not asserted. Filed so the idea is remembered rather than adopted by default.
+- **Phase 13 deferred it.** W-11 is deliberately the opposite shape: the reader picks the peers, one at a time, and the project never asserts that any set of authorities is a group. The compare view is the honest replacement for a peer group; this entry is re-filed here, behind a named claim that needs a group.
 
 **Browser-level regression tests · M**
 - What: a headless pass that loads each portal route and asserts it renders without console errors or vendor-library failures — the manual "verify in a browser" the house rules already demand, automated.
@@ -1574,10 +1629,83 @@ Order within the phase, and the first entry has a clock on it:
   test that the disclosure matrix distinguishes "not matched" from "not
   searched".
 
-### Phase 13 — Comparison, and the inferences it forces · M — **planned**
+### Phase 13 — Comparison, and the inferences it forces · M — **done** (2026-08-15)
 
-Delivers **W-11**, **W-19**, and settles three §3J entries that ride with
-them.
+Delivered **W-11**, **W-19**, and settled the three §3J entries. On its own
+branch, off Phase 11: 1,570 → **1,589 passed** (19 new), 3 skipped, 18
+deselected; ruff clean; the compare page's route and payload loaded against
+Jon's own warehouse over HTTP, and the frozen-list edits were two routes
+(`compare`, `layers`) and one static path (`/js/pages/compare.js`). Phase 12
+ran in parallel the same day and both phases edited this file and the frozen
+route list, exactly as the plan's note said they would; the two sessions
+stashed rather than clobbered each other's uncommitted work.
+
+The plan is above; the record of what changed as it landed is here.
+
+**The three §3J decisions, settled in writing before any of the three was
+coded (this is the phase's first-hour deliverable):**
+
+1. **The matrix / tartan rug view is deferred.** W-11 ships the axes'd form of
+   the same comparison, so per the entry's own rule W-11 shapes the matrix —
+   and the matrix's cell colouring is the same inference surface as item 2,
+   which is declined. It is re-filed as the entry it already is; it becomes
+   buildable as a rendering of the compare payload, which is why it is cheap
+   to revisit.
+2. **Significance-aware colouring is declined.** The colour is an inference,
+   and `docs/CAVEATS.md` decides which inferences this project makes. The
+   register already states the counter-case in its own words: *"two
+   authorities whose intervals overlap have not been shown to differ"*
+   (`ndtms_estimates`). Colouring authorities by whether their CI overlaps
+   the England value would be that sentence inverted — a claim of *shown to
+   differ* — drawn over every figure without a decision. Nothing in this
+   phase colours by significance, and nothing built on its payloads is
+   allowed to either.
+3. **Peer-group benchmarking is deferred.** Comparability is a claim, and
+   which authorities are comparable is a method decision this pipeline has
+   not taken. W-11 is deliberately the opposite shape: the *reader* picks the
+   peers, one at a time, and the project never asserts that any set of
+   authorities is a group. The compare view is the honest replacement for a
+   peer group, and the entry is re-filed as a possible future behind a named
+   claim that needs it.
+
+**W-11 — the compare view, and the shape the decisions forced.** The page's
+URL is the comparison: `#/compare?ons_code=...&ons_code=...&provider_key=...`,
+with the same parameter names the API takes, so a comparison is a shareable
+address and the page holds no selection state the URL does not. Every series
+is the existing endpoint's series composed rather than re-written — the pin
+test holds that composition the same way W-13's does — and each series'
+rows are exactly the published columns of its own layer, pinned, so no
+per-capita, deflated or cross-layer number has a key to hide in. The
+cross-layer caveat is pinned above the whole page, and the contract charts
+carry the window caveat because a comparison over years is exactly where "do
+not read a trend from it" is most needed. The authority page and the provider
+deep dive each link to a comparison seeded with themselves.
+
+**W-19 — the map layers, and one decision of shape.** The toggles are built
+from `/api/v1/layers`, whose caveats are read from the export layer registry
+rather than copied — `pipeline/exports/geojson.py` now holds `LAYER_CAVEATS`
+and the portal imports it, pinned word for word, so a layer that is drawn
+here carries the caveat discipline its export carries. The treatment overlay
+is the export's own query, pinned row for row against
+`treatment_numbers.geojson`. The contracts layer is aggregated to one point
+per commissioning authority where the export emits one feature per notice:
+98,636 points would be a payload and a canvas no reader could use, and the
+aggregation is stated in the layer's caveats rather than left for the reader
+to infer. **PFD reports are deliberately not a layer.** They have no geometry
+— coroner areas are not local authorities — and the export keeps them
+geometry-free for the same reason; the absence is pinned by a test, in the
+shape of W-15's CQC decision. The plan's "boundaries" toggle stayed where it
+was: the choropleth *is* the boundary layer, and a toggle that turned it off
+would leave a map of nothing.
+
+**One thing found in passing and fixed:** `writeStateToUrl` in app.js rebuilt
+the hash query from the filter state alone, so a page-owned query key — the
+compare page's whole selection — would have been wiped by the first filter-bar
+change. It now preserves keys the filter bar does not own, which is what makes
+a compare URL shareable in practice rather than until the reader touches a
+filter.
+
+Below is the plan as written.
 
 **Why last of the portal phases.** Everything in Phases 9–12 is descriptive:
 it shows a figure with its caveat. Comparison is the first thing the portal

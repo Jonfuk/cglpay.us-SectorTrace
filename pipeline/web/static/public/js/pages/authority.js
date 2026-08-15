@@ -67,7 +67,9 @@ async function renderOne(main, code) {
   const type = TYPE_LABELS[authority.type] || authority.type || 'Local authority';
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('p', {}, el('a', { href: '#/geography' }, '← Map of all authorities')),
+      el('p', {}, el('a', { href: '#/geography' }, '← Map of all authorities'),
+        ' · ', el('a', { href: `#/compare?ons_code=${code}` },
+          'Compare with other authorities →')),
       el('h1', { text: authority.name || code }),
       el('p', { class: 'lede' },
         `${type} · ${authority.region || 'region not recorded'} · `,

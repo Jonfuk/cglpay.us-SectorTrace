@@ -369,6 +369,38 @@ main:focus { outline: none; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
 
+/* --- compare page (W-11) ---------------------------------------------------- */
+
+/* The selection: a chip per chosen entity, removable, with the URL as the
+   state. The chips and the pickers sit in one panel so the reader sees the
+   selection and the way to change it together. */
+.compare-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12.5px;
+  border: 1px solid var(--border-accent); color: var(--text-primary);
+  background: var(--bg-surface);
+}
+.chip-remove {
+  border: 0; background: none; color: var(--text-muted); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 50%;
+}
+.chip-remove:hover { color: var(--accent-red); background: var(--bg-elevated); }
+.compare-pickers { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+
+/* --- geography layers (W-19) ------------------------------------------------ */
+
+/* Each overlay layer is a checkbox with its caveat pinned underneath it the
+   moment it is checked — a layer never appears without the warning that
+   governs it, which is the finding's own test. */
+.layerpanel { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; }
+.layer-toggle {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 13.5px; color: var(--text-secondary); width: fit-content;
+}
+.layer-toggle input { accent-color: var(--accent-teal); }
+.layer-caveat { margin-left: 24px; }
+
 /* --- timeline ------------------------------------------------------------ */
 
 .timeline { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); border-left: 1px solid var(--border-accent); }

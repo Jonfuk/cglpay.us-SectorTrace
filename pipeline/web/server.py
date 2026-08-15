@@ -109,7 +109,7 @@ for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
-              "authority"):
+              "authority", "compare"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1002,6 +1002,13 @@ class Handler(BaseHTTPRequestHandler):
                 topic=_str(params, "topic") or None,
                 ons_code=_str(params, "ons_code") or None,
                 substance=_str(params, "substance") or None)
+        if route == "compare":
+            return public_queries.compare(
+                conn,
+                ons_codes=params.get("ons_code", []),
+                provider_keys=params.get("provider_key", []))
+        if route == "layers":
+            return public_queries.layers(conn)
 
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:

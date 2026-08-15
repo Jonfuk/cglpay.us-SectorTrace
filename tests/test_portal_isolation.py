@@ -47,6 +47,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/treatment.js",
     "/js/pages/providers.js",
     "/js/pages/authority.js",
+    "/js/pages/compare.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -66,6 +67,8 @@ PUBLIC_API_ROUTES = {
     "boundaries",
     "fingertips",
     "ndtms",
+    "compare",
+    "layers",
 }
 
 # Route patterns under /api/v1/ that take a parameter.

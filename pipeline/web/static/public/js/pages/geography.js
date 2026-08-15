@@ -27,6 +27,17 @@ const METRICS = [
 
 let boundaryCache = null;
 
+/* W-19: overlay layers, toggled per kind of evidence. The toggles are built
+ * from /api/v1/layers, whose caveats come from the same source the export
+ * layers use, so a layer that is drawn here carries the caveat discipline its
+ * export carries — and a layer added to the payload gains a toggle here
+ * without anyone hardcoding a caveat text. PFD reports are deliberately not
+ * in the payload at all: they have no geometry, and coroner areas must not be
+ * mapped as if they were authorities. */
+let layersPayload = null;
+let layerState = {};
+let mapContext = null;
+
 export async function render(main) {
   const charts = [];
   const state = { metric: 'grant_drug_alcohol', year: null };
@@ -45,6 +56,7 @@ export async function render(main) {
   const mapHolder = el('div', {});
   const rankHolder = el('div', {});
   const caveatHolder = el('div', {});
+  const layerHolder = el('div', {});
   const provHolder = el('div', {});
   const legend = el('div', { class: 'legend' });
 
@@ -58,6 +70,7 @@ export async function render(main) {
         el('span', { class: 'spacer' }),
         el('span', { id: 'geo-export' })),
       caveatHolder,
+      layerHolder,
       el('div', { class: 'maplayout' },
         el('div', {}, mapHolder, legend),
         el('div', {}, rankHolder)),
@@ -110,9 +123,11 @@ export async function render(main) {
 
     await drawMap(mapHolder, legend, data);
     drawRanking(rankHolder, data, charts);
+    redrawOverlays();
   }
 
   await load();
+  initLayers(layerHolder);
   return () => disposeCharts(charts);
 }
 
@@ -246,6 +261,16 @@ async function drawMap(container, legend, data) {
     }),
     el('span', { class: 'small', text: format(data.max, data.unit) }),
     el('span', { class: 'small muted', text: `· ${num(data.features.length)} authorities` }));
+
+  // The context the overlay layers draw on: the same projection and path the
+  // choropleth used, so a contract point and a boundary edge cannot disagree
+  // about where an authority is.
+  mapContext = {
+    svg, projection, path, tip, features: geo.features, legend,
+    names: (f) => names.get(f.properties.ons_code) || f.properties.name,
+  };
+  redrawOverlays();
+  return mapContext;
 }
 
 function drawRanking(container, data, charts) {
@@ -281,6 +306,216 @@ function drawRanking(container, data, charts) {
     height: 'tall',
     aria: `Bar chart of the twenty authorities with the highest `
       + `${data.metric_label}.`,
+  }));
+}
+
+// --- overlay layers (W-19) ----------------------------------------------------
+
+/* The toggle panel, built from the payload so a layer's label and caveats
+ * live in one place: the same caveats the export layer carries, joined for
+ * the screen. A checked layer draws its overlay on the current map and pins
+ * its caveat beside the toggle; the overlay and the caveat are cleared
+ * together, so a figure and the warning that governs it never separate. */
+async function initLayers(holder) {
+  let payload;
+  try {
+    payload = await fetchJSON('layers');
+  } catch (error) {
+    replace(holder, el('p', { class: 'small muted' },
+      'Overlay layers unavailable: ', error.message));
+    return;
+  }
+  layersPayload = payload;
+
+  const rows = [];
+  for (const [key, layer] of Object.entries(payload.layers || {})) {
+    const caveatBox = el('div', { class: 'layer-caveat' });
+    const input = el('input', { type: 'checkbox', dataset: { layer: key } });
+    input.addEventListener('change', (e) => {
+      layerState[key] = e.target.checked;
+      replace(caveatBox, e.target.checked
+        ? pinnedCaveat(layer.caveats.join(' '),
+            `Read this with the ${layer.label} layer`)
+        : el('span', {}));
+      redrawOverlays();
+    });
+    rows.push(el('label', { class: 'layer-toggle' },
+      input,
+      el('span', { text: layer.label })),
+      caveatBox);
+  }
+  replace(holder, el('div', { class: 'layerpanel' }, rows));
+}
+
+/* The overlays are drawn after every map redraw — a metric switch replaces
+ * the SVG, and the layers must come back with it. Layer state persists across
+ * switches, which is the point: a reader comparing contracts against two
+ * metrics changes the base, not the overlays. */
+function redrawOverlays() {
+  const ctx = mapContext;
+  if (!ctx || !layersPayload) return;
+  ctx.svg.selectAll('.overlay').remove();
+  ctx.legend.querySelectorAll('.layer-legend').forEach((n) => n.remove());
+  for (const [key, on] of Object.entries(layerState)) {
+    if (!on) continue;
+    const layer = layersPayload.layers?.[key];
+    if (!layer) continue;
+    if (key === 'contracts') drawContractPoints(ctx, layer);
+    else if (key === 'cqc_locations') drawCqcPoints(ctx, layer);
+    else if (key === 'treatment') drawTreatmentFill(ctx, layer);
+    else if (key === 'coverage') drawCoverageOutline(ctx, layer);
+  }
+}
+
+function overlayTip(ctx, event, lines) {
+  const tip = ctx.tip;
+  tip.hidden = false;
+  tip.textContent = '';
+  for (const line of lines) tip.append(line);
+  tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 300)}px`;
+  tip.style.top = `${event.clientY + 14}px`;
+}
+
+/* Contracts: one point per commissioning authority, sized by notice count.
+ * The payload aggregated the corpus — 98,636 points are a canvas no reader
+ * can use — and the layer's caveats say so. The point sits at the authority's
+ * own centroid, which is exactly what the caveat warns about. */
+function drawContractPoints(ctx, layer) {
+  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
+  const points = [];
+  for (const feature of ctx.features) {
+    const row = byCode.get(feature.properties.ons_code);
+    if (!row) continue;
+    points.push({ ...row, xy: ctx.path.centroid(feature) });
+  }
+  if (!points.length) return;
+
+  ctx.svg.append('g').attr('class', 'overlay')
+    .selectAll('circle')
+    .data(points)
+    .join('circle')
+    .attr('cx', (d) => d.xy[0])
+    .attr('cy', (d) => d.xy[1])
+    .attr('r', (d) => Math.max(3, Math.min(15, Math.sqrt(d.count) / 7)))
+    .attr('fill', 'rgba(45, 212, 191, 0.8)')
+    .attr('stroke', '#0d1117')
+    .attr('stroke-width', 0.6)
+    .on('mousemove', (event, d) => {
+      overlayTip(ctx, event, [
+        el('strong', { text: d.authority_name }),
+        el('div', { class: 'small muted', text: d.ons_code }),
+        el('div', { text: `${num(d.count)} notices · ${gbp(d.value_gbp)}` }),
+      ]);
+    })
+    .on('mouseleave', () => { ctx.tip.hidden = true; })
+    .on('click', (event, d) => { location.hash = `#/authorities/${d.ons_code}`; });
+
+  ctx.legend.append(el('span', {
+    class: 'small muted layer-legend',
+    text: `· ○ contracts, size by notice count (${num(points.length)} authorities)`,
+  }));
+}
+
+/* CQC: every regulated location with a published coordinate. The layer's
+ * caveat is the whole point — most community provision is not CQC-registered,
+ * so the pins are a map of regulated locations, not of services. */
+function drawCqcPoints(ctx, layer) {
+  const points = (layer.features || [])
+    .filter((f) => f.latitude !== null && f.longitude !== undefined
+      && f.latitude !== undefined && f.longitude !== null)
+    .map((f) => {
+      const xy = ctx.projection([f.longitude, f.latitude]);
+      return xy ? { ...f, xy } : null;
+    })
+    .filter(Boolean);
+  if (!points.length) return;
+
+  ctx.svg.append('g').attr('class', 'overlay')
+    .selectAll('circle')
+    .data(points)
+    .join('circle')
+    .attr('cx', (d) => d.xy[0])
+    .attr('cy', (d) => d.xy[1])
+    .attr('r', 4)
+    .attr('fill', 'rgba(96, 165, 250, 0.9)')
+    .attr('stroke', '#0d1117')
+    .attr('stroke-width', 0.6)
+    .on('mousemove', (event, d) => {
+      overlayTip(ctx, event, [
+        el('strong', { text: d.location_name }),
+        el('div', { class: 'small muted', text: d.region || 'region not recorded' }),
+        el('div', { text: `CQC rating: ${d.overall_rating || 'not rated'}` }),
+      ]);
+    })
+    .on('mouseleave', () => { ctx.tip.hidden = true; });
+
+  ctx.legend.append(el('span', {
+    class: 'small muted layer-legend',
+    text: `· ● CQC-registered locations (${num(points.length)})`,
+  }));
+}
+
+/* Treatment: the latest published rate per authority, as a translucent fill
+ * over whatever metric the base map shows. The rate scale is quantile over
+ * this layer's own values, never shared with the base metric's. */
+function drawTreatmentFill(ctx, layer) {
+  const values = (layer.features || [])
+    .map((f) => f.value).filter((v) => v !== null && v !== undefined);
+  if (!values.length) return;
+
+  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
+  const scale = window.d3.scaleQuantile()
+    .domain(values)
+    .range(window.d3.quantize(window.d3.interpolateYlGnBu, 6));
+
+  ctx.svg.append('g').attr('class', 'overlay')
+    .selectAll('path')
+    .data(ctx.features)
+    .join('path')
+    .attr('d', ctx.path)
+    .attr('fill', (f) => {
+      const row = byCode.get(f.properties.ons_code);
+      return row ? scale(row.value) : 'none';
+    })
+    .attr('opacity', 0.5)
+    .attr('pointer-events', 'none');
+
+  const period = [...new Set((layer.features || [])
+    .map((f) => f.time_period).filter(Boolean))].sort().pop();
+  ctx.legend.append(el('span', {
+    class: 'small muted layer-legend',
+    text: `· treatment rates, latest period (${period || 'period varies'})`,
+  }));
+}
+
+/* Coverage: how many evidence kinds the warehouse holds per authority, as an
+ * outline. The layer's caveat is the standing one — absence is absence of
+ * collection, not evidence of absence — and the outline intensity shows how
+ * much the pipeline holds here without implying the authority is anything. */
+function drawCoverageOutline(ctx, layer) {
+  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
+  const max = Math.max(1, ...(layer.features || []).map((f) => f.kinds_held));
+
+  ctx.svg.append('g').attr('class', 'overlay')
+    .selectAll('path')
+    .data(ctx.features)
+    .join('path')
+    .attr('d', ctx.path)
+    .attr('fill', 'none')
+    .attr('stroke', (f) => {
+      const row = byCode.get(f.properties.ons_code);
+      return row ? '#f59e0b' : 'none';
+    })
+    .attr('stroke-width', (f) => {
+      const row = byCode.get(f.properties.ons_code);
+      return row ? 0.8 + (row.kinds_held / max) * 2.4 : 0;
+    })
+    .attr('opacity', 0.9)
+    .attr('pointer-events', 'none');
+
+  ctx.legend.append(el('span', {
+    class: 'small muted layer-legend',
+    text: `· amber outline: evidence kinds held (of ${num(max)})`,
   }));
 }
 
