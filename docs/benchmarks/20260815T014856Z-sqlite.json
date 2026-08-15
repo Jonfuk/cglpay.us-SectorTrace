@@ -1,0 +1,262 @@
+{
+  "environment": {
+    "backend": "sqlite",
+    "measured_at": "2026-08-15T01:45:41+00:00",
+    "python": "3.10.11",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "commit": "fd31f22",
+    "server": "sqlite 3.40.1",
+    "target": "warehouse.db",
+    "bytes": 519892992
+  },
+  "tables": {
+    "contracts": 98636,
+    "la_revenue_budgets": 477199,
+    "fingertips_la_values": 22667,
+    "ndtms_la_statistics": 17231,
+    "public_health_grants": 4893,
+    "authorities": 347,
+    "review_queue": 4822,
+    "providers": 13
+  },
+  "reads": [
+    {
+      "name": "portal.summary",
+      "why": "The portal's front page. Aggregates over contracts, which is 98,636 rows and the largest table anyone reaches through a browser.",
+      "n": 10,
+      "min_ms": 3457.82,
+      "p50_ms": 3907.09,
+      "p95_ms": 4977.7,
+      "p99_ms": 4977.7,
+      "max_ms": 4977.7,
+      "rows": 6
+    },
+    {
+      "name": "portal.contracts.first_page",
+      "why": "The contracts list as it first loads, ordered by date_published \u2014 which no index covers today, and is candidate one for Phase 4 index work.",
+      "n": 10,
+      "min_ms": 5387.17,
+      "p50_ms": 6044.73,
+      "p95_ms": 6930.88,
+      "p99_ms": 6930.88,
+      "max_ms": 6930.88,
+      "rows": 12
+    },
+    {
+      "name": "portal.contracts.full_page",
+      "why": "The same list at its cap. The plan expected the portal to paginate with OFFSET and it does not \u2014 `contracts()` takes a limit and no offset, and the cap is what protects it \u2014 so the deep-OFFSET cost the keyset-pagination proposal is aimed at lives on the admin side only, below. This is what the portal's worst case actually is.",
+      "n": 10,
+      "min_ms": 4687.15,
+      "p50_ms": 5588.29,
+      "p95_ms": 6261.71,
+      "p99_ms": 6261.71,
+      "max_ms": 6261.71,
+      "rows": 12
+    },
+    {
+      "name": "portal.geography",
+      "why": "The map's payload: grant totals per authority, joined across the authority spine.",
+      "n": 10,
+      "min_ms": 2.86,
+      "p50_ms": 3.48,
+      "p95_ms": 4.8,
+      "p99_ms": 4.8,
+      "max_ms": 4.8,
+      "rows": 10
+    },
+    {
+      "name": "portal.boundaries",
+      "why": "347 generalised boundary polygons. Dominated by moving text rather than by the query, which is worth knowing before anyone optimises the query.",
+      "n": 10,
+      "min_ms": 440.65,
+      "p50_ms": 528.17,
+      "p95_ms": 648.25,
+      "p99_ms": 648.25,
+      "max_ms": 648.25,
+      "rows": 3
+    },
+    {
+      "name": "portal.providers",
+      "why": "Goes through v_provider_viability, the view whose bare GROUP BY had to be restructured for PostgreSQL. If the rewrite cost anything, it shows up here.",
+      "n": 10,
+      "min_ms": 0.96,
+      "p50_ms": 1.02,
+      "p95_ms": 1.75,
+      "p99_ms": 1.75,
+      "max_ms": 1.75,
+      "rows": 13
+    },
+    {
+      "name": "portal.pay",
+      "why": "Includes _median_value, which loads every priced notice into Python and sorts it there. percentile_cont is the Phase 4 replacement, and this is what it has to beat.",
+      "n": 10,
+      "min_ms": 1.47,
+      "p50_ms": 1.55,
+      "p95_ms": 2.34,
+      "p99_ms": 2.34,
+      "max_ms": 2.34,
+      "rows": 9
+    },
+    {
+      "name": "portal.fingertips",
+      "why": "22,667 rows behind a view, filtered per indicator.",
+      "n": 10,
+      "min_ms": 224.68,
+      "p50_ms": 240.07,
+      "p95_ms": 274.93,
+      "p99_ms": 274.93,
+      "max_ms": 274.93,
+      "rows": 4
+    },
+    {
+      "name": "portal.authorities",
+      "why": "ORDER BY name over the authority spine \u2014 the query whose answer changes if the collation is wrong.",
+      "n": 10,
+      "min_ms": 1.0,
+      "p50_ms": 1.02,
+      "p95_ms": 1.21,
+      "p99_ms": 1.21,
+      "max_ms": 1.21,
+      "rows": 347
+    },
+    {
+      "name": "admin.read_table.contracts",
+      "why": "The table browser on the biggest table, in primary-key order \u2014 what replaced ORDER BY rowid.",
+      "n": 10,
+      "min_ms": 10.03,
+      "p50_ms": 11.27,
+      "p95_ms": 11.97,
+      "p99_ms": 11.97,
+      "max_ms": 11.97,
+      "rows": 12
+    },
+    {
+      "name": "admin.read_table.budgets_deep",
+      "why": "477,199 rows, paged near the end. The worst OFFSET in the application.",
+      "n": 3,
+      "min_ms": 407.47,
+      "p50_ms": 492.81,
+      "p95_ms": 563.94,
+      "p99_ms": 563.94,
+      "max_ms": 563.94,
+      "rows": 12
+    },
+    {
+      "name": "admin.read_table.search",
+      "why": "LIKE with an escaped term over every column cast to text. Case sensitivity differs between the engines and the cost does too.",
+      "n": 3,
+      "min_ms": 555.01,
+      "p50_ms": 555.44,
+      "p95_ms": 556.85,
+      "p99_ms": 556.85,
+      "max_ms": 556.85,
+      "rows": 12
+    },
+    {
+      "name": "admin.review_items",
+      "why": "The operator's worklist, ordered by created_at and id \u2014 already the sort keyset pagination would use.",
+      "n": 10,
+      "min_ms": 2.78,
+      "p50_ms": 2.84,
+      "p95_ms": 3.3,
+      "p99_ms": 3.3,
+      "max_ms": 3.3,
+      "rows": 8
+    },
+    {
+      "name": "admin.review_items.deep_offset",
+      "why": "The same worklist near the end of 4,822 items. This and the budgets page below are the two numbers that decide whether Phase 4's keyset pagination is worth building.",
+      "n": 10,
+      "min_ms": 11.73,
+      "p50_ms": 12.4,
+      "p95_ms": 13.81,
+      "p99_ms": 13.81,
+      "max_ms": 13.81,
+      "rows": 8
+    },
+    {
+      "name": "admin.list_objects",
+      "why": "Sidebar. One COUNT(*) per table, 68 of them, on every page load of the operator UI.",
+      "n": 3,
+      "min_ms": 38.32,
+      "p50_ms": 39.26,
+      "p95_ms": 39.68,
+      "p99_ms": 39.68,
+      "max_ms": 39.68,
+      "rows": 89
+    },
+    {
+      "name": "admin.health.freshness",
+      "why": "Deliberately unindexed full scans of every table carrying retrieved_at. Documented as expensive on purpose; the question is how expensive, on each engine.",
+      "n": 3,
+      "min_ms": 886.56,
+      "p50_ms": 944.05,
+      "p95_ms": 1014.01,
+      "p99_ms": 1014.01,
+      "max_ms": 1014.01,
+      "rows": 44
+    },
+    {
+      "name": "admin.overview",
+      "why": "The admin landing page.",
+      "n": 10,
+      "min_ms": 23.61,
+      "p50_ms": 24.5,
+      "p95_ms": 27.27,
+      "p99_ms": 27.27,
+      "max_ms": 27.27,
+      "rows": 4
+    }
+  ],
+  "write_throughput": {
+    "rows": 2000,
+    "seconds": 1.83,
+    "rows_per_second": 1092.6,
+    "commit": {
+      "n": 2000,
+      "min_ms": 0.65,
+      "p50_ms": 0.82,
+      "p95_ms": 1.03,
+      "p99_ms": 1.37,
+      "max_ms": 9.13
+    }
+  },
+  "write_contention": {
+    "rows_each": 100,
+    "by_writers": [
+      {
+        "writers": 1,
+        "rows": 100,
+        "wall_seconds": 0.157,
+        "rows_per_second": 637.5,
+        "errors": [],
+        "scaling_vs_one_writer": 1.0
+      },
+      {
+        "writers": 2,
+        "rows": 200,
+        "wall_seconds": 0.323,
+        "rows_per_second": 618.6,
+        "errors": [],
+        "scaling_vs_one_writer": 0.97
+      },
+      {
+        "writers": 4,
+        "rows": 400,
+        "wall_seconds": 0.712,
+        "rows_per_second": 561.5,
+        "errors": [],
+        "scaling_vs_one_writer": 0.88
+      },
+      {
+        "writers": 8,
+        "rows": 800,
+        "wall_seconds": 1.538,
+        "rows_per_second": 520.3,
+        "errors": [],
+        "scaling_vs_one_writer": 0.82
+      }
+    ],
+    "errors": []
+  }
+}
