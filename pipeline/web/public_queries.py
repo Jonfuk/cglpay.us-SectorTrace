@@ -34,6 +34,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Iterator
 
+from pipeline import catalog
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.exports.geojson import LAYER_CAVEATS
 from pipeline.notice_urls import notice_page_url
@@ -1834,14 +1835,12 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
     "covered" means would be a second statement free to drift. W-12's pin is
     that the two answers agree row for row.
     """
-    def exists(name: str) -> bool:
-        return conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (name,)).fetchone() is not None
-
+    # `sqlite_master` has no PostgreSQL equivalent, so "does the warehouse
+    # hold this table?" is asked through catalog, which speaks to both.
+    tables = set(catalog.table_names(conn))
     cells: dict[str, int] = {}
     for label, table, column, _module in health.COVERAGE_COLUMNS:
-        if not exists(table):
+        if table not in tables:
             cells[label] = 0
             continue
         # Table and column names come from health.COVERAGE_COLUMNS, which is
@@ -2254,8 +2253,7 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
     a statement about the pipeline's own knowledge, not about the authority —
     the caveat is the whole point of the layer.
     """
-    exists = {row["name"] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    exists = set(catalog.table_names(conn))
     names = dict(conn.execute("SELECT ons_code, name FROM authorities"))
 
     held: dict[str, set[str]] = {}
