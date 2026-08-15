@@ -184,3 +184,139 @@ def test_the_hash_survives_windows_line_endings(tmp_path):
     assert server_module.inline_script_hashes(unix), "a hash was found at all"
     assert (server_module.inline_script_hashes(unix)
             == server_module.inline_script_hashes(windows))
+
+
+class TestResponseSplitting:
+    """A query parameter must not be able to add a header.
+
+    This was live. `_export_name` interpolated `provider_key` and `metric`
+    into `Content-Disposition`, and `BaseHTTPRequestHandler.send_header`
+    formats `"%s: %s\r\n"` without validating anything, so
+
+        /api/v1/export?endpoint=summary&format=csv&provider_key=x%0d%0aX-Injected:%20yes
+
+    put `X-Injected` in the response. CodeQL had been reporting it as
+    `py/http-response-splitting` since the scan was switched on, in the
+    untriaged pile finding O-05 records; it took reading the alerts to find
+    out that one of them was true.
+
+    Over a raw socket rather than through httpx, deliberately. An HTTP client
+    parses the response into a dict of headers, which is exactly the step that
+    would make an injected header look like an ordinary one — the bytes on the
+    wire are the evidence.
+    """
+
+    @pytest.fixture
+    def port(self, conn, settings):
+        conn.execute(
+            "INSERT INTO providers (provider_key, canonical_name, is_target) "
+            "VALUES ('cgl', 'Change Grow Live', 1)")
+        conn.commit()
+        server = build_server(settings, host="127.0.0.1", port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        yield server.server_address[1]
+        server.shutdown()
+        server.server_close()
+
+    def _headers(self, port: int, path: str) -> bytes:
+        import socket
+
+        sock = socket.create_connection(("127.0.0.1", port), timeout=15)
+        try:
+            sock.sendall(f"GET {path} HTTP/1.1\r\nHost: localhost\r\n"
+                          "Connection: close\r\n\r\n".encode())
+            received = b""
+            while b"\r\n\r\n" not in received:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                received += chunk
+        finally:
+            sock.close()
+        return received.split(b"\r\n\r\n", 1)[0]
+
+    def _header_names(self, head: bytes) -> list[str]:
+        """The name of every header line in the response.
+
+        Asserting on names rather than on the absence of a substring, because
+        once the fix is in the substring is present *legitimately*: the
+        sanitised value is echoed inside the filename, and the raw value
+        inside the JSON-escaped `X-Provenance`. Both sit on one header line
+        each, which is the whole question. A test that searched the bytes for
+        `X-Injected` would fail against a server behaving correctly — and the
+        obvious way to make it pass would be to stop echoing the value rather
+        than to stop splitting the response, which is fixing the test's
+        opinion instead of the defect.
+        """
+        return [line.split(b":", 1)[0].decode("latin-1").strip().lower()
+                 for line in head.split(b"\r\n")[1:] if b":" in line]
+
+    def test_a_crlf_in_a_query_parameter_adds_no_header(self, port):
+        head = self._headers(
+            port, "/api/v1/export?endpoint=summary&format=csv"
+                   "&provider_key=cgl%0d%0aX-Injected:%20yes")
+        assert "x-injected" not in self._header_names(head), head
+
+    def test_the_same_through_the_metric_parameter(self, port):
+        """Two parameters reach the filename, and a fix that covered one of
+        them would pass a test that only tried that one."""
+        head = self._headers(
+            port, "/api/v1/export?endpoint=geography&format=csv"
+                   "&metric=grant_total%0d%0aX-Injected:%20yes")
+        assert "x-injected" not in self._header_names(head), head
+
+    def test_the_provenance_header_stays_one_line(self, port):
+        """`X-Provenance` carries the filters back, hostile one included.
+
+        `json.dumps` escapes the newline rather than emitting it, which is why
+        that header was never the hole. Pinned so that a later change to
+        hand-built JSON cannot quietly open one.
+        """
+        head = self._headers(
+            port, "/api/v1/export?endpoint=summary&format=csv"
+                   "&provider_key=cgl%0d%0aX-Injected:%20yes")
+        provenance = [line for line in head.split(b"\r\n")
+                       if line.lower().startswith(b"x-provenance")]
+        # One line is the assertion. The text `X-Injected: yes` *is* in it —
+        # the filters are echoed back, which is the header's job — but behind
+        # a two-character `\r\n` escape rather than a real newline, so it is
+        # data inside a value and not a header of its own.
+        assert len(provenance) == 1, head
+        assert rb"cgl\r\nX-Injected: yes" in provenance[0], provenance[0]
+
+    def test_a_quote_does_not_end_the_filename(self, port):
+        """No control character needed: a `"` closes the quoted filename and
+        anything after it becomes another Content-Disposition parameter."""
+        head = self._headers(
+            port, '/api/v1/export?endpoint=summary&format=csv'
+                   '&provider_key=x%22;%20filename%3D%22evil.exe')
+        disposition = [line for line in head.split(b"\r\n")
+                        if line.lower().startswith(b"content-disposition")]
+        assert disposition, head
+        assert disposition[0].count(b'filename=') == 1, disposition[0]
+
+    def test_the_response_is_still_a_working_download(self, port):
+        """The fix must not have broken the header it sanitises."""
+        head = self._headers(
+            port, "/api/v1/export?endpoint=summary&format=csv&provider_key=cgl")
+        assert b"attachment; filename=" in head, head
+        assert b"sectorTrace_summary_cgl_" in head, head
+
+
+class TestHeaderSanitiser:
+    def test_it_strips_both_carriage_return_and_newline(self):
+        assert server_module._HEADER_BREAK.sub(" ", "a\r\nb") == "a  b"
+
+    def test_a_filename_part_keeps_what_a_filename_may_hold(self):
+        assert server_module._safe_name_part("change_grow_live") == "change_grow_live"
+        assert server_module._safe_name_part("grant-total.2026") == "grant-total.2026"
+
+    def test_a_filename_part_drops_everything_else(self):
+        assert server_module._safe_name_part('x"; filename="evil.exe') == "x-filename-evil.exe"
+        assert server_module._safe_name_part("a\r\nb") == "a-b"
+
+    def test_a_filename_part_is_bounded(self):
+        """A 4KB query parameter is not a filename, and some clients reject a
+        header line long before that."""
+        assert len(server_module._safe_name_part("a" * 5000)) == server_module._NAME_PART_MAX

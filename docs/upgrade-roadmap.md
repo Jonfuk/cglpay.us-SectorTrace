@@ -562,8 +562,54 @@ Effort: S = under a day, M = a few days, L = a week or more.
   project's to fix or to dismiss.
 - First green run found **21 alerts** (14 high, 7 medium) — SQL injection,
   path injection, response splitting, and workflow permissions. Several are
-  the by-design ones the workflow's own header predicted. **None has been
-  triaged yet**, and that is the open work this finding leaves behind.
+  the by-design ones the workflow's own header predicted.
+
+**S-04 · Query parameters could add response headers · S — found by triaging
+O-05, fixed 2026-08-15**
+- The triage O-05 left open was done at 25 alerts (the PostgreSQL work added
+  four more). **One of them was true**, and it was the class the header had
+  predicted would be noise.
+- `_export_name` interpolated the `provider_key` and `metric` query
+  parameters into `Content-Disposition`, and
+  `BaseHTTPRequestHandler.send_header` formats `"%s: %s\r\n"` while
+  validating nothing. So
+  `/api/v1/export?endpoint=summary&format=csv&provider_key=x%0d%0aX-Injected:%20yes`
+  put `X-Injected` in the response. Confirmed over a raw socket before it was
+  fixed, on a server that binds every interface by default and has no
+  authentication.
+- What it was worth: an attacker who can get a link clicked could set
+  arbitrary headers on a response from this origin — undermining the CSP the
+  rest of S-02 put there, and poisoning any cache in front of it.
+- **Fix:** sanitise at the source (`_safe_name_part` reduces the value to what
+  a filename may hold — a `"` or `;` breaks the header without any control
+  character) and a backstop in `Handler.send_header` that strips CR and LF
+  from every header this server sends and logs the attempt. Pinned by
+  `tests/test_web_security_headers.py::TestResponseSplitting`, over a raw
+  socket rather than through an HTTP client, because a client parses the
+  response into a dict of headers and that is exactly the step that would
+  make an injected header look ordinary.
+- The other two workflow findings were real and cheap: `tests.yml` now
+  declares `permissions: contents: read`, and both actions it uses are pinned
+  to commits rather than to tags a third party can repoint.
+- The remaining 22 are dismissed with reasons, in four groups. **Path
+  injection** (`artefacts.resolve_for_download`, and the two call sites that
+  use its result): the requested path is not sanitised but *matched* against
+  a listing computed on the spot, then re-checked with `is_relative_to` after
+  resolution — CodeQL does not model set membership as a sanitiser. **SQL
+  injection**: `catalog.py` and `queries.py` interpolate object names that
+  were validated against the live catalog first and are quoted with doubled
+  quotes; `pg.py:160` and `queries.py:226` are the generic execute wrappers
+  every query passes through, and the SQL box behind the second one is a
+  documented feature defended by the read-only role rather than by inspecting
+  the SQL. **Incomplete URL sanitisation**: six assertions in tests, checking
+  which URL a module fetched — not a sanitiser, and not reachable. **Bad tag
+  filter**: `_INLINE_SCRIPT_RE` extracts inline scripts from *our own* static
+  pages to compute CSP hashes; it is not filtering hostile HTML, and a tag it
+  fails to match produces a policy that blocks the script rather than one
+  that admits it — it fails closed, and a test asserts the count it finds.
+- The rule this leaves behind: a dismissal carries its reason, and the reason
+  has to be checkable. Each of the four above names the mechanism that makes
+  the alert wrong, not the fact that it looked wrong.
 
 **O-02 · No backup or restore · M — closed in Phase 3** — nothing in `pipeline/` performs a backup (no `VACUUM INTO`, no dump helper). 242.7 MB warehouse plus 3.6 GB archive **[live]**, rebuilt only by re-crawling at one request per two seconds per host.
 
