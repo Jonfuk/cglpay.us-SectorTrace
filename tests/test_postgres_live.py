@@ -4,7 +4,14 @@ Skipped unless `POSTGRES_TEST_URL` is set. Deliberately **not** `DATABASE_URL`:
 that one names a working warehouse, and a test suite that wrote to whatever a
 developer happened to have configured would eventually write to a real one.
 Two different variables means pointing the tests at a database is a separate,
-deliberate act. Everything here writes, and cleans up after itself.
+deliberate act.
+
+Everything here writes, so it writes into a **schema of its own**, built by
+the PostgreSQL migration tree and dropped at the end — see `scratch_schema` in
+`tests/conftest.py`. The separate variable is still the right rule and is not
+enough on its own: this server holds one database and `sectortrace_app` cannot
+create another, so the two variables end up naming the same place whatever the
+docstring asks for.
 
 Either as environment variables or as lines in `.env` — both are read, so
 the credentials can live in the same file as everything else rather than
@@ -28,6 +35,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from conftest import scratch_schema
 
 from pipeline import catalog, db
 
@@ -69,18 +77,29 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="module")
-def pg():
-    """A migrated PostgreSQL warehouse. Applying is idempotent, so this is
-    safe to run against a database that already has the schema."""
-    from pipeline import pg as pg_module
+def scratch():
+    """A migrated PostgreSQL warehouse of this file's own, dropped afterwards.
 
-    conn = pg_module.connect(POSTGRES_TEST_URL, application_name="sectortrace-tests")
-    try:
-        db.apply_migrations(conn, MIGRATIONS / "postgres")
-        conn.commit()
-        yield conn
-    finally:
-        conn.close()
+    This used to be the database `POSTGRES_TEST_URL` named, on the reasoning
+    that every test here cleans up after itself. Two things retired that. The
+    tests do write — into `parse_failures` and `review_queue` — and a run that
+    fails part-way leaves those rows behind, which is enough to make
+    `verify-migration` report a warehouse that no longer matches its source.
+    And the operator pointed `POSTGRES_TEST_URL` at the working database,
+    which is the reasonable thing to do when the server has one and
+    `sectortrace_app` cannot create another.
+
+    See `scratch_schema` in `tests/conftest.py`. Module-scoped here: nothing
+    in this file depends on starting empty, and building the schema once
+    rather than 38 times keeps the file at about a minute.
+    """
+    with scratch_schema(POSTGRES_TEST_URL, POSTGRES_TEST_RO_URL) as made:
+        yield made
+
+
+@pytest.fixture(scope="module")
+def pg(scratch):
+    return scratch.conn
 
 
 @pytest.fixture(scope="module")
@@ -332,12 +351,15 @@ class TestTheReadPath:
     """
 
     @pytest.fixture
-    def readonly(self):
+    def readonly(self, scratch):
         from pipeline.config import Settings
         from pipeline.web import queries
 
-        settings = Settings(contact_email="t@e.com", database_url=POSTGRES_TEST_URL,
-                             database_ro_url=POSTGRES_TEST_RO_URL)
+        # Both URLs scoped to this file's schema, so the read path is
+        # exercised against the schema the tests built rather than whichever
+        # warehouse the credentials happen to reach.
+        settings = Settings(contact_email="t@e.com", database_url=scratch.url,
+                             database_ro_url=scratch.ro_url)
         conn = queries.readonly_connection(settings)
         try:
             yield conn
@@ -413,7 +435,7 @@ class TestTheReadPath:
         with pytest.raises(queries.QueryError):
             queries.run_select(readonly, "CREATE TABLE should_not_exist (x int)")
 
-    def test_a_write_is_refused_by_the_server_not_by_the_code(self):
+    def test_a_write_is_refused_by_the_server_not_by_the_code(self, scratch):
         """With a reader role configured, the refusal survives a bug here.
 
         `run_select` guards by statement inspection and the connection carries
@@ -421,12 +443,11 @@ class TestTheReadPath:
         for. This goes underneath both and writes directly, which is what a bug
         in either would amount to.
         """
-        ro_url = POSTGRES_TEST_RO_URL
-        if not ro_url:
+        if not scratch.ro_url:
             pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
         from pipeline import pg as pg_module
 
-        conn = pg_module.connect(ro_url, readonly=True)
+        conn = pg_module.connect(scratch.ro_url, readonly=True)
         try:
             with pytest.raises(db.Error):
                 conn.execute("CREATE TABLE should_not_exist (x int)")
@@ -434,13 +455,12 @@ class TestTheReadPath:
         finally:
             conn.close()
 
-    def test_the_reader_can_still_read_everything_it_needs(self):
-        ro_url = POSTGRES_TEST_RO_URL
-        if not ro_url:
+    def test_the_reader_can_still_read_everything_it_needs(self, scratch):
+        if not scratch.ro_url:
             pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
         from pipeline import pg as pg_module
 
-        conn = pg_module.connect(ro_url, readonly=True)
+        conn = pg_module.connect(scratch.ro_url, readonly=True)
         try:
             assert conn.execute("SELECT COUNT(*) FROM authorities").fetchone()[0] >= 0
             assert catalog.list_objects(conn)

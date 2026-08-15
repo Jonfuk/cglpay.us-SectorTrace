@@ -5,9 +5,19 @@ Skipped unless `POSTGRES_TEST_URL` is set, and reading it from the same place
 these are the same two credentials and having them read two different ways is
 how one of them ends up silently ignored.
 
-**Everything here truncates the target's tables.** Point `POSTGRES_TEST_URL`
-at a database kept for the tests, never at a warehouse holding anything. The
-source is a small SQLite warehouse built fresh in `tmp_path` from the real
+**Everything here writes, and several tests truncate every table they can
+see** — so the first version of this file said "point `POSTGRES_TEST_URL` at a
+database kept for the tests" and left it at that. That is not a guard, it is a
+hope, and it was wrong within the day: the operator pointed both
+`POSTGRES_TEST_URL` and `DATABASE_URL` at the same server, which is the
+obvious thing to do when the server has one database and `sectortrace_app`
+cannot create another. An ordinary `pytest` run would then have truncated the
+migrated warehouse.
+
+So this suite builds a **schema of its own**, migrates into it, and drops it
+afterwards. Pointing both variables at the same database is now a supported
+configuration rather than a loaded gun, and nothing here can reach `public`.
+The source is a small SQLite warehouse built fresh in `tmp_path` from the real
 migration tree, so nothing touches `data/warehouse.db` either.
 
     uv run python -m pytest tests/test_pg_migration_live.py -q
@@ -22,10 +32,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from conftest import scratch_schema
 
 # The same two variables, read the same way. `tests/` is on `sys.path` under
-# pytest's default import mode, so this is the sibling module.
-from test_postgres_live import POSTGRES_TEST_URL, _configured_url
+# pytest's default import mode, so these are the sibling modules.
+from test_postgres_live import POSTGRES_TEST_RO_URL, POSTGRES_TEST_URL
 
 from pipeline import catalog, db, pgload, pgverify
 from pipeline.config import Settings
@@ -138,31 +149,26 @@ def source(settings) -> sqlite3.Connection:
 
 
 @pytest.fixture
-def target():
-    """The PostgreSQL warehouse, migrated and emptied, and emptied again after.
+def scratch(request):
+    """A migrated PostgreSQL warehouse of this test's own.
 
-    Emptied at both ends deliberately: at the start because a previous run
-    that failed part-way leaves rows, and at the end because the next suite to
-    run against this database should find it as it found it.
+    Function-scoped, not module-scoped: several tests here truncate every
+    table and one deliberately leaves a half-finished state file behind, and
+    sharing that between tests would make the order they run in load-bearing.
+    Building a schema and applying 34 migrations costs about a second.
     """
-    from pipeline import pg as pg_module
-
-    conn = pg_module.connect(POSTGRES_TEST_URL,
-                              application_name="sectortrace-migration-tests")
-    try:
-        db.apply_migrations(conn, MIGRATIONS / "postgres")
-        conn.commit()
-        tables = pgload.load_order(conn)
-        pgload.truncate_all(conn, tables)
-        yield conn
-        pgload.truncate_all(conn, tables)
-    finally:
-        conn.close()
+    with scratch_schema(POSTGRES_TEST_URL, POSTGRES_TEST_RO_URL) as made:
+        yield made
 
 
 @pytest.fixture
-def pg_settings(settings) -> Settings:
-    """The suite's settings with the test server's URL added.
+def target(scratch):
+    return scratch.conn
+
+
+@pytest.fixture
+def pg_settings(settings, scratch) -> Settings:
+    """The suite's settings, pointed at this test's own schema.
 
     Derived from the shared fixture rather than built fresh, so every writable
     path still points into `tmp_path`. A `Settings()` constructed here would
@@ -170,7 +176,7 @@ def pg_settings(settings) -> Settings:
     and this suite has deposited its output next to the operator's twice
     already — see `tests/conftest.py`.
     """
-    return settings.model_copy(update={"database_url": POSTGRES_TEST_URL})
+    return settings.model_copy(update={"database_url": scratch.url})
 
 
 class TestALoadAndItsProof:
@@ -358,16 +364,15 @@ class TestVerificationNoticesWhatWentWrong:
             report["problems"])
 
     def test_a_reader_role_can_run_the_verification(self, source, target,
-                                                     pg_settings):
+                                                     pg_settings, scratch):
         """The check that says the two agree should not need write access to
         either of them."""
-        ro_url = _configured_url("POSTGRES_TEST_RO_URL")
-        if not ro_url:
+        if not POSTGRES_TEST_RO_URL:
             pytest.skip("POSTGRES_TEST_RO_URL is not set; no reader role to test")
         from pipeline import pg as pg_module
 
         pgload.migrate(source, target, settings=pg_settings)
-        reader = pg_module.connect(ro_url, readonly=True)
+        reader = pg_module.connect(scratch.ro_url, readonly=True)
         try:
             # Deep, so it exercises the streaming cursor on an autocommit
             # connection — the one place the read path and the verification

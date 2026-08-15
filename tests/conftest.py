@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,6 +174,64 @@ def _logs_stay_out_of_the_repo(tmp_path: Path, monkeypatch):
         lambda: Settings(contact_email="test@example.com",
                           logs_dir=tmp_path / "logs", _env_file=None))
     yield
+
+
+@contextmanager
+def scratch_schema(url: str, ro_url: str | None = None):
+    """A migrated PostgreSQL warehouse of its own, dropped on the way out.
+
+    Every live PostgreSQL suite here writes, and some truncate. The first
+    version of them said "point `POSTGRES_TEST_URL` at a database kept for the
+    tests" and trusted that — which lasted until the operator pointed it at
+    the same database as `DATABASE_URL`, the obvious thing to do when the
+    server holds one database and `sectortrace_app` has no CREATEDB. An
+    ordinary `pytest` run would then have truncated the working warehouse.
+
+    A schema is the isolation that is actually available here. Everything in
+    this codebase asks `current_schema()` rather than naming `public`, so a
+    warehouse in a schema of its own is the same warehouse; and the scoping
+    rides on the URL (see `pg.with_schema`) so connections opened by fetch
+    pools and by module code land in it too.
+
+    The reader role is granted what it holds on `public`, because several
+    tests check the read path through a role that cannot write, and a grant
+    on a schema that is about to be dropped is narrower than the alternative
+    of pointing those tests at the working warehouse.
+    """
+    from urllib.parse import urlsplit
+    from uuid import uuid4
+
+    from pipeline import pg
+
+    name = f"pgtest_{uuid4().hex[:12]}"
+    quoted = '"' + name.replace('"', '""') + '"'
+    admin = pg.connect(url, application_name="sectortrace-tests")
+    try:
+        admin.execute(f"CREATE SCHEMA {quoted}")
+        admin.commit()
+        conn = pg.connect(pg.with_schema(url, name),
+                           application_name="sectortrace-tests")
+        try:
+            db.apply_migrations(conn, MIGRATIONS_DIR / "postgres")
+            conn.commit()
+            reader = urlsplit(ro_url).username if ro_url else None
+            if reader:
+                safe = '"' + reader.replace('"', '""') + '"'
+                admin.execute(f"GRANT USAGE ON SCHEMA {quoted} TO {safe}")
+                admin.execute(
+                    f"GRANT SELECT ON ALL TABLES IN SCHEMA {quoted} TO {safe}")
+                admin.commit()
+            yield SimpleNamespace(conn=conn, schema=name,
+                                   url=pg.with_schema(url, name),
+                                   ro_url=pg.with_schema(ro_url, name) if ro_url else None)
+        finally:
+            conn.close()
+    finally:
+        try:
+            admin.execute(f"DROP SCHEMA {quoted} CASCADE")
+            admin.commit()
+        finally:
+            admin.close()
 
 
 @pytest.fixture

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
 
@@ -246,6 +247,32 @@ class PostgresConnection:
         """The psycopg connection, for the few places that need a real one —
         `COPY`, and the backup tooling."""
         return self._conn
+
+
+def with_schema(url: str, schema: str) -> str:
+    """The same URL, with every connection made from it landing in `schema`.
+
+    Carried in the URL as a libpq `options` parameter rather than issued as a
+    `SET search_path` on one connection, and that difference is the whole
+    point: the council-walking modules open their own connections in
+    fetch-pool threads (`pipeline/parallel.py`), and the backup and export
+    paths open their own too. A setting on the connection this function's
+    caller happens to hold would leave all of those writing somewhere else.
+
+    What it is for: giving a test run a warehouse of its own on a server where
+    creating a database is not available — `sectortrace_app` has no CREATEDB,
+    and a suite that writes has to write somewhere that is not the warehouse.
+    Nothing in the pipeline itself calls this.
+
+    No space after `-c`. `urlencode` renders one as `+`, and libpq then reads
+    the parameter as `+search_path` and refuses the connection outright —
+    which at least fails loudly, unlike most ways of getting this wrong.
+    """
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query))
+    query["options"] = f"-csearch_path={schema}"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path,
+                        urlencode(query), parts.fragment))
 
 
 def connect(url: str, *, readonly: bool = False,
