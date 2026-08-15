@@ -88,7 +88,15 @@ TABS: list[TabSpec] = [
                    date_start, date_end, procedure_type, psr_basis,
                    psr_direct_award_option, source_system, source_url
               FROM contracts
-             ORDER BY date_published DESC
+             -- NULLS LAST is stated, not left to the engine. SQLite sorts
+             -- NULLs last in a DESC order and PostgreSQL sorts them first, so
+             -- an undated notice would move from the bottom of this tab to the
+             -- top purely by changing backend. These tabs are the artefact
+             -- somebody defends in a room a year later; the row order is part
+             -- of what they are defending, and it does not get to depend on
+             -- which database answered. Same reasoning at every ORDER BY in
+             -- this file over a column that can be NULL.
+             ORDER BY date_published DESC NULLS LAST
         """,
     ),
     TabSpec(
@@ -170,7 +178,9 @@ TABS: list[TabSpec] = [
                    l.registration_status, l.last_inspection_date,
                    l.overall_rating, l.service_types
               FROM cqc_locations l
-             ORDER BY l.provider_key, l.location_name
+             -- location_name is nullable; ascending, SQLite puts NULLs first
+             -- and PostgreSQL puts them last.
+             ORDER BY l.provider_key, l.location_name NULLS FIRST
         """,
     ),
     TabSpec(
@@ -192,7 +202,7 @@ TABS: list[TabSpec] = [
                    hearing_venue_raw, decision_date, jurisdiction_codes,
                    outcome, outcome_confidence, document_count
               FROM tribunal_cases
-             ORDER BY decision_date DESC
+             ORDER BY decision_date DESC NULLS LAST
         """,
     ),
     TabSpec(
@@ -218,7 +228,7 @@ TABS: list[TabSpec] = [
                      WHERE m.report_ref = r.report_ref AND m.mention_type = 'body_text') AS provider_mentions,
                    r.matters_of_concern
               FROM pfd_reports r
-             ORDER BY r.report_date DESC
+             ORDER BY r.report_date DESC NULLS LAST
         """,
     ),
     TabSpec(

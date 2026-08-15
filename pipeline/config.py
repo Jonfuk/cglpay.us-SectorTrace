@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -97,6 +97,37 @@ class Settings(BaseSettings):
     ocr_enabled: bool = False
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
+
+    # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
+    # still the backend of record, and a checkout with no `.env` entry here
+    # behaves exactly as it did before PostgreSQL existed.
+    #
+    # Presence of the URL is what selects the backend — there is deliberately
+    # no separate DATABASE_BACKEND switch. Two settings that can disagree have
+    # a third state where they do, and the failure ("why is it writing to the
+    # file when the URL is set?") is silent and reads like a bug in the driver.
+    # To force SQLite for one command, unset the variable: `DATABASE_URL= …`.
+    #
+    # No default points at a real server, and nothing in the repository holds a
+    # hostname or a password. `redacted_database_url` is what goes in a log.
+    database_url: str | None = None
+
+    # The same warehouse, as a role that holds SELECT and nothing else.
+    #
+    # This is what the portal and the operator UI read through, and it is the
+    # PostgreSQL replacement for SQLite's `mode=ro` + `PRAGMA query_only`. The
+    # difference between the two is worth being precise about, because it is
+    # the reason this setting exists rather than being folded into the one
+    # above: `default_transaction_read_only` is a session setting *this
+    # application asks for*, so a bug in the code that forgets it leaves a
+    # writable connection serving the SQL box. A role without INSERT cannot be
+    # talked into one, whatever the code does. Enforcement at the server, not
+    # by intention — the same argument as settled decision 3.
+    #
+    # Optional. Left unset, reads use `database_url` and are protected only by
+    # the session setting; that is a working configuration and a weaker one,
+    # and `pipeline.web.queries` says so where it happens.
+    database_ro_url: str | None = None
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"
     keywords_path: Path = REPO_ROOT / "pipeline" / "keywords.py"
@@ -147,6 +178,104 @@ class Settings(BaseSettings):
                 "User-Agent sent to every source (politeness requirement)."
             )
         return v
+
+    @field_validator("database_url", "database_ro_url")
+    @classmethod
+    def _usable_database_url(cls, v: str | None) -> str | None:
+        """An unusable URL is refused here, not at the first connection.
+
+        The alternative is a run that applies migrations, fetches for an hour
+        and then fails on a write, which is the shape of failure this project
+        spends most of its design avoiding. An empty string is treated as
+        unset so `DATABASE_URL=` on a command line forces SQLite back on
+        without editing `.env`.
+        """
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        # postgres:// is what Railway and Heroku hand out; psycopg accepts
+        # both, and rejecting the shorter one would fail on a URL the platform
+        # generated rather than one anybody typed.
+        if not v.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
+            raise ValueError(
+                f"DATABASE_URL must be a PostgreSQL URL, got {v.split(':', 1)[0]!r}. "
+                "PostgreSQL is the only alternative backend; leave it unset to "
+                "use the SQLite warehouse at DATABASE_PATH."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _ro_url_needs_a_backend_to_read(self) -> Settings:
+        """A read-only URL with no `DATABASE_URL` is refused rather than
+        ignored.
+
+        The backend selector is deliberately one setting, so `DATABASE_RO_URL`
+        alone does not switch anything on. Silently ignoring it would leave
+        somebody who set only this one believing the portal reads PostgreSQL
+        through a restricted role while every query in the process goes to the
+        SQLite file — configured for a guarantee they do not have, which is
+        worse than not having it.
+        """
+        if self.database_ro_url and not self.database_url:
+            raise ValueError(
+                "DATABASE_RO_URL is set but DATABASE_URL is not. The read-only "
+                "URL names a second role on the same PostgreSQL warehouse; it "
+                "does not select the backend by itself. Set DATABASE_URL too, "
+                "or unset this one."
+            )
+        return self
+
+    @property
+    def database_backend(self) -> str:
+        """`"postgres"` or `"sqlite"`. The single answer to "which backend?".
+
+        Derived, never set: see the note on `database_url` for why there is no
+        second switch that could disagree with this one.
+        """
+        return "postgres" if self.database_url else "sqlite"
+
+    @staticmethod
+    def _redact(url: str | None) -> str | None:
+        if not url:
+            return None
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(url)
+        if parts.password is None:
+            return url
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        userinfo = f"{parts.username}:***@" if parts.username else "***@"
+        return urlunsplit((parts.scheme, f"{userinfo}{host}", parts.path,
+                            parts.query, parts.fragment))
+
+    @property
+    def redacted_database_ro_url(self) -> str | None:
+        return self._redact(self.database_ro_url)
+
+    @property
+    def redacted_database_url(self) -> str | None:
+        """The URL with its password replaced, safe to log or show in the UI.
+
+        Every structured log line that names a database has to go through
+        this. The URL carries a password, structlog writes to a file that is
+        kept for five generations, and the health tab renders what it is told
+        — three places a credential would otherwise come to rest.
+        """
+        if not self.database_url:
+            return None
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(self.database_url)
+        if parts.password is None:
+            return self.database_url
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+        userinfo = f"{parts.username}:***@" if parts.username else "***@"
+        return urlunsplit((parts.scheme, f"{userinfo}{host}", parts.path,
+                            parts.query, parts.fragment))
 
     @property
     def user_agent(self) -> str:

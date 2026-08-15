@@ -28,6 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from pipeline import catalog, db
 from pipeline.config import Settings, get_settings
 from pipeline.db import RESTRICTED_PREFIX
 
@@ -52,15 +53,60 @@ class QueryError(Exception):
     typed it rather than a traceback."""
 
 
-def readonly_connection(settings: Settings | None = None) -> sqlite3.Connection:
+def readonly_connection(settings: Settings | None = None):
     """A connection to the warehouse that cannot write to it.
 
-    Raises QueryError rather than sqlite3.OperationalError when the database
-    is missing or unreadable — those are the two states a fresh checkout is
-    actually in ("you have not run anything yet"), and they deserve an answer
-    rather than a stack trace.
+    Raises QueryError rather than a driver exception when the database is
+    missing or unreachable — those are the states a fresh checkout and a
+    stopped server are actually in ("you have not run anything yet", "the
+    database is not answering"), and they deserve an answer rather than a
+    stack trace.
+
+    Read-only means something different on each backend, and on PostgreSQL it
+    means something *better*:
+
+      * SQLite — `mode=ro` on the URI plus `PRAGMA query_only`, both enforced
+        by the driver rather than by inspecting the SQL, so neither can be
+        talked around by a statement nobody anticipated.
+      * PostgreSQL — `DATABASE_RO_URL`, a role holding `SELECT` and nothing
+        else, plus `default_transaction_read_only` on the connection. The
+        session setting is the belt; the role is the braces, and the role is
+        the one that survives a bug in this file. A session setting is
+        something this application *asks for*; a role without INSERT cannot be
+        talked into one whatever the code does.
+
+    With no `DATABASE_RO_URL` configured this falls back to `DATABASE_URL` —
+    which works, and is weaker: reads then run as the role that owns the
+    schema, so the only thing standing between the SQL box and a write is the
+    session setting. That is a real difference from the SQLite path, not a
+    tidiness point, so the fallback is logged rather than taken quietly. See
+    pipeline/migrations/postgres/README.md for the role definitions.
     """
     settings = settings or get_settings()
+
+    if settings.database_backend == "postgres":
+        import structlog
+
+        from pipeline import pg
+
+        url = settings.database_ro_url or settings.database_url
+        if not settings.database_ro_url:
+            structlog.get_logger().warning(
+                "web.readonly_without_a_reader_role",
+                database=settings.redacted_database_url,
+                note="reads are running as the schema owner; set DATABASE_RO_URL "
+                     "to a SELECT-only role so a write is refused by the server "
+                     "rather than by a session setting")
+        try:
+            return pg.connect(url, readonly=True,
+                               application_name="sectortrace-web",
+                               statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
+        except db.Error as exc:
+            raise QueryError(
+                f"Could not reach the PostgreSQL warehouse at "
+                f"{settings._redact(url)}: {exc}"
+            ) from exc
+
     path = Path(settings.database_path).resolve()
     if not path.exists():
         raise QueryError(
@@ -76,7 +122,7 @@ def readonly_connection(settings: Settings | None = None) -> sqlite3.Connection:
 
     try:
         conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-    except sqlite3.OperationalError as exc:
+    except db.OperationalError as exc:
         # The usual cause is a WAL database whose -shm file is missing and
         # cannot be created by a read-only connection: SQLite needs shared
         # memory to read a WAL, and read-only cannot make it. Any pipeline
@@ -95,8 +141,30 @@ def readonly_connection(settings: Settings | None = None) -> sqlite3.Connection:
 
 
 @contextmanager
-def deadline(conn: sqlite3.Connection, seconds: float = QUERY_TIMEOUT_SECONDS) -> Iterator[None]:
-    """Abort statements on this connection that run longer than `seconds`."""
+def deadline(conn, seconds: float = QUERY_TIMEOUT_SECONDS) -> Iterator[None]:
+    """Abort statements on this connection that run longer than `seconds`.
+
+    On PostgreSQL this is a no-op, because the equivalent is already in place
+    and is not a context manager: `readonly_connection` sets
+    `statement_timeout` on the session, so every statement carries the
+    deadline whether or not anyone remembered to wrap it. The server cancels
+    and raises `QueryCanceled`, which `_run` turns into the same message the
+    SQLite path produces.
+
+    A no-op rather than an error because the callers should not have to ask
+    which backend they are on — `with deadline(conn):` reads the same and
+    means the same, and the only difference is where the timer lives.
+
+    The one behavioural difference worth naming: the argument is honoured on
+    SQLite and ignored on PostgreSQL, where the session's timeout wins. Both
+    callers that pass a value pass a shorter one for a cheap probe, so the
+    effect is a probe that may run for the full 20s instead of 2s rather than
+    one that outlives its deadline.
+    """
+    if db.backend_of(conn) == "postgres":
+        yield
+        return
+
     expires_at = time.monotonic() + seconds
 
     def _abort_if_late() -> int:
@@ -120,13 +188,16 @@ def escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _quote(identifier: str) -> str:
-    """A SQL identifier, quoted. Table and column names are never accepted
-    from the caller directly — they are matched against the live schema first
-    — but they still reach an f-string, and doubling embedded quotes keeps
-    that true of names this schema does not happen to contain today.
-    """
-    return '"' + identifier.replace('"', '""') + '"'
+# A SQL identifier, quoted. Table and column names are never accepted from
+# the caller directly — they are matched against the live schema first — but
+# they still reach an f-string, and doubling embedded quotes keeps that true
+# of names this schema does not happen to contain today.
+#
+# Moved to `pipeline/catalog.py` when the Phase 2 loader needed the same
+# thing. The name stays here because eight call sites in this file and one in
+# health.py use it, and a second spelling of a quoting rule is exactly what
+# catalog.py exists to prevent.
+_quote = catalog.quote
 
 
 def is_restricted(name: str) -> bool:
@@ -135,26 +206,51 @@ def is_restricted(name: str) -> bool:
     return name.startswith(RESTRICTED_PREFIX)
 
 
-def _run(conn: sqlite3.Connection, sql: str, params: Any = ()) -> list[sqlite3.Row]:
+# What each backend says when it stops a statement for running too long.
+# SQLite's progress handler produces "interrupted"; PostgreSQL's
+# statement_timeout produces "canceling statement due to statement timeout".
+# Matched on text rather than on exception class because sqlite3 has no
+# distinct class for it, and one code path that reads the same on both
+# backends is worth more here than catching psycopg's QueryCanceled precisely.
+_TIMED_OUT = ("interrupted", "canceling statement")
+
+
+def _timed_out(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _TIMED_OUT)
+
+
+def _run(conn, sql: str, params: Any = ()) -> list:
     with deadline(conn):
         try:
             return conn.execute(sql, params).fetchall()
-        except sqlite3.OperationalError as exc:
-            if "interrupted" in str(exc):
+        except db.OperationalError as exc:
+            if _timed_out(exc):
                 raise QueryError(
                     f"Query took longer than {QUERY_TIMEOUT_SECONDS:.0f}s and was "
                     "stopped. Narrow it with a WHERE clause, or sort on an "
                     "indexed column."
                 ) from exc
             raise QueryError(str(exc)) from exc
-        except sqlite3.Error as exc:
+        except db.Error as exc:
+            if _timed_out(exc):
+                # psycopg raises QueryCanceled, which descends from
+                # DatabaseError rather than OperationalError — so without this
+                # a timed-out query on PostgreSQL would reach the operator as
+                # the raw server message instead of the sentence telling them
+                # what to do about it.
+                raise QueryError(
+                    f"Query took longer than {QUERY_TIMEOUT_SECONDS:.0f}s and was "
+                    "stopped. Narrow it with a WHERE clause, or sort on an "
+                    "indexed column."
+                ) from exc
             raise QueryError(str(exc)) from exc
 
 
 # --- schema ------------------------------------------------------------------
 
 
-def list_objects(conn: sqlite3.Connection) -> list[dict]:
+def list_objects(conn: db.Connection) -> list[dict]:
     """Every table and view, with row counts for tables.
 
     Views are listed uncounted. `v_fingertips_la_latest` is 20k rows over a
@@ -163,63 +259,64 @@ def list_objects(conn: sqlite3.Connection) -> list[dict]:
     first paint of every page load, to show a number nobody asked for yet.
     They are counted when one is opened.
     """
-    rows = _run(
-        conn,
-        "SELECT name, type FROM sqlite_master "
-        "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
-        "ORDER BY type, name",
-    )
-
+    # Sorted by type then name, as the sidebar has always shown them:
+    # `catalog.list_objects` orders by name alone, because its other callers
+    # compare two backends' inventories and only need a stable order.
     objects: list[dict] = []
-    for row in rows:
+    for obj in sorted(catalog.list_objects(conn), key=lambda o: (o["type"], o["name"])):
         entry = {
-            "name": row["name"],
-            "type": row["type"],
-            "restricted": is_restricted(row["name"]),
+            "name": obj["name"],
+            "type": obj["type"],
+            "restricted": is_restricted(obj["name"]),
             "rows": None,
         }
-        if row["type"] == "table":
-            entry["rows"] = _run(conn, f"SELECT COUNT(*) AS n FROM {_quote(row['name'])}")[0]["n"]
+        if obj["type"] == "table":
+            entry["rows"] = _run(conn, f"SELECT COUNT(*) AS n FROM {_quote(obj['name'])}")[0]["n"]
         objects.append(entry)
     return objects
 
 
-def object_type(conn: sqlite3.Connection, name: str) -> str | None:
+def object_type(conn, name: str) -> str | None:
     """'table', 'view', or None if no such object. This is what validates
     every caller-supplied object name before it reaches a query."""
-    rows = _run(
-        conn,
-        "SELECT type FROM sqlite_master "
-        "WHERE name = ? AND type IN ('table', 'view')",
-        (name,),
-    )
-    return rows[0]["type"] if rows else None
+    return catalog.object_type(conn, name)
 
 
-def columns_of(conn: sqlite3.Connection, name: str) -> list[dict]:
-    rows = _run(conn, f"PRAGMA table_info({_quote(name)})")
-    return [
-        {
-            "name": row["name"],
-            "type": row["type"] or "",
-            "notnull": bool(row["notnull"]),
-            "pk": bool(row["pk"]),
-        }
-        for row in rows
-    ]
+def columns_of(conn, name: str) -> list[dict]:
+    return catalog.columns_of(conn, name)
 
 
-def _has_rowid(conn: sqlite3.Connection, name: str) -> bool:
+def _default_order(conn, name: str) -> str:
+    """The ORDER BY that makes paging a table stable, or `""` if there is none.
+
+    SQLite has `rowid`, a stable per-row identifier every ordinary table has,
+    and the probe below is how you find out whether this one does — WITHOUT
+    ROWID tables and views do not.
+
+    PostgreSQL has no equivalent. `ctid` looks like one and is not: it is a
+    physical location that moves when a row is updated and when VACUUM
+    reclaims space, so paging by it would silently repeat and skip rows —
+    which is the precise failure this function exists to prevent, arrived at
+    by a different route. The primary key is the honest answer, and a table
+    without one has no stable order to offer; the caller reports `ordered:
+    False` and the UI says so, exactly as it already does for a view.
+    """
+    if db.backend_of(conn) == "postgres":
+        key = catalog.primary_key(conn, name)
+        if not key:
+            return ""
+        return " ORDER BY " + ", ".join(_quote(column) for column in key)
+
     try:
         with deadline(conn, 2.0):
             conn.execute(f"SELECT rowid FROM {_quote(name)} LIMIT 0")
-        return True
-    except sqlite3.Error:
-        return False
+        return " ORDER BY rowid"
+    except db.Error:
+        return ""
 
 
 def read_table(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     name: str,
     *,
     limit: int = DEFAULT_PAGE_SIZE,
@@ -260,11 +357,17 @@ def read_table(
 
     order_sql, ordered = "", False
     if order_by and order_by in column_names:
-        order_sql = f" ORDER BY {_quote(order_by)} {'DESC' if descending else 'ASC'}"
+        # NULLS spelled out because the two engines disagree on the default:
+        # SQLite sorts NULLs first ascending and last descending, PostgreSQL
+        # the reverse. Sorting a nullable column in the table browser would
+        # otherwise put the empty rows at opposite ends depending on which
+        # database answered.
+        direction = "DESC NULLS LAST" if descending else "ASC NULLS FIRST"
+        order_sql = f" ORDER BY {_quote(order_by)} {direction}"
         ordered = True
-    elif kind == "table" and _has_rowid(conn, name):
-        order_sql = " ORDER BY rowid"
-        ordered = True
+    elif kind == "table":
+        order_sql = _default_order(conn, name)
+        ordered = bool(order_sql)
 
     params = {**params, "limit": limit, "offset": offset}
     rows = _run(
@@ -289,7 +392,7 @@ def read_table(
     }
 
 
-def _row_to_json(row: sqlite3.Row, column_names: list[str]) -> list[Any]:
+def _row_to_json(row, column_names: list[str]) -> list[Any]:
     """A row as a list of JSON-safe values, positionally.
 
     Positional rather than a dict because several views repeat a column name
@@ -306,7 +409,7 @@ def _row_to_json(row: sqlite3.Row, column_names: list[str]) -> list[Any]:
     return values
 
 
-def run_select(conn: sqlite3.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dict:
+def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dict:
     """Run one statement typed by the user and return up to `limit` rows.
 
     Nothing inspects the SQL for danger. The connection is read-only, which
@@ -327,16 +430,16 @@ def run_select(conn: sqlite3.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -
             truncated = cursor.fetchone() is not None
             column_names = [d[0] for d in cursor.description or []]
             cursor.close()
-        except sqlite3.OperationalError as exc:
+        except db.OperationalError as exc:
             if "interrupted" in str(exc):
                 raise QueryError(
                     f"Query took longer than {QUERY_TIMEOUT_SECONDS:.0f}s and was stopped."
                 ) from exc
             raise QueryError(str(exc)) from exc
-        except sqlite3.Warning as exc:
+        except db.Warning as exc:
             # "You can only execute one statement at a time" arrives here.
             raise QueryError(str(exc)) from exc
-        except sqlite3.Error as exc:
+        except db.Error as exc:
             raise QueryError(str(exc)) from exc
 
     if not column_names:
@@ -369,7 +472,7 @@ REVIEW_STATUSES = ("pending", "approved", "rejected")
 ALL_REVIEW_STATUSES = (*REVIEW_STATUSES, "answered")
 
 
-def review_facets(conn: sqlite3.Connection) -> dict:
+def review_facets(conn: db.Connection) -> dict:
     """The values worth filtering on, with counts, so the UI's dropdowns are
     built from what is actually in the queue rather than a hardcoded list that
     goes stale the next time a module invents an item type."""
@@ -435,7 +538,7 @@ def review_filter_sql(
 
 
 def review_items(
-    conn: sqlite3.Connection,
+    conn: db.Connection,
     *,
     status: str | None = "pending",
     module: str | None = None,
@@ -492,7 +595,7 @@ def review_items(
     }
 
 
-def review_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
+def review_item(conn: db.Connection, item_id: int) -> dict | None:
     """One item with its full decision history, newest first."""
     rows = _run(conn, "SELECT * FROM review_queue WHERE id = ?", (item_id,))
     if not rows:
@@ -512,7 +615,7 @@ def review_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
     return item
 
 
-def recent_decisions(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
+def recent_decisions(conn: db.Connection, limit: int = 20) -> list[dict]:
     return [
         dict(row)
         for row in _run(
@@ -526,7 +629,7 @@ def recent_decisions(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
     ]
 
 
-def parse_failures(conn: sqlite3.Connection, limit: int = 200) -> list[dict]:
+def parse_failures(conn: db.Connection, limit: int = 200) -> list[dict]:
     """Parse failures, grouped the way they are read: by module and reason.
 
     Read-only and never decidable. A parse failure is a bug report about this
@@ -546,18 +649,16 @@ def parse_failures(conn: sqlite3.Connection, limit: int = 200) -> list[dict]:
     ]
 
 
-def overview(conn: sqlite3.Connection, settings: Settings | None = None) -> dict:
+def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     """The landing screen: what is in the queue, what has been decided, and
     what the warehouse holds."""
     settings = settings or get_settings()
     path = Path(settings.database_path)
     facets = review_facets(conn)
 
-    tables = _run(
-        conn,
-        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-    )[0]["n"]
-    views = _run(conn, "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'view'")[0]["n"]
+    objects = catalog.list_objects(conn)
+    tables = sum(1 for o in objects if o["type"] == "table")
+    views = sum(1 for o in objects if o["type"] == "view")
     migrations = _run(
         conn, "SELECT COUNT(*) AS n FROM schema_migrations")[0]["n"]
     failures = _run(conn, "SELECT COUNT(*) AS n FROM parse_failures")[0]["n"]
