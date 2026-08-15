@@ -306,19 +306,42 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a compare view over data the portal already renders — pick two or more authorities (or providers) and draw the existing series (grant, budget, treatment, contracts) on shared axes. No new data, and the existing no-cross-layer-arithmetic caveats reapply on each shared axis.
 - Verified by: a browser check of a two-area comparison, with the cross-layer caveat present on the shared axis.
 
-**W-12 · The coverage matrix never reaches the public · M — filed 2026-08-14**
+**W-12 · The coverage matrix never reaches the public · M — closed in Phase 11**
+- **Fix:** a coverage tick row on the authority page, computed from the admin
+  health tab's own `COVERAGE_COLUMNS` declaration rather than a second copy
+  of it — the public payload reads the tuple from `health.py`, and the pin
+  test compares the ticks with the admin matrix row for row. The caveat the
+  finding demands travels in the payload: absence is absence of collection,
+  not evidence of absence. An empty tick renders as "none" in shape, never
+  as a zero figure.
 - Evidence: the admin Health tab's authority × evidence coverage matrix ([pipeline/web/health.py:50](pipeline/web/health.py:50)) is the best existing answer to "what is missing here", and only the operator sees it.
 - Costs today: a public reader cannot tell whether an absent figure for their authority is absence of evidence or absence of collection — the exact distinction the review queue exists to keep, kept invisible.
 - Fix: a public coverage view per authority (which of grant, budget, contracts, NDTMS, Fingertips, CQC and candidates hold rows), reusing the health tab's counts, carrying the caveat that absence is not evidence of absence.
 - Verified by: a test that the public coverage endpoint and the admin one agree row for row.
 
-**W-13 · No page exists for an authority · M — filed 2026-08-14**
+**W-13 · No page exists for an authority · M — closed in Phase 11**
+- **Fix:** `/api/v1/authorities/{ons_code}` and `#/authorities/{ons_code}` — an
+  authority page in the provider deep-dive shape: grant allocation, budgeted
+  spend, treatment estimates with their paired CIs and contracts let, all
+  composed from the existing endpoint functions so a number here cannot
+  disagree with the page it came from. The route pattern is pinned with the
+  provider deep dive's; one frozen-route-list edit and one frozen-static-path
+  edit covered the whole phase. "What does my authority get?" is now one
+  address, and `buyer_ons_code` — accepted by `/api/v1/contracts` since it
+  was written and set by no control — finally has a reader.
 - Evidence: the portal routes to six sections plus a provider deep dive ([pipeline/web/static/public/app.js:206](pipeline/web/static/public/app.js:206)); nothing keys off an authority, yet grant, budgets, treatment and contracts all join to `authorities`, and `/api/v1/contracts` accepts `buyer_ons_code` ([pipeline/web/public_queries.py:337](pipeline/web/public_queries.py:337)) that no control on any page sets. LG Inform's Headline Report and Fingertips' area profiles are the comparators.
 - Costs today: the campaign question — "what does my authority get?" — is answered only by assembling the choropleth, the treatment page and the contracts API by hand, then aligning them by eye.
 - Fix: a per-authority page in the provider deep-dive shape — grant allocation, budgeted spend, treatment estimates with their paired CIs, contracts let (the `buyer_ons_code` filter finally exposed), and W-12's coverage ticks. No new data.
 - Verified by: a test that an authority page shows the same figures the existing endpoints return for that authority.
 
-**W-14 · The map cannot carry a click through to the data · S — filed 2026-08-14**
+**W-14 · The map cannot carry a click through to the data · S — closed in Phase 11**
+- **Fix:** clicking an area on the choropleth navigates to
+  `#/authorities/{ons_code}` from the boundary's own property, so the code
+  the map drew is the code that opens — including areas with no value for
+  the metric, whose absence stories live on the page the click now reaches.
+  The tooltip says the click exists, and the svg's aria-label says so too.
+  Pinned statically in the suite (the browser check is the deliberate human
+  step); the click target URL carrying the ONS code is the pin's assertion.
 - Evidence: the choropleth renders hover tooltips and nothing else ([pipeline/web/static/public/js/pages/geography.js:196](pipeline/web/static/public/js/pages/geography.js:196)); no click navigates anywhere. Fingertips' map selects an area and carries it through the other views.
 - Costs today: no UI path to "contracts let by council X" — the parameter exists, the page does not. A researcher hand-crafts API URLs.
 - Fix: clicking an authority opens its page (W-13) or a contracts view filtered to that buyer. Depends on W-13 or a lighter filtered-lists route.
@@ -355,7 +378,14 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: an export target that zips the sheets, geojson and echarts outputs with their `.provenance.json` companions and a README naming the contents; offered from the admin exports tab, and a decision on whether the public portal serves it.
 - Verified by: a test that the zip contains every file its manifest names, and no file the manifest does not.
 
-**W-17 · There is no "find my council" · S — filed 2026-08-14**
+**W-17 · There is no "find my council" · S — closed in Phase 11**
+- **Fix:** a name typeahead in the top bar, over the 347-row `/api/v1/authorities`
+  payload with the Fuse.js already vendored. It is a *navigator*, not a
+  filter — picking an authority goes straight to its page — which is why it
+  lives in the top bar rather than the filter bar: the filter bar's controls
+  must declare a state key a page reads (tests/test_portal_controls.py), and
+  a navigator holds no state. Enter picks the top match; the list carries
+  name and ONS code. The postcode half stays unfiled as planned.
 - Evidence: the global filter bar offers provider, region and years ([pipeline/web/static/public/index.html:45](pipeline/web/static/public/index.html:45)); the only authority typeahead in the whole portal is on the Treatment page ([pipeline/web/static/public/js/pages/treatment.js:83](pipeline/web/static/public/js/pages/treatment.js:83)). A reader who knows their town rather than their ONS code has the choropleth tooltip and nothing else. Fingertips' GP finder searches by name, postcode and ODS code; every council site has a "find my council".
 - Costs today: the portal's entry points all presuppose knowing the commissioning geography — for the campaign's own audience, "my council" is the natural first query, and it has no answer.
 - Fix: an authority name typeahead in the global chrome — 347 rows, Fuse.js already vendored ([pipeline/web/static/public/index.html:22](pipeline/web/static/public/index.html:22)) — whose result lands on W-13's authority page when it exists, and on the geography map for that authority until then. The postcode half is deliberately not filed: ONS NSPD is a large, quarterly-updating source with its own archive cost, and the name search covers the common case for free.
@@ -430,7 +460,15 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Verified by: a browser check that a zero-promotion funnel renders as zero rather than as an empty chart.
 - **Shipped in Phase 12** with the funnel in `summary` and the freshness on its own route — the 14-table scan measured 3 seconds against the real warehouse, so the bars are loaded lazily after first paint (W-21's own correction, applied to the public side). The funnel and the bars are divs rather than a chart so zero renders as the text "0" and never as an empty canvas.
 
-**W-27 · 477,199 budget lines sit behind one metric · M — filed 2026-08-14**
+**W-27 · 477,199 budget lines sit behind one metric · M — closed in Phase 11**
+- **Fix:** a budget drill-down section on the authority page — by `section`
+  and `line_code` for the chosen financial year, from `la_revenue_budgets`
+  directly. The payload carries exactly the published columns: the pin test
+  asserts the row keys, so a derived number cannot slip in as a new key, and
+  grant and budget stay separate payload keys that are never combined. An
+  unreadable-denomination row keeps its NULL amount and its verbatim
+  `value_text`. The section's caveat says what must not be computed here in
+  the finding's own words.
 - Evidence **[live]**: `la_revenue_budgets` holds 477,199 rows and the portal reads them only through `v_la_public_health_budget`, as one of the geography page's metrics.
 - Costs today: the single largest table in the warehouse is reachable as one number per authority.
 - Fix: a per-authority drill-down by `section` and `line_code` for a chosen ONS code and financial year. **No per-capita, no deflation, no ratio against grants or contracts** — [docs/CAVEATS.md:14](docs/CAVEATS.md:14) forbids cross-layer arithmetic and the grant/budget distinction is already one of the register's caveats. If a comparison looks irresistible, put the two figures side by side and let the reader make it explicitly.
@@ -599,7 +637,7 @@ not quite true of the work.
 | W-10 | Licence lines in exports and footer | Reuse, and defending reuse, start with the licence | *done, 9* |
 | W-15 | Link providers to their registers | The cheapest verification affordance is a link | *done, 9* — CQC still open |
 | W-16 | Zip bundle of exports | "Download the evidence" is nine CSVs and nine JSONs by hand today | **10** — after W-06 |
-| W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point | **11** — needs W-13 to land on |
+| W-17 | "Find my council" typeahead | A reader who knows their town, not their ONS code, has no entry point | *done, 11* |
 | W-18 | Search and page the public tables | Tabulator ships it; the portal configures none of it | *done, 9* |
 | W-20 | Stale-exports warning on the Exports tab | A state that looks fine and isn't — the D-02 shape, for artefacts | **10** |
 | W-21 | Storage card on the Health tab | The only instrument for P-02's growth curve is a one-off audit | **10** |
@@ -1036,7 +1074,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**8**~~ | F-03 — census verification, and the campaign starts | M | **done** |
 | ~~**9**~~ | W-05, W-18, W-08, W-10, W-15 — the shared furniture | S–M | **done** |
 | ~~**10**~~ | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | **done** |
-| **11** | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | Phase 9 |
+| ~~**11**~~ | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | **done** |
 | ~~**12**~~ | W-23, W-26, W-25, W-24 — show what is already collected | M–L | **done** |
 | **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
 | **14** | P-03, F-05 — gated by runs and decisions, not by effort | M | yours |
@@ -1405,9 +1443,15 @@ One thing found in passing and fixed: `.noscript ul` used `var(--space-5)`,
 which does not exist, so an undefined custom property made the declaration
 invalid and that list had no indent at all.
 
-### Phase 11 — The authority spine · M–L — **planned**
+### Phase 11 — The authority spine · M–L — **done** (2026-08-15)
 
-Delivers **W-13**, **W-12**, **W-27**, **W-17**, **W-14**. Depends on Phase 9.
+Delivered **W-13**, **W-12**, **W-27**, **W-17** and **W-14**, in that order.
+1,557 → **1,568 passed** (11 new), 3 skipped, 18 deselected; ruff clean; the
+authority page, the find-council search and the map click all loaded in a
+browser against Jon's own warehouse with no console errors.
+
+What follows is the plan; the record of what changed as it landed is at the
+end of the entry.
 
 **Why these together:** they are one page and its four feeders. "What does my
 authority get?" is the campaign's own question and the portal has no surface
@@ -1444,6 +1488,54 @@ Order within the phase:
 
 **Deliberately not in this phase:** comparison between authorities. One
 authority at a time here; two is Phase 13 and is a different kind of claim.
+
+#### What changed as it landed
+
+The order held and every "verified by" above is a test. Four things the plan
+did not anticipate, and one decision it left to the phase:
+
+- **W-17 is a navigator, not a filter, and that decides where it lives.** The
+  filter bar's controls must declare a state key that a page reads — the
+  W-05 pin — and a control that navigates has no state to hold. Faking a
+  state key for it would have been decoration for the test. It sits in the
+  top bar instead, beside the admin links, and selecting an authority goes
+  straight to its page. Enter picks the top match; the list shows name and
+  ONS code; a failed authorities fetch disables the input rather than
+  breaking the bar.
+- **The endpoint composes the existing endpoints, which made the phase's
+  first pin nearly free and the rest honest.** `authority()` calls the
+  `fingertips`, `ndtms` and `contracts` functions rather than re-writing
+  their queries, so the "same figures as the existing endpoints" test pins
+  the composition itself: if anyone replaces the reuse with a hand-written
+  query, the test fails where the two disagree. Grant and budget are the two
+  sections that could not be reused (no single existing query returns them
+  per authority), so those are the ones the test cross-checks against the
+  geography endpoint year by year.
+- **The row-for-row pin needed the public side to import the admin side's
+  declaration, and the direction is the point.** `public_queries` reads
+  `health.COVERAGE_COLUMNS` rather than copying the twelve
+  (label, table, column, module) tuples — a second copy would be a second
+  statement of what "covered" means, free to drift. The import is one-way:
+  the admin module still imports nothing from the portal, which is the
+  direction the isolation test already pins.
+- **The drill-down pin asserts the row keys, not the absence of a word.** "No
+  ratio" as a search for "ratio" in the payload would pass the moment a
+  derived number got a better name. The test asserts the exact column set of
+  every drill-down row — a derived figure has to arrive as *some* new key —
+  and that `grant` and `budget` are separate payload objects. The
+  unreadable-denomination row keeps `amount NULL` and its verbatim
+  `value_text`, which the fixture exercises and the page renders as "—".
+- **A bare `#/authorities` route needed an answer.** It exists now as a
+  landing pointing at the search, the map and the treatment page, rather
+  than as an error or a 347-row list nobody asked for.
+- **One page-wide caveat text was added server-side**: `budget_detail`,
+  stating the drill-down's no-per-capita, no-deflation, no-ratio rule in the
+  finding's own words, so the section renders it pinned rather than hoping
+  a future editor keeps the rule in a comment.
+
+The map click and the typeahead are the two browser checks the plan named,
+and both were checked by hand against the real warehouse in the same pass
+that loaded every existing route.
 
 ### Phase 12 — Show what is already collected · M–L — **done** (2026-08-15)
 
