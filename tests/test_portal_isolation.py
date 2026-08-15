@@ -48,6 +48,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/providers.js",
     "/js/pages/pfd.js",
     "/js/pages/authority.js",
+    "/js/pages/compare.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -67,6 +68,8 @@ PUBLIC_API_ROUTES = {
     "boundaries",
     "fingertips",
     "ndtms",
+    "compare",
+    "layers",
     "pfd",
     "freshness",
 }

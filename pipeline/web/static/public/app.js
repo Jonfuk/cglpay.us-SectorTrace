@@ -170,10 +170,22 @@ export function subscribe(fn) {
  *  path; filters are its query, which keeps one shareable address for
  *  "contracts, this provider, these years". */
 function writeStateToUrl() {
-  const [path] = (location.hash.slice(1) || '/').split('?');
+  const [path, rawQuery] = (location.hash.slice(1) || '/').split('?');
+  const existing = rawQuery ? new URLSearchParams(rawQuery) : null;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(state)) {
     if (value !== null && value !== undefined && value !== '') params.set(key, value);
+  }
+  // Page-owned query keys survive a filter change. The compare page's
+  // selection is the whole page — `#/compare?ons_code=...&ons_code=...` —
+  // and a filter change must not wipe it out of a URL that is a shareable
+  // comparison.
+  if (existing) {
+    for (const key of existing.keys()) {
+      if (!(key in state)) {
+        for (const value of existing.getAll(key)) params.append(key, value);
+      }
+    }
   }
   const query = params.toString();
   const target = `#${path}${query ? `?${query}` : ''}`;
@@ -218,12 +230,13 @@ const ROUTES = {
   '/providers': () => import('/js/pages/providers.js'),
   '/pfd': () => import('/js/pages/pfd.js'),
   '/authorities': () => import('/js/pages/authority.js'),
+  '/compare': () => import('/js/pages/compare.js'),
 };
 
 let disposeCurrent = null;
 
 async function render() {
-  const { path } = parseHash();
+  const { path, params } = parseHash();
   // Deep dives share their base module: /providers/:key is the providers
   // module with a key, /authorities/:ons_code the authority module with one.
   const base = path.startsWith('/providers/') ? '/providers'
@@ -248,7 +261,10 @@ async function render() {
 
   try {
     const module = await load();
-    disposeCurrent = await module.render(main, { path });
+    // The query is passed through so a page can key off its own hash params —
+    // the compare page is `#/compare?ons=...&ons=...`, a URL that is the whole
+    // comparison. Pages that do not ask for params ignore them.
+    disposeCurrent = await module.render(main, { path, params });
   } catch (error) {
     replace(main, el('div', { class: 'section' },
       el('div', { class: 'chart-error' },

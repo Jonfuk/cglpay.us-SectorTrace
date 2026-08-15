@@ -126,7 +126,9 @@ async function renderOne(main, key) {
   const provider = data.provider || {};
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('p', {}, el('a', { href: '#/providers' }, '← All providers')),
+      el('p', {}, el('a', { href: '#/providers' }, '← All providers'),
+        ' · ', el('a', { href: `#/compare?provider_key=${key}` },
+          'Compare with other providers →')),
       el('h1', {}, provider.canonical_name || key,
         provider.is_target ? ' ' : null,
         provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null),
