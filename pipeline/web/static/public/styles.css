@@ -118,11 +118,17 @@ a:hover { text-decoration-color: currentColor; }
 /* De-emphasised on purpose: the operator tools are for whoever runs the
    pipeline, not for the researchers this portal is built for. */
 .adminlink {
-  margin-left: auto; font-size: 12.5px; color: var(--text-muted);
+  font-size: 12.5px; color: var(--text-muted);
   text-decoration: none; padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 }
 .adminlink:hover { color: var(--text-secondary); border-color: var(--border-accent); }
+
+/* "Find your council" (W-17): a navigator in the top bar, not a filter.
+   Right-aligned with the admin links; the list drops below the input. */
+.findcouncil { position: relative; margin-left: auto; }
+.findcouncil input { min-width: 190px; }
+.findcouncil .typeahead-list { min-width: 260px; right: 0; left: auto; }
 
 /* --- filter bar ---------------------------------------------------------- */
 
@@ -340,6 +346,28 @@ main:focus { outline: none; }
    quiet aside rather than as a badge for that reason. */
 .registers { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: baseline; }
 .registerlink { white-space: nowrap; }
+
+/* --- authority page -------------------------------------------------------- */
+
+/* W-12: which evidence kinds the warehouse holds for one authority. A chip
+   per kind, filled when rows exist; the empty state must read as "not
+   collected" rather than as a zero figure, which is what the pinned caveat
+   next to the row says in prose. */
+.coverage-ticks { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.coverage-tick {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  border-radius: 999px; padding: 4px 12px; font-size: 12.5px;
+  border: 1px solid var(--border-subtle); color: var(--text-secondary);
+}
+.coverage-tick.yes { border-color: var(--border-accent); color: var(--text-primary); }
+.coverage-tick.yes .tick-mark { color: var(--accent-green); }
+.coverage-tick .tick-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* W-27: grant and budget sit side by side on the same page and are never
+   combined into one axis — the caveat pinned above both is why the section
+   exists. */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+@media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
 
 /* --- timeline ------------------------------------------------------------ */
 

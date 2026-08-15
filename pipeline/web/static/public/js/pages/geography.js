@@ -187,7 +187,8 @@ async function drawMap(container, legend, data) {
     .attr('role', 'img')
     .attr('aria-label',
       `Map of English local authorities coloured by ${data.metric_label}. `
-      + `Range ${format(data.min, data.unit)} to ${format(data.max, data.unit)}.`);
+      + `Range ${format(data.min, data.unit)} to ${format(data.max, data.unit)}. `
+      + 'Click an area for its authority page.');
 
   const collection = { type: 'FeatureCollection', features: geo.features };
   const projection = d3.geoMercator().fitSize([width, height], collection);
@@ -221,11 +222,18 @@ async function drawMap(container, legend, data) {
         el('strong', { text: names.get(code) || f.properties.name || code }),
         el('div', { class: 'small muted', text: code }),
         el('div', { text: value === undefined || value === null
-          ? 'no value for this metric' : format(value, data.unit) }));
+          ? 'no value for this metric' : format(value, data.unit) }),
+        el('div', { class: 'small muted', text: 'click for this authority' }));
       tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 300)}px`;
       tip.style.top = `${event.clientY + 14}px`;
     })
-    .on('mouseleave', () => { tip.hidden = true; });
+    .on('mouseleave', () => { tip.hidden = true; })
+    // W-14: the map is an entry point now. The click carries the ONS code
+    // through to the authority page — where the absence stories live too,
+    // which is why an area with no value for this metric is still clickable.
+    .on('click', (event, f) => {
+      location.hash = `#/authorities/${f.properties.ons_code}`;
+    });
 
   replace(container, svg.node());
 
