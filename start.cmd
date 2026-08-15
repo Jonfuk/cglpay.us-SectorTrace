@@ -37,6 +37,19 @@ REM   start.cmd web
 REM   start.cmd web --host 127.0.0.1    - this machine only
 REM   start.cmd web --port 8080 --no-open
 REM
+REM   PostgreSQL. Set DATABASE_URL in .env and this script syncs the "postgres"
+REM   extra, and every command above reads and writes that warehouse instead of
+REM   data\warehouse.db. The SQLite file is opened read-only by both:
+REM   start.cmd migrate-data --dry-run   - the plan and the preflight checks
+REM   start.cmd migrate-data             - load, then verify every value
+REM   start.cmd verify-migration         - check the two again, later
+REM   start.cmd sync-sqlite --check      - how far apart the two warehouses are
+REM   start.cmd sync-sqlite              - rebuild the SQLite one from PostgreSQL
+REM
+REM   "backup" and "restore" follow the configured backend: a .db snapshot on
+REM   SQLite, a verified .sql.gz one on PostgreSQL. See docs\BACKUP.md and
+REM   docs\DEPLOYMENT.md.
+REM
 REM   OCR. Set OCR_ENABLED=true in .env ^(or in the environment^) and this script
 REM   syncs the "ocr" extra as well, so Module 8 can read the two thirds of PFD
 REM   reports that are scans rather than text. Left off, those reports are
@@ -156,13 +169,36 @@ if defined OCR_ENABLED (
     )
 )
 
+REM The "postgres" extra, on the same rule and for a sharper version of the
+REM same reason. uv sync removes what the selected extras do not ask for, so
+REM with DATABASE_URL set in .env and this check absent, every run of this
+REM script uninstalled psycopg — and since the warehouse of record is now the
+REM PostgreSQL one, the next command failed at its first connection with
+REM ModuleNotFoundError. start.sh grew this check when the port landed; this
+REM file did not, and Windows is where the collection actually runs.
+REM
+REM Presence of the URL is the selector, matching pipeline/config.py exactly:
+REM there is deliberately no second switch that could disagree with it. An
+REM empty value reads as unset on both sides.
+set "PG_EXTRA="
+if defined DATABASE_URL (
+    if not "%DATABASE_URL%"=="" set "PG_EXTRA=--extra postgres"
+) else (
+    if exist ".env" (
+        findstr /i /r /c:"^ *DATABASE_URL *= *[^ ]" ".env" >nul 2>nul && set "PG_EXTRA=--extra postgres"
+    )
+)
+
 echo ==^> Syncing dependencies
-uv sync --quiet %OCR_EXTRA%
+uv sync --quiet %OCR_EXTRA% %PG_EXTRA%
 if errorlevel 1 (
     echo error: uv sync failed. Run "uv sync" without --quiet to see the full output. 1>&2
     if defined OCR_EXTRA (
         echo   OCR_ENABLED is set, so this tried "uv sync --extra ocr". 1>&2
         echo   Unset it to start without OCR. 1>&2
+    )
+    if defined PG_EXTRA (
+        echo   DATABASE_URL is set, so this tried "uv sync --extra postgres". 1>&2
     )
     popd
     exit /b 1
@@ -172,7 +208,11 @@ if defined OCR_EXTRA (
     echo   ! OCR is on. The first scanned report downloads ~105 MB of models, 1>&2
     echo   ! and reading one takes about nine seconds a page. 1>&2
 ) else (
-    echo   ok dependencies in sync
+    if defined PG_EXTRA (
+        echo   ok dependencies in sync ^(including the postgres extra^)
+    ) else (
+        echo   ok dependencies in sync
+    )
 )
 
 REM --- run -------------------------------------------------------------------------

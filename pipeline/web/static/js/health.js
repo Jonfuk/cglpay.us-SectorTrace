@@ -199,7 +199,14 @@ async function runIntegrity() {
       result.textContent = current.error || 'check failed';
       result.className = 'label bad';
     } else if (outcome.ok) {
-      result.textContent = 'no corruption found';
+      // What was checked differs by backend and the difference matters:
+      // SQLite walks every page of the file, PostgreSQL cannot and sweeps the
+      // foreign keys instead. "No corruption found" would claim the same
+      // thing for both, so the panel says what it looked at.
+      result.textContent = outcome.checked
+        ? `no problems found in ${outcome.checked}`
+        : 'no corruption found';
+      result.title = outcome.not_checked || '';
       result.className = 'label good';
     } else {
       result.textContent = `${outcome.integrity.slice(0, 2).join('; ')}`

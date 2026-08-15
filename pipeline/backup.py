@@ -26,6 +26,14 @@ A backup is verified before it is called one. `VACUUM INTO` can fail part-way
 and leave a file, and a backup nobody checked is a hope rather than a copy, so
 the new database is opened, integrity-checked, and compared table by table
 against the source it came from.
+
+Both of those halves are about the warehouse's *contents*, not about SQLite,
+and the warehouse now has two backends. When `DATABASE_URL` is set this module
+keeps the contract and hands the copying to `pipeline/pgbackup.py`, which takes
+a consistent snapshot the way PostgreSQL offers one — see that module for why
+it is not `pg_dump`. The manifest, the archive inventory, the retention rule
+and the refusal to overwrite are the same either way; they were never about
+the file format.
 """
 from __future__ import annotations
 
@@ -48,9 +56,38 @@ log = structlog.get_logger()
 # it; nothing else gives a consistent copy of a live database in one statement.
 MIN_SQLITE = (3, 27, 0)
 
+# What a backup of each backend is called on disk. Both are `warehouse-<stamp>`
+# so one listing, one retention rule and one set of companion files cover them;
+# the suffix is what says which backend took it, and `restore` refuses the
+# wrong one rather than trying to read it.
+SQLITE_SUFFIX = ".db"
+POSTGRES_SUFFIX = ".sql.gz"
+# Longest first: `.sql.gz` and `.db` do not collide, but a future `.db.gz`
+# would, and stripping the shorter one first would leave `.gz` behind.
+BACKUP_SUFFIXES = (POSTGRES_SUFFIX, SQLITE_SUFFIX)
+
 
 class BackupError(RuntimeError):
     """A backup that cannot be trusted, or a restore that would lose data."""
+
+
+def companion(backup: Path, suffix: str) -> Path:
+    """The manifest or listing beside a backup, whatever its own suffix is.
+
+    `warehouse-….db` and `warehouse-….sql.gz` both answer
+    `warehouse-….manifest.json`. Not `with_suffix`, which sees `.sql.gz` as a
+    name ending in `.gz` and would file the manifest under
+    `warehouse-….sql.manifest.json` — beside the backup, and not where
+    anything looks for it.
+    """
+    name = backup.name
+    for known in BACKUP_SUFFIXES:
+        if name.endswith(known):
+            name = name[: -len(known)]
+            break
+    else:
+        name = backup.stem
+    return backup.with_name(name + suffix)
 
 
 def _now() -> datetime:
@@ -149,6 +186,11 @@ def create(settings: Settings | None = None, destination: Path | None = None,
     that looks like a backup and is not.
     """
     settings = settings or get_settings()
+    if settings.database_backend == "postgres":
+        from pipeline import pgbackup
+
+        return pgbackup.dump(settings, destination=destination, label=label)
+
     _require_vacuum_into()
 
     source = settings.database_path
@@ -195,6 +237,7 @@ def create(settings: Settings | None = None, destination: Path | None = None,
     manifest = {
         "created_at": started.isoformat(timespec="seconds"),
         "elapsed_seconds": round((_now() - started).total_seconds(), 1),
+        "backend": "sqlite",
         "warehouse": {
             "source": str(source),
             "backup": str(target),
@@ -207,10 +250,10 @@ def create(settings: Settings | None = None, destination: Path | None = None,
         "raw_archive": {"path": str(settings.raw_archive_dir), **archive},
         "sqlite_version": sqlite3.sqlite_version,
     }
-    target.with_suffix(".manifest.json").write_text(
+    companion(target, ".manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8")
     if listing:
-        target.with_suffix(".archive.txt").write_text(
+        companion(target, ".archive.txt").write_text(
             "\n".join(listing) + "\n", encoding="utf-8")
 
     log.info("backup.complete", target=str(target),
@@ -248,6 +291,24 @@ def restore(backup: Path, settings: Settings | None = None,
     settings = settings or get_settings()
     if not backup.is_file():
         raise BackupError(f"no backup file at {backup}.")
+
+    # Which backend restores this is the configured one, not the file's — but
+    # a file taken from the other backend cannot be read by it, and finding
+    # that out from a parse error is worse than being told. The check is on
+    # the name because that is what the operator typed and what they can
+    # correct.
+    wanted = (POSTGRES_SUFFIX if settings.database_backend == "postgres"
+               else SQLITE_SUFFIX)
+    if not backup.name.endswith(wanted):
+        raise BackupError(
+            f"{backup.name} is not a {settings.database_backend} backup "
+            f"(those end in {wanted}). DATABASE_URL decides which warehouse "
+            "is being restored into; unset it to restore a SQLite file.")
+
+    if settings.database_backend == "postgres":
+        from pipeline import pgbackup
+
+        return pgbackup.restore(backup, settings, force=force)
 
     # A file damaged badly enough does not report a failed check -- it refuses
     # to be read as a database at all, and sqlite3 raises. Both are the same
@@ -338,18 +399,24 @@ def prune(settings: Settings | None = None, keep: int = 7,
         path = Path(entry["path"])
         # warehouse-20260813T131334Z.db is automatic;
         # warehouse-20260813T131334Z-before-m04-rerun.db is not.
-        stem = path.stem
+        #
+        # Read off the name with the suffix stripped by `companion`, not off
+        # `Path.stem`: for `warehouse-….sql.gz` that leaves `warehouse-….sql`,
+        # which matches nothing here, and every PostgreSQL snapshot would have
+        # been filed as labelled and never pruned — a retention rule that
+        # quietly retains everything.
+        stem = companion(path, "").name
         (automatic if re.fullmatch(r"warehouse-\d{8}T\d{6}Z(-\d+)?", stem)
           else labelled).append(path)
 
     doomed = automatic[keep:]          # listing() is newest first
     removed = []
     for path in doomed:
-        companions = [path, path.with_suffix(".manifest.json"),
-                       path.with_suffix(".archive.txt")]
+        companions = [path, companion(path, ".manifest.json"),
+                       companion(path, ".archive.txt")]
         if not dry_run:
-            for companion in companions:
-                companion.unlink(missing_ok=True)
+            for beside in companions:
+                beside.unlink(missing_ok=True)
         removed.append(path.name)
 
     if removed and not dry_run:
@@ -373,14 +440,25 @@ def listing(settings: Settings | None = None) -> list[dict]:
     if not settings.backup_dir.is_dir():
         return []
 
+    # Both backends' backups, in one list. An operator who has cut over to
+    # PostgreSQL still has the SQLite snapshots from before it, and those are
+    # the ones that matter most on the day the cutover is being reconsidered —
+    # a listing that hid them because of the configured backend would hide
+    # them exactly then.
+    found = [path for pattern in (f"warehouse-*{suffix}"
+                                   for suffix in BACKUP_SUFFIXES)
+              for path in settings.backup_dir.glob(pattern)]
+
     out = []
-    for path in sorted(settings.backup_dir.glob("warehouse-*.db"),
-                        key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True):
+    for path in sorted(found, key=lambda p: (p.stat().st_mtime_ns, p.name),
+                        reverse=True):
         entry = {"path": str(path), "name": path.name,
                   "bytes": path.stat().st_size,
+                  "backend": ("postgres" if path.name.endswith(POSTGRES_SUFFIX)
+                               else "sqlite"),
                   "modified": datetime.fromtimestamp(
                       path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")}
-        manifest_path = path.with_suffix(".manifest.json")
+        manifest_path = companion(path, ".manifest.json")
         if manifest_path.is_file():
             try:
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

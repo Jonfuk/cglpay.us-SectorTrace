@@ -405,23 +405,7 @@ def integrity_check(settings) -> list[dict]:
     conn = queries.readonly_connection(settings)
     try:
         if db.backend_of(conn) == "postgres":
-            # Refused rather than approximated. PostgreSQL has no single
-            # statement that answers this: `pg_amcheck` is a separate binary,
-            # and the foreign-key sweep would have to be a generated query per
-            # constraint. Both are real work and belong in the phase that does
-            # the backup and restore port, since they answer the same question
-            # ("is this warehouse intact?") and should be built together.
-            #
-            # What is NOT acceptable is a check that returns ok because it
-            # looked at nothing — a corruption check nobody can distinguish
-            # from a passing one is worse than an absent feature, and this
-            # panel's whole claim is that it verified something.
-            raise queries.QueryError(
-                "The integrity check has no PostgreSQL implementation yet. "
-                "SQLite's PRAGMA integrity_check walks every page of the file; "
-                "PostgreSQL's equivalent is pg_amcheck plus a per-constraint "
-                "foreign-key sweep, which is not yet built. Nothing here has "
-                "been verified — treat this as unknown, not as passing.")
+            return _postgres_integrity(conn)
         integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
         foreign_keys = [dict(zip(("table", "rowid", "parent", "fkid"), row))
                          for row in conn.execute("PRAGMA foreign_key_check")]
@@ -433,4 +417,107 @@ def integrity_check(settings) -> list[dict]:
         "ok": integrity == ["ok"] and not foreign_keys,
         "foreign_key_violations": foreign_keys[:200],
         "foreign_key_violation_count": len(foreign_keys),
+        "checked": "every page of the file and every foreign key",
+        "not_checked": "",
+    }]
+
+
+def _postgres_integrity(conn) -> list[dict]:
+    """The half of `PRAGMA integrity_check` that PostgreSQL can answer.
+
+    Phase 1 refused this outright rather than return an ok nobody could
+    distinguish from a check, and left the work to the phase doing backup and
+    restore, on the grounds that both answer "is this warehouse intact?". This
+    is that work, and it is deliberately two thirds of it:
+
+      * **Every foreign key is swept**, one generated anti-join per constraint
+        — the analogue of `PRAGMA foreign_key_check`, and the check that would
+        notice a restore or a load having produced orphans.
+      * **Every constraint is asked whether it is validated.** A `NOT VALID`
+        constraint is enforced for new rows and never checked against the old
+        ones, so it is a guarantee the schema claims and does not have. SQLite
+        cannot express that state and therefore cannot have it.
+      * **Pages are not checked.** There is no in-database equivalent of
+        walking the file: `pg_amcheck` is a separate binary, and the `amcheck`
+        extension is not installed on this server — installing it needs
+        superuser, which `sectortrace_app` deliberately is not. So the panel
+        says what it looked at rather than reporting a clean bill for a check
+        that did not run.
+
+    Read through the reader role like everything else here, which is also why
+    the sweep is `COUNT(*)` per constraint rather than anything that writes a
+    temporary table.
+    """
+    constraints = conn.execute(
+        "SELECT c.conname AS name, c.contype AS kind, c.convalidated AS validated, "
+        "       c.conrelid::regclass::text AS child, "
+        "       c.confrelid::regclass::text AS parent, "
+        "       c.conkey AS child_columns, c.confkey AS parent_columns "
+        "FROM pg_constraint c "
+        "JOIN pg_class r ON r.oid = c.conrelid "
+        "WHERE r.relnamespace = current_schema()::regnamespace "
+        "  AND r.relkind = 'r' "
+        "ORDER BY c.conrelid::regclass::text, c.conname").fetchall()
+
+    def columns_of(table: str, numbers) -> list[str]:
+        rows = conn.execute(
+            "SELECT a.attname AS name FROM pg_attribute a "
+            "WHERE a.attrelid = to_regclass(?) AND a.attnum = ANY(?) "
+            "ORDER BY array_position(?, a.attnum)",
+            (table, list(numbers), list(numbers))).fetchall()
+        return [r["name"] for r in rows]
+
+    violations: list[dict] = []
+    unvalidated: list[str] = []
+    swept = 0
+    for row in constraints:
+        if not row["validated"]:
+            unvalidated.append(f"{row['child']}.{row['name']}")
+        if row["kind"] != "f":
+            continue
+        child_columns = columns_of(row["child"], row["child_columns"])
+        parent_columns = columns_of(row["parent"], row["parent_columns"])
+        if len(child_columns) != len(parent_columns):
+            violations.append({"table": row["child"], "parent": row["parent"],
+                                "fkid": row["name"],
+                                "rowid": "constraint could not be read"})
+            continue
+
+        # MATCH SIMPLE: a row with a NULL anywhere in the key satisfies the
+        # constraint however little else is true of it, so those rows are not
+        # orphans and must not be counted as any.
+        present = " AND ".join(f"c.{catalog.quote(col)} IS NOT NULL"
+                                for col in child_columns)
+        joined = " AND ".join(
+            f"p.{catalog.quote(p)} = c.{catalog.quote(c)}"
+            for p, c in zip(parent_columns, child_columns))
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM {catalog.quote(row['child'])} c "
+            f"WHERE {present} AND NOT EXISTS ("
+            f"  SELECT 1 FROM {catalog.quote(row['parent'])} p WHERE {joined})"
+        ).fetchone()[0]
+        swept += 1
+        if count:
+            violations.append({"table": row["child"], "parent": row["parent"],
+                                "fkid": row["name"],
+                                "rowid": f"{count:,} orphaned row(s)"})
+
+    integrity = []
+    if unvalidated:
+        integrity.append("not validated against existing rows: "
+                          + ", ".join(unvalidated))
+    if not integrity:
+        integrity = ["ok"]
+
+    return [{
+        "integrity": integrity,
+        "ok": not violations and not unvalidated,
+        "foreign_key_violations": violations[:200],
+        "foreign_key_violation_count": len(violations),
+        "checked": f"{swept} foreign keys and {len(constraints)} constraints",
+        "not_checked": "The pages. PostgreSQL has no in-database equivalent of "
+                        "walking the file: pg_amcheck is a separate binary run "
+                        "against the server, and the amcheck extension needs a "
+                        "superuser to install. Nothing here has looked at "
+                        "physical storage.",
     }]
