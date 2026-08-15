@@ -23,12 +23,25 @@ provided two things hold:
 
 The one piece of database work a worker unavoidably does is the HTTP
 conditional-request cache, since `PipelineHTTPClient` reads and writes it on
-every fetch. Each thread therefore gets its own client with its own SQLite
+every fetch. Each thread therefore gets its own client with its own
 connection, **opened in that thread**, so no connection object ever crosses a
-thread boundary and `check_same_thread` can stay on. Those connections commit
-their own cache entries immediately: the cache is a fetch optimisation, not
-evidence, and it is consistent with the raw archive either way because
-archiving already happens regardless of `--dry-run`.
+thread boundary and `check_same_thread` can stay on.
+
+What a worker does with a cache entry depends on the backend, and this is the
+one place in the pipeline where that is true:
+
+  * **SQLite** — buffered, and flushed by the caller once the pool has
+    finished. A worker writing here would take the single writer slot that
+    the main thread is holding while it commits evidence, and block for the
+    whole busy_timeout, over and over. That was observed as a hung test
+    suite, not predicted.
+  * **PostgreSQL** — written and committed by the worker itself, because
+    there is no slot to take. Phase 4; the plan named the deferral as
+    machinery that PostgreSQL makes unnecessary, and it is.
+
+Either way the cache is a fetch optimisation and not evidence, and it is
+consistent with the raw archive on both paths because archiving already
+happens regardless of `--dry-run`.
 
 Results come back in submission order, not completion order. Two runs of the
 same checkout should do the same work in the same sequence — the same reason
@@ -104,7 +117,15 @@ class _ClientPool:
             # hook of its own to close it in.
             conn = db.get_connection(self._settings, check_same_thread=False)
             client = PipelineHTTPClient(self._source_system, settings=self._settings, conn=conn)
-            client.defer_cache_writes = True
+            # Deferring is SQLite's answer to SQLite's single writer. On
+            # PostgreSQL a worker writes its own cache entries on its own
+            # connection, which is what the module docstring above has always
+            # wished were true — see `PipelineHTTPClient` for why the commit
+            # travels with it.
+            if db.backend_of(conn) == "sqlite":
+                client.defer_cache_writes = True
+            else:
+                client.commit_cache_writes = True
             if self._configure is not None:
                 self._configure(client)
             self._local.client = client
@@ -148,10 +169,16 @@ def fetch_in_parallel(
     with a broken TLS chain should cost one council, not the crawl.
 
     Pass `cache_conn` (the module's connection) to keep conditional requests
-    working across runs. Worker threads cannot write the HTTP cache
-    themselves — SQLite allows one writer, and the main thread holds that slot
-    while committing evidence — so their entries are buffered and flushed here
-    once the pool has finished and nothing else is running.
+    working across runs on SQLite, where worker threads cannot write the HTTP
+    cache themselves — SQLite allows one writer and the main thread holds that
+    slot while committing evidence — so their entries are buffered and flushed
+    here once the pool has finished and nothing else is running.
+
+    On PostgreSQL the workers have already written and committed their own,
+    so there is nothing to flush and `cache_conn` is unused. Still worth
+    passing: which backend a module is running against is not a module's
+    business, and a call site that dropped the argument would quietly stop
+    caching the day someone unset `DATABASE_URL`.
     """
     units = list(units)
     if not units:

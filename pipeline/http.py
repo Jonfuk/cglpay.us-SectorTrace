@@ -403,10 +403,27 @@ class PipelineHTTPClient:
         self._robots = _RobotsCache(self._client, self.settings.user_agent)
         self._overrides_recorded: set[str] = set()
 
-        # Set by the fetch pool. Reads of the conditional-request cache are
-        # always safe (WAL readers never block); writes are the problem, and
-        # are buffered here for the main thread to flush.
+        # Both set by the fetch pool, and only ever one of them, because they
+        # are the two answers to the same question: what a worker thread does
+        # with a conditional-request cache entry.
+        #
+        # On SQLite it defers. Reads are always safe (WAL readers never
+        # block); a write takes the single writer slot that the main thread is
+        # holding while it commits evidence, so the entries are buffered and
+        # flushed by the caller.
+        #
+        # On PostgreSQL it writes and commits, because there is no slot to
+        # take. The commit is not a detail: the pool gives each worker a
+        # connection of its own and closes it at the end, and psycopg rolls
+        # back on close — so a cache write without one is a cache write
+        # thrown away. Which is only a re-validation next run rather than lost
+        # evidence, and would therefore never have announced itself.
+        #
+        # A client using the *module's* connection sets neither and writes
+        # without committing, which is right: the module commits per unit of
+        # work and the cache entry belongs to that unit.
         self.defer_cache_writes = False
+        self.commit_cache_writes = False
         self.pending_cache_writes: list[dict] = []
 
     def __enter__(self) -> "PipelineHTTPClient":
@@ -557,6 +574,8 @@ class PipelineHTTPClient:
                 self.pending_cache_writes.append(entry)
             else:
                 db.set_http_cache(self.conn, **entry)
+                if self.commit_cache_writes:
+                    self.conn.commit()
 
         return FetchResult(
             url=request_url,

@@ -561,6 +561,72 @@ class TestMigrationsKeepTheReaderCurrent:
                 reader.close()
 
 
+class TestFetchPoolCacheWrites:
+    """Worker threads write their own conditional-request cache here.
+
+    `defer_cache_writes` exists because SQLite allows one writer and the main
+    thread holds the slot while it commits evidence. PostgreSQL has no such
+    slot, so the deferral goes — and the thing that makes that change worth
+    testing rather than reasoning about is how it fails: the pool gives each
+    worker its own connection and closes it at the end, psycopg rolls back on
+    close, and a cache write without a commit is therefore discarded in
+    silence. The run succeeds, the rows are simply not there, and the only
+    symptom is that next week's crawl re-downloads everything.
+    """
+
+    @pytest.fixture
+    def settings(self, scratch):
+        from pipeline.config import Settings
+
+        return Settings(contact_email="t@e.com", database_url=scratch.url,
+                         default_rate_limit_seconds=0.0, _env_file=None)
+
+    def test_a_worker_writes_and_commits_its_own_entries(self, settings, pg):
+        from pipeline import db as db_module
+        from pipeline.parallel import fetch_in_parallel
+
+        pg.execute("DELETE FROM http_cache WHERE url LIKE 'https://pool-test%'")
+        pg.commit()
+
+        def worker(unit, client):
+            assert client.defer_cache_writes is False, (
+                "PostgreSQL has no write slot to queue behind")
+            assert client.commit_cache_writes is True
+            db_module.set_http_cache(
+                client.conn, url=f"https://pool-test-{unit}.example.com/x",
+                host=f"pool-test-{unit}.example.com", etag=f"etag-{unit}",
+                last_modified=None, payload_sha256=f"sha-{unit}")
+            client.conn.commit()
+            return unit
+
+        outcomes = list(fetch_in_parallel(
+            range(4), worker, source_system="test_source", settings=settings,
+            max_workers=4))
+        assert all(o.ok for o in outcomes), [o.error for o in outcomes if not o.ok]
+
+        # Read on a different connection, after the pool has closed its own:
+        # the point is that the rows survived the connections that wrote them.
+        rows = pg.execute(
+            "SELECT url, etag FROM http_cache WHERE url LIKE 'https://pool-test%' "
+            "ORDER BY url").fetchall()
+        assert [r["etag"] for r in rows] == ["etag-0", "etag-1", "etag-2", "etag-3"]
+
+        pg.execute("DELETE FROM http_cache WHERE url LIKE 'https://pool-test%'")
+        pg.commit()
+
+    def test_nothing_is_left_buffered_for_the_caller_to_flush(self, settings):
+        """The other half: `fetch_in_parallel` still flushes on SQLite, and
+        must find nothing to flush here rather than writing the same rows a
+        second time on the module's connection."""
+        from pipeline import db as db_module
+        from pipeline.parallel import _ClientPool
+
+        pool = _ClientPool("test_source", settings)
+        client = pool.get()
+        assert db_module.backend_of(client.conn) == "postgres"
+        assert pool.close() == []
+
+
 class TestTheReadPoolHandsBackWhatItPromised:
     """A borrowed connection is the same connection the callers had.
 
