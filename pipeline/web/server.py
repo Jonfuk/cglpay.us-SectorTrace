@@ -252,6 +252,24 @@ def _int(params: dict[str, list[str]], name: str, default: int) -> int:
         raise ApiError(f"{name} must be a whole number, got {value!r}.") from None
 
 
+# CR and LF, the two characters that end an HTTP header line. See
+# `Handler.send_header`.
+_HEADER_BREAK = re.compile(r"[\r\n]")
+
+# What a generated filename may contain. Everything else becomes a hyphen:
+# these values reach a quoted `filename="…"` in a Content-Disposition header,
+# where a quote or a semicolon changes what the header means.
+_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+# Long enough for a provider key or a metric name, short enough that a
+# filename stays a filename.
+_NAME_PART_MAX = 64
+
+
+def _safe_name_part(value: str) -> str:
+    return _NAME_UNSAFE.sub("-", value).strip("-")[:_NAME_PART_MAX]
+
+
 def _str(params: dict[str, list[str]], name: str, default: str = "") -> str:
     return (params.get(name, [default])[0] or "").strip()
 
@@ -316,6 +334,47 @@ class Handler(BaseHTTPRequestHandler):
         happened" is recorded, and it is structlog.
         """
         log.debug("web.request", client=self.address_string(), message=format % args)
+
+    def send_header(self, keyword: str, value: Any) -> None:
+        """Every header this server sends, with CR and LF taken out of it.
+
+        `BaseHTTPRequestHandler.send_header` formats `"%s: %s\\r\\n"` and
+        validates nothing, so a value carrying its own CRLF ends the header and
+        starts another one. That is HTTP response splitting, and it was live
+        here: `_export_name` interpolated the `provider_key` and `metric` query
+        parameters straight into `Content-Disposition`, so
+
+            /api/v1/export?endpoint=summary&format=csv&provider_key=x%0d%0aX-Injected:%20yes
+
+        put `X-Injected` in the response. Confirmed over a raw socket before
+        this was written, and pinned by
+        `tests/test_web_security_headers.py`. CodeQL had been reporting it as
+        `py/http-response-splitting` since the scan was first switched on; it
+        sat in the untriaged pile that finding O-05 records.
+
+        The names are fixed by this file, so only the values are a real risk —
+        but both are checked, because the cost is a regex and the argument for
+        checking one and not the other is the kind that stops being true later.
+
+        Stripping rather than refusing, which is the opposite of what this
+        project usually does. A refusal here would raise part-way through
+        writing a response whose status line has already gone out, turning a
+        blocked attack into a broken connection and a stack trace. So the value
+        is made safe and the attempt is logged loudly — the log line is what
+        makes it visible, and the strip is what makes it harmless.
+
+        This is the backstop. `_export_name` sanitises at the source as well,
+        because a filename containing a quote or a semicolon still produces a
+        `Content-Disposition` that parses wrongly without ever touching a
+        newline.
+        """
+        text = str(value)
+        if _HEADER_BREAK.search(text) or _HEADER_BREAK.search(str(keyword)):
+            log.warning("web.header_break_stripped", header=str(keyword),
+                         client=self.address_string())
+            keyword = _HEADER_BREAK.sub(" ", str(keyword))
+            text = _HEADER_BREAK.sub(" ", text)
+        super().send_header(keyword, text)
 
     def _accepts_gzip(self) -> bool:
         return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
@@ -699,9 +758,22 @@ class Handler(BaseHTTPRequestHandler):
             "text/csv; charset=utf-8", name, provenance)
 
     def _export_name(self, label: str, params: dict[str, list[str]]) -> str:
+        """The download's filename, built from what was asked for.
+
+        `provider_key` and `metric` come from the query string and land in a
+        `Content-Disposition` header, so they are reduced to the characters a
+        filename may contain rather than interpolated. Two separate problems
+        are being avoided and only one of them involves a newline: a value
+        carrying `"` or `;` ends the quoted filename and adds a parameter to
+        the header, which needs no control character at all.
+
+        `send_header` strips CR and LF as a backstop — see its docstring, and
+        the response-splitting hole this pair of fixes closed.
+        """
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-        parts = [p for p in (_str(params, "provider_key"), _str(params, "metric")) if p]
-        return "_".join(["sectorTrace", label, *parts, stamp])
+        parts = [_safe_name_part(p) for p
+                  in (_str(params, "provider_key"), _str(params, "metric"))]
+        return "_".join(["sectorTrace", label, *[p for p in parts if p], stamp])
 
     def _send_chunked(self, chunks, content_type: str, filename: str,
                        provenance: dict) -> None:

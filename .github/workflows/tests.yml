@@ -15,6 +15,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege for GITHUB_TOKEN. This workflow reads the code, runs the
+# suite and writes nothing back, so `contents: read` is the whole of what it
+# needs — and a token scoped to what a job does is a token a compromised
+# dependency cannot use to push. CodeQL reported the omission as
+# `actions/missing-workflow-permissions`; codeql.yml already declared its own.
+permissions:
+  contents: read
+
 jobs:
   test:
     # Ubuntu, while development is on Windows. That is deliberate: every path
@@ -25,10 +33,14 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v7
+      # Pinned to a commit rather than a tag: a tag is a moving pointer
+      # the action's owner can repoint, so `@v7` is a promise to run
+      # whatever that repository decides `v7` means on the day. The
+      # comment keeps the version readable; Dependabot updates both.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
         with:
           enable-cache: true
 
