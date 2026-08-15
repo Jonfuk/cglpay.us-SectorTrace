@@ -1429,3 +1429,19 @@ def serve(settings: Settings | None = None, host: str = "127.0.0.1",
         server.serve_forever()
     finally:
         server.server_close()
+        close_read_pools()
+
+
+def close_read_pools() -> None:
+    """Give back the PostgreSQL read pool when the server stops.
+
+    `atexit` would do it too. This is here so that a caller which builds a
+    server, serves, and carries on — the tests do exactly that — does not
+    leave a pool holding connections to a warehouse nobody is reading any
+    more. A no-op on SQLite, and on a checkout without psycopg installed.
+    """
+    try:
+        from pipeline import pg
+    except ImportError:  # pragma: no cover - no postgres extra installed
+        return
+    pg.close_pools()

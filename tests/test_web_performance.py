@@ -184,10 +184,57 @@ def test_the_coverage_aggregates_use_an_index(ro, table, column):
     assert "SCAN" not in plan or "USING" in plan, f"{table}.{column} is scanned: {plan}"
 
 
+def test_the_portal_contract_list_uses_its_index(ro):
+    """Migration 0044, and the ORDER BY that has to match it.
+
+    The portal's contract list is `ORDER BY date_published DESC NULLS LAST,
+    notice_id`, and 0044 indexes exactly that. The pairing is the fragile
+    part: drop the `NULLS LAST`, or reverse either column, and the index stops
+    being usable without anything failing — the page just goes back to sorting
+    98,636 rows to show the first fifty. That was 6 seconds on SQLite and
+    83ms on PostgreSQL before the index, and 1.9ms after.
+    """
+    from pipeline.web import public_queries
+
+    sql = public_queries._NOTICE_SELECT.format(clause="") + " LIMIT 500"
+    plan = plan_for(ro, sql)
+    assert "idx_contracts_date_published" in plan, (
+        f"the contract list is not using its index: {plan}. The ORDER BY and "
+        "migration 0044 have to agree, down to the NULLS clause.")
+
+
 def test_the_pending_queue_count_uses_an_index(ro):
     plan = plan_for(ro, "SELECT module, COUNT(*) FROM review_queue "
                          "WHERE status = 'pending' GROUP BY module")
     assert "INDEX" in plan, plan
+
+
+def test_the_sidebar_asks_for_its_counts_once(ro):
+    """The other half of "add an index" is "ask fewer times".
+
+    This is the one case in the Phase 3 baseline where PostgreSQL was slower
+    for a reason that had nothing to do with the query: a `COUNT(*)` per
+    table, on every page load of the operator UI, is 82 cheap reads of a local
+    file and 82 round-trips to a server on the LAN — 39ms against 320ms.
+
+    Asserted by counting statements rather than by timing, because a timing
+    test on a fixture database would pass either way.
+    """
+    statements: list[str] = []
+    ro.set_trace_callback(statements.append)
+    try:
+        objects = queries.list_objects(ro)
+    finally:
+        ro.set_trace_callback(None)
+
+    counted = [o for o in objects if o["rows"] is not None]
+    assert len(counted) > 3, "too few tables here for this to be a test"
+
+    counting = [s for s in statements if "COUNT(*)" in s]
+    assert len(counting) == 1, (
+        f"{len(counting)} counting statements for {len(counted)} tables. The "
+        "sidebar counts every table in the warehouse on every page load; one "
+        "statement per table is free on a file and 5-15ms each over a LAN.")
 
 
 def test_freshness_scans_and_that_is_the_accepted_cost(ro):

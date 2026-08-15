@@ -18,6 +18,8 @@ NULL — but the rule is written down here because the same trap is live in
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from pipeline import db
 
 # The tables SQLite keeps for itself. PostgreSQL puts its equivalents in
@@ -68,6 +70,40 @@ def list_objects(conn) -> list[dict]:
 def table_names(conn) -> list[str]:
     """Base tables only, views excluded."""
     return [o["name"] for o in list_objects(conn) if o["type"] == "table"]
+
+
+def row_counts(conn, names: Sequence[str]) -> dict[str, int]:
+    """Exact row counts for `names`, asked once rather than once each.
+
+    A count per table is one cheap read of a local file and one round-trip
+    over a LAN, and the operator sidebar asks for every table in the
+    warehouse on every page load. Measured in Phase 3 that was 39ms on SQLite
+    and 320ms on PostgreSQL — the single largest regression in the baseline,
+    and the one case there where the fix is not an index but asking once.
+
+    Exact, not estimated. `pg_class.reltuples` would answer in one seek
+    without touching the tables, and it is a planner statistic: it is stale
+    between autovacuum runs, it is -1 on a table that has never been
+    analysed, and a sidebar that says 98,000 when the table holds 98,636 is
+    worse than a slow one in a project whose figures have to survive being
+    disputed. `COUNT(*)` is what the callers already had; the round-trips are
+    what this removes.
+
+    The ordinal is not decoration. Results are matched back to names by
+    position, and `UNION ALL` does not promise to return branches in the order
+    they were written — so the order is asked for explicitly rather than
+    relied on. Names are quoted, and every caller has already matched them
+    against the live schema.
+    """
+    names = list(names)
+    if not names:
+        return {}
+    sql = " UNION ALL ".join(
+        f"SELECT {i} AS i, COUNT(*) AS n FROM {quote(name)}"
+        for i, name in enumerate(names)
+    ) + " ORDER BY i"
+    rows = conn.execute(sql).fetchall()
+    return {names[row["i"]]: row["n"] for row in rows}
 
 
 def object_type(conn, name: str) -> str | None:

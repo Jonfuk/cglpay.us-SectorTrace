@@ -608,7 +608,14 @@ _NOTICE_SELECT = """
                -- columns should not have them move underneath them.
                c.source_system, c.notice_web_url
         FROM contracts c{clause}
-        ORDER BY c.date_published DESC, c.notice_id"""
+        -- NULLS LAST is said rather than left to the engine: SQLite puts them
+        -- last under DESC and PostgreSQL puts them first, so the same list
+        -- would open on a different notice depending on which backend
+        -- answered. SQLite is the backend of record, so its order is the one
+        -- written down. It is also what idx_contracts_date_published is built
+        -- to answer (migration 0044) — an ORDER BY the index does not match
+        -- is a sort of the whole table.
+        ORDER BY c.date_published DESC NULLS LAST, c.notice_id"""
 
 
 def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only):
@@ -1834,21 +1841,39 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
     from health.py rather than re-declared here — a second copy of what
     "covered" means would be a second statement free to drift. W-12's pin is
     that the two answers agree row for row.
+
+    Thirteen statements until Phase 4 — one asking which tables exist, per
+    column, plus a count per column — and one now. The authority page is the
+    heaviest payload the portal serves (40 statements, of which round-trips
+    over a LAN were most of the 380ms), and this was the only part of it that
+    could be folded: everything else here is `fingertips`, `ndtms` and
+    `contracts` composed rather than re-written, which is a guarantee that a
+    figure on this page matches the page it came from and worth more than the
+    statements it costs.
     """
     # `sqlite_master` has no PostgreSQL equivalent, so "does the warehouse
-    # hold this table?" is asked through catalog, which speaks to both.
-    tables = set(catalog.table_names(conn))
-    cells: dict[str, int] = {}
-    for label, table, column, _module in health.COVERAGE_COLUMNS:
-        if table not in tables:
-            cells[label] = 0
-            continue
-        # Table and column names come from health.COVERAGE_COLUMNS, which is
-        # code, not a request, so interpolating them is the same trust as the
-        # admin matrix.
-        cells[label] = _one(
-            conn, f"SELECT COUNT(*) AS n FROM {table} WHERE {column} = ?",
-            (ons_code,)).get("n", 0)
+    # hold this table?" is asked through catalog, which speaks to both. Named
+    # directly here until Phase 4, which made this route fail outright on
+    # PostgreSQL.
+    present = set(catalog.table_names(conn))
+
+    # Table and column names come from health.COVERAGE_COLUMNS, which is code,
+    # not a request, so interpolating them is the same trust as the admin
+    # matrix. The ordinal carries the position back: `UNION ALL` does not
+    # promise to return branches in the order they were written.
+    counted = [(label, table, column)
+                for label, table, column, _module in health.COVERAGE_COLUMNS
+                if table in present]
+    cells = {label: 0 for label, _t, _c, _m in health.COVERAGE_COLUMNS}
+    if not counted:
+        return cells
+
+    sql = " UNION ALL ".join(
+        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = ?"
+        for i, (_label, table, column) in enumerate(counted)
+    ) + " ORDER BY i"
+    for row in conn.execute(sql, tuple(ons_code for _ in counted)):
+        cells[counted[row["i"]][0]] = row["n"]
     return cells
 
 
@@ -2253,12 +2278,16 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
     a statement about the pipeline's own knowledge, not about the authority —
     the caveat is the whole point of the layer.
     """
-    exists = set(catalog.table_names(conn))
-    names = dict(conn.execute("SELECT ons_code, name FROM authorities"))
+    present = set(catalog.table_names(conn))
+    # By column name rather than `dict(rows)`: that shorthand relies on a row
+    # being a two-element sequence, which is true of both backends' rows and
+    # is not the thing this line is about.
+    names = {row["ons_code"]: row["name"] for row in
+              conn.execute("SELECT ons_code, name FROM authorities")}
 
     held: dict[str, set[str]] = {}
     for label, table, column, _module in health.COVERAGE_COLUMNS:
-        if table not in exists:
+        if table not in present:
             continue
         # Table and column names come from health.COVERAGE_COLUMNS, which is
         # code, not a request — the same trust as the admin matrix.

@@ -523,7 +523,7 @@ def web(
     """
     import webbrowser
 
-    from pipeline.web.server import build_server, reachable_urls
+    from pipeline.web.server import build_server, close_read_pools, reachable_urls
 
     configure_logging("web")
     settings = get_settings()
@@ -553,7 +553,13 @@ def web(
         # The addresses another device on the network can actually type.
         # "listening on 0.0.0.0" is true and useless from a phone.
         ui.info(f"  also on [pipeline.module]{other}[/]")
-    ui.info(f"  warehouse: [pipeline.muted]{settings.database_path}[/]")
+    # Whichever warehouse is actually being served. `database_path` is always
+    # set and is the SQLite file, so printing it unconditionally told an
+    # operator running against PostgreSQL the name of a file this process was
+    # not going to open — and the redacted URL is the one line that would have
+    # made that obvious.
+    ui.info(f"  warehouse: [pipeline.muted]"
+             f"{settings.redacted_database_url or settings.database_path}[/]")
     ui.info(f"  {pending:,} item(s) pending review")
     if host not in ("127.0.0.1", "localhost", "::1"):
         # Stated every time, not once in a doc. There is no login on this
@@ -577,6 +583,7 @@ def web(
         ui.muted("\n  stopped.")
     finally:
         server.server_close()
+        close_read_pools()
 
 
 _audit_counts = runner.audit_counts

@@ -106,6 +106,28 @@ def _time(call, repetitions: int) -> dict:
 # hand-copied SQL would keep reporting on code that no longer runs. Each entry
 # says why it is here — a case with no argument for its presence is a case
 # nobody will know whether to keep.
+def _authority_case(conn):
+    """`portal.authority` for whichever authority this warehouse knows most
+    about, or nothing at all if it knows of none.
+
+    Hardcoding an ONS code would make the case's cost depend on which one
+    somebody picked, and would fail outright against a warehouse collected
+    differently — including the empty one the offline suite runs this harness
+    against. The busiest authority is reproducible and is the honest worst
+    case for a page whose cost is the evidence behind it.
+    """
+    from pipeline.web import public_queries
+
+    row = conn.execute(
+        "SELECT a.ons_code AS ons_code FROM authorities a "
+        "LEFT JOIN contracts c ON c.buyer_ons_code = a.ons_code "
+        "GROUP BY a.ons_code "
+        "ORDER BY COUNT(c.notice_id) DESC, a.ons_code LIMIT 1").fetchone()
+    if row is None:
+        return None
+    return public_queries.authority(conn, row["ons_code"])
+
+
 def _read_cases() -> list[dict]:
     from pipeline.web import health, public_queries, queries
 
@@ -139,6 +161,26 @@ def _read_cases() -> list[dict]:
             "why": "The map's payload: grant totals per authority, joined "
                     "across the authority spine.",
             "call": lambda conn: public_queries.geography(conn),
+        },
+        {
+            # Added in Phase 4, and the reason is not that it is slow. Neither
+            # this nor `portal.layers` below was measured in Phase 3, and
+            # neither ran on PostgreSQL at all — both named `sqlite_master` in
+            # their SQL. A harness that skips two routes is a harness that
+            # cannot report them broken.
+            "name": "portal.authority",
+            "why": "The heaviest payload the portal serves: one authority's "
+                    "grant, budget, treatment and contracts, composed from "
+                    "the same functions the individual pages use.",
+            "call": _authority_case,
+            "slow": True,
+        },
+        {
+            "name": "portal.layers",
+            "why": "The map's layer index, including a coverage count per "
+                    "authority over every evidence table.",
+            "call": lambda conn: public_queries.layers(conn),
+            "slow": True,
         },
         {
             "name": "portal.boundaries",
@@ -211,8 +253,9 @@ def _read_cases() -> list[dict]:
         },
         {
             "name": "admin.list_objects",
-            "why": "Sidebar. One COUNT(*) per table, 68 of them, on every "
-                    "page load of the operator UI.",
+            "why": "Sidebar, on every page load of the operator UI. One "
+                    "COUNT(*) per table until Phase 4 — 82 of them, which is "
+                    "82 round-trips over a LAN — and one statement since.",
             "call": lambda conn: queries.list_objects(conn),
             "slow": True,
         },
@@ -236,6 +279,20 @@ def read_latency(conn, cases=None) -> list[dict]:
     """Every read case against one connection. Failures are recorded, not
     raised: a case that cannot run on one backend is a finding, and losing the
     other fifteen measurements to it is not.
+
+    Which is what the rollback below is for, and it is not a tidiness point.
+    These cases read on a *write* connection, and PostgreSQL aborts the whole
+    transaction when a statement fails — so without it the first failing case
+    made every case after it fail too, all sixteen reporting "current
+    transaction is aborted" and none of them reporting anything about
+    themselves. Found in Phase 4 by running the harness against the code from
+    before it, where `portal.layers` genuinely does not run: one real finding
+    arrived as sixteen, fifteen of them fictional.
+
+    The same shape as the trap in `web/health.py:freshness`, which the read
+    path answers with autocommit. This is a write connection on purpose — it
+    is the same one the write benchmark uses — so it answers with a rollback
+    instead.
     """
     results = []
     for case in cases or _read_cases():
@@ -246,6 +303,10 @@ def read_latency(conn, cases=None) -> list[dict]:
             results.append({"name": case["name"], "why": case["why"],
                              "error": f"{type(exc).__name__}: {exc}"})
             log.warning("benchmark.case_failed", case=case["name"], error=str(exc))
+            try:
+                conn.rollback()
+            except Exception:                         # noqa: BLE001 - already failing
+                pass
             continue
         results.append({"name": case["name"], "why": case["why"], **measured})
         log.info("benchmark.case", case=case["name"], p50_ms=measured["p50_ms"])

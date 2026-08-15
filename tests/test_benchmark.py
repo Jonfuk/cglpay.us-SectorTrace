@@ -75,6 +75,32 @@ class TestItRunsAgainstARealWarehouse:
         failed = [case for case in report["reads"] if "error" in case]
         assert not failed, failed
 
+    def test_a_failing_case_does_not_take_the_rest_of_the_run_with_it(
+            self, conn, settings):
+        """The cases read on a write connection, and on PostgreSQL a failed
+        statement aborts the transaction — so one broken case reported itself
+        and then made every later case report "current transaction is
+        aborted". Sixteen findings, fifteen of them fictional, which is worse
+        than the one real one being missed.
+
+        Asserted on SQLite, where the rollback is a no-op, because what is
+        being tested is that the harness performs one at all: the cases either
+        side of the broken one have to come back measured.
+        """
+        cases = [
+            {"name": "before", "why": "runs", "call": lambda c: c.execute(
+                "SELECT 1").fetchone()},
+            {"name": "broken", "why": "does not", "call": lambda c: c.execute(
+                "SELECT * FROM a_table_that_is_not_there").fetchone()},
+            {"name": "after", "why": "must still be measured",
+             "call": lambda c: c.execute("SELECT 1").fetchone()},
+        ]
+        results = {r["name"]: r for r in benchmark.read_latency(conn, cases)}
+
+        assert "error" in results["broken"]
+        assert "error" not in results["before"], results["before"]
+        assert "error" not in results["after"], results["after"]
+
     def test_it_records_the_row_counts_it_measured(self, conn, settings):
         """A comparison between two backends is only a comparison if they hold
         the same rows, so each report carries its own evidence of what it was

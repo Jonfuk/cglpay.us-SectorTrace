@@ -1,6 +1,12 @@
-# Phase 3 — the baseline
+# The benchmarks
 
-Measurements only. Nothing in the pipeline was changed to produce these
+Two phases live in this file. [Phase 3](#phase-3--the-baseline) measured both
+backends and changed nothing; [Phase 4](#phase-4--what-changed-and-what-it-was-worth)
+acted on it and measured again. Read Phase 4's first section before comparing
+any number here with any other — the answer to "faster than what?" turned out
+to be the hard part.
+
+Measurements only. Nothing in the pipeline was changed to produce the Phase 3
 numbers, and nothing should be changed on the strength of them without
 re-running this and putting the second file beside the first.
 
@@ -20,7 +26,9 @@ backends hold the same 655,344 rows, verified value by value, and every report
 records the row counts it measured so a later reader does not have to take
 that on trust.
 
-## The baseline (2026-08-15, commit `fd31f22`)
+## Phase 3 — the baseline
+
+### The baseline (2026-08-15, commit `fd31f22`)
 
 SQLite 3.40.1 on the local disk; PostgreSQL 18.6 on the LAN. p50 of ten runs
 (three for the slow cases), after a discarded warm-up. Ratio is PostgreSQL
@@ -105,7 +113,7 @@ incident in the README, the 120-second busy timeout, the 900-second write-slot
 deadline, and the `defer_cache_writes` dance in `pipeline/parallel.py` that
 exists because worker threads could not write.
 
-## What this says about Phase 4
+### What this says about Phase 4
 
 Evidence-gated, in the order the evidence supports:
 
@@ -133,7 +141,7 @@ Evidence-gated, in the order the evidence supports:
    m13 runtime". m13's cost is parsing and fetching; nothing here suggests
    otherwise.
 
-## What is not measured, and why
+### What is not measured, and why
 
 **Ingestion wall-clock and `--jobs` scaling.** A collection waits on the
 network by design. Measuring it honestly needs live sources and hours;
@@ -151,3 +159,169 @@ at 235 ms, 360 ms and 690 ms across three runs of this harness on the same
 data. The percentiles within a run are stable; the medians between runs are
 not, for the PostgreSQL cases. Two runs before believing a difference under
 about 1.5×.
+
+## Phase 4 — what changed, and what it was worth
+
+### First: what "faster" can and cannot be measured against
+
+Phase 4's changes were made on Phase 3's evidence, so the obvious thing to do
+was re-run the harness and compare the two files. That comparison says every
+case got between 1.3× and 2.4× **slower**, including several that nothing
+touched.
+
+It is not true. Two runs an hour apart agreed with each other to within
+0.8–1.2× and both sat at that level, and — the check that settles it — the
+*pre-Phase-4 code*, run today against the same server, is slower than
+yesterday by the same factor. The machine, the link, or the server was simply
+having a different day.
+
+So the numbers below come from an A/B run back to back within twenty minutes:
+the commit before this phase in one worktree, this phase's commit in another,
+the same harness file copied into both, against the same warehouse.
+
+```bash
+git worktree add /tmp/before <commit-before-phase-4>
+cp pipeline/benchmark.py /tmp/before/pipeline/     # same harness on both sides
+(cd /tmp/before && uv run --extra postgres python -m pipeline.cli benchmark --no-writes --output-dir bench)
+./start.sh benchmark --compare-to /tmp/before/bench/<file>.json
+```
+
+**Do not compare a number here with a number in the Phase 3 table.** They were
+taken on different days, and the day is worth more than anything this phase
+did to any case except one.
+
+### PostgreSQL, before and after, same conditions
+
+`20260815T131844Z-postgres.json` is the before, `20260815T132056Z-postgres.json`
+the after. Ratio is after over before, so **below 1 is the improvement**.
+
+| Case | before | after | ratio |
+|---|---:|---:|---:|
+| admin.list_objects | 525.4 ms | 92.3 ms | **0.18** |
+| portal.authority | *did not run* | 412.8 ms | — |
+| portal.layers | *did not run* | 571.3 ms | — |
+| portal.authorities | 8.9 ms | 5.9 ms | 0.66 |
+| portal.geography | 33.7 ms | 27.6 ms | 0.82 |
+| portal.pay | 28.0 ms | 23.8 ms | 0.85 |
+| admin.overview | 61.9 ms | 55.0 ms | 0.89 |
+| admin.read_table.budgets_deep | 571.6 ms | 521.0 ms | 0.91 |
+| admin.review_items | 29.1 ms | 26.5 ms | 0.91 |
+| portal.contracts.first_page | 1,496.1 ms | 1,450.4 ms | 0.97 |
+| portal.contracts.full_page | 1,530.9 ms | 1,500.1 ms | 0.98 |
+| admin.read_table.search | 412.5 ms | 410.4 ms | 0.99 |
+| admin.review_items.deep_offset | 39.1 ms | 38.9 ms | 0.99 |
+| admin.health.freshness | 622.1 ms | 619.2 ms | 1.00 |
+| portal.fingertips | 404.9 ms | 407.1 ms | 1.01 |
+| admin.read_table.contracts | 50.6 ms | 51.8 ms | 1.02 |
+| portal.boundaries | 804.4 ms | 823.6 ms | 1.02 |
+| portal.summary | 995.2 ms | 1,029.2 ms | 1.03 |
+| portal.providers | 33.1 ms | 36.0 ms | 1.09 |
+
+One case moved and the rest are noise, which is what the changes predict.
+`admin.list_objects` is the sidebar asking once instead of once per table.
+Everything from 0.82 to 1.09 is inside the run-to-run variance Phase 3 already
+documented, and none of it is attributable.
+
+**`portal.authority` and `portal.layers` did not run at all before.** Both
+named `sqlite_master` in their SQL, so both raised `UndefinedTable` on
+PostgreSQL — two public routes, broken on the backend Phase 5 intends to
+deploy, and the harness had no case for either. They have cases now.
+
+### What the harness cannot see
+
+Three of this phase's changes are invisible to a benchmark that opens one
+connection, holds it, and calls query functions directly. Each was measured on
+its own.
+
+**The connection pool — 68 ms per request, gone.** The web layer opens a
+connection per HTTP request, which the harness never does:
+
+| | p50 |
+|---|---:|
+| connect + close (reader role) | 68.4 ms |
+| connect + `SELECT 1` + close | 67.5 ms |
+| the same, borrowed from the pool | 8.3 ms |
+| `SELECT 1` on a connection already held | 4.1 ms |
+
+Every portal and operator request was paying more to open a connection than
+`portal.pay`, `portal.providers` and `admin.review_items` cost put together.
+
+**The `date_published` index — the query, not the payload.** The A/B shows
+`portal.contracts.first_page` unchanged, and that is correct rather than
+disappointing: that case is `contracts()`, whose cost is its aggregates over
+76,229 priced notices, not its `ORDER BY`. The index answers the notices
+query, which is what the list and the CSV export are made of:
+
+| | without the index | with it |
+|---|---:|---:|
+| PostgreSQL (`EXPLAIN ANALYZE`) | 83 ms, 14,728 buffers | 0.55 ms, 128 buffers |
+| SQLite (same file, same cache) | 333 ms | 2.3 ms |
+
+Both measured by building and dropping the index around the same query on the
+same data, slower arm first so that a warm cache could not be mistaken for the
+result. SQLite's plan goes from `SCAN c` plus `USE TEMP B-TREE FOR ORDER BY`
+to `SCAN c USING INDEX idx_contracts_date_published`.
+
+**Statement counts.** Round-trips are the cost on a LAN, so the honest unit is
+sometimes the number of questions rather than milliseconds:
+
+| | before | after |
+|---|---:|---:|
+| `admin.list_objects` counting statements | 82 | 1 |
+| `portal.authority` statements | 40 | 29 |
+| `_coverage_cells` statements | 13 | 1 |
+
+`admin.list_objects` on SQLite is 72.7 ms per-table against 78.4 ms batched —
+no round-trips to save on a local file, and nothing lost either. The change is
+worth 5.4× on the LAN and free on the file.
+
+### The SQLite half is not reported, and why
+
+A before/after over the whole harness was run on SQLite too, on two copies of
+the working warehouse. It is not here, because it cannot be trusted: the
+copies were read cold and warm respectively, and cases this phase never
+touched moved as much as the ones it did — `admin.health.freshness` 3,506 ms
+to 972 ms, `admin.read_table.budgets_deep` 1,335 ms to 501 ms. That is the OS
+page cache, measured very precisely.
+
+The SQLite claims this phase does make are the isolated ones above, taken on a
+single file with one cache state.
+
+### Writes, on the after run
+
+| | rows/s | vs one writer |
+|---|---:|---:|
+| 1 concurrent writer | 53 | ×1.00 |
+| 2 | 116 | ×2.17 |
+| 4 | 203 | ×3.81 |
+| 8 | 323 | ×6.06 |
+
+Same shape as Phase 3 (×7.80 at eight writers there): PostgreSQL scales with
+writers and SQLite does not. Nothing in this phase was aimed at write
+throughput, and nothing moved it.
+
+### What Phase 4 refused, and on what evidence
+
+- **`contracts(value_core)`** — the plan expected the concentration and median
+  queries to want an index. They read 76,229 of 98,636 rows; at that
+  selectivity the sequential scan is the right plan and the planner picks it.
+- **Dropping unused indexes** — `pg_stat_user_indexes` shows four never
+  scanned, all on tables that hold no rows yet, including the
+  `idx_authority_url_overrides_item` the plan named as a candidate "to
+  confirm, not to assume". Confirmed, and the answer is no. Nothing here is
+  both large and unused.
+- **Keyset pagination, `percentile_cont`, m13 `COPY` staging** — all three
+  were already unjustified by the Phase 3 table, and nothing found here
+  changes that. The reasoning is in "What this says about Phase 4" above and
+  stands unedited.
+
+### One harness bug, found by running it against old code
+
+The read cases share the write connection, and on PostgreSQL a failed
+statement aborts the transaction. So the first case that failed reported
+itself and then made **every case after it** report "current transaction is
+aborted" — the run against the pre-Phase-4 code produced two real findings and
+fifteen fictional ones. `read_latency` now rolls back after a failed case, and
+a test pins it. It is the same trap as `web/health.py:freshness`, which the
+read path answers with autocommit; a write connection answers it with a
+rollback.

@@ -181,11 +181,15 @@ def test_worker_clients_defer_their_cache_writes(tmp_path):
     SQLite's single writer slot, which the main thread is holding while it
     commits an authority's evidence — so the worker blocks for the whole
     busy_timeout, over and over. Observed as a hung test suite.
+
+    SQLite only. On PostgreSQL there is no slot to take and the worker writes
+    its own — see `test_postgres_live.py::TestFetchPoolCacheWrites`.
     """
     settings = _settings(tmp_path)
 
     def worker(unit, client):
         assert client.defer_cache_writes is True
+        assert client.commit_cache_writes is False
         client.pending_cache_writes.append(
             dict(url=f"https://h{unit}.example.com/x", host=f"h{unit}.example.com",
                  etag=f"etag-{unit}", last_modified=None, payload_sha256=f"sha-{unit}"))
