@@ -375,6 +375,10 @@ def _mock_search(httpx_mock, body: str, status_code: int = 200):
 def _one_variant(monkeypatch, provider_key="change_grow_live", variant="Change Grow Live"):
     monkeypatch.setattr(nj, "search_variants", lambda: [(provider_key, variant)])
     monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 1)
+    # The role-keyword pass runs after the employer pass; these tests are
+    # about the employer pass, so the keyword pass is silenced rather than
+    # left to re-fetch the same fixture.
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", [])
 
 
 def _run(conn, settings, since=None, limit=None):
@@ -589,6 +593,7 @@ def test_paging_stops_at_the_cap(conn, settings, httpx_mock, monkeypatch):
     """
     monkeypatch.setattr(nj, "search_variants", lambda: [("change_grow_live", "Change Grow Live")])
     monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 2)
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", [])
     _mock_search(httpx_mock, CGL)
 
     _run(conn, settings)
@@ -605,6 +610,7 @@ def test_paging_stops_as_soon_as_a_page_attributes_nothing(
     """
     monkeypatch.setattr(nj, "search_variants", lambda: [("phoenix_futures", "Phoenix Futures")])
     monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 5)
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", [])
     _mock_search(httpx_mock, UNMATCHED)   # 10 adverts, none attributable, next page offered
 
     _run(conn, settings)
@@ -643,6 +649,121 @@ def test_variants_differing_only_in_punctuation_are_searched_once():
     variants = [variant for _key, variant in nj.search_variants()]
     assert "Change Grow Live" in variants
     assert "Change, Grow, Live" not in variants
+
+
+# --- the sustained crawl: the role-keyword pass ---------------------------------
+
+def _keyword_only(monkeypatch, *terms):
+    monkeypatch.setattr(nj, "search_variants", lambda: [])
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", list(terms))
+    monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 1)
+
+
+def test_a_role_search_surfaces_and_attributes_adverts(
+        conn, settings, httpx_mock, monkeypatch):
+    _keyword_only(monkeypatch, "recovery worker")
+    _mock_search(httpx_mock, CGL)
+
+    _run(conn, settings)
+
+    rows = conn.execute("SELECT * FROM nhs_job_adverts").fetchall()
+    assert len(rows) == 10
+    assert {r["provider_key"] for r in rows} == {"change_grow_live"}
+    assert all(r["surfaced_by"] == "role_search" for r in rows)
+    assert all(r["searched_variant"] == "keyword:recovery worker" for r in rows)
+
+
+def test_the_keyword_never_decides_whose_advert_it_is(
+        conn, settings, httpx_mock, monkeypatch):
+    """The keyword pass must hold the same rule as the employer pass: the
+    advert's own employer field attributes it, never the term that found it.
+    The Turning Point fixture contains West Point Medical Centre, and it must
+    not become a Turning Point pay figure just because the search did.
+    """
+    _keyword_only(monkeypatch, "recovery worker")
+    _mock_search(httpx_mock, TURNING_POINT)
+
+    _run(conn, settings)
+
+    employers = {r["employer_name_raw"] for r in conn.execute(
+        "SELECT employer_name_raw FROM nhs_job_adverts")}
+    assert employers == {"Turning Point"}
+
+
+def test_a_role_search_that_finds_nothing_is_not_a_finding_about_a_provider(
+        conn, settings, httpx_mock, monkeypatch):
+    """A keyword with no results is a normal outcome, not a question about a
+    provider — the `nhs_jobs_search_no_matches` item exists for employer
+    searches, and a role search must not flood the queue with it.
+    """
+    _keyword_only(monkeypatch, "recovery worker")
+    _mock_search(httpx_mock, NO_RESULTS)
+
+    _run(conn, settings)
+
+    assert conn.execute("SELECT COUNT(*) c FROM nhs_job_adverts").fetchone()["c"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue "
+        "WHERE item_type IN ('nhs_jobs_search_no_matches', "
+        "'nhs_jobs_search_matched_nothing', "
+        "'unmatched_nhs_jobs_employer')").fetchone()["c"] == 0
+
+
+def test_a_role_search_markup_change_is_still_recorded(
+        conn, settings, httpx_mock, monkeypatch):
+    """The keyword pass is silent about empty searches and unmatched adverts,
+    but not about a page that is neither results nor "no result found" — a
+    markup change is a markup change whichever pass tripped over it.
+    """
+    _keyword_only(monkeypatch, "recovery worker")
+    _mock_search(httpx_mock, "<html><body><p>Something else entirely</p></body></html>")
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue "
+        "WHERE item_type = 'nhs_jobs_results_unrecognised'").fetchone()["c"] == 1
+
+
+def test_surfaced_by_records_the_first_discovery_and_stays_stable(
+        conn, settings, httpx_mock, monkeypatch):
+    """An advert found by both passes keeps the record of which one found it
+    first. The employer pass runs first: its rows say employer_search, and a
+    later role search that re-finds them must not overwrite that.
+    """
+    _one_variant(monkeypatch)   # employer pass only, keyword pass silenced
+    _mock_search(httpx_mock, CGL)
+    _run(conn, settings)
+
+    monkeypatch.setattr(nj, "search_variants", lambda: [])
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", ["recovery worker"])
+    monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 1)
+    _run(conn, settings)
+
+    row = conn.execute("SELECT * FROM nhs_job_adverts LIMIT 1").fetchone()
+    assert row["surfaced_by"] == "employer_search"
+    assert row["searched_variant"] == "Change Grow Live"
+
+
+def test_a_role_search_first_discovery_survives_a_later_employer_search(
+        conn, settings, httpx_mock, monkeypatch):
+    """The reverse order: the keyword pass finds the adverts first, and a
+    later employer search that re-finds them does not rewrite the discovery
+    record — searched_variant and surfaced_by both describe how the advert
+    first entered the corpus, and that is the keyword search.
+    """
+    _keyword_only(monkeypatch, "recovery worker")
+    _mock_search(httpx_mock, CGL)
+    _run(conn, settings)
+
+    monkeypatch.setattr(nj, "search_variants", lambda: [("change_grow_live", "Change Grow Live")])
+    monkeypatch.setattr(nj, "ROLE_KEYWORDS", [])
+    monkeypatch.setattr(nj, "MAX_RESULT_PAGES", 1)
+    _run(conn, settings)
+
+    row = conn.execute("SELECT * FROM nhs_job_adverts LIMIT 1").fetchone()
+    assert row["surfaced_by"] == "role_search"
+    assert row["searched_variant"] == "keyword:recovery worker"
 
 
 # --- the repeat-advertisement view --------------------------------------------------

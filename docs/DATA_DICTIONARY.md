@@ -6,7 +6,7 @@
 ./start.sh export docs
 ```
 
-Generated 2026-08-15 01:41 UTC.
+Generated 2026-08-15 03:51 UTC.
 
 `restricted` columns hold personal data. They are excluded from every export by default and `pipeline.exports.guard_columns()` raises if one is referenced.
 
@@ -793,6 +793,48 @@ Verified promotions only.
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `gender_pay_gap_reports`
+
+*table* — 0 rows.
+
+Module 20: gender pay gap reports, from the Gender Pay Gap service's own bulk download (`/viewing/download-data/{year}`). One row per MATCHED filing: a provider whose legal entity appears in the bulk file for a year gets a row with the figures as submitted. Absence is deliberately NOT a row: a provider not in the file may be out of scope (fewer than 250 staff, outside the law's reach) or may not have filed, and the module cannot tell which. The absence is a review item (`gender_pay_gap_absence`), which is the one place the distinction can be decided -- never a zero gap. `ResponsiblePerson` from the source CSV is deliberately NOT collected: it is the name of the person who confirmed the figures, personal data this pipeline has no reason to hold.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `reporting_year` | TEXT | NOT NULL | exportable |
+| `reporting_year_label` | TEXT | NOT NULL | exportable |
+| `employer_id` | TEXT | NOT NULL | exportable |
+| `match_basis` | TEXT | NOT NULL | exportable |
+| `employer_name` | TEXT | nullable | exportable |
+| `company_number` | TEXT | nullable | exportable |
+| `sic_codes` | TEXT | nullable | exportable |
+| `diff_mean_hourly_percent` | REAL | nullable | exportable |
+| `diff_median_hourly_percent` | REAL | nullable | exportable |
+| `diff_mean_bonus_percent` | REAL | nullable | exportable |
+| `diff_median_bonus_percent` | REAL | nullable | exportable |
+| `male_bonus_percent` | REAL | nullable | exportable |
+| `female_bonus_percent` | REAL | nullable | exportable |
+| `male_lower_quartile` | REAL | nullable | exportable |
+| `female_lower_quartile` | REAL | nullable | exportable |
+| `male_lower_middle_quartile` | REAL | nullable | exportable |
+| `female_lower_middle_quartile` | REAL | nullable | exportable |
+| `male_upper_middle_quartile` | REAL | nullable | exportable |
+| `female_upper_middle_quartile` | REAL | nullable | exportable |
+| `male_top_quartile` | REAL | nullable | exportable |
+| `female_top_quartile` | REAL | nullable | exportable |
+| `written_statement_url` | TEXT | nullable | exportable |
+| `employer_size` | TEXT | nullable | exportable |
+| `current_name` | TEXT | nullable | exportable |
+| `submitted_after_deadline` | INTEGER | nullable | exportable |
+| `due_date` | TEXT | nullable | exportable |
+| `date_submitted` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
 ## `http_cache`
 
 *table* — 7,849 rows.
@@ -1007,6 +1049,38 @@ Module 16: NHS Jobs advertised pay. The only source in this pipeline that carrie
 | `http_status` | INTEGER | NOT NULL | exportable |
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
+| `surfaced_by` | TEXT | nullable | exportable |
+
+## `ons_ashe_observations`
+
+*table* — 0 rows.
+
+Module 21: ONS ASHE earnings, via the ONS developer API (Data Explorer). The comparator market: median gross hourly pay (excluding overtime) as the Annual Survey of Hours and Earnings publishes it, for the occupation groups (SOC 2010, two-digit) and industry groups (SIC 2007, two-digit) the sector's workforce sits in, at UK and England geography, all published tax years of the version the API serves. One observation per (dataset, version, measure, dimension, code, geography, time) -- the natural key is what ONE request returns; the measure is part of it so a future collection of a second measure cannot silently overwrite this one. Codes are pinned in the module config (SOC/SIC codes are stable standards); labels are pinned there too, because the API's code-list items carry no label text (verified 2026-08-15). The gate from the phase plan governs anything built on this table: an ASHE-versus-adverts statement is a side-by-side comparison, never an arithmetic ratio, and nothing in the module computes one.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `dataset_id` | TEXT | NOT NULL | exportable |
+| `dataset_title` | TEXT | nullable | exportable |
+| `edition` | TEXT | NOT NULL | exportable |
+| `version` | TEXT | NOT NULL | exportable |
+| `hoursandearnings` | TEXT | NOT NULL | exportable |
+| `averagesandpercentiles` | TEXT | NOT NULL | exportable |
+| `sex` | TEXT | NOT NULL | exportable |
+| `workingpattern` | TEXT | NOT NULL | exportable |
+| `dimension_kind` | TEXT | NOT NULL | exportable |
+| `dimension_code` | TEXT | NOT NULL | exportable |
+| `dimension_label` | TEXT | NOT NULL | exportable |
+| `geography_code` | TEXT | NOT NULL | exportable |
+| `geography_label` | TEXT | NOT NULL | exportable |
+| `time` | TEXT | NOT NULL | exportable |
+| `value` | REAL | nullable | exportable |
+| `value_text` | TEXT | nullable | exportable |
+| `unit_of_measure` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `parse_failures`
 
@@ -1132,6 +1206,48 @@ External identifiers for a provider. `status` distinguishes an identifier assert
 | `role` | TEXT | nullable | exportable |
 | `status` | TEXT | NOT NULL | exportable |
 | `discovered_by` | TEXT | nullable | exportable |
+
+## `provider_pay_mentions`
+
+*table* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `page_url` | TEXT | NOT NULL | exportable |
+| `mention_index` | INTEGER | NOT NULL | exportable |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `section` | TEXT | nullable | exportable |
+| `mention_text` | TEXT | NOT NULL | exportable |
+| `salary_raw` | TEXT | nullable | exportable |
+| `salary_min` | REAL | nullable | exportable |
+| `salary_max` | REAL | nullable | exportable |
+| `salary_period` | TEXT | nullable | exportable |
+| `salary_basis` | TEXT | NOT NULL | exportable |
+| `match_basis` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `provider_pay_pages`
+
+*table* — 0 rows.
+
+Module 22: provider career and reward pages. The provider's own half of the direct pay evidence: pay figures published on the tracked providers' websites -- advertised bands, "rewards package" pages, listed rates. Attribution is exact by construction: the whole page is the provider's own site (the registry in `pipeline/provider_websites.py` is hand-verified), so there is no free-text matching and no match_basis uncertainty -- every mention carries match_basis 'site_owned'. Two tables because two different facts are being recorded:   * `provider_pay_pages` is a page-level row per fetch: whether the page     answered, and how many pay mentions it carried. A page with zero     mentions is a real answer about that page (the provider published     none), which is why the count lives here and not in the mentions table.   * `provider_pay_mentions` is one row per figure, with the text around it     kept verbatim so the figure can be checked against its context.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `page_url` | TEXT | NOT NULL | exportable |
+| `page_role` | TEXT | NOT NULL | exportable |
+| `page_title` | TEXT | nullable | exportable |
+| `pay_mentions` | INTEGER | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `provider_report_disclosure`
 
@@ -1422,7 +1538,7 @@ Items the pipeline answered for itself, and what answered them. `review_queue` h
 
 ## `schema_migrations`
 
-*table* — 38 rows.
+*table* — 48 rows.
 
 Core infrastructure tables shared by every module. Applied automatically by pipeline.db.apply_migrations before any module runs.
 

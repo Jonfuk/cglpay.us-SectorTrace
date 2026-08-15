@@ -115,6 +115,14 @@ LICENCES: dict[str, Licence] = {
                 "employers are accredited; check the foundation's terms "
                 "before republishing it in bulk.",
     ),
+    "provider_own": Licence(
+        id="provider_own",
+        name="The provider's own copyright",
+        url=None,
+        attribution="Pages published on the provider's own website.",
+        caution="A public website, not an open licence. Passages are held as "
+                "evidence rather than republished wholesale.",
+    ),
 }
 
 # Read from docs/SOURCES.md, one row per module. A new module belongs here on
@@ -142,6 +150,9 @@ MODULE_LICENCES: dict[str, str] = {
     "m17_statutory_pay_rates": "ogl_v3",
     "m18_living_wage": "lwf_own",
     "m19_data_gov_uk": "ogl_v3",
+    "m20_gender_pay_gap": "ogl_v3",
+    "m21_ons_ashe": "ogl_v3",
+    "m22_provider_pay_pages": "provider_own",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
