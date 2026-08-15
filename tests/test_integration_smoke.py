@@ -299,6 +299,42 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
         note="The keyword pass must find something in the catalogue, or the "
               "discovery vocabulary is matching nothing.",
     ),
+    Smoke(
+        module="m20_gender_pay_gap",
+        produces=("gender_pay_gap_reports",),
+        signal=(("gender_pay_gap_reports", "employer_name"),
+                ("gender_pay_gap_reports", "diff_median_hourly_percent")),
+        limit=None,
+        note="Ignores --limit: each reporting year is one bulk CSV read whole. "
+              "The name pass alone can match (charities file without a company "
+              "number); a run whose every tracked provider is absent is a real "
+              "answer and lands as gender_pay_gap_absence review items, not "
+              "rows — this spec requires that at least one filing matched.",
+    ),
+    Smoke(
+        module="m21_ons_ashe",
+        produces=("ons_ashe_observations",),
+        signal=(("ons_ashe_observations", "value"),
+                ("ons_ashe_observations", "dimension_label")),
+        limit=None,
+        note="Ignores --limit: each dataset is one paged query. The "
+              "observations endpoint was answering 502 at verification "
+              "(2026-08-15), and a persistent 5xx fails the module loudly "
+              "by the shared-client rule — so this smoke test is expected to "
+              "fail until the API's ASHE observations recover, which is the "
+              "honest state, not a pass with an empty table.",
+    ),
+    Smoke(
+        module="m22_provider_pay_pages",
+        produces=("provider_pay_pages", "provider_pay_mentions"),
+        signal=(("provider_pay_pages", "page_title"),
+                ("provider_pay_mentions", "salary_min")),
+        note="Some sites answer 403 or robots-disallow and are recorded as "
+              "review items; the signal is that the pages which did answer "
+              "carry figures. salary_min is the honest one: a run in which no "
+              "figure parsed anywhere is a shape-change signature, not a "
+              "successful crawl.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

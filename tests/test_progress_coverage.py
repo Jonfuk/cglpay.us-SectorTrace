@@ -41,7 +41,7 @@ def test_all_twenty_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 20
+    assert len(_real_modules()) == 23
 
 
 @pytest.mark.parametrize("name", [
@@ -50,7 +50,7 @@ def test_all_twenty_modules_are_covered():
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
 ])
 def test_the_tracked_loop_carries_a_label(name):
     """A bar labelled with the module name twice tells a reader nothing about
@@ -86,7 +86,7 @@ def test_progress_never_changes_what_a_module_collects():
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
 ])
 def test_each_module_registers_its_run_function(name):
     """m15_foi was registered to crawl_disclosure_log(profile, client).
@@ -108,7 +108,7 @@ def test_each_module_registers_its_run_function(name):
     "m08_pfd_reports", "m09_cdp_documents", "m10_committee_papers",
     "m11_public_health_grant", "m12_fingertips", "m13_la_budgets",
     "m14_annual_reports", "m15_foi", "m16_nhs_jobs",
-    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk",
+    "m17_statutory_pay_rates", "m18_living_wage", "m19_data_gov_uk", "m20_gender_pay_gap", "m21_ons_ashe", "m22_provider_pay_pages",
 ])
 def test_each_module_takes_exactly_a_context(name):
     """The signature the CLI calls with. Catches the same class of mistake

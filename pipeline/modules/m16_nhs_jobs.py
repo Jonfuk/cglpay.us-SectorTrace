@@ -6,6 +6,20 @@ composite (the charity accounts wage-per-head) and not a proxy (the sector
 workforce census). It is also the only evidence here of the thing the census
 cannot show: the same role advertised again, and again.
 
+The crawl has two passes (the "sustained crawl" of the phase plan):
+
+  1. **Employer searches** — every provider name variant, as described
+     below. Attribution is on the advert's own employer field.
+  2. **Role-keyword searches** — the sector's role vocabulary (ROLE_KEYWORDS).
+     Employer search is relevance-ranked, so an employer's adverts come
+     first, but a name the search interprets loosely can strand adverts
+     past the page cap; a role search surfaces adverts by title whatever
+     their employer. Attribution stays on the advert's own employer field —
+     the keyword that found an advert never decides whose it is. `surfaced_by`
+     records which pass first surfaced each advert, and the two passes agree
+     on every other rule: what counts as "the service states it found
+     nothing", what counts as a markup change, and what gets discarded.
+
 WHAT THE SEARCH ACTUALLY DOES, measured against the live service:
 
   * `employer=Change Grow Live` -> "20 jobs found", page 1 all CGL, page 2
@@ -81,6 +95,33 @@ SEARCH_URL = "https://www.jobs.nhs.uk/candidate/search/results"
 # does not recognise returns hundreds of unrelated adverts) costs a bounded
 # number of requests instead of paging through the whole service.
 MAX_RESULT_PAGES = 5
+
+# The sustained crawl's second pass: role-keyword searches alongside the
+# employer searches. Employer search is relevance-ranked, so an employer's
+# own adverts come first — but an advert can still be missed when the search
+# interprets the name loosely (or the employer's adverts sit past the page
+# cap). A role search over the sector's own vocabulary surfaces adverts by
+# title, whatever their employer, and every one of them is attributed on its
+# own employer field with the same rule as the employer pass — the keyword
+# that found an advert never decides who it belongs to.
+#
+# The keywords are the roles the sector's workforce actually holds; the list
+# is bounded on purpose, because each term costs up to five pages of
+# requests for rows that are mostly other employers' adverts.
+ROLE_KEYWORDS: list[str] = [
+    "substance misuse",
+    "recovery worker",
+    "recovery coordinator",
+    "drug and alcohol",
+    "alcohol worker",
+    "harm reduction",
+]
+
+# How an advert was first surfaced. 'employer_search' for a name search,
+# 'role_search' for a keyword search; recorded so the CAVEATS reading
+# ("the search that surfaced it means nothing on its own") stays checkable.
+SURFACED_BY_EMPLOYER = "employer_search"
+SURFACED_BY_ROLE = "role_search"
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -626,8 +667,10 @@ def run(ctx: ModuleContext) -> None:
                         "posted_date": row["posted_date"],
                         "closing_date": row["closing_date"],
                         "searched_variant": variant,
+                        "surfaced_by": SURFACED_BY_EMPLOYER,
                         **_provenance(result),
-                    }, natural_key=["job_reference"])
+                    }, natural_key=["job_reference"],
+                       preserve=["searched_variant", "surfaced_by"])
                     adverts_written += 1
 
                     for location in row["locations"]:
@@ -675,6 +718,127 @@ def run(ctx: ModuleContext) -> None:
             if ctx.limit and adverts_written >= ctx.limit:
                 break
 
+        # --- the sustained crawl's role-keyword pass ---------------------------
+        #
+        # Same attribution rule as the employer pass: the advert's OWN
+        # employer field decides, never the term that surfaced it. What
+        # differs is what gets recorded, on purpose:
+        #
+        #   * a keyword with no results is a normal outcome, not a finding
+        #     about a provider — no `nhs_jobs_search_no_matches` item;
+        #   * adverts returned but not attributable are counted, not queued —
+        #     a role search surfaces mostly other employers' adverts, and
+        #     the `unmatched_nhs_jobs_employer` queue belongs to the
+        #     employer pass, which samples the same pool;
+        #   * everything else — a search that does not answer, a page that
+        #     is neither results nor "no result found" — is recorded exactly
+        #     as the employer pass records it, because a markup change is a
+        #     markup change whichever pass tripped over it.
+        ctx.phase("searching by role keywords")
+        role_adverts = 0
+        role_returned = 0
+        role_discarded = 0
+        for term in ctx.track(ROLE_KEYWORDS, "role searches"):
+            url: str | None = SEARCH_URL
+            params: dict | None = {"keyword": term, "page": 1}
+            for _page in range(MAX_RESULT_PAGES):
+                if url is None:
+                    break
+                result = client.get(url, params=params)
+                params = None
+                pages_fetched += 1
+
+                if not result.ok:
+                    db.record_review_item(
+                        conn, module_name, "nhs_jobs_search_unavailable",
+                        f"keyword:{term}",
+                        json.dumps({"status": result.status_code, "url": result.url,
+                                     "note": "role search did not answer; adverts "
+                                             "surfaced by it are missing from this run"}))
+                    break
+
+                page_html = result.body.decode("utf-8", "replace")
+                rows = parse_search_results(page_html, result.url)
+                if not rows:
+                    if not has_no_results(page_html):
+                        db.record_review_item(
+                            conn, module_name, "nhs_jobs_results_unrecognised",
+                            f"keyword:{term}",
+                            json.dumps({"url": result.url,
+                                         "note": "a 200 that is neither a results page "
+                                                  "nor the service's own 'no result "
+                                                  "found' page — the markup has moved"}))
+                    break
+
+                role_returned += len(rows)
+                matched_on_this_page = 0
+                for row in rows:
+                    matched_key, match_basis = match_employer(row["employer_name_raw"])
+                    if matched_key is None:
+                        role_discarded += 1
+                        continue
+                    matched_on_this_page += 1
+                    if ctx.is_before_since(row["posted_date"]):
+                        continue
+                    if row["job_reference"] in seen_references:
+                        continue
+                    seen_references.add(row["job_reference"])
+
+                    if row["posted_date_raw"] and not row["posted_date"]:
+                        db.record_parse_failure(
+                            conn, module_name, "posted_date", row["posted_date_raw"],
+                            "advert date did not parse as '<D> <Month> <YYYY>'",
+                            source_url=result.url)
+                    if row["salary_basis"] == "unparsed":
+                        db.record_parse_failure(
+                            conn, module_name, "salary", row["salary_raw"] or "",
+                            "a currency figure was present but could not be read",
+                            source_url=result.url)
+
+                    db.upsert(conn, "nhs_job_adverts", {
+                        "job_reference": row["job_reference"],
+                        "provider_key": matched_key,
+                        "provider_match_basis": match_basis,
+                        "employer_name_raw": row["employer_name_raw"],
+                        "job_title": row["job_title"],
+                        "advert_url": row["advert_url"],
+                        "salary_raw": row["salary_raw"],
+                        "salary_min": row["salary_min"],
+                        "salary_max": row["salary_max"],
+                        "salary_period": row["salary_period"],
+                        "salary_basis": row["salary_basis"],
+                        "contract_type": row["contract_type"],
+                        "working_pattern": row["working_pattern"],
+                        "posted_date": row["posted_date"],
+                        "closing_date": row["closing_date"],
+                        "searched_variant": f"keyword:{term}",
+                        "surfaced_by": SURFACED_BY_ROLE,
+                        **_provenance(result),
+                    }, natural_key=["job_reference"],
+                       preserve=["searched_variant", "surfaced_by"])
+                    role_adverts += 1
+
+                    for location in row["locations"]:
+                        db.upsert(conn, "nhs_job_advert_locations", {
+                            "job_reference": row["job_reference"],
+                            "location_raw": location,
+                        }, natural_key=["job_reference", "location_raw"])
+
+                    if ctx.limit and adverts_written + role_adverts >= ctx.limit:
+                        break
+
+                if not ctx.dry_run:
+                    conn.commit()
+                if ctx.limit and adverts_written + role_adverts >= ctx.limit:
+                    break
+                if not matched_on_this_page:
+                    break
+                url = next_result_page_url(page_html, result.url)
+
+            log.info("nhs_jobs.role_search_done", term=term, adverts_returned=role_returned)
+            if ctx.limit and adverts_written + role_adverts >= ctx.limit:
+                break
+
     for employer_name, variant in sorted(unmatched_employers.items()):
         db.record_review_item(
             conn, module_name, "unmatched_nhs_jobs_employer", employer_name,
@@ -685,6 +849,8 @@ def run(ctx: ModuleContext) -> None:
         conn.commit()
 
     log.info("nhs_jobs.run_complete", adverts=adverts_written,
+              role_adverts=role_adverts,
               discarded_unmatched_employer=discarded_unmatched,
+              role_returned=role_returned, role_discarded=role_discarded,
               distinct_unmatched_employers=len(unmatched_employers),
               pages_fetched=pages_fetched)

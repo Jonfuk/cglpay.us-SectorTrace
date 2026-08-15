@@ -345,6 +345,16 @@ anyone using it.
   `searched_variant` and means nothing on its own. Employers the search
   returned and this pipeline could not attribute are in `review_queue` under
   `unmatched_nhs_jobs_employer` — they were **not** stored.
+- **The role-keyword pass finds the same rows by the same rule.** Since the
+  sustained crawl, every provider name is searched *and* the sector's role
+  vocabulary is searched (recovery worker, substance misuse, ...). The
+  keyword that surfaced an advert never decides whose it is — attribution is
+  still the advert's own employer field — and `surfaced_by` records which
+  pass first found each advert (`employer_search` or `role_search`), stable
+  across runs. A role search that found nothing, or returned only other
+  employers' adverts, is a normal outcome and is not queued — the
+  `nhs_jobs_search_no_matches` and `unmatched_nhs_jobs_employer` items exist
+  for employer searches and a keyword pass must not flood them.
 - **`salary_basis = 'not_stated'` is not zero pay.** It means the employer
   published "Depends on experience" or similar. Exclude those adverts from a
   pay comparison; do not treat them as £0, and do not silently drop them from
@@ -414,6 +424,75 @@ anyone using it.
 - **Licences vary per dataset.** The catalogue mixes OGL and non-OGL; the
   `license_*` columns carry each dataset's own published terms, and the OGL
   line on the module applies only to the metadata rows themselves.
+
+### Gender pay gap reports (Module 20)
+
+- **A provider absent from the file is not a zero gap.** The module stores
+  only matched filings. A provider with no matched filing for a reporting
+  year is a `gender_pay_gap_absence` review item: it may be out of scope
+  (fewer than 250 staff on its snapshot date — the law's reach) or it may
+  not have filed. The claim shape "of the tracked providers that must file"
+  is built from the decided set, never from a count that treats absence as
+  0%. Only the review decision can tell the two apart.
+- **The figures are the employer's own submission, as submitted.** The
+  service does not audit them, and neither does this pipeline. A blank cell
+  is stored as NULL — a filing that left a cell blank is not a filing
+  reporting 0%.
+- **Attribution is company number first, exact name second.** A charity files
+  under its own name with no company number; the exact-normalised name
+  fallback is the m18 discipline — a near-miss name is not a filing. One
+  provider can have several legal entities in the file; each matched filing
+  is its own row, keyed by the service's employer id.
+- **`ResponsiblePerson` is not collected.** It is the name of the person who
+  confirmed the figures, and the schema has no column for it.
+- **Only completed reporting years are read.** The service also lists the
+  current, incomplete year ("the most recent year for which the reporting
+  deadlines have passed" is its own wording); the module reads the newest
+  completed years by the deadline rule (30 March / 4 April of the end year).
+
+### ONS ASHE earnings (Module 21)
+
+- **ASHE is a sample survey.** The figures are estimates from a 1% sample of
+  PAYE jobs, and the API serves them as the survey published them, with no
+  confidence intervals in this table. Every observation records the version
+  it came from, and the API's ASHE versions lag the publication — at
+  verification (2026-08-15) table 3 served version 7, released 2024-01-19.
+  "The current year's ASHE" is the version the API serves, said out loud.
+- **The comparison gate applies in advance: side-by-side only.** The module
+  exists to sit beside `nhs_job_adverts` and `provider_pay_mentions` — "the
+  sector's advertised band vs ASHE's median for that occupation" — and any
+  ratio or "X% below the market" is the CAVEATS reading's decision, not a
+  number this pipeline computes. Hourly stays with hourly; the measure is
+  median gross hourly pay excluding overtime.
+- **A suppressed cell is NULL, never zero.** ASHE suppresses some cells;
+  they are stored with the observation text verbatim and a `parse_failures`
+  row.
+- **The observations endpoint was answering 502 at verification.** The shared
+  client retries a 5xx and then fails the run loudly, so a run against the
+  broken endpoint reports a failed module rather than a quiet empty table.
+
+### Provider career and reward pages (Module 22)
+
+- **The pages are the provider's own site, so attribution is exact** — there
+  is no free-text matching, and `match_basis = 'site_owned'` on every
+  mention. The registry (`pipeline/provider_websites.py`) is hand-verified
+  and committed; the D-05 lesson applied to providers.
+- **A page with no figures is an answer about that page, and a page that did
+  not answer is a review item** (`pay_page_unavailable`,
+  `pay_page_robots_disallowed`). Neither is evidence about what the provider
+  pays — coverage is the same floor as Module 16's, written for websites: a
+  provider may publish its pay on a jobs board or in PDFs this module does
+  not read.
+- **An advertised band here is what the provider's site offered a new
+  starter on a date**, the same reading as Module 16's adverts. Not a spine
+  point, not what anyone in post is paid.
+- **Hourly and annual figures are kept as published.** `salary_period` says
+  which is which; nothing converts between them (the CAVEATS rule that
+  governs Module 16 applies to these mentions too).
+- **Mergers are recorded, not smoothed over.** Richmond Fellowship's and
+  Humankind's careers pages are Waythrough's (the October 2024 merger), and
+  WDP's are Via's (the 2020 merger); the registry notes say which, and rows
+  stay under the provider_key that searched its own site.
 
 ---
 

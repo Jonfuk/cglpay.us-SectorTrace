@@ -263,10 +263,10 @@ of PSCs is then a redaction, not a finding.
 | | |
 | --- | --- |
 | Source | NHS Jobs candidate search |
-| Endpoint | `https://www.jobs.nhs.uk/candidate/search/results?employer=…&page=N` |
+| Endpoint | `https://www.jobs.nhs.uk/candidate/search/results?employer=…&page=N` and `?keyword=…&page=N` (the sustained crawl's role-keyword pass) |
 | Licence | Crown copyright on the service; the advert content is the employer's |
 | Key | None |
-| Rate limit | Default (2s/host), conditional requests, max 5 result pages per name variant |
+| Rate limit | Default (2s/host), conditional requests, max 5 result pages per search |
 | robots.txt | Answers with an **HTML page, not a rules file** — a "Service Domain Information" shell containing no user-agent, allow or disallow directives. Verified rather than assumed, and asserted in the tests. Re-check it if the service is redesigned |
 | Notes | The only **direct** pay evidence in this pipeline. Read the two limits below before using any figure from it |
 
@@ -330,6 +330,39 @@ invisible here.
 | Key | None |
 | Rate limit | Default |
 | Notes | Discovery metadata — what datasets exist and where their resources live — not the data itself. Two passes: the substance-misuse keyword vocabulary, and exact-normalised organisation-name matches against the authorities and providers tables. A query is read to the catalogue's own count, capped at 300 datasets; hitting the cap raises a review item. The catalogue is only what data.gov.uk harvests: absence from this table is absence from the index, never absence of the data |
+
+## Module 20 — Gender pay gap reports
+
+| | |
+| --- | --- |
+| Source | Gender Pay Gap service (GOV.UK) |
+| Endpoints | `https://gender-pay-gap.service.gov.uk/viewing/download` (the year list), `https://gender-pay-gap.service.gov.uk/viewing/download-data/{year}` (one bulk CSV per reporting year) |
+| Licence | OGL v3.0 (service content; the underlying data is statutory disclosure) |
+| Key | None |
+| Rate limit | Default |
+| Notes | A mandatory annual filing by employers with 250+ staff. One row per **matched** filing: company number first (the identifiers m04 discovered), exact-normalised name second — never a near-miss. A provider with no matched filing for a year is a `gender_pay_gap_absence` review item naming what was searched, because it may be out of scope (fewer than 250 staff) or may not have filed — never a stored zero. `ResponsiblePerson` (the name of the person who confirmed the figures) is deliberately not collected. Only completed reporting years are read (deadlines: 30 March / 4 April of the end year) |
+
+## Module 21 — ONS ASHE earnings
+
+| | |
+| --- | --- |
+| Source | ONS developer API (the Data Explorer; `api.beta.ons.gov.uk/v1`) |
+| Endpoints | `/datasets/ashe-tables-3` (occupation by two-digit SOC), `/datasets/ashe-table-5` (industry by two-digit SIC), each with its time-series edition, dimension options and observations |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | Median gross hourly pay **excluding overtime**, all employees, all working patterns, UK and England, every published tax year of the version the API serves. Pinned dimension codes are queried against the version's own options (a code the version no longer serves is a review item); labels come from the options response. **Known access shape:** the observations endpoint answered 502 for every ASHE query at verification on 2026-08-15 (a cpih01 query answered), and the API's ASHE versions lag the publication — so this module currently fails loudly against the live API rather than collecting nothing quietly. The phase gate applies: an ASHE-versus-adverts statement is **side-by-side**, never a ratio |
+
+## Module 22 — Provider career and reward pages
+
+| | |
+| --- | --- |
+| Source | The tracked providers' own websites, from the hand-verified registry in `pipeline/provider_websites.py` (the D-05 lesson applied to providers: answers live in a committed file) |
+| Endpoints | The registered pages, plus same-host links whose anchor or URL carries the pay/careers vocabulary, one hop deep, max 10 followed pages per provider |
+| Licence | Not OGL — the provider's own copyright. Passages are held as evidence, not republished wholesale |
+| Key | None |
+| Rate limit | Default; a robots.txt disallow is recorded as a review item |
+| Notes | Pay figures on career and reward pages — advertised bands, rewards pages, listed rates. Attribution is exact by construction: the page is the provider's own site (`match_basis = 'site_owned'`). A page that answered with no figures is recorded with `pay_mentions = 0` — an answer about that page; a page that did not answer is a review item, never a zero row. Coverage is a floor, the same caveat as Module 16: a provider whose site publishes no figures here may publish them on a jobs board or in PDFs this module does not read |
 
 ---
 

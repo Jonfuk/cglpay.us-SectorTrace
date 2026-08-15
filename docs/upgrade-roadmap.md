@@ -2,15 +2,15 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Fourteen phases have been worked**: 1–3, 5,
-6, 8–15 are done — 14 is the standing gated pair, P-03 and F-05, and stays
+1 skipped, 18 deselected, 422s**). **Fifteen phases have been worked**: 1–3, 5,
+6, 8–13, 15 and 16 are done — 14 is the standing gated pair, P-03 and F-05, and stays
 open until its two decisions are taken; Phase 4 delivered F-01 and U-01 and
 left F-03 open
 (D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
 and F-04 and left P-03 open. Each phase records what changed from the plan as
 it landed.
 
-**Everything still open is sequenced as Phases 14 and 16–19**, at the end of
+**Everything still open is sequenced as Phases 14 and 17–19**, at the end of
 §5 — in the order to take them and with the reasons for that order. **Phases
 8, 9, 10, 11, 12 and 13 are delivered**: 8 and 9 ran in parallel on
 2026-08-14 by two
@@ -18,7 +18,12 @@ sessions, which is what the phase plan said they could be; 10 landed the same
 day; 11 and 12 landed on 2026-08-15; 13 landed the same day, on a branch off
 11, and closed the last two open portal findings (W-11, W-19). **Phase 15
 landed on 2026-08-15** — G7, B2, G3, G4 and G6, the cheap sources that feed
-Phases 17 and 18.
+Phases 17 and 18. **Phase 16 landed the same day** — B3, G1 and B1, the
+direct pay evidence: the sustained m16 crawl and the provider pay-page
+module on one side, the ONS ASHE comparator and the gender pay gap filings
+on the other, with the F-05 note that B3 was always making standing true
+(it feeds the one table history would be for, and the decision in Phase 14
+now has its mechanism).
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -48,7 +53,7 @@ already there.
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
-| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item. Remaining: Phases 16–19, in the order their dependencies fall. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**. Remaining: Phases 17–19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
@@ -1944,7 +1949,15 @@ politeness surface — and six things are worth recording:
 The three new modules are registered in the progress-coverage, smoke and
 docs-coverage suites; the module count the tests pin moved 17 → 20.
 
-### Phase 16 — Direct pay evidence and its comparators · M–L — **planned**
+### Phase 16 — Direct pay evidence and its comparators · M–L — **done** (2026-08-15)
+
+Delivered **B3** (the provider pay-page module, m22, and the sustained m16
+crawl — the role-keyword pass), **G1** (ONS ASHE, m21) and **B1** (gender
+pay gap filings, m20), in that order. 1,619 → **1,666 passed**, 3 skipped,
+24 deselected; ruff clean.
+
+What follows is the plan; the record of what changed as it landed is at the
+end of the entry.
 
 **B3** (provider career and reward pages, plus a sustained m16 crawl), **G1**
 (ONS ASHE), **B1** (gender pay gap filings).
@@ -1961,6 +1974,83 @@ B3 is also where the F-05 decision becomes load-bearing — an advertised band
 per provider per period is a snapshot until history exists, and "the change is
 the claim" is the campaign's own argument. Phase 14 before this one, then, if
 the answer is going to be yes.
+
+#### What changed as it landed
+
+The order held — B3 first because it is the sector's own half, then the two
+comparators — and every "verified by" is a test. Seven things the plan did
+not anticipate, three of them found by doing the live verification the
+modules' registration discipline demands:
+
+- **The gender pay gap scope rule landed as a review item, not a flag.** The
+  plan said absence must read as out-of-scope, never as a zero. The module
+  stores only matched filings and raises one `gender_pay_gap_absence` item
+  per (provider, year) naming exactly what was searched — the name variants
+  and the company numbers. The item is the decision point: fewer than 250
+  staff, or did not file. There is no `out_of_scope` column, because writing
+  one would be a second, unattributed copy of the decision the queue
+  already owns — the same argument migration `0030` makes for promotion.
+- **The employer→filing match is company number first, name second, and the
+  normalisation is shared with m04.** Charities file without a company
+  number, so the name fallback is the m18 discipline (exact-normalised,
+  never a near-miss — "Viaduct Care" is not Via). The company-number side
+  goes through `providers.normalise_identifier`, the same padding m04
+  applied on the way in, so one company's filing cannot split in two. That
+  is why m20 declares `depends_on=("m04_companies",)`.
+- **`ResponsiblePerson` is not collected at all.** The CSV column is the
+  name of the person who confirmed the figures. The schema has no column
+  for it — the strongest form of "personal data stays out" is not storing
+  it — and the migration's comment says why, so a future editor sees the
+  decision rather than just its absence.
+- **The ONS observations endpoint answered 502 for every ASHE query at
+  verification, and the module is built to fail loudly rather than quietly
+  collect nothing.** The dataset, edition, dimension and options endpoints
+  all answered (the options are where the labels come from — the code-list
+  items themselves carry no label text, which is why the module reads the
+  version's own options rather than the code lists). The observations
+  endpoint 502'd on single-observation and wildcard queries alike while a
+  cpih01 query answered, and the API's ASHE versions lag the publication
+  (table 3 serves version 7, released 2024-01-19). The shared client's
+  house rule — a persistent 5xx raises and fails the run — is exactly
+  right here, so m21 currently fails against the live API instead of
+  producing a plausible-looking empty series. That is the honest state,
+  recorded in the module docstring, SOURCES.md and the smoke spec, which
+  is expected to fail until the API recovers. The module itself is built
+  and fully tested against the documented response shapes.
+- **B3's registry found three mergers that the provider list's own notes
+  had already filed.** Richmond Fellowship's domain serves Waythrough
+  (merged October 2024), Humankind's the same way, and wdp.org.uk serves
+  Via (WDP merged into Via in 2020). The registry records the mergers in
+  the notes and points each at the merged organisation's careers pages —
+  the rows stay under the provider_key that searched, and the caveats say
+  the pages are the merged organisation's.
+- **The provider crawl is bounded the way m16's paging is bounded, and a
+  page that answers with no figures is an answer about that page.** The
+  registered pages are the hand-verified entry points; the crawl follows
+  same-host links whose anchor or URL carries the pay vocabulary, one hop,
+  ten followed pages per provider. `provider_pay_pages.pay_mentions = 0`
+  means the provider published no figures on that page — a real answer,
+  visible as a zero count. A page that did not answer is
+  `pay_page_unavailable` or `pay_page_robots_disallowed`, never a zero row.
+  Attribution is exact by construction — the page is the provider's own
+  site — so every mention carries `match_basis = 'site_owned'` and there
+  is no free-text matching anywhere in the module.
+- **The sustained crawl is a role-keyword pass, and it reuses every rule
+  the employer pass already proved.** `nhs_job_adverts` gains `surfaced_by`
+  (`employer_search` / `role_search`, first discovery, stable across runs —
+  both passes `preserve` it and `searched_variant`). The keyword never
+  decides whose advert it is; attribution stays on the advert's own
+  employer field. What deliberately differs: a role search that finds
+  nothing, or returns only other employers' adverts, is a normal outcome
+  and is not queued — the `nhs_jobs_search_no_matches` and
+  `unmatched_nhs_jobs_employer` items exist for employer searches, and a
+  keyword pass must not flood them. A markup change is still recorded, by
+  either pass.
+
+Also worth recording: the licences table gained a deliberate non-OGL entry
+for m22 (`provider_own`) — a provider's website is its own copyright, and
+the export header must not claim a permission nobody granted. Both mirrors
+updated, per the licence test.
 
 ### Phase 17 — The claims-to-evidence index · M — **planned**
 

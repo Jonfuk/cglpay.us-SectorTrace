@@ -113,7 +113,7 @@ safe to repeat.
 **Re-runs are cheap, but only `m01_procurement` truly resumes.** It is the one
 module that records a cursor (`module_cursors`), because Find a Tender is
 paged and picking the page back up is the difference between minutes and
-hours. The other nineteen restart from the beginning — what makes that
+hours. The other twenty-two restart from the beginning — what makes that
 acceptable rather than wasteful is the conditional-request cache: a document
 that has not changed answers `304` and is read from the raw archive instead of
 downloaded again. The requests are still made, at the same one per two seconds
@@ -141,10 +141,13 @@ one or both.
 | `m13_la_budgets` | MHCLG | Local authority budgeted revenue expenditure, incl. the Public Health line |
 | `m14_annual_reports` | Provider annual reports | Workforce narrative and disclosure gaps, read from PDFs `m03` already archived |
 | `m15_foi` | mySociety register + WhatDoTheyKnow search feed + council disclosure logs | **Discovery of** publicly published FOI requests (never their response text), and an authoritative website URL per authority |
-| `m16_nhs_jobs` | NHS Jobs | Advertised pay bands, contract type and closing dates per provider — the only **direct** pay evidence here, and a floor rather than a total |
+| `m16_nhs_jobs` | NHS Jobs | Advertised pay bands, contract type and closing dates per provider — the only **direct** pay evidence here, and a floor rather than a total. Two passes: employer searches plus role-keyword searches (`surfaced_by` records which) |
 | `m17_statutory_pay_rates` | GOV.UK rates page (not an API) | National Minimum Wage and National Living Wage rates per period and band — the statutory floor, updated once a year |
 | `m18_living_wage` | Living Wage Foundation | Which of the tracked providers are accredited living wage employers, per lookup, with fetch date |
 | `m19_data_gov_uk` | data.gov.uk CKAN | Dataset discovery metadata and resource URLs — what the central catalogue holds, by keyword and by exact organisation match |
+| `m20_gender_pay_gap` | Gender Pay Gap service | Statutory gender pay gap filings matched to the tracked providers — company number first, exact name second; an absent provider is a review item, never a zero |
+| `m21_ons_ashe` | ONS developer API | Median gross hourly pay (excl. overtime) by occupation and industry, UK and England — the comparator market for the sector's advertised pay, side-by-side only |
+| `m22_provider_pay_pages` | The tracked providers' own websites | Pay figures published on provider career and reward pages — advertised bands and listed rates, attributed exactly (the page is the provider's own site) |
 
 ### Run order
 
@@ -165,6 +168,7 @@ deterministic and two logs are comparable). Three orderings matter:
 | `m04_companies` | `m03_charity_finance`, `m05_cqc` | both publish company numbers; without them every company name match stays unconfirmed |
 | `m09`, `m10` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched |
 | `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
+| `m20_gender_pay_gap` | `m04_companies` | company-number matching reads the identifiers `m04` discovered |
 
 Alphabetical order breaks the second and third of these. Neither failed
 loudly when it did — `m04` simply confirmed nothing, and `m09`/`m10` searched
@@ -228,6 +232,10 @@ evidence:
   Nothing reaches `cdp_documents` unverified.
 - **`m10`** finds committee papers the same way. Nothing reaches
   `committee_papers` unverified.
+- **`m20`** raises one `gender_pay_gap_absence` item per tracked provider per
+  reporting year with no matched filing. The item is the only place the
+  out-of-scope decision (fewer than 250 staff) can be made; a provider absent
+  from the file is never recorded as a zero gap.
 
 **A decision survives a re-run.** These modules re-write every candidate they
 find on every run, and until [#2](https://github.com/Jonfuk/cglpay.us-SectorTrace/issues/2)
