@@ -2162,6 +2162,18 @@ discipline does not reach this.
   `name_only_unconfirmed` rows have no identifiers and can never acquire
   one. A test asserts zero name-only rows carry a provider_key — on the
   live data, 20 rows link to a tracked provider, all by identifier.
+- **The migration number collided with the postgres workstream, and the
+  live warehouse is already on the phase.** The same hour this landed,
+  issue #21's phase-4 branch shipped `0044_contracts_by_date_published.sql`
+  and applied it to the live PostgreSQL warehouse, and a web-server startup
+  on this branch applied this phase's migration under the same number
+  before the rename. Renamed to **`0045`** (apply order decides the number
+  order), the phantom `0044_sector_universe` record removed from the live
+  `schema_migrations`, and the phase then applied to the live warehouse for
+  real: migration `0045`, the m23 build (29,680 rows, 20 identifier-linked
+  to tracked providers), and `resolve-answered` closing all 3,165 absorbed
+  items — the pending queue dropped 4,304 → 1,139, every closure recorded
+  in `review_resolutions` and reopenable.
 
 Below is the plan as written.
 
