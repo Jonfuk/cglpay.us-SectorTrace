@@ -33,7 +33,7 @@ The inputs, and what each contributes:
     items themselves happens through review_sweep's rules once their rows
     exist, so every closure is recorded, previewable and reversible.
 
-The match-basis discipline is m04's, kept exactly — see migration 0044 for
+The match-basis discipline is m04's, kept exactly — see migration 0045 for
 the vocabulary. The one rule this module exists to enforce is its simplest
 consequence: provider_key is set only through an identifier that a source
 published (provider_identifiers, or a company row m04 seeded), never through

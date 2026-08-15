@@ -26,7 +26,7 @@ on the other, with the F-05 note that B3 was always making standing true
 now has its mechanism). **Phase 18 landed the same day — the sector universe
 (F1, F2, F3) with D-04's remaining 3,160 review items folded in**, and the
 standing design question (new table or providers extension) settled as a new
-table — the argument is in migration `0044`. What is left of the plan is
+table — the argument is in migration `0045`. What is left of the plan is
 Phases 14 (gated on your say-so), 17 (gated on campaign throughput) and 19.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
@@ -2101,7 +2101,7 @@ discipline does not reach this.
 #### What changed as it landed
 
 - **The design question settled as a new table, and the argument is in
-  migration `0044`.** `providers` is reference/config — seeded from code,
+  migration `0045`.** `providers` is reference/config — seeded from code,
   no provenance, the human-curated thirteen. The universe is
   evidence-derived, unbounded, and must keep provenance and match-basis per
   row; extending `providers` would have made the config table unbounded and

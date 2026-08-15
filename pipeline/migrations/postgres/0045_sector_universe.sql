@@ -1,6 +1,6 @@
 -- Phase 18 (F1): the sector universe — the population workstream's table.
 --
--- PostgreSQL dialect of ../0044_sector_universe.sql. See README.md in this
+-- PostgreSQL dialect of ../0045_sector_universe.sql. See README.md in this
 -- directory for the conversion rules; the porting decisions specific to this
 -- file are commented where they occur.
 --
