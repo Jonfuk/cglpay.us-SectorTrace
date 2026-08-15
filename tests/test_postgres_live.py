@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,17 @@ def _configured_url(name: str) -> str | None:
 POSTGRES_TEST_URL = _configured_url("POSTGRES_TEST_URL")
 POSTGRES_TEST_RO_URL = _configured_url("POSTGRES_TEST_RO_URL")
 
-pytestmark = pytest.mark.skipif(
-    not POSTGRES_TEST_URL,
-    reason="POSTGRES_TEST_URL is not set; the offline suite does not need a server")
+# A URL is not enough: psycopg is an extra, and a checkout that has the
+# credentials configured but has not run `uv sync --extra postgres` would
+# otherwise error in every fixture rather than skipping. Both conditions are
+# named here so `tests/test_pg_migration_live.py` shares one answer.
+LIVE_POSTGRES = bool(POSTGRES_TEST_URL) and find_spec("psycopg") is not None
+NO_LIVE_POSTGRES = (
+    "POSTGRES_TEST_URL is not set" if not POSTGRES_TEST_URL
+    else "the postgres extra is not installed (uv sync --extra postgres)"
+) + "; the offline suite needs neither"
+
+pytestmark = pytest.mark.skipif(not LIVE_POSTGRES, reason=NO_LIVE_POSTGRES)
 
 
 @pytest.fixture(scope="module")

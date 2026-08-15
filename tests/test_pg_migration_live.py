@@ -36,16 +36,19 @@ from conftest import scratch_schema
 
 # The same two variables, read the same way. `tests/` is on `sys.path` under
 # pytest's default import mode, so these are the sibling modules.
-from test_postgres_live import POSTGRES_TEST_RO_URL, POSTGRES_TEST_URL
+from test_postgres_live import (
+    LIVE_POSTGRES,
+    NO_LIVE_POSTGRES,
+    POSTGRES_TEST_RO_URL,
+    POSTGRES_TEST_URL,
+)
 
 from pipeline import catalog, db, pgload, pgverify
 from pipeline.config import Settings
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
 
-pytestmark = pytest.mark.skipif(
-    not POSTGRES_TEST_URL,
-    reason="POSTGRES_TEST_URL is not set; the offline suite does not need a server")
+pytestmark = pytest.mark.skipif(not LIVE_POSTGRES, reason=NO_LIVE_POSTGRES)
 
 PROVENANCE = ("https://example.org/source", "2026-08-15T00:00:00+00:00", 200,
                "test", "0" * 64)

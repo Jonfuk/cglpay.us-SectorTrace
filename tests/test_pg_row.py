@@ -15,7 +15,17 @@ import sqlite3
 
 import pytest
 
-from pipeline.pg import Row, row_factory
+# `pipeline/pg.py` imports psycopg at module level, and psycopg is an extra.
+# pyproject is explicit that a checkout with no driver must still work — "a
+# fresh checkout, CI, and every test that does not name a backend open a file,
+# and none of them should need a database driver on the machine" — and without
+# this line that claim was false of the test suite itself: collection aborted
+# with ModuleNotFoundError before a single test ran, taking the whole offline
+# suite with it. CI installs the extra (see .github/workflows/tests.yml) so
+# these do run there; this is what keeps the driverless case honest.
+pytest.importorskip("psycopg", reason="the postgres extra is not installed")
+
+from pipeline.pg import Row, row_factory  # noqa: E402 - after the guard above
 
 
 def make_row(names, values):
