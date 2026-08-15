@@ -12,6 +12,12 @@ only be rebuilt by doing that again. Until Phase 3 of
 ./start.sh restore data/backups/warehouse-20260813T131334Z.db --force
 ```
 
+The same four commands cover both backends. `DATABASE_URL` decides which
+warehouse they are about, and the suffix says which one a file came from:
+`warehouse-….db` is a SQLite snapshot, `warehouse-….sql.gz` a PostgreSQL one.
+Restoring a file from the other backend is refused by name rather than
+attempted — see [PostgreSQL snapshots](#postgresql-snapshots) below.
+
 ## What is copied, and what is not
 
 | | Size (2026-08-13) | Treatment |
@@ -55,6 +61,83 @@ backup becomes a corrupt warehouse.
 
 The common reason to restore is "something went wrong". The second-commonest
 is "I restored the wrong one", which is why nothing is thrown away.
+
+## PostgreSQL snapshots
+
+`VACUUM INTO` is a SQLite statement. With `DATABASE_URL` set, `backup` writes
+`data/backups/warehouse-<stamp>.sql.gz` instead: every table streamed out of
+**one `REPEATABLE READ, READ ONLY` transaction** — the mechanism `pg_dump`
+itself uses — into a gzipped SQL script of `COPY … FROM stdin` blocks. The
+live 688,189-row warehouse takes 30 seconds and comes out at 39 MB, checked.
+
+```bash
+./start.sh backup --label before-cutover   # 30s, verified, manifest beside it
+./start.sh restore data/backups/warehouse-20260815T223557Z.sql.gz --force
+```
+
+**It is not `pg_dump`, and that is a decision.** `pg_dump` must be at least
+the server's major version, and the machine that runs the collection has no
+PostgreSQL client on it at all; a backup tool that does not run on the
+operator's machine does not run. The one thing `pg_dump` does that this cannot
+is emit the schema — which this project does not need it for, because the
+schema *is* `pipeline/migrations/postgres/`, in git, applied in a recorded
+order. A dump carrying its own DDL would be a second copy of the schema, free
+to disagree with the tree.
+
+So **the archive holds data and a ledger, not DDL**, and restoring needs a
+checkout whose PostgreSQL tree contains the migrations the archive names.
+`restore` checks that first and refuses by name rather than discovering a
+missing column part way in. The other side of the same trade: the file is a
+plain SQL script, so `psql -f` restores it into a migrated database without
+this repository being involved at all.
+
+**The archive proves itself.** The trailer is written last, after every byte
+of data, and carries each table's row count and the SHA-256 of its block.
+Verification decompresses the whole file — gzip's own checksum covers that —
+counts the rows and re-hashes the blocks, so a truncated dump fails on the
+missing trailer and a corrupted one fails naming the table. Every snapshot is
+read back this way before it is called a backup, with the writing connection
+closed: a file checked by the process that wrote it is agreeing with its own
+memory.
+
+**Restoring never discards silently.** A PostgreSQL warehouse holding rows
+needs `--force`, and even then the rows it is about to replace are snapshotted
+first — the equivalent of renaming the SQLite file aside, since there is no
+file here to rename. That snapshot is labelled, so retention never prunes it.
+
+The raw archive is inventoried exactly as it is on SQLite: it lives on the
+machine that runs the collection whichever backend holds the rows.
+
+## Keeping the SQLite warehouse in step
+
+Once `DATABASE_URL` is set, collection writes to PostgreSQL and
+`data/warehouse.db` stops moving. The plan's rollback — unset the variable —
+is then only as good as the day that file was last current. It was 12
+migrations and 33,000 rows behind when this was written.
+
+```bash
+./start.sh sync-sqlite --check   # how far apart the two warehouses are
+./start.sh sync-sqlite           # rebuild the SQLite one from PostgreSQL
+```
+
+`sync-sqlite` rebuilds the file from PostgreSQL through the SQLite migration
+tree, verifies it row by row against the source it came from, and only then
+swaps it in; what it replaces is renamed, never deleted. The live warehouse
+takes 70 seconds with counts and aggregates checked (`--quick`), or a little
+over two minutes with every value of all 688,189 rows compared. Nothing may
+have the warehouse open while it swaps — stop the web server first; on Windows
+the rename fails outright, and the command says so and keeps the rebuilt file
+for the retry.
+
+It is a rebuild, not a merge: a row written into SQLite while PostgreSQL was
+authoritative is not preserved, because two warehouses that both accept writes
+are two warehouses that disagree. Re-running the collection against SQLite is
+not an alternative — it would ask every source for the same evidence twice.
+
+`--check` answers two questions separately, because they have different
+remedies. Rows out of step are what a refresh fixes. **Ledgers** out of step
+mean this checkout does not hold every migration the server has had applied,
+which a refresh cannot fix and should not paper over.
 
 ## What a backup does and does not protect against
 

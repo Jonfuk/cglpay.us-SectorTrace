@@ -654,6 +654,11 @@ a listing is enough to say exactly which documents are missing after a partial
 loss. `restore` refuses a backup that fails its own integrity check and never
 deletes the warehouse it replaces.
 
+With `DATABASE_URL` set the same commands snapshot the PostgreSQL warehouse
+instead: every table streamed out of one `REPEATABLE READ` transaction into a
+gzipped SQL script, read back and re-hashed before it is called a backup. It
+is not `pg_dump` — the reasoning is in [`docs/BACKUP.md`](docs/BACKUP.md).
+
 Both directories sit on the same disk, so this covers a bad migration and not
 a dead drive. See [`docs/BACKUP.md`](docs/BACKUP.md).
 
@@ -691,6 +696,26 @@ half-loaded table. See
 [`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md)
 for creating the database, its two roles, and why the collation matters.
 
+### After the cutover
+
+Once `DATABASE_URL` is set, collection writes to PostgreSQL and
+`data/warehouse.db` stops moving — so "unset the URL" is only a rollback while
+that file is current. It is kept current by rebuilding it:
+
+```bash
+./start.sh sync-sqlite --check   # how far apart the two warehouses are
+./start.sh sync-sqlite           # rebuild the SQLite one, verified, then swap
+```
+
+The rebuild goes through the SQLite migration tree, is compared value by value
+against the warehouse it came from before it is installed, and never deletes
+what it replaces. It is not a merge and not a second collection: the same
+evidence is never fetched twice.
+
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) has the server's roles and
+collation, the cutover checklist, what dual maintenance costs, and what a
+hosted deployment would have to change.
+
 ### Which backend is faster
 
 Both, at different things, and the measurements are in
@@ -716,7 +741,8 @@ request per two seconds per host, and always will.
 | [`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md) | Every table and column, generated from the live schema — never hand-edited |
 | [`docs/SOURCES.md`](docs/SOURCES.md) | Each source's URL, licence, key requirement and applied rate limit |
 | [`docs/CAVEATS.md`](docs/CAVEATS.md) | Known limitations, and what must not be computed |
-| [`docs/BACKUP.md`](docs/BACKUP.md) | Backing the warehouse up, restoring it, and how big the archive gets |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | Backing the warehouse up on either backend, restoring it, keeping the two in step, and how big the archive gets |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | The LAN PostgreSQL server, the cutover checklist, dual maintenance, and what a hosted deployment would change |
 | [`docs/benchmarks/README.md`](docs/benchmarks/README.md) | What each backend costs, measured, and what it says about optimising either |
 | [`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md) | The PostgreSQL dialect tree, the conversions it makes, and moving the data across |
 | `docs/verification/` | Per-run review worklists produced by `m06`, `m09` and `m10` |

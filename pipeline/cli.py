@@ -186,9 +186,12 @@ def backup(
 ) -> None:
     """Copy the warehouse to a verified snapshot, and inventory the raw archive.
 
-    Uses VACUUM INTO, so the copy is consistent even while a run is writing,
-    and is checked against the original before it is called a backup. The raw
-    archive is inventoried rather than copied — see pipeline/backup.py.
+    On SQLite this is VACUUM INTO, so the copy is consistent even while a run
+    is writing, and is checked against the original before it is called a
+    backup. On PostgreSQL it is every table streamed out of one REPEATABLE
+    READ snapshot into a gzipped SQL script, checked by reading the whole file
+    back — see pipeline/pgbackup.py for why it is not pg_dump. The raw archive
+    is inventoried rather than copied either way.
     """
     from pathlib import Path
 
@@ -208,22 +211,32 @@ def backup(
     warehouse = manifest["warehouse"]
     archive = manifest["raw_archive"]
     typer.echo(f"warehouse -> {warehouse['backup']}")
-    typer.echo(f"  {warehouse['rows']:,} rows in {warehouse['tables']} tables, "
-                f"{human_bytes(warehouse['backup_bytes'])} "
-                f"(from {human_bytes(warehouse['source_bytes'])}), "
-                f"integrity {warehouse['integrity']}")
-    if warehouse["drifted_while_copying"]:
-        # Not a fault: the warehouse is live, and a module may have committed
-        # between the copy and the count. Said out loud so it is not mistaken
-        # for one later.
-        typer.echo(f"  note: {len(warehouse['drifted_while_copying'])} table(s) "
-                    "changed in the source while copying; the snapshot is "
-                    "consistent, just not the newest state.")
+    if manifest["backend"] == "postgres":
+        typer.echo(f"  {warehouse['rows']:,} rows in {warehouse['tables']} tables, "
+                    f"{human_bytes(warehouse['backup_bytes'])} "
+                    f"from {warehouse['source']}")
+        typer.echo("  re-read after writing: every row counted and every "
+                    "table's bytes re-hashed")
+        typer.echo(f"  schema: {len(warehouse['migrations'])} migrations, "
+                    "applied from pipeline/migrations/postgres/ on restore")
+    else:
+        typer.echo(f"  {warehouse['rows']:,} rows in {warehouse['tables']} tables, "
+                    f"{human_bytes(warehouse['backup_bytes'])} "
+                    f"(from {human_bytes(warehouse['source_bytes'])}), "
+                    f"integrity {warehouse['integrity']}")
+        if warehouse["drifted_while_copying"]:
+            # Not a fault: the warehouse is live, and a module may have
+            # committed between the copy and the count. Said out loud so it is
+            # not mistaken for one later.
+            typer.echo(f"  note: {len(warehouse['drifted_while_copying'])} table(s) "
+                        "changed in the source while copying; the snapshot is "
+                        "consistent, just not the newest state.")
     if archive.get("present"):
         typer.echo(f"raw archive: {archive['files']:,} files, "
                     f"{human_bytes(archive['bytes'])} across "
                     f"{len(archive['sources'])} sources — inventoried, not copied")
-    typer.echo(f"  manifest: {Path(warehouse['backup']).with_suffix('.manifest.json')}")
+    typer.echo("  manifest: "
+                f"{backup_module.companion(Path(warehouse['backup']), '.manifest.json')}")
 
     if keep is not None:
         try:
@@ -238,7 +251,9 @@ def backup(
 
 @app.command()
 def restore(
-    backup_file: str = typer.Argument(..., help="Path to a backup .db to restore"),
+    backup_file: str = typer.Argument(
+        ..., help="Path to a backup to restore: a .db file for SQLite, a "
+                   ".sql.gz snapshot for PostgreSQL"),
     force: bool = typer.Option(
         False, "--force",
         help="Required when a warehouse already exists. It is moved aside, "
@@ -246,8 +261,12 @@ def restore(
 ) -> None:
     """Put a backup back in place of the warehouse.
 
-    Refuses a backup that fails its own integrity check, and never deletes the
-    warehouse it replaces — that one is renamed with a timestamp.
+    Refuses a backup that fails its own checks, and never throws away what it
+    replaces: a SQLite warehouse is renamed with a timestamp, and a PostgreSQL
+    one is snapshotted before it is emptied.
+
+    Which warehouse is restored into is decided by DATABASE_URL, not by the
+    file — a file from the other backend is refused rather than parsed.
     """
     from pathlib import Path
 
@@ -264,6 +283,14 @@ def restore(
     typer.echo(f"  {result['rows']:,} rows in {result['tables']} tables")
     if result["superseded"]:
         typer.echo(f"  previous warehouse kept at {result['superseded']}")
+    if result.get("migrations_ahead_of_archive"):
+        # Not a refusal: those migrations added objects, and objects the
+        # snapshot predates are simply empty. Said out loud because "the
+        # restore worked and the table is empty" is otherwise a mystery.
+        typer.echo("  note: this warehouse has "
+                    f"{len(result['migrations_ahead_of_archive'])} migration(s) "
+                    "applied since the snapshot was taken; anything they added "
+                    "is empty.")
 
 
 @app.command("list-backups")
@@ -278,7 +305,8 @@ def list_backups() -> None:
         return
     for entry in entries:
         rows = f"{entry['rows']:,} rows" if entry.get("rows") else "no manifest"
-        typer.echo(f"{entry['name']}  {human_bytes(entry['bytes'])}  {rows}")
+        typer.echo(f"{entry['name']}  {human_bytes(entry['bytes'])}  {rows}  "
+                    f"{entry['backend']}")
 
 
 def _postgres_target(settings, what: str):
@@ -420,6 +448,86 @@ def verify_migration(
     _report_verification(report)
     if not report["ok"]:
         raise typer.Exit(code=1)
+
+
+@app.command("sync-sqlite")
+def sync_sqlite(
+    check: bool = typer.Option(
+        False, "--check",
+        help="Say how far apart the two warehouses are and write nothing"),
+    output: str = typer.Option(
+        None, "--output", help="Build the warehouse here instead of at "
+                                "DATABASE_PATH. For inspecting one without "
+                                "replacing what you have."),
+    verify: bool = typer.Option(
+        True, "--verify/--no-verify",
+        help="Compare the rebuilt file against PostgreSQL before installing it"),
+    quick: bool = typer.Option(
+        False, "--quick",
+        help="Verify by counts and per-column aggregates only, not row by row"),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite the file named by --output"),
+) -> None:
+    """Rebuild the SQLite warehouse from PostgreSQL, so rollback stays real.
+
+    PostgreSQL is where collection writes once DATABASE_URL is set, and the
+    SQLite file stops moving the moment it is. Unsetting the variable is only
+    a rollback while this has been run recently — see pipeline/pgsync.py.
+
+    The new file is built beside the old one, verified against PostgreSQL, and
+    only then swapped in. What it replaces is renamed, never deleted.
+    """
+    from pathlib import Path
+
+    from pipeline import pgsync
+
+    configure_logging("pgsync")
+    settings = get_settings()
+
+    try:
+        if check:
+            report = pgsync.check(settings)
+            ui.heading(f"{report['postgres_rows']:,} rows in PostgreSQL, "
+                        + (f"{report['sqlite_rows']:,} in {report['sqlite_path']}"
+                            if report["sqlite_present"] else "no SQLite warehouse"))
+            for problem in report["problems"]:
+                ui.warn(f"  {problem}")
+            if report["in_step"]:
+                ui.success("  the two warehouses hold the same rows and the "
+                            "same schema.")
+            elif report["rows_in_step"]:
+                ui.info("  the rows match; it is the migration ledgers that "
+                         "differ. A refresh will not change that — this "
+                         "checkout is not at the commit the server was "
+                         "migrated from.")
+            else:
+                ui.muted("  `./start.sh sync-sqlite` rebuilds the SQLite "
+                          "warehouse from PostgreSQL.")
+            raise typer.Exit(code=0 if report["in_step"] else 1)
+
+        def announce(table: str, rows: int | None) -> None:
+            if rows is not None:
+                ui.success(f"  {table}: {rows:,} rows")
+
+        result = pgsync.refresh(
+            settings, destination=Path(output) if output else None,
+            verify=verify, deep=not quick, force=force, on_table=announce)
+    except pgsync.SyncError as exc:
+        ui.error(str(exc))
+        raise typer.Exit(code=1) from None
+
+    ui.heading(f"{result['rows']:,} rows in {result['tables']} tables -> "
+                f"{result['target']}")
+    if result["verified"]:
+        ui.success("  verified against PostgreSQL by "
+                    + ("every value" if result["deep"]
+                        else "counts and aggregates")
+                    + " before it was installed")
+    else:
+        ui.warn("  not verified — this file has not been compared with the "
+                 "warehouse it came from")
+    if result["superseded"]:
+        ui.muted(f"  previous warehouse kept at {result['superseded']}")
 
 
 @app.command()

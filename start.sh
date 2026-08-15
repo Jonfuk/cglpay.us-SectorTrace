@@ -43,6 +43,17 @@
 #   ./start.sh migrate-data             # load, then verify every value
 #   ./start.sh verify-migration         # check the two again, later
 #
+#   After that, collection writes to PostgreSQL and data/warehouse.db stops
+#   moving — so unsetting the URL is only a rollback while that file is
+#   current. Rebuild it from PostgreSQL, verified value by value before it is
+#   installed, with nothing else holding the warehouse open:
+#   ./start.sh sync-sqlite --check      # how far apart the two are
+#   ./start.sh sync-sqlite              # rebuild, verify, then swap it in
+#
+#   `backup` and `restore` follow the configured backend: a .db snapshot on
+#   SQLite, a verified .sql.gz one on PostgreSQL. See docs/BACKUP.md and
+#   docs/DEPLOYMENT.md.
+#
 #   Measure whichever backend is configured, and record it under
 #   docs/benchmarks/ so a later change can be judged against it rather than
 #   against a recollection. Changes nothing:
