@@ -16,9 +16,9 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num } from '/app.js';
+import { el, replace, fetchJSON, num, sourceLink } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenanceFromRows, tableCard, sourceLink } from '/js/components.js';
+          disposeCharts, provenanceFromRows, tableCard } from '/js/components.js';
 
 export async function render(main) {
   const charts = [];
