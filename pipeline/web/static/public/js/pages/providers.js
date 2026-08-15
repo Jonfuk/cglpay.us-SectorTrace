@@ -549,7 +549,7 @@ function renderPfd(container, data) {
       m.mention_type === 'recipient'
         ? `Report sent to this provider (matched: ${m.matched_name || 'unknown'})`
         : `Report names this provider (matched: ${m.matched_name || 'unknown'})`,
-      el('div', { class: 'small' }, sourceLink(m.report_url, 'report ↗')))),
+      el('div', { class: 'small' }, sourceLink(m.report_url, 'report ↗'))),
     el('div', { class: 'detail', text: m.coroner_area || '' }));
 
   replace(container, section(
