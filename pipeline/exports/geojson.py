@@ -19,6 +19,42 @@ from pipeline.exports.provenance import write_export
 
 log = structlog.get_logger()
 
+# The caveats per layer, in one place. The portal's map layers read these
+# through public_queries.layers (pinned word-for-word by test), so the text
+# that governs a layer travels with it wherever the layer is drawn — the
+# exports, the portal, and anything built on either.
+LAYER_CAVEATS = {
+    "contracts": [
+        "Contracts have no location of their own. Each is placed at the centroid of the "
+        "commissioning authority's boundary — this shows who commissioned it, not where "
+        "the service is delivered.",
+        "Contract values are estimates at notice stage and may differ from actual spend.",
+        "Notices whose buyer could not be matched to an authority are omitted from this "
+        "layer; they are in the Contracts tab with a NULL buyer_ons_code.",
+    ],
+    "cqc_locations": [
+        "CQC registration covers only some service types — residential detoxification, "
+        "inpatient and certain prescribing services. Most community drug and alcohol "
+        "provision is NOT CQC-registered, so this layer is a map of regulated locations "
+        "and NOT a map of services.",
+        "Absence of a pin does not mean absence of a service.",
+    ],
+    "treatment_numbers": [
+        "Service-demand data, not workforce data. It must not be combined with workforce "
+        "figures to produce caseload-per-worker style ratios.",
+        "Values are the most recent published period per authority; periods differ between "
+        "authorities and are given per feature.",
+        "Rates are per 1,000 population and are not counts of people.",
+    ],
+    "pfd_reports": [
+        "Coroner areas are NOT local authorities and do not share their boundaries. These "
+        "features carry no geometry for that reason — grouping is by coroner area name.",
+        "A report being sent to a provider and a provider being named in one are different "
+        "facts and are given as separate properties.",
+        "The deceased is never named. Reports are keyed on the coroner's own reference.",
+    ],
+}
+
 
 def _feature(geometry: dict | None, properties: dict) -> dict:
     return {"type": "Feature", "geometry": geometry, "properties": properties}
@@ -52,14 +88,7 @@ def export_contracts(conn: sqlite3.Connection, output_dir: Path) -> Path:
     commissioning authority's boundary centroid, which is a presentational
     choice and is stated in the layer caveats.
     """
-    caveats = [
-        "Contracts have no location of their own. Each is placed at the centroid of the "
-        "commissioning authority's boundary — this shows who commissioned it, not where "
-        "the service is delivered.",
-        "Contract values are estimates at notice stage and may differ from actual spend.",
-        "Notices whose buyer could not be matched to an authority are omitted from this "
-        "layer; they are in the Contracts tab with a NULL buyer_ons_code.",
-    ]
+    caveats = LAYER_CAVEATS["contracts"]
     cursor = conn.execute("""
         SELECT c.notice_id, c.title, c.buyer_name, c.buyer_ons_code,
                c.supplier_name_raw, c.value_core, c.currency, c.date_published,
@@ -90,13 +119,7 @@ def export_contracts(conn: sqlite3.Connection, output_dir: Path) -> Path:
 
 
 def export_cqc_locations(conn: sqlite3.Connection, output_dir: Path) -> Path:
-    caveats = [
-        "CQC registration covers only some service types — residential detoxification, "
-        "inpatient and certain prescribing services. Most community drug and alcohol "
-        "provision is NOT CQC-registered, so this layer is a map of regulated locations "
-        "and NOT a map of services.",
-        "Absence of a pin does not mean absence of a service.",
-    ]
+    caveats = LAYER_CAVEATS["cqc_locations"]
     cursor = conn.execute("""
         SELECT location_id, provider_key, location_name, postal_code, latitude, longitude,
                local_authority_ons_code, region, overall_rating, last_inspection_date,
@@ -126,13 +149,7 @@ def export_cqc_locations(conn: sqlite3.Connection, output_dir: Path) -> Path:
 
 def export_treatment_numbers(conn: sqlite3.Connection, output_dir: Path) -> Path:
     """Authority polygons carrying their latest treatment-rate value."""
-    caveats = [
-        "Service-demand data, not workforce data. It must not be combined with workforce "
-        "figures to produce caseload-per-worker style ratios.",
-        "Values are the most recent published period per authority; periods differ between "
-        "authorities and are given per feature.",
-        "Rates are per 1,000 population and are not counts of people.",
-    ]
+    caveats = LAYER_CAVEATS["treatment_numbers"]
     cursor = conn.execute("""
         SELECT v.ons_code, a.name AS authority_name, a.geometry_geojson,
                v.indicator_id, i.slug, i.topic, v.time_period, v.value
@@ -177,13 +194,7 @@ def export_pfd_reports(conn: sqlite3.Connection, output_dir: Path) -> Path:
     coroner area as a property. A UI can group by it; it must not be drawn as
     if it were an authority boundary.
     """
-    caveats = [
-        "Coroner areas are NOT local authorities and do not share their boundaries. These "
-        "features carry no geometry for that reason — grouping is by coroner area name.",
-        "A report being sent to a provider and a provider being named in one are different "
-        "facts and are given as separate properties.",
-        "The deceased is never named. Reports are keyed on the coroner's own reference.",
-    ]
+    caveats = LAYER_CAVEATS["pfd_reports"]
     cursor = conn.execute("""
         SELECT r.report_ref, r.report_date, r.coroner_area, r.coroner_name, r.categories,
                r.report_url,

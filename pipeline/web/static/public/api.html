@@ -105,7 +105,10 @@
       Returns <code>providers</code>, <code>authorities</code>,
       <code>contracts</code> (with <code>value_is_concentrated</code>, which is
       why this portal publishes no headline contract total),
-      <code>workforce</code>, <code>pipeline</code>.
+      <code>workforce</code>, <code>pipeline</code>,
+      <code>funnel</code> (the candidate-to-evidence verification funnel:
+      <code>discovered</code>, <code>undecided</code>, <code>promoted</code>,
+      <code>rejected</code>, <code>evidence_rows</code>).
     </p>
     <p><a href="/api/v1/summary"><code>/api/v1/summary</code></a></p>
   </article>
@@ -136,7 +139,11 @@
     <p class="small">
       Returns <code>provider</code>, <code>events</code>,
       <code>cqc_locations</code>, <code>entity_edges</code>,
-      <code>tribunal_cases</code>, <code>caveats</code>.
+      <code>tribunal_cases</code>, <code>charity_finance</code>,
+      <code>cqc_inspections</code>, <code>disclosure</code> (with
+      <code>gaps</code>, <code>disclosed</code> and <code>not_searched</code>
+      kept apart), <code>filings</code>, <code>pfd_mentions</code>,
+      <code>caveats</code>.
     </p>
     <p><code>/api/v1/providers/change_grow_live/timeline</code></p>
   </article>
@@ -150,6 +157,90 @@
     </p>
     <p class="muted small">No parameters.</p>
     <p><a href="/api/v1/authorities"><code>/api/v1/authorities</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="authorities/{ons_code}"
+           data-route-pattern="authorities/([A-Z][0-9]{8})">
+    <h3><code>/api/v1/authorities/{ons_code}</code></h3>
+    <p>
+      Everything the warehouse holds about one authority: coverage ticks
+      (W-12), grant allocation and budgeted spend as published, the budget
+      lines behind the budget figure (W-27), treatment estimates with their
+      paired confidence intervals, and the contracts it let.
+      <code>ons_code</code> is the <code>ons_code</code> field from
+      <code>/api/v1/authorities</code>.
+    </p>
+    <p class="small">
+      Returns <code>authority</code>, <code>coverage</code>,
+      <code>grant</code>, <code>budget</code>, <code>budget_detail</code>,
+      <code>treatment</code> (<code>fingertips</code> and
+      <code>ndtms</code>, with the same pairing rules the treatment page
+      uses), <code>contracts</code>, <code>caveats</code>.
+    </p>
+    <p>
+      The grant and the budget are different figures from different documents
+      and are never combined or divided — the payload keeps them separate and
+      so must anything built on it. <code>budget_detail</code> carries amounts
+      as published: no per-capita, no inflation adjustment, no ratio.
+    </p>
+    <p><code>/api/v1/authorities/E08000025</code></p>
+  </article>
+
+  <article class="apiroute" data-route="compare">
+    <h3><code>/api/v1/compare</code></h3>
+    <p>
+      The existing series for two or more authorities or providers, drawn on
+      shared axes — the campaign's "how does my authority compare?" answered
+      in the only shape this pipeline may give it: the reader picks the peers.
+      No new data: every series is the series an existing endpoint returns
+      (grant and budget as the geography page draws them, treatment as the
+      treatment page draws it, contracts by publication year as the contracts
+      page counts them), composed for the chosen entities.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>. Repeatable.</td></tr>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Repeatable.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>authorities</code>, <code>providers</code>,
+      <code>series</code> keyed by layer — <code>grant</code>,
+      <code>budget</code>, <code>treatment</code>, <code>contracts</code> for
+      authorities, <code>charity</code> and <code>provider_contracts</code>
+      for providers — each carrying its own caveat, plus
+      <code>caveats.cross_layer</code>.
+    </p>
+    <p>
+      The charts share axes with each other's authorities, never with each
+      other's layers: nothing in the payload is combined, differenced or
+      divided, and a gap between one chart and another is not a finding.
+      At least one parameter is required; an unknown code is a 400.
+    </p>
+    <p>
+      <code>/api/v1/compare?ons_code=E08000025&amp;ons_code=E06000047&amp;provider_key=change_grow_live</code>
+    </p>
+  </article>
+
+  <article class="apiroute" data-route="layers">
+    <h3><code>/api/v1/layers</code></h3>
+    <p>
+      The geography map's overlay layers: contracts aggregated to one point
+      per commissioning authority, CQC-regulated locations, latest treatment
+      rates per authority, and coverage — how many evidence kinds the
+      warehouse holds per authority. Each layer carries its own caveats, read
+      from the same source the export layers use, so the portal and the
+      downloads cannot drift apart.
+    </p>
+    <p class="small">
+      Returns <code>layers</code>, each with <code>label</code>,
+      <code>features</code> and <code>caveats</code>. PFD reports are
+      deliberately absent: they have no geometry, and coroner areas must not
+      be mapped as if they were authorities.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p><a href="/api/v1/layers"><code>/api/v1/layers</code></a></p>
   </article>
 
   <article class="apiroute" data-route="contracts">
@@ -175,8 +266,12 @@
       Returns <code>total</code>, <code>total_value_gbp</code>,
       <code>value_concentration</code>, <code>matched_to_provider</code>,
       <code>date_range</code>, <code>by_year</code>, <code>by_provider</code>,
-      <code>by_procedure_type</code>, <code>top_buyers</code>,
-      <code>notices</code>, <code>caveats</code>.
+      <code>by_procedure_type</code>, <code>by_quarter</code>,
+      <code>value_bands</code> (in fixed bands that never move with the
+      filters), <code>ending_soon</code> (notices whose published end date
+      falls within two years, with the caveat saying what that does and does
+      not mean), <code>top_buyers</code>, <code>notices</code>,
+      <code>caveats</code>.
     </p>
     <p>
       Each notice carries three link fields and they are three different
@@ -318,6 +413,45 @@
       suppression markers kept verbatim. A marker is not a zero.
     </p>
     <p><a href="/api/v1/ndtms"><code>/api/v1/ndtms</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="pfd">
+    <h3><code>/api/v1/pfd</code></h3>
+    <p>
+      Coroners' Prevention of Future Deaths reports: reports by year (with
+      the metadata stubs counted on the chart, not in a footnote), by coroner
+      area, the concern-term finding aid, and the two mention facts kept
+      apart — being <em>sent</em> a report and being <em>named</em> in one
+      are different <code>mention_type</code>s and are never summed.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>totals</code>, <code>by_year</code>,
+      <code>by_coroner_area</code>, <code>concern_terms</code>,
+      <code>mentions</code> (<code>sent_to_providers</code>,
+      <code>naming_providers</code>, <code>recipient_organisations</code>),
+      <code>recent</code>, <code>caveats</code>. The names of the deceased
+      are in restricted tables this route cannot read, and no restricted
+      table is listed anywhere in the payload.
+    </p>
+    <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="freshness">
+    <h3><code>/api/v1/freshness</code></h3>
+    <p>
+      When each source table was last written by a pipeline run — the newest
+      <code>retrieved_at</code> per table. Served on its own route rather
+      than inside <code>/api/v1/summary</code> because it is seconds of full
+      table scans; the overview loads it lazily after first paint.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>tables</code>: an array of <code>label</code>,
+      <code>table</code> and <code>retrieved_at</code> (or no date at all —
+      never collected is "never", not a zero), plus <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/freshness"><code>/api/v1/freshness</code></a></p>
   </article>
 
   <article class="apiroute" data-route="export">

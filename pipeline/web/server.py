@@ -108,7 +108,8 @@ for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
 # Portal ES modules, listed rather than globbed for the same reason as above.
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
-for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers"):
+for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
+              "pfd", "authority", "compare"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1001,10 +1002,31 @@ class Handler(BaseHTTPRequestHandler):
                 topic=_str(params, "topic") or None,
                 ons_code=_str(params, "ons_code") or None,
                 substance=_str(params, "substance") or None)
+        if route == "pfd":
+            return public_queries.pfd(conn)
+        if route == "freshness":
+            # Its own route rather than a key of `summary` for the same
+            # reason the admin one is: seconds of full table scans, and the
+            # landing page loads it lazily after first paint.
+            return public_queries.freshness(conn)
+        if route == "compare":
+            return public_queries.compare(
+                conn,
+                ons_codes=params.get("ons_code", []),
+                provider_keys=params.get("provider_key", []))
+        if route == "layers":
+            return public_queries.layers(conn)
 
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:
             return public_queries.provider_timeline(conn, match.group(1))
+
+        # ONS codes are a letter followed by eight digits (E08000025). The
+        # pattern is intentionally tighter than "anything": an authority page
+        # is keyed by a code the /api/v1/authorities list actually returns.
+        match = re.fullmatch(r"authorities/([A-Z][0-9]{8})", route)
+        if match:
+            return public_queries.authority(conn, match.group(1))
 
         raise ApiError(f"No route for GET {path}", status=404)
 

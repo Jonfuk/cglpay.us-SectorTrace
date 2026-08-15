@@ -98,7 +98,7 @@ class TestTheTreesMatch:
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
         # through.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 34
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 39
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

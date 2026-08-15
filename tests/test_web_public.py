@@ -105,6 +105,9 @@ def test_no_public_query_touches_a_restricted_table(ro):
     public_queries.fingertips(ro)
     public_queries.boundaries(ro)
     public_queries.authorities(ro)
+    public_queries.freshness(ro)
+    public_queries.pfd(ro)
+    public_queries.authority(ro, "E08000025")
 
 
 def test_the_guard_actually_refuses_a_restricted_table():

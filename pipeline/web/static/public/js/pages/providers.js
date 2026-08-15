@@ -11,7 +11,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, isoDate, sourceLink } from '/app.js';
+import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks } from '/js/components.js';
@@ -126,7 +126,9 @@ async function renderOne(main, key) {
   const provider = data.provider || {};
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('p', {}, el('a', { href: '#/providers' }, '← All providers')),
+      el('p', {}, el('a', { href: '#/providers' }, '← All providers'),
+        ' · ', el('a', { href: `#/compare?provider_key=${key}` },
+          'Compare with other providers →')),
       el('h1', {}, provider.canonical_name || key,
         provider.is_target ? ' ' : null,
         provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null),
@@ -140,12 +142,22 @@ async function renderOne(main, key) {
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
     el('div', { id: 'cqc' }),
+    el('div', { id: 'cqc-reports' }),
+    el('div', { id: 'finance' }),
+    el('div', { id: 'disclosure' }),
+    el('div', { id: 'filings' }),
+    el('div', { id: 'pfd' }),
     el('div', { id: 'tribunals' }));
   replace(main, page);
 
   renderTimeline(page.querySelector('#timeline'), data);
   renderGraph(page.querySelector('#graph'), data, charts, key);
   renderCqc(page.querySelector('#cqc'), data);
+  renderCqcReports(page.querySelector('#cqc-reports'), data, charts);
+  renderCharityFinance(page.querySelector('#finance'), data, charts);
+  renderDisclosure(page.querySelector('#disclosure'), data, charts);
+  renderFilings(page.querySelector('#filings'), data);
+  renderPfd(page.querySelector('#pfd'), data);
   renderTribunals(page.querySelector('#tribunals'), data);
 
   return () => disposeCharts(charts);
@@ -286,6 +298,270 @@ function renderCqc(container, data) {
             title: `${l.location_name} — ${l.overall_rating || 'not rated'}`,
           }, `${truncate(l.location_name, 34)} · ${l.overall_rating || 'not rated'}`)))
         : noData('CQC locations', './start.sh run m05_cqc'))));
+}
+
+/* W-24: inspection history from cqc_location_reports. A report date is when
+ * an inspection report was published, not when a rating changed — the
+ * caveat is pinned beside the chart. The report_uri is deliberately not
+ * linked: it is a relative address with no documented host (W-15's open
+ * half), and a link that 404s is worse than a name. */
+function renderCqcReports(container, data, charts) {
+  const inspections = data.cqc_inspections || [];
+  const holder = el('div', {});
+
+  const years = {};
+  for (const row of inspections) {
+    const year = String(row.report_date || '').slice(0, 4);
+    if (year && /^\d{4}$/.test(year)) {
+      years[year] = (years[year] || 0) + 1;
+    }
+  }
+  const byYear = Object.entries(years).sort(([a], [b]) => a.localeCompare(b));
+
+  replace(container, section(
+    'CQC inspection history',
+    `${num(inspections.length)} published inspection reports across `
+    + `${num(new Set(inspections.map((r) => r.location_name)).size)} locations.`,
+    el('div', { class: 'grid two' },
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Reports per year' }), holder,
+        pinnedCaveat(data.caveats?.cqc_inspection_dates,
+          'A report date is an inspection published')),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'The reports' }),
+        inspections.length
+          ? tableCard('Inspection reports', [
+            { title: 'Location', field: 'location_name' },
+            { title: 'Report date', field: 'report_date', width: 130 },
+            { title: 'First visit', field: 'first_visit_date', width: 130 },
+          ], inspections, { height: 300 })
+          : noData('CQC inspection reports', './start.sh run m05_cqc')))));
+
+  if (byYear.length) {
+    charts.push(mountChart(holder, {
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: { type: 'category', data: byYear.map(([year]) => year) },
+      yAxis: { type: 'value', name: 'reports' },
+      series: [{
+        type: 'bar', data: byYear.map(([, n]) => n), itemStyle: { color: '#38bdf8' },
+      }],
+    }, {
+      height: 'short',
+      aria: 'Bar chart of CQC inspection reports per year for this provider.',
+    }));
+  } else {
+    replace(holder, noData('CQC inspection reports', './start.sh run m05_cqc'));
+  }
+}
+
+/* W-24: charity finance. Income against expenditure per year, and the
+ * government share of that year's own income. The share is within one row
+ * of one source, which the caveat states in terms — combining it with
+ * procurement values is the arithmetic this pipeline refuses. */
+function renderCharityFinance(container, data, charts) {
+  const rows = data.charity_finance || [];
+  const incomeHolder = el('div', {});
+  const shareHolder = el('div', {});
+
+  replace(container, section(
+    'Charity finance',
+    'Filed accounts, one row per financial year. The government share is a '
+    + 'share of that year\'s own total income.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveats?.charity_share,
+        'What may and may not be computed here'),
+      el('div', { class: 'grid two' },
+        el('div', { class: 'panel' },
+          el('h3', { text: 'Income and expenditure' }), incomeHolder),
+        el('div', { class: 'panel' },
+          el('h3', { text: 'Government contracts and grants as a share of income' }),
+          shareHolder)))));
+
+  if (!rows.length) {
+    replace(incomeHolder, noData('charity financials', './start.sh run m03_charity_finance'));
+    return;
+  }
+
+  const years = rows.map((r) => String(r.financial_year_end || '').slice(0, 4));
+  charts.push(mountChart(incomeHolder, {
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0 },
+    xAxis: { type: 'category', data: years },
+    yAxis: { type: 'value', name: '£' },
+    series: [
+      { name: 'income', type: 'bar', data: rows.map((r) => r.total_income),
+        itemStyle: { color: '#38bdf8' } },
+      { name: 'expenditure', type: 'bar', data: rows.map((r) => r.total_expenditure),
+        itemStyle: { color: '#30363d' } },
+    ],
+  }, {
+    height: 'short',
+    aria: 'Bar chart of total income and expenditure per financial year for '
+      + 'this provider.',
+  }));
+
+  charts.push(mountChart(shareHolder, {
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => params.map((p) =>
+        `<strong>${escapeHtml(p.seriesName)}</strong> — ${pct(p.value)}`
+      ).join('<br>'),
+    },
+    legend: { top: 0 },
+    xAxis: { type: 'category', data: years },
+    yAxis: { type: 'value', name: 'share of income', axisLabel: { formatter: '{value}%' } },
+    series: [
+      { name: 'government contracts', type: 'bar',
+        data: rows.map((r) => r.govt_contracts_share == null ? null : +(r.govt_contracts_share * 100).toFixed(1)),
+        itemStyle: { color: '#f59e0b' } },
+      { name: 'government grants', type: 'bar',
+        data: rows.map((r) => r.govt_grants_share == null ? null : +(r.govt_grants_share * 100).toFixed(1)),
+        itemStyle: { color: '#a78bfa' } },
+    ],
+  }, {
+    height: 'short',
+    aria: 'Bar chart of government contract and grant income as a share of '
+      + 'each year\'s total income, within the same row of the filed accounts.',
+  }));
+}
+
+/* W-24: what a report does not discuss. The matrix distinguishes three
+ * states and the caveat pins the weakest one: "not matched" means the
+ * search terms did not appear in the extracted text, which is a statement
+ * about the PDF and the terms, not about the provider. */
+function renderDisclosure(container, data, charts) {
+  const disclosure = data.disclosure || {};
+  const gaps = disclosure.gaps || [];
+  const disclosed = disclosure.disclosed || [];
+  const notSearched = disclosure.not_searched || [];
+  const topics = disclosure.topics || [];
+  const years = [...new Set([
+    ...gaps.map((g) => g.financial_year_end),
+    ...disclosed.map((d) => d.financial_year_end),
+    ...notSearched.map((n) => n.financial_year_end),
+  ])].sort();
+  const holder = el('div', {});
+
+  const gapCaveat = gaps.find((g) => g.caveat)?.caveat;
+  const gapByKey = new Map(gaps.map((g) => [`${g.financial_year_end}|${g.topic}`, g]));
+  const notSearchedYears = new Set(notSearched.map((n) => n.financial_year_end));
+
+  replace(container, section(
+    'Annual report disclosure',
+    'What each annual report appears not to discuss, by topic and year. '
+    + 'Every cell is a prompt to look, not a finding in itself.',
+    el('div', { class: 'panel' },
+      gapCaveat ? pinnedCaveat(gapCaveat, 'Read before citing a gap') : null,
+      holder)));
+
+  if (!topics.length) {
+    replace(holder, noData('annual report disclosure', './start.sh run m14_annual_reports'));
+    return;
+  }
+
+  const cellData = [];
+  for (const year of years) {
+    for (const topic of topics) {
+      const gap = gapByKey.get(`${year}|${topic}`);
+      let value = 2; // disclosed: the terms matched
+      if (notSearchedYears.has(year)) value = 0; // the report was never searched
+      else if (gap) value = 1; // searched, and the terms did not match
+      cellData.push([years.indexOf(year), topics.indexOf(topic), value]);
+    }
+  }
+
+  charts.push(mountChart(holder, {
+    tooltip: {
+      formatter: (p) => {
+        const topic = topics[p.value[1]];
+        const year = years[p.value[0]];
+        const gap = gapByKey.get(`${year}|${topic}`);
+        if (gap) {
+          return `<strong>${escapeHtml(topic)}</strong>, ${escapeHtml(year)}`
+            + `<br><span style="color:#f59e0b">terms did not match</span><br>`
+            + `<span style="color:#8b949e">${escapeHtml(gap.search_terms)}</span>`;
+        }
+        if (notSearchedYears.has(year)) {
+          return `<strong>${escapeHtml(topic)}</strong>, ${escapeHtml(year)}`
+            + `<br><span style="color:#8b949e">annual report not searched</span>`;
+        }
+        return `<strong>${escapeHtml(topic)}</strong>, ${escapeHtml(year)}`
+          + `<br><span style="color:#34d399">terms matched</span>`;
+      },
+    },
+    xAxis: { type: 'category', data: years, splitArea: { show: true } },
+    yAxis: { type: 'category', data: topics, splitArea: { show: true } },
+    visualMap: {
+      min: 0, max: 2, show: false,
+      inRange: { color: ['#21262d', '#f59e0b', '#34d399'] },
+    },
+    series: [{
+      type: 'heatmap', data: cellData,
+      label: { show: false },
+      emphasis: { itemStyle: { borderColor: '#e6edf3', borderWidth: 1 } },
+    }],
+  }, {
+    height: 'tall',
+    aria: 'Heatmap of annual report disclosure by topic and year. Amber cells '
+      + 'are topics whose search terms did not match; green cells matched; '
+      + 'dark cells are years whose report was never searched.',
+  }));
+}
+
+/* W-24: the filing history. Each row links to the document itself on
+ * Companies House's document API; the caveat says a filing is a record of a
+ * document, not a statement about the provider. */
+function renderFilings(container, data) {
+  const filings = data.filings || [];
+
+  replace(container, section(
+    'Company filing history',
+    `${num(filings.length)} documents filed at Companies House.`,
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveats?.filing_records, 'A filing is not a finding'),
+      filings.length
+        ? tableCard('Filings', [
+          { title: 'Filed', field: 'filing_date', width: 110,
+            formatter: (c) => isoDate(c.getValue()) },
+          { title: 'Category', field: 'category', width: 130 },
+          { title: 'Subcategory', field: 'subcategory', width: 130 },
+          { title: 'Description', field: 'description' },
+          { title: 'Document', field: 'document_url', width: 100, headerFilter: false,
+            formatter: (c) => (c.getValue()
+              ? el('a', { href: c.getValue(), target: '_blank', rel: 'noopener noreferrer' },
+                'document ↗')
+              : '') },
+        ], filings, { height: 380 })
+        : noData('company filings', './start.sh run m04_companies'))));
+}
+
+/* W-25's deep-dive half: the reports that mention this provider. Sent and
+ * named stay visibly different rows, and the caveat says the two are never
+ * added. Each report links to the coroner's published page. */
+function renderPfd(container, data) {
+  const mentions = data.pfd_mentions || [];
+  const sent = mentions.filter((m) => m.mention_type === 'recipient');
+  const named = mentions.filter((m) => m.mention_type === 'body_text');
+
+  const row = (m) => el('li', { class: m.mention_type },
+    el('div', { class: 'when', text: m.report_date || '—' }),
+    el('div', { class: 'what' },
+      m.mention_type === 'recipient'
+        ? `Report sent to this provider (matched: ${m.matched_name || 'unknown'})`
+        : `Report names this provider (matched: ${m.matched_name || 'unknown'})`,
+      el('div', { class: 'small' }, sourceLink(m.report_url, 'report ↗')))),
+    el('div', { class: 'detail', text: m.coroner_area || '' }));
+
+  replace(container, section(
+    'Coroners\' reports mentioning this provider',
+    `${num(sent.length)} reports addressed to this provider; `
+    + `${num(named.length)} naming it in the text. Two different facts, `
+    + 'shown separately and never added together.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveats?.pfd_mentions, 'Sent and named are different facts'),
+      mentions.length
+        ? el('ul', { class: 'timeline' }, mentions.map(row))
+        : noData('PFD mentions', './start.sh run m08_pfd_reports'))));
 }
 
 function renderTribunals(container, data) {

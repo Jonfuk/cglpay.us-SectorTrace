@@ -158,7 +158,7 @@ def scratch(request):
     Function-scoped, not module-scoped: several tests here truncate every
     table and one deliberately leaves a half-finished state file behind, and
     sharing that between tests would make the order they run in load-bearing.
-    Building a schema and applying 34 migrations costs about a second.
+    Building a schema and applying 39 migrations costs about a second.
     """
     with scratch_schema(POSTGRES_TEST_URL, POSTGRES_TEST_RO_URL) as made:
         yield made

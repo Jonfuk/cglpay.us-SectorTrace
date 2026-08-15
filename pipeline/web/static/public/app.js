@@ -170,10 +170,22 @@ export function subscribe(fn) {
  *  path; filters are its query, which keeps one shareable address for
  *  "contracts, this provider, these years". */
 function writeStateToUrl() {
-  const [path] = (location.hash.slice(1) || '/').split('?');
+  const [path, rawQuery] = (location.hash.slice(1) || '/').split('?');
+  const existing = rawQuery ? new URLSearchParams(rawQuery) : null;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(state)) {
     if (value !== null && value !== undefined && value !== '') params.set(key, value);
+  }
+  // Page-owned query keys survive a filter change. The compare page's
+  // selection is the whole page — `#/compare?ons_code=...&ons_code=...` —
+  // and a filter change must not wipe it out of a URL that is a shareable
+  // comparison.
+  if (existing) {
+    for (const key of existing.keys()) {
+      if (!(key in state)) {
+        for (const value of existing.getAll(key)) params.append(key, value);
+      }
+    }
   }
   const query = params.toString();
   const target = `#${path}${query ? `?${query}` : ''}`;
@@ -216,14 +228,19 @@ const ROUTES = {
   '/geography': () => import('/js/pages/geography.js'),
   '/treatment': () => import('/js/pages/treatment.js'),
   '/providers': () => import('/js/pages/providers.js'),
+  '/pfd': () => import('/js/pages/pfd.js'),
+  '/authorities': () => import('/js/pages/authority.js'),
+  '/compare': () => import('/js/pages/compare.js'),
 };
 
 let disposeCurrent = null;
 
 async function render() {
-  const { path } = parseHash();
-  // /providers/:key deep-dive shares the providers module.
-  const base = path.startsWith('/providers/') ? '/providers' : path;
+  const { path, params } = parseHash();
+  // Deep dives share their base module: /providers/:key is the providers
+  // module with a key, /authorities/:ons_code the authority module with one.
+  const base = path.startsWith('/providers/') ? '/providers'
+    : path.startsWith('/authorities/') ? '/authorities' : path;
   const load = ROUTES[base] || ROUTES['/'];
 
   for (const link of document.querySelectorAll('.mainnav a')) {
@@ -244,7 +261,10 @@ async function render() {
 
   try {
     const module = await load();
-    disposeCurrent = await module.render(main, { path });
+    // The query is passed through so a page can key off its own hash params —
+    // the compare page is `#/compare?ons=...&ons=...`, a URL that is the whole
+    // comparison. Pages that do not ask for params ignore them.
+    disposeCurrent = await module.render(main, { path, params });
   } catch (error) {
     replace(main, el('div', { class: 'section' },
       el('div', { class: 'chart-error' },
@@ -330,12 +350,70 @@ async function initFilterBar() {
   if (s.yearTo) $('#f-year-to').value = s.yearTo;
 }
 
+// --- find your council -------------------------------------------------------
+
+/* W-17: a reader who knows their town, not their ONS code, has no entry
+ * point. This navigates rather than filters — picking an authority goes
+ * straight to its page — which is why it is in the top bar rather than the
+ * filter bar: the filter bar's controls declare a state key for a page to
+ * read (tests/test_portal_controls.py), and a navigator holds no state. */
+async function initFindCouncil() {
+  const input = $('#find-council');
+  const list = $('#find-council-list');
+
+  let authorities = [];
+  try {
+    authorities = (await fetchJSON('authorities')).authorities || [];
+  } catch (e) {
+    input.disabled = true;
+    input.placeholder = 'Council search unavailable';
+    return;
+  }
+
+  const fuse = window.Fuse
+    ? new window.Fuse(authorities, { keys: ['name', 'ons_code'], threshold: 0.4 })
+    : null;
+
+  const go = (code, label) => {
+    input.value = label || '';
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    if (code) location.hash = `#/authorities/${code}`;
+  };
+
+  const showMatches = () => {
+    const term = input.value.trim();
+    const matches = !term ? authorities.slice(0, 12)
+      : fuse ? fuse.search(term).slice(0, 12).map((r) => r.item)
+        : authorities.filter((a) =>
+          a.name.toLowerCase().includes(term.toLowerCase())).slice(0, 12);
+    replace(list, matches.map((a) => el('li', {
+      role: 'option',
+      onmousedown: () => go(a.ons_code, a.name),
+    }, `${a.name} · ${a.ons_code}`)));
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+
+  input.addEventListener('focus', showMatches);
+  input.addEventListener('input', showMatches);
+  input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
+  // Enter picks the top match. A search box that swallows Enter invites the
+  // reader to type and wait for nothing.
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || list.hidden) return;
+    const first = list.querySelector('li');
+    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  });
+}
+
 // --- boot --------------------------------------------------------------------
 
 function boot() {
   registerTheme();
   readStateFromUrl();
   initFilterBar();
+  initFindCouncil();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
   render();

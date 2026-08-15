@@ -273,6 +273,32 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "attribution rests on, and it is what goes blank if the results "
               "markup changes shape.",
     ),
+    Smoke(
+        module="m17_statutory_pay_rates",
+        produces=("statutory_pay_rates",),
+        signal=(("statutory_pay_rates", "period_label"),
+                ("statutory_pay_rates", "amount")),
+        note="The current-rates row must parse, or the module is reading a "
+              "page that has changed shape.",
+    ),
+    Smoke(
+        module="m18_living_wage",
+        produces=("living_wage_accreditations",),
+        signal=(("living_wage_accreditations", "provider_key"),
+                ("living_wage_accreditations", "accredited")),
+        note="accredited is a boolean: every provider gets a row saying "
+              "whether the exact name was found.",
+    ),
+    Smoke(
+        module="m19_data_gov_uk",
+        produces=("data_gov_uk_datasets", "data_gov_uk_resources"),
+        signal=(("data_gov_uk_datasets", "dataset_id"),
+                ("data_gov_uk_datasets", "title")),
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match organisations against",
+        note="The keyword pass must find something in the catalogue, or the "
+              "discovery vocabulary is matching nothing.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

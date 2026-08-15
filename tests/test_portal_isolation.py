@@ -46,6 +46,9 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/geography.js",
     "/js/pages/treatment.js",
     "/js/pages/providers.js",
+    "/js/pages/pfd.js",
+    "/js/pages/authority.js",
+    "/js/pages/compare.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -65,10 +68,17 @@ PUBLIC_API_ROUTES = {
     "boundaries",
     "fingertips",
     "ndtms",
+    "compare",
+    "layers",
+    "pfd",
+    "freshness",
 }
 
 # Route patterns under /api/v1/ that take a parameter.
-PUBLIC_API_PATTERNS = {r"providers/([a-z0-9_]+)/timeline"}
+PUBLIC_API_PATTERNS = {
+    r"providers/([a-z0-9_]+)/timeline",
+    r"authorities/([A-Z][0-9]{8})",
+}
 
 # Published under /api/v1/ and dispatched before the table above, so it is not
 # a `route ==` literal in `_public_api` and would otherwise be absent from

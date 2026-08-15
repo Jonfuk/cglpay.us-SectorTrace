@@ -118,11 +118,17 @@ a:hover { text-decoration-color: currentColor; }
 /* De-emphasised on purpose: the operator tools are for whoever runs the
    pipeline, not for the researchers this portal is built for. */
 .adminlink {
-  margin-left: auto; font-size: 12.5px; color: var(--text-muted);
+  font-size: 12.5px; color: var(--text-muted);
   text-decoration: none; padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
 }
 .adminlink:hover { color: var(--text-secondary); border-color: var(--border-accent); }
+
+/* "Find your council" (W-17): a navigator in the top bar, not a filter.
+   Right-aligned with the admin links; the list drops below the input. */
+.findcouncil { position: relative; margin-left: auto; }
+.findcouncil input { min-width: 190px; }
+.findcouncil .typeahead-list { min-width: 260px; right: 0; left: auto; }
 
 /* --- filter bar ---------------------------------------------------------- */
 
@@ -341,6 +347,60 @@ main:focus { outline: none; }
 .registers { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: baseline; }
 .registerlink { white-space: nowrap; }
 
+/* --- authority page -------------------------------------------------------- */
+
+/* W-12: which evidence kinds the warehouse holds for one authority. A chip
+   per kind, filled when rows exist; the empty state must read as "not
+   collected" rather than as a zero figure, which is what the pinned caveat
+   next to the row says in prose. */
+.coverage-ticks { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.coverage-tick {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  border-radius: 999px; padding: 4px 12px; font-size: 12.5px;
+  border: 1px solid var(--border-subtle); color: var(--text-secondary);
+}
+.coverage-tick.yes { border-color: var(--border-accent); color: var(--text-primary); }
+.coverage-tick.yes .tick-mark { color: var(--accent-green); }
+.coverage-tick .tick-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* W-27: grant and budget sit side by side on the same page and are never
+   combined into one axis — the caveat pinned above both is why the section
+   exists. */
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+@media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+
+/* --- compare page (W-11) ---------------------------------------------------- */
+
+/* The selection: a chip per chosen entity, removable, with the URL as the
+   state. The chips and the pickers sit in one panel so the reader sees the
+   selection and the way to change it together. */
+.compare-chips { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 12.5px;
+  border: 1px solid var(--border-accent); color: var(--text-primary);
+  background: var(--bg-surface);
+}
+.chip-remove {
+  border: 0; background: none; color: var(--text-muted); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 50%;
+}
+.chip-remove:hover { color: var(--accent-red); background: var(--bg-elevated); }
+.compare-pickers { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+
+/* --- geography layers (W-19) ------------------------------------------------ */
+
+/* Each overlay layer is a checkbox with its caveat pinned underneath it the
+   moment it is checked — a layer never appears without the warning that
+   governs it, which is the finding's own test. */
+.layerpanel { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; }
+.layer-toggle {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 13.5px; color: var(--text-secondary); width: fit-content;
+}
+.layer-toggle input { accent-color: var(--accent-teal); }
+.layer-caveat { margin-left: 24px; }
+
 /* --- timeline ------------------------------------------------------------ */
 
 .timeline { list-style: none; margin: 0; padding: 0 0 0 var(--space-6); border-left: 1px solid var(--border-accent); }
@@ -366,10 +426,28 @@ main:focus { outline: none; }
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
   border-radius: 999px; padding: 4px 12px; font-size: 12.5px;
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
-.dot.green { background: var(--accent-green); }
-.dot.amber { background: var(--accent-amber); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.green { background: var(--accent-green); }
+  .dot.amber { background: var(--accent-amber); }
 
+  /* The overview's flow bars (verification funnel and freshness). A plain
+   * div track rather than a chart on purpose: a zero renders as the text
+   * "0" next to an empty track, which an empty canvas would not say. */
+  .flowrows { display: grid; gap: var(--space-3); }
+  .flowrow { display: grid; grid-template-columns: minmax(180px, 1fr) 3fr;
+    gap: var(--space-3); align-items: center; }
+  .flowlabel { display: flex; justify-content: space-between; gap: var(--space-2);
+    font-size: 13.5px; }
+  .flowvalue { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .flowbar { height: 10px; border-radius: 5px; background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle); overflow: hidden; }
+  .flowbar-fill { height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #1f6feb, #38bdf8); }
+  .flowbar-fill.never { background: var(--border-subtle); }
+  @media (max-width: 720px) {
+    .flowrow { grid-template-columns: 1fr; gap: var(--space-1); }
+  }
+  
 .sitefoot {
   border-top: 1px solid var(--border-subtle); padding: var(--space-8) var(--space-6);
   color: var(--text-secondary); font-size: 13px; max-width: 1440px; margin: 0 auto;

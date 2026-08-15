@@ -113,7 +113,7 @@ safe to repeat.
 **Re-runs are cheap, but only `m01_procurement` truly resumes.** It is the one
 module that records a cursor (`module_cursors`), because Find a Tender is
 paged and picking the page back up is the difference between minutes and
-hours. The other sixteen restart from the beginning — what makes that
+hours. The other nineteen restart from the beginning — what makes that
 acceptable rather than wasteful is the conditional-request cache: a document
 that has not changed answers `304` and is read from the raw archive instead of
 downloaded again. The requests are still made, at the same one per two seconds
@@ -127,9 +127,9 @@ one or both.
 | --- | --- | --- |
 | `m00_geography` | ONS Open Geography Portal | Local authority spine, boundaries, reorganisation successors |
 | `m01_procurement` | Find a Tender, Contracts Finder | Contract notices, values, suppliers, direct awards |
-| `m02_tribunals` | GOV.UK employment tribunal decisions | Judgments against providers (pseudonymised) |
+| `m02_tribunals` | GOV.UK employment tribunal decisions | Judgments against providers (pseudonymised), plus Employment Appeal Tribunal decisions as their own layer |
 | `m03_charity_finance` | Charity Commission + filed accounts | Income, wages, employee numbers, agency spend, pay bands |
-| `m04_companies` | Companies House | Group structure, former names, filings, officer churn, insolvency cases, disqualified-director check |
+| `m04_companies` | Companies House | Group structure, former names, filings, officer churn, insolvency cases, PSC ownership edges, disqualified-director check |
 | `m05_cqc` | CQC public API | Registered locations, ratings, inspection reports |
 | `m06_workforce_census` | NHS Benchmarking Network | Vacancy, turnover, WTE, volunteer and contract-type metrics |
 | `m07_ndtms` | OHID via GOV.UK | Published treatment statistics; LA-level tables where they exist |
@@ -142,6 +142,9 @@ one or both.
 | `m14_annual_reports` | Provider annual reports | Workforce narrative and disclosure gaps, read from PDFs `m03` already archived |
 | `m15_foi` | mySociety register + WhatDoTheyKnow search feed + council disclosure logs | **Discovery of** publicly published FOI requests (never their response text), and an authoritative website URL per authority |
 | `m16_nhs_jobs` | NHS Jobs | Advertised pay bands, contract type and closing dates per provider — the only **direct** pay evidence here, and a floor rather than a total |
+| `m17_statutory_pay_rates` | GOV.UK rates page (not an API) | National Minimum Wage and National Living Wage rates per period and band — the statutory floor, updated once a year |
+| `m18_living_wage` | Living Wage Foundation | Which of the tracked providers are accredited living wage employers, per lookup, with fetch date |
+| `m19_data_gov_uk` | data.gov.uk CKAN | Dataset discovery metadata and resource URLs — what the central catalogue holds, by keyword and by exact organisation match |
 
 ### Run order
 
@@ -430,9 +433,21 @@ portal is at `/`, and the operator tools — the review queue and the raw
 warehouse browser — moved to `/admin`, linked from the portal's header.
 
 The portal is built for people who need to read this evidence rather than run
-the pipeline: union researchers, journalists, public health analysts. Six
-sections — overview, pay evidence, contracts, geography, treatment demand, and
-a page per provider — over a read-only `/api/v1/` API.
+the pipeline: union researchers, journalists, public health analysts. Seven
+sections — overview, pay evidence, contracts, geography, treatment demand,
+coroners' Prevention of Future Deaths reports, and a page per provider — over
+a read-only `/api/v1/` API.
+
+Since Phase 11 the portal also has a page per authority, and since Phase 13 a
+compare view: `#/compare?ons_code=...&ons_code=...` draws two or more
+authorities or providers on shared axes — the campaign's "how does my
+authority compare?" answered in the only shape this pipeline may give it, with
+the reader picking the peers and every chart carrying the caveat of the layer
+it came from. The geography map gained overlay layers of its own (contracts by
+buyer authority, CQC locations, treatment rates, and how many evidence kinds
+the warehouse holds per authority), each toggled with its caveat pinned beside
+it; PFD reports are deliberately not a layer, because coroner areas are not
+local authorities and must not be mapped as if they were.
 
 Three properties it is built around:
 
