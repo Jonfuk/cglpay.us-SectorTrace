@@ -430,9 +430,10 @@ portal is at `/`, and the operator tools — the review queue and the raw
 warehouse browser — moved to `/admin`, linked from the portal's header.
 
 The portal is built for people who need to read this evidence rather than run
-the pipeline: union researchers, journalists, public health analysts. Six
-sections — overview, pay evidence, contracts, geography, treatment demand, and
-a page per provider — over a read-only `/api/v1/` API.
+the pipeline: union researchers, journalists, public health analysts. Seven
+sections — overview, pay evidence, contracts, geography, treatment demand,
+coroners' Prevention of Future Deaths reports, and a page per provider — over
+a read-only `/api/v1/` API.
 
 Three properties it is built around:
 
