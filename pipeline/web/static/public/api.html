@@ -105,7 +105,10 @@
       Returns <code>providers</code>, <code>authorities</code>,
       <code>contracts</code> (with <code>value_is_concentrated</code>, which is
       why this portal publishes no headline contract total),
-      <code>workforce</code>, <code>pipeline</code>.
+      <code>workforce</code>, <code>pipeline</code>,
+      <code>funnel</code> (the candidate-to-evidence verification funnel:
+      <code>discovered</code>, <code>undecided</code>, <code>promoted</code>,
+      <code>rejected</code>, <code>evidence_rows</code>).
     </p>
     <p><a href="/api/v1/summary"><code>/api/v1/summary</code></a></p>
   </article>
@@ -136,7 +139,11 @@
     <p class="small">
       Returns <code>provider</code>, <code>events</code>,
       <code>cqc_locations</code>, <code>entity_edges</code>,
-      <code>tribunal_cases</code>, <code>caveats</code>.
+      <code>tribunal_cases</code>, <code>charity_finance</code>,
+      <code>cqc_inspections</code>, <code>disclosure</code> (with
+      <code>gaps</code>, <code>disclosed</code> and <code>not_searched</code>
+      kept apart), <code>filings</code>, <code>pfd_mentions</code>,
+      <code>caveats</code>.
     </p>
     <p><code>/api/v1/providers/change_grow_live/timeline</code></p>
   </article>
@@ -175,8 +182,12 @@
       Returns <code>total</code>, <code>total_value_gbp</code>,
       <code>value_concentration</code>, <code>matched_to_provider</code>,
       <code>date_range</code>, <code>by_year</code>, <code>by_provider</code>,
-      <code>by_procedure_type</code>, <code>top_buyers</code>,
-      <code>notices</code>, <code>caveats</code>.
+      <code>by_procedure_type</code>, <code>by_quarter</code>,
+      <code>value_bands</code> (in fixed bands that never move with the
+      filters), <code>ending_soon</code> (notices whose published end date
+      falls within two years, with the caveat saying what that does and does
+      not mean), <code>top_buyers</code>, <code>notices</code>,
+      <code>caveats</code>.
     </p>
     <p>
       Each notice carries three link fields and they are three different
@@ -318,6 +329,45 @@
       suppression markers kept verbatim. A marker is not a zero.
     </p>
     <p><a href="/api/v1/ndtms"><code>/api/v1/ndtms</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="pfd">
+    <h3><code>/api/v1/pfd</code></h3>
+    <p>
+      Coroners' Prevention of Future Deaths reports: reports by year (with
+      the metadata stubs counted on the chart, not in a footnote), by coroner
+      area, the concern-term finding aid, and the two mention facts kept
+      apart — being <em>sent</em> a report and being <em>named</em> in one
+      are different <code>mention_type</code>s and are never summed.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>totals</code>, <code>by_year</code>,
+      <code>by_coroner_area</code>, <code>concern_terms</code>,
+      <code>mentions</code> (<code>sent_to_providers</code>,
+      <code>naming_providers</code>, <code>recipient_organisations</code>),
+      <code>recent</code>, <code>caveats</code>. The names of the deceased
+      are in restricted tables this route cannot read, and no restricted
+      table is listed anywhere in the payload.
+    </p>
+    <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="freshness">
+    <h3><code>/api/v1/freshness</code></h3>
+    <p>
+      When each source table was last written by a pipeline run — the newest
+      <code>retrieved_at</code> per table. Served on its own route rather
+      than inside <code>/api/v1/summary</code> because it is seconds of full
+      table scans; the overview loads it lazily after first paint.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>tables</code>: an array of <code>label</code>,
+      <code>table</code> and <code>retrieved_at</code> (or no date at all —
+      never collected is "never", not a zero), plus <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/freshness"><code>/api/v1/freshness</code></a></p>
   </article>
 
   <article class="apiroute" data-route="export">
