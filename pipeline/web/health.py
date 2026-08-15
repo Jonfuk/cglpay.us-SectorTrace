@@ -27,9 +27,9 @@ because it can take a while on a 230 MB file.
 """
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
+from pipeline import catalog, db
 from pipeline.web import queries
 
 # Authorities responsible for public health, and therefore the ones any
@@ -64,16 +64,14 @@ COVERAGE_COLUMNS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (name,)).fetchone() is not None
+def _table_exists(conn: db.Connection, name: str) -> bool:
+    return catalog.object_type(conn, name) == "table"
 
 
 # --- coverage -------------------------------------------------------------------
 
 
-def coverage(conn: sqlite3.Connection, tier: str = "upper") -> dict:
+def coverage(conn: db.Connection, tier: str = "upper") -> dict:
     """Authorities down the side, evidence across the top, counts in the cells.
 
     `tier` is "upper" (the 159 responsible for public health) or "all". All is
@@ -137,8 +135,51 @@ def coverage(conn: sqlite3.Connection, tier: str = "upper") -> dict:
 # --- freshness and warehouse state -----------------------------------------------
 
 
-def warehouse(conn: sqlite3.Connection, settings) -> dict:
-    """Size, shape, and whether the schema on disk is the schema that ran."""
+def warehouse(conn: db.Connection, settings) -> dict:
+    """Size, shape, and whether the schema on disk is the schema that ran.
+
+    The migration half of this is the part that matters and it is identical on
+    both backends: what the ledger says was applied, what is on disk, and the
+    two ways those can disagree. The size half is where the backends stop
+    resembling each other, and the shape of the answer says which one you are
+    looking at rather than pretending they are the same measurement.
+    """
+    # Applied-vs-on-disk, from the tree matching this connection. Reading
+    # `settings.migrations_dir` here would list SQLite's filenames against a
+    # PostgreSQL ledger — they happen to be the same names today, which is
+    # exactly what would make the bug survive review.
+    applied = [row["filename"] for row in conn.execute(
+        "SELECT filename FROM schema_migrations ORDER BY filename")]
+    on_disk = sorted(p.name for p in db.migrations_dir_for(settings).glob("*.sql"))
+
+    common = {
+        "applied_migrations": applied,
+        "migrations_on_disk": on_disk,
+        "unapplied": [name for name in on_disk if name not in applied],
+        # A migration recorded as applied with no file behind it means this
+        # warehouse was built by a checkout that has since changed.
+        "applied_without_file": [name for name in applied if name not in on_disk],
+    }
+
+    if db.backend_of(conn) == "postgres":
+        # No file, no sidecars, no page count this side of the connection, and
+        # no freelist at all: PostgreSQL's dead-tuple space is per-table and is
+        # reclaimed by autovacuum rather than being a single number about the
+        # database. `pg_database_size` is the honest total; anything finer
+        # belongs in a Phase 4 panel that measures per-relation bloat properly
+        # rather than in a field named after a SQLite pragma.
+        size = conn.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
+        return {
+            "backend": "postgres",
+            "path": settings.redacted_database_url,
+            "files": {},
+            "bytes": size,
+            "page_size": None,
+            "page_count": None,
+            "free_bytes": None,
+            **common,
+        }
+
     database_path = Path(settings.database_path)
     files = {}
     for suffix in ("", "-wal", "-shm"):
@@ -150,11 +191,8 @@ def warehouse(conn: sqlite3.Connection, settings) -> dict:
     page_count = conn.execute("PRAGMA page_count").fetchone()[0]
     freelist = conn.execute("PRAGMA freelist_count").fetchone()[0]
 
-    applied = [row["filename"] for row in conn.execute(
-        "SELECT filename FROM schema_migrations ORDER BY filename")]
-    on_disk = sorted(p.name for p in Path(settings.migrations_dir).glob("*.sql"))
-
     return {
+        "backend": "sqlite",
         "path": str(database_path),
         "files": files,
         "bytes": sum(files.values()),
@@ -163,16 +201,11 @@ def warehouse(conn: sqlite3.Connection, settings) -> dict:
         # Free pages are space the file is holding but not using. Worth seeing
         # before wondering why a 230 MB warehouse holds 200 MB of evidence.
         "free_bytes": freelist * page_size,
-        "applied_migrations": applied,
-        "migrations_on_disk": on_disk,
-        "unapplied": [name for name in on_disk if name not in applied],
-        # A migration recorded as applied with no file behind it means this
-        # warehouse was built by a checkout that has since changed.
-        "applied_without_file": [name for name in applied if name not in on_disk],
+        **common,
     }
 
 
-def hosts(conn: sqlite3.Connection) -> list[dict]:
+def hosts(conn: db.Connection) -> list[dict]:
     """Every source host this warehouse has spoken to, and when it last did.
 
     From http_cache, which is written on every conditional request, so this is
@@ -186,7 +219,7 @@ def hosts(conn: sqlite3.Connection) -> list[dict]:
         "FROM http_cache GROUP BY host ORDER BY urls DESC")]
 
 
-def freshness(conn: sqlite3.Connection) -> list[dict]:
+def freshness(conn: db.Connection) -> list[dict]:
     """Newest `retrieved_at` per table that records one.
 
     The honest freshness signal. A module that ran this morning and found
@@ -205,10 +238,7 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
     the rest of the Health tab does not wait for it.
     """
     out = []
-    for row in conn.execute(
-            "SELECT m.name AS name FROM sqlite_master m JOIN pragma_table_info(m.name) p "
-            "WHERE m.type = 'table' AND p.name = 'retrieved_at' ORDER BY m.name"):
-        name = row["name"]
+    for name in catalog.tables_with_column(conn, "retrieved_at"):
         if queries.is_restricted(name):
             continue
         quoted = queries._quote(name)
@@ -216,7 +246,18 @@ def freshness(conn: sqlite3.Connection) -> list[dict]:
             stats = conn.execute(
                 f"SELECT COUNT(*) AS rows_held, MAX(retrieved_at) AS newest, "
                 f"       MIN(retrieved_at) AS oldest FROM {quoted}").fetchone()
-        except sqlite3.Error:
+        except db.Error:
+            # Skip the table, keep the panel: one unreadable table is not a
+            # reason to report nothing about the other nineteen.
+            #
+            # This `continue` is why the PostgreSQL read connection runs in
+            # autocommit. Inside a transaction a failed statement aborts the
+            # whole transaction, so the first failure here would make every
+            # remaining iteration raise InFailedSqlTransaction and the panel
+            # would silently truncate at the first bad table rather than skip
+            # it — a wrong answer that looks like a right one. On SQLite this
+            # loop has always been safe; the connection setting is what makes
+            # it mean the same thing on both. See pipeline/pg.py.
             continue
         out.append({"table": name, "rows": stats["rows_held"],
                      "newest": stats["newest"], "oldest": stats["oldest"]})
@@ -290,7 +331,7 @@ def storage(settings) -> list[dict]:
     return out
 
 
-def health(conn: sqlite3.Connection, settings) -> dict:
+def health(conn: db.Connection, settings) -> dict:
     """The cheap half: size, migrations, and which hosts were last asked.
 
     Neither freshness nor storage is here, and for the same reason: one is
@@ -307,7 +348,7 @@ def health(conn: sqlite3.Connection, settings) -> dict:
 # --- parse failures ---------------------------------------------------------------
 
 
-def failures(conn: sqlite3.Connection, module: str | None = None,
+def failures(conn: db.Connection, module: str | None = None,
               search: str | None = None, limit: int = 100, offset: int = 0) -> dict:
     """Grouped by (module, field, reason), because that is one bug.
 
@@ -363,6 +404,24 @@ def integrity_check(settings) -> list[dict]:
     """
     conn = queries.readonly_connection(settings)
     try:
+        if db.backend_of(conn) == "postgres":
+            # Refused rather than approximated. PostgreSQL has no single
+            # statement that answers this: `pg_amcheck` is a separate binary,
+            # and the foreign-key sweep would have to be a generated query per
+            # constraint. Both are real work and belong in the phase that does
+            # the backup and restore port, since they answer the same question
+            # ("is this warehouse intact?") and should be built together.
+            #
+            # What is NOT acceptable is a check that returns ok because it
+            # looked at nothing — a corruption check nobody can distinguish
+            # from a passing one is worse than an absent feature, and this
+            # panel's whole claim is that it verified something.
+            raise queries.QueryError(
+                "The integrity check has no PostgreSQL implementation yet. "
+                "SQLite's PRAGMA integrity_check walks every page of the file; "
+                "PostgreSQL's equivalent is pg_amcheck plus a per-constraint "
+                "foreign-key sweep, which is not yet built. Nothing here has "
+                "been verified — treat this as unknown, not as passing.")
         integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
         foreign_keys = [dict(zip(("table", "rowid", "parent", "fkid"), row))
                          for row in conn.execute("PRAGMA foreign_key_check")]

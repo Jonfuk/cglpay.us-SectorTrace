@@ -159,6 +159,90 @@
     <p><a href="/api/v1/authorities"><code>/api/v1/authorities</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="authorities/{ons_code}"
+           data-route-pattern="authorities/([A-Z][0-9]{8})">
+    <h3><code>/api/v1/authorities/{ons_code}</code></h3>
+    <p>
+      Everything the warehouse holds about one authority: coverage ticks
+      (W-12), grant allocation and budgeted spend as published, the budget
+      lines behind the budget figure (W-27), treatment estimates with their
+      paired confidence intervals, and the contracts it let.
+      <code>ons_code</code> is the <code>ons_code</code> field from
+      <code>/api/v1/authorities</code>.
+    </p>
+    <p class="small">
+      Returns <code>authority</code>, <code>coverage</code>,
+      <code>grant</code>, <code>budget</code>, <code>budget_detail</code>,
+      <code>treatment</code> (<code>fingertips</code> and
+      <code>ndtms</code>, with the same pairing rules the treatment page
+      uses), <code>contracts</code>, <code>caveats</code>.
+    </p>
+    <p>
+      The grant and the budget are different figures from different documents
+      and are never combined or divided — the payload keeps them separate and
+      so must anything built on it. <code>budget_detail</code> carries amounts
+      as published: no per-capita, no inflation adjustment, no ratio.
+    </p>
+    <p><code>/api/v1/authorities/E08000025</code></p>
+  </article>
+
+  <article class="apiroute" data-route="compare">
+    <h3><code>/api/v1/compare</code></h3>
+    <p>
+      The existing series for two or more authorities or providers, drawn on
+      shared axes — the campaign's "how does my authority compare?" answered
+      in the only shape this pipeline may give it: the reader picks the peers.
+      No new data: every series is the series an existing endpoint returns
+      (grant and budget as the geography page draws them, treatment as the
+      treatment page draws it, contracts by publication year as the contracts
+      page counts them), composed for the chosen entities.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>. Repeatable.</td></tr>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Repeatable.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>authorities</code>, <code>providers</code>,
+      <code>series</code> keyed by layer — <code>grant</code>,
+      <code>budget</code>, <code>treatment</code>, <code>contracts</code> for
+      authorities, <code>charity</code> and <code>provider_contracts</code>
+      for providers — each carrying its own caveat, plus
+      <code>caveats.cross_layer</code>.
+    </p>
+    <p>
+      The charts share axes with each other's authorities, never with each
+      other's layers: nothing in the payload is combined, differenced or
+      divided, and a gap between one chart and another is not a finding.
+      At least one parameter is required; an unknown code is a 400.
+    </p>
+    <p>
+      <code>/api/v1/compare?ons_code=E08000025&amp;ons_code=E06000047&amp;provider_key=change_grow_live</code>
+    </p>
+  </article>
+
+  <article class="apiroute" data-route="layers">
+    <h3><code>/api/v1/layers</code></h3>
+    <p>
+      The geography map's overlay layers: contracts aggregated to one point
+      per commissioning authority, CQC-regulated locations, latest treatment
+      rates per authority, and coverage — how many evidence kinds the
+      warehouse holds per authority. Each layer carries its own caveats, read
+      from the same source the export layers use, so the portal and the
+      downloads cannot drift apart.
+    </p>
+    <p class="small">
+      Returns <code>layers</code>, each with <code>label</code>,
+      <code>features</code> and <code>caveats</code>. PFD reports are
+      deliberately absent: they have no geometry, and coroner areas must not
+      be mapped as if they were authorities.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p><a href="/api/v1/layers"><code>/api/v1/layers</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="contracts">
     <h3><code>/api/v1/contracts</code></h3>
     <p>

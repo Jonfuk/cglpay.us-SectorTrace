@@ -1,8 +1,25 @@
-"""SQLite access: connection, migrations, and generic upsert/audit helpers.
+"""Warehouse access: connection, migrations, and generic upsert/audit helpers.
 
 Plain SQL throughout, no ORM, per the brief. Domain schemas live in numbered
 files under pipeline/migrations/ (0001_core.sql is the infra layer this
 module owns; 0002+ are added by m00_geography onward).
+
+Two backends live behind one interface. SQLite is the backend of record and
+the default; PostgreSQL is selected by setting `DATABASE_URL`, and everything
+about that choice is resolved here so that no caller has to know which one it
+is talking to. What a caller can rely on either way:
+
+  * `get_connection()` for writes, closed in `finally`;
+  * `?` and `:name` parameters — SQLite's style is the one this codebase
+    writes, and `pipeline/sqldialect.py` translates it for psycopg;
+  * rows addressable by name and by position (`row["x"]`, `row[0]`);
+  * `db.IntegrityError` and friends in `except` clauses, rather than
+    `sqlite3.IntegrityError`, which is only half the answer now.
+
+The write slot below is SQLite's and stays SQLite's. It exists to work around
+one writer at a time, which is not a constraint PostgreSQL has, so the
+PostgreSQL path never acquires it — not by checking a flag on the way past,
+but by not being made of `WriteSerialisedConnection` in the first place.
 """
 from __future__ import annotations
 
@@ -13,10 +30,64 @@ from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from pipeline.config import Settings, get_settings
 
 RESTRICTED_PREFIX = "restricted_"
+
+# What a warehouse connection is, whichever backend answered.
+#
+# Written as a name rather than spelled out at eighty call sites. There is no
+# type checker in this project — ruff's selected rules do not include one — so
+# an annotation here is documentation, and `db.Connection` says "a warehouse
+# connection" where `sqlite3.Connection` now says something that is not true.
+#
+# `object` at runtime because psycopg is an optional extra: a checkout without
+# it must still import this module. Annotations are never evaluated anyway
+# (`from __future__ import annotations`), so nothing looks at either branch.
+if TYPE_CHECKING:
+    from pipeline.pg import PostgresConnection
+
+    Connection = Union[sqlite3.Connection, PostgresConnection]
+else:
+    Connection = object
+
+# Exception classes to catch, per backend, as tuples so `except db.Error:`
+# works whichever one is connected.
+#
+# psycopg is an optional extra: a checkout that never touches PostgreSQL does
+# not install a driver, so the import is conditional and the tuples simply
+# stay one element long. Catching a class that cannot be raised is free;
+# requiring the driver in order to run against a file is not.
+#
+# The one that needed thought is `IntegrityError`. A `RAISE(ABORT)` trigger in
+# SQLite surfaces as `sqlite3.IntegrityError`, which is what the promotion and
+# census suites assert. plpgsql's `RAISE EXCEPTION` surfaces as
+# `psycopg.errors.RaiseException`, which is *not* an IntegrityError — so the
+# ported triggers raise with `ERRCODE = 'integrity_constraint_violation'` to
+# land in the right class, and `RaiseException` is listed here anyway for the
+# case where someone writes a new trigger and forgets.
+try:
+    import psycopg as _psycopg
+
+    Error: tuple[type[BaseException], ...] = (sqlite3.Error, _psycopg.Error)
+    DatabaseError: tuple[type[BaseException], ...] = (
+        sqlite3.DatabaseError, _psycopg.DatabaseError)
+    IntegrityError: tuple[type[BaseException], ...] = (
+        sqlite3.IntegrityError, _psycopg.IntegrityError,
+        _psycopg.errors.RaiseException)
+    OperationalError: tuple[type[BaseException], ...] = (
+        sqlite3.OperationalError, _psycopg.OperationalError)
+    # sqlite3 raises this for "You can only execute one statement at a time",
+    # which the SQL box turns into a message for the person who typed it.
+    Warning: tuple[type[BaseException], ...] = (sqlite3.Warning, _psycopg.Warning)
+except ImportError:  # pragma: no cover - exercised by the no-extra install
+    Error = (sqlite3.Error,)
+    DatabaseError = (sqlite3.DatabaseError,)
+    IntegrityError = (sqlite3.IntegrityError,)
+    OperationalError = (sqlite3.OperationalError,)
+    Warning = (sqlite3.Warning,)
 
 
 def _utcnow() -> str:
@@ -236,7 +307,24 @@ class WriteSerialisedConnection(sqlite3.Connection):
 
 
 def get_connection(settings: Settings | None = None,
-                    check_same_thread: bool = True) -> sqlite3.Connection:
+                    check_same_thread: bool = True):
+    """A warehouse connection, on whichever backend is configured.
+
+    `check_same_thread` is a SQLite concept and is ignored on PostgreSQL,
+    where a connection is not bound to the thread that opened it. Callers pass
+    it for the fetch pools; leaving it in the signature means those call sites
+    do not have to ask which backend they are on.
+    """
+    settings = settings or get_settings()
+    if settings.database_backend == "postgres":
+        from pipeline import pg
+
+        return pg.connect(settings.database_url)
+    return _sqlite_connection(settings, check_same_thread)
+
+
+def _sqlite_connection(settings: Settings,
+                        check_same_thread: bool = True) -> sqlite3.Connection:
     """A warehouse connection in WAL mode.
 
     WAL matters for two reasons, only one of which is about concurrency:
@@ -253,7 +341,6 @@ def get_connection(settings: Settings | None = None,
     where access is actually serialised — SQLite is safe across threads, but
     Python's cursor and transaction state is not.
     """
-    settings = settings or get_settings()
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.database_path, timeout=BUSY_TIMEOUT_MS / 1000,
                             check_same_thread=check_same_thread,
@@ -310,21 +397,62 @@ def get_connection(settings: Settings | None = None,
     return conn
 
 
-def applied_migrations(conn: sqlite3.Connection) -> set[str]:
-    cur = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-    )
-    if cur.fetchone() is None:
+def backend_of(conn) -> str:
+    """`"sqlite"` or `"postgres"`, from the connection rather than the
+    settings.
+
+    Asked of the connection on purpose: a test can hold a SQLite connection
+    while `DATABASE_URL` is set in the environment, and a helper that trusted
+    the settings would then send `information_schema` queries to a file. The
+    connection knows what it is.
+    """
+    return "sqlite" if isinstance(conn, sqlite3.Connection) else "postgres"
+
+
+def migrations_dir_for(settings: Settings | None = None) -> Path:
+    """The dialect tree for the configured backend.
+
+    Same 33 filenames on both sides, applied in the same order, recorded in
+    the same `schema_migrations` table. Identical names are what make the two
+    trees auditable against each other — see
+    `tests/test_migration_equivalence.py`, which diffs the object inventories
+    they produce.
+    """
+    settings = settings or get_settings()
+    if settings.database_backend == "postgres":
+        return settings.migrations_dir / "postgres"
+    return settings.migrations_dir
+
+
+def applied_migrations(conn) -> set[str]:
+    if backend_of(conn) == "postgres":
+        exists = conn.execute(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_name = ?",
+            ("schema_migrations",)).fetchone()
+    else:
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='schema_migrations'").fetchone()
+    if exists is None:
         return set()
     return {row["filename"] for row in conn.execute("SELECT filename FROM schema_migrations")}
 
 
-def apply_migrations(conn: sqlite3.Connection, migrations_dir: Path | None = None) -> list[str]:
+def apply_migrations(conn, migrations_dir: Path | None = None) -> list[str]:
     """Apply any .sql files in migrations_dir not yet recorded as applied,
     in filename order. Returns the list of filenames newly applied. Safe to
     call on every run — a no-op once the schema is current.
+
+    The directory defaults to the dialect tree matching the *connection*, not
+    the settings, so a test that opens a SQLite connection with `DATABASE_URL`
+    set still gets the SQLite migrations.
     """
-    migrations_dir = migrations_dir or get_settings().migrations_dir
+    if migrations_dir is None:
+        settings = get_settings()
+        migrations_dir = settings.migrations_dir
+        if backend_of(conn) == "postgres":
+            migrations_dir = migrations_dir / "postgres"
     already = applied_migrations(conn)
     newly_applied: list[str] = []
 
@@ -356,7 +484,7 @@ DECISION_COLUMNS = ("verified", "verified_at", "rejected")
 
 
 def upsert(
-    conn: sqlite3.Connection,
+    conn: Connection,
     table: str,
     row: dict,
     natural_key: list[str],
@@ -404,7 +532,7 @@ def upsert(
 
 
 def record_parse_failure(
-    conn: sqlite3.Connection,
+    conn: Connection,
     module: str,
     field_name: str,
     raw_fragment: str,
@@ -425,7 +553,7 @@ def record_parse_failure(
 
 
 def record_review_item(
-    conn: sqlite3.Connection,
+    conn: Connection,
     module: str,
     item_type: str,
     raw_value: str,
@@ -445,14 +573,14 @@ def record_review_item(
     )
 
 
-def get_cursor(conn: sqlite3.Connection, module: str) -> str | None:
+def get_cursor(conn: Connection, module: str) -> str | None:
     row = conn.execute(
         "SELECT cursor_value FROM module_cursors WHERE module = ?", (module,)
     ).fetchone()
     return row["cursor_value"] if row else None
 
 
-def set_cursor(conn: sqlite3.Connection, module: str, cursor_value: str) -> None:
+def set_cursor(conn: Connection, module: str, cursor_value: str) -> None:
     conn.execute(
         "INSERT INTO module_cursors (module, cursor_value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT (module) DO UPDATE SET cursor_value = excluded.cursor_value, "
@@ -461,12 +589,12 @@ def set_cursor(conn: sqlite3.Connection, module: str, cursor_value: str) -> None
     )
 
 
-def get_http_cache(conn: sqlite3.Connection, url: str) -> sqlite3.Row | None:
+def get_http_cache(conn: Connection, url: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM http_cache WHERE url = ?", (url,)).fetchone()
 
 
 def set_http_cache(
-    conn: sqlite3.Connection,
+    conn: Connection,
     url: str,
     host: str,
     etag: str | None,
@@ -483,7 +611,7 @@ def set_http_cache(
     )
 
 
-def rows_missing_provenance(conn: sqlite3.Connection, table: str) -> list[sqlite3.Row]:
+def rows_missing_provenance(conn: Connection, table: str) -> list[sqlite3.Row]:
     """Constraint 1: every row in every public (non-restricted) table must
     carry a non-null source_url and retrieved_at. Returns the offending rows
     (empty list if the table is clean). Assumes the table has those columns
@@ -494,7 +622,7 @@ def rows_missing_provenance(conn: sqlite3.Connection, table: str) -> list[sqlite
     ).fetchall()
 
 
-def restricted_tables(conn: sqlite3.Connection) -> list[str]:
+def restricted_tables(conn) -> list[str]:
     """Every restricted_ table AND view.
 
     Views matter as much as tables and were previously invisible here: this
@@ -502,9 +630,14 @@ def restricted_tables(conn: sqlite3.Connection) -> list[str]:
     saved under a name — would have passed assert_no_restricted_tables
     untouched. The entity graph is built from views, several of which name
     company officers, so the gap had to close before they landed.
+
+    Filtered in Python rather than by `LIKE` now that it goes through the
+    catalog helper. The prefix contains no wildcard, the object list is 77
+    rows, and one code path that behaves identically on both backends is
+    worth more here than a predicate the server evaluates — this function is
+    what `guard_columns()` and the reveal gate stand on.
     """
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name LIKE ?",
-        (f"{RESTRICTED_PREFIX}%",),
-    ).fetchall()
-    return [r["name"] for r in rows]
+    from pipeline import catalog
+
+    return [o["name"] for o in catalog.list_objects(conn)
+            if o["name"].startswith(RESTRICTED_PREFIX)]

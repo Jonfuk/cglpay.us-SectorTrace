@@ -35,7 +35,9 @@ from datetime import date
 from typing import Any, Iterator
 
 from pipeline.exports import guard_columns, guard_not_restricted
+from pipeline.exports.geojson import LAYER_CAVEATS
 from pipeline.notice_urls import notice_page_url
+from pipeline.web import health
 from pipeline.web.queries import QueryError, _run
 
 # Caveats that must travel with particular figures. Kept here, in one place,
@@ -199,6 +201,32 @@ CAVEATS = {
         "Filing dates and categories are Companies House's own record of "
         "documents submitted. That a filing exists is a fact; what the "
         "document says is for the reader."
+    ),
+    "coverage_absence": (
+        "A tick means the warehouse holds rows of this kind for this "
+        "authority. Its absence is absence of collection, not evidence of "
+        "absence — the pipeline has not looked everywhere, and what it has "
+        "not looked at is not zero."
+    ),
+    "budget_detail": (
+        "Each line is what the authority planned to spend, as reported to "
+        "MHCLG. Amounts are shown as published: no per-capita figures, no "
+        "inflation adjustment, and no ratio against the grant allocation or "
+        "contract values elsewhere on this page."
+    ),
+    "compare_layers": (
+        "Each chart on this page is one kind of figure from one kind of "
+        "document: a grant allocation, a budgeted spend, a treatment estimate, "
+        "a contract notice. The charts share axes with each other's "
+        "authorities — never with each other's layers. Nothing here is "
+        "combined, differenced or divided, and a gap between one chart and "
+        "another is not a finding."
+    ),
+    "charity_accounts": (
+        "Charity income and expenditure are as filed in the provider's "
+        "registered accounts, per financial year end. They are one source's "
+        "figures and may share an axis with each other, and with nothing else "
+        "on this page."
     ),
 }
 
@@ -1778,3 +1806,471 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
             "pfd_mentions": CAVEATS["pfd_mentions"],
         },
     }
+
+
+# --- authority deep dive -------------------------------------------------------
+#
+# W-13: "what does my authority get?" is the campaign's own question and the
+# portal had no surface that answered it, while /api/v1/contracts had accepted
+# `buyer_ons_code` since it was written and no control anywhere set it. This is
+# the provider deep-dive shape applied to an authority: grant allocation,
+# budgeted spend, treatment estimates with their paired intervals, and
+# contracts let.
+#
+# The four figure sections reuse the existing endpoint functions rather than
+# re-writing their queries, so a number on this page cannot disagree with the
+# same number on the page it came from — and the test that pins that agreement
+# would fail the moment anyone replaced the reuse with a hand-written query.
+# Grant and budget stay separate keys and are never summed or divided: the
+# CAVEATS rule that a grant allocation is not a budgeted spend is exactly the
+# reason they sit side by side on the page and nowhere else.
+
+
+def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
+    """How many rows of each evidence kind the warehouse holds for one authority.
+
+    The same declaration the admin Health tab's coverage matrix uses, read
+    from health.py rather than re-declared here — a second copy of what
+    "covered" means would be a second statement free to drift. W-12's pin is
+    that the two answers agree row for row.
+    """
+    def exists(name: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,)).fetchone() is not None
+
+    cells: dict[str, int] = {}
+    for label, table, column, _module in health.COVERAGE_COLUMNS:
+        if not exists(table):
+            cells[label] = 0
+            continue
+        # Table and column names come from health.COVERAGE_COLUMNS, which is
+        # code, not a request, so interpolating them is the same trust as the
+        # admin matrix.
+        cells[label] = _one(
+            conn, f"SELECT COUNT(*) AS n FROM {table} WHERE {column} = ?",
+            (ons_code,)).get("n", 0)
+    return cells
+
+
+def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
+    """Everything the warehouse holds about one authority, in one payload."""
+    _public(["authorities", "public_health_grants", "la_revenue_budgets",
+              "v_la_public_health_budget", "fingertips_indicators",
+              "fingertips_la_values", "ndtms_la_statistics", "ndtms_publications",
+              "contracts", "supplier_aliases", "providers", "cqc_locations",
+              "cdp_documents", "cdp_document_candidates", "committee_papers",
+              "committee_paper_candidates", "foi_requests",
+              "foi_request_candidates"])
+
+    authority_row = _one(
+        conn, "SELECT ons_code, name, type, region FROM authorities "
+              "WHERE ons_code = ?", (ons_code,))
+    if not authority_row:
+        raise QueryError(f"No authority {ons_code!r}.")
+
+    # Grant allocation by year, every grant type as recorded. The page draws
+    # the allocation and the ring-fenced drug-and-alcohol share as separate
+    # lines: the second is part of the first, so they are never summed into
+    # one series. Provenance per row, like every other payload here.
+    grant = _rows(conn, """
+        SELECT financial_year, grant_type, allocation_status, amount, unit,
+               source_url, retrieved_at, payload_sha256
+        FROM public_health_grants WHERE ons_code = ?
+        ORDER BY financial_year, grant_type""", (ons_code,))
+
+    # Budgeted public health spend by year. The same aggregation the geography
+    # page's budget metric uses, so the two cannot disagree.
+    budget = _rows(conn, """
+        SELECT b.financial_year, SUM(b.budget_gbp) AS amount
+        FROM v_la_public_health_budget b WHERE b.ons_code = ?
+        GROUP BY b.financial_year ORDER BY b.financial_year""", (ons_code,))
+
+    # W-27: the drill-down, by section and line code as published. Amounts
+    # only — no per-capita, no deflation, no ratio against the grant. A row
+    # whose denomination could not be read carries a NULL amount and a
+    # verbatim value_text, kept as it was stored.
+    budget_detail = _rows(conn, """
+        SELECT financial_year, section, line_code, line_number, column_label,
+               amounts_multiplier, amount, value_text
+        FROM la_revenue_budgets WHERE ons_code = ?
+        ORDER BY financial_year, section, line_number""", (ons_code,))
+
+    # Treatment with its paired intervals, straight from the functions the
+    # Treatment page itself uses. `fingertips` carries the series with its
+    # lower/upper columns; `ndtms` carries the pairing discipline — a bound
+    # attaches to an estimate only where the source's own naming makes it
+    # unambiguous.
+    treatment = {
+        "fingertips": fingertips(conn, topic="numbers_in_treatment",
+                                 ons_code=ons_code),
+        "ndtms": ndtms(conn, ons_code=ons_code),
+    }
+
+    contract_payload = contracts(conn, buyer_ons_code=ons_code, limit=200)
+    contracts_held = {
+        "total": contract_payload["total"],
+        "notices": contract_payload["notices"],
+        "caveats": contract_payload["caveats"],
+    }
+
+    return {
+        "authority": authority_row,
+        "coverage": {
+            "labels": [label for label, _t, _c, _m in health.COVERAGE_COLUMNS],
+            "cells": _coverage_cells(conn, ons_code),
+            "caveat": CAVEATS["coverage_absence"],
+        },
+        "grant": {"rows": grant, "unit": "gbp"},
+        "budget": {"rows": budget, "unit": "gbp"},
+        "budget_detail": {"rows": budget_detail},
+        "treatment": treatment,
+        "contracts": contracts_held,
+        "caveats": {
+            "grant_not_budget": CAVEATS["grant_not_budget"],
+            "budget_detail": CAVEATS["budget_detail"],
+            "contract_value": CAVEATS["contract_value"],
+            "contract_provider_match": CAVEATS["contract_provider_match"],
+        },
+    }
+
+
+# --- compare (W-11) -----------------------------------------------------------
+#
+# "How does my authority compare?" is the campaign's central question, and
+# this is the answer in the only shape this pipeline may give it: the reader
+# picks the authorities (or providers), and each series is drawn on a shared
+# axis with its peers — never on an axis with a different layer. Every series
+# here is the existing endpoint's series, composed rather than re-written, so
+# a number on this page cannot disagree with the page it came from; the pin
+# test holds that composition the same way W-13's does.
+#
+# The rule this endpoint exists to keep: the four authority charts are four
+# different kinds of figure from four different documents. There is no
+# cross-chart series, no summed, differenced or divided figure, and each
+# series carries the caveat of the layer it came from — comparison is the
+# first thing this portal does that is an inference, and the caveats are why
+# it stays a reader's inference rather than this project's.
+
+
+def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict:
+    """The existing series for two or more authorities or providers.
+
+    `ons_code` and `provider_key` are each repeatable, named as the rest of
+    the API names them. At least one is required. Series are keyed by layer
+    and never mixed; `provider_*` series exist because grant, budget and
+    treatment are authority figures a provider cannot be plotted against.
+    """
+    _public(["authorities", "public_health_grants", "v_la_public_health_budget",
+              "fingertips_indicators", "fingertips_la_values", "contracts",
+              "supplier_aliases", "providers", "charity_financials",
+              "provider_identifiers"])
+
+    ons = list(dict.fromkeys(ons_codes))
+    keys = list(dict.fromkeys(provider_keys))
+    if not ons and not keys:
+        raise QueryError("compare needs at least one `ons` or `provider` parameter.")
+
+    authority_rows: list[dict] = []
+    provider_rows: list[dict] = []
+    if ons:
+        placeholders = ", ".join(f":o{n}" for n in range(len(ons)))
+        params = {f"o{n}": v for n, v in enumerate(ons)}
+        authority_rows = _rows(conn, f"""
+            SELECT ons_code, name, region, type FROM authorities
+            WHERE ons_code IN ({placeholders}) ORDER BY name""", params)
+        missing = [c for c in ons
+                   if c not in {a["ons_code"] for a in authority_rows}]
+        if missing:
+            raise QueryError(f"No authority {missing[0]!r}.")
+    if keys:
+        placeholders = ", ".join(f":p{n}" for n in range(len(keys)))
+        params = {f"p{n}": v for n, v in enumerate(keys)}
+        provider_rows = _rows(conn, f"""
+            SELECT provider_key, canonical_name, is_target FROM providers
+            WHERE provider_key IN ({placeholders}) ORDER BY canonical_name""", params)
+        missing = [k for k in keys
+                   if k not in {p["provider_key"] for p in provider_rows}]
+        if missing:
+            raise QueryError(f"No provider {missing[0]!r}.")
+
+    series: dict[str, dict] = {}
+
+    if ons:
+        in_clause = ", ".join(f":o{n}" for n in range(len(ons)))
+        on_params = {f"o{n}": v for n, v in enumerate(ons)}
+
+        # The allocation series, as the authority page draws it: `allocation`
+        # rows in gbp only, with the published status travelling per row so the
+        # page can warn when a year is still indicative.
+        series["grant"] = {
+            "rows": _rows(conn, f"""
+                SELECT g.ons_code, a.name AS authority_name, g.financial_year,
+                       g.allocation_status, g.amount,
+                       g.source_url, g.retrieved_at, g.payload_sha256
+                FROM public_health_grants g
+                JOIN authorities a ON a.ons_code = g.ons_code
+                WHERE g.grant_type = 'allocation' AND g.unit = 'gbp'
+                  AND g.ons_code IN ({in_clause})
+                ORDER BY g.financial_year, g.ons_code""", on_params),
+            "caveat": CAVEATS["grant_not_budget"],
+        }
+
+        # The same aggregation the geography page's budget metric uses, scoped
+        # to the chosen authorities. The view carries no provenance of its
+        # own, so it is attached from the rows the view reads.
+        series["budget"] = {
+            "rows": _rows(conn, f"""
+                SELECT b.ons_code, b.authority_name, b.financial_year,
+                       SUM(b.budget_gbp) AS amount
+                FROM v_la_public_health_budget b
+                WHERE b.ons_code IN ({in_clause})
+                GROUP BY b.ons_code, b.authority_name, b.financial_year
+                ORDER BY b.financial_year, b.ons_code""", on_params),
+            "caveat": CAVEATS["grant_not_budget"],
+            "provenance": _source_meta(
+                conn, "la_revenue_budgets", "ons_code", "IN", in_clause, on_params),
+        }
+
+        # Treatment is the treatment page's own payload per authority,
+        # concatenated: same indicators, same series, same paired intervals.
+        # The England series is identical for every authority and returned
+        # once.
+        treatment: dict = {
+            "rows": [], "england": [], "indicators": [],
+            "caveat": CAVEATS["treatment_not_need"],
+        }
+        for index, code in enumerate(ons):
+            ft = fingertips(conn, topic="numbers_in_treatment", ons_code=code)
+            if index == 0:
+                treatment["indicators"] = ft["indicators"]
+                treatment["england"] = ft["england_series"]
+            treatment["rows"].extend(ft["series"])
+        series["treatment"] = treatment
+
+        # Contracts by publication year, from the contracts endpoint's own
+        # by_year aggregation — so the count and value here are the count and
+        # value on the contracts page for each buyer.
+        contract_rows: list[dict] = []
+        names = {a["ons_code"]: a["name"] for a in authority_rows}
+        for code in ons:
+            payload = contracts(conn, buyer_ons_code=code)
+            for row in payload["by_year"]:
+                contract_rows.append({
+                    "ons_code": code, "authority_name": names[code], **row})
+        series["contracts"] = {
+            "rows": contract_rows,
+            "caveats": {
+                "value": CAVEATS["contract_value"],
+                "window": CAVEATS["contract_window"],
+            },
+            "provenance": _source_meta(
+                conn, "contracts", "buyer_ons_code", "IN", in_clause, on_params),
+        }
+
+    if keys:
+        in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+        key_params = {f"p{n}": v for n, v in enumerate(keys)}
+
+        # Income and expenditure as filed, per financial year end — one
+        # source's figures on one axis, the same pairing the deep dive draws.
+        series["charity"] = {
+            "rows": _rows(conn, f"""
+                SELECT pi.provider_key, p.canonical_name, cf.financial_year_end,
+                       cf.total_income, cf.total_expenditure,
+                       cf.source_url, cf.retrieved_at, cf.payload_sha256
+                FROM charity_financials cf
+                JOIN provider_identifiers pi
+                  ON pi.identifier = cf.charity_number AND pi.scheme = 'charity_number'
+                JOIN providers p ON p.provider_key = pi.provider_key
+                WHERE pi.provider_key IN ({in_clause})
+                ORDER BY cf.financial_year_end, pi.provider_key""", key_params),
+            "caveat": CAVEATS["charity_accounts"],
+        }
+
+        provider_contract_rows: list[dict] = []
+        names = {p["provider_key"]: p["canonical_name"] for p in provider_rows}
+        for key in keys:
+            payload = contracts(conn, provider_key=key)
+            for row in payload["by_year"]:
+                provider_contract_rows.append({
+                    "provider_key": key, "provider_name": names[key], **row})
+        series["provider_contracts"] = {
+            "rows": provider_contract_rows,
+            "caveats": {
+                "provider_match": CAVEATS["contract_provider_match"],
+                "window": CAVEATS["contract_window"],
+            },
+            "provenance": _provider_source_meta(conn, "contracts", keys),
+        }
+
+    return {
+        "authorities": authority_rows,
+        "providers": provider_rows,
+        "series": series,
+        "caveats": {"cross_layer": CAVEATS["compare_layers"]},
+    }
+
+
+def _source_meta(conn: sqlite3.Connection, table: str, column: str,
+                 operator: str, in_clause: str, params: dict) -> dict:
+    """Provenance for an aggregated series whose rows do not carry it per
+    record: the newest retrieval and a few of the source URLs the rows came
+    from. Table and column names are code, not request input — the same trust
+    as every other interpolated identifier in this file.
+    """
+    return {
+        "retrieved_at": _one(conn, f"""
+            SELECT MAX(retrieved_at) AS retrieved_at FROM {table}
+            WHERE {column} {operator} ({in_clause})""", params)
+            .get("retrieved_at"),
+        "sources": [r["source_url"] for r in _rows(conn, f"""
+            SELECT DISTINCT source_url FROM {table}
+            WHERE {column} {operator} ({in_clause}) AND source_url IS NOT NULL
+            LIMIT 6""", params)],
+    }
+
+
+def _provider_source_meta(conn: sqlite3.Connection, table: str,
+                          keys: list[str]) -> dict:
+    in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+    params = {f"p{n}": v for n, v in enumerate(keys)}
+    return {
+        "retrieved_at": _one(conn, f"""
+            SELECT MAX(retrieved_at) AS retrieved_at FROM {table}
+            WHERE supplier_name_raw IN (
+                SELECT alias_raw FROM supplier_aliases WHERE supplier_key IN ({in_clause})
+            )""", params).get("retrieved_at"),
+        "sources": [r["source_url"] for r in _rows(conn, f"""
+            SELECT DISTINCT source_url FROM {table}
+            WHERE supplier_name_raw IN (
+                SELECT alias_raw FROM supplier_aliases WHERE supplier_key IN ({in_clause})
+            ) AND source_url IS NOT NULL LIMIT 6""", params)],
+    }
+
+
+# --- geography map layers (W-19) ----------------------------------------------
+#
+# The map's overlay layers. Three of them are the export layers from
+# pipeline/exports/geojson.py — contracts, CQC locations, treatment numbers —
+# and their caveats are read from there rather than copied, so the portal and
+# the downloads cannot drift apart; the pin test holds that identity. The
+# fourth, coverage, is W-12's "what is held here" data as an outline layer,
+# carrying the absence caveat.
+#
+# PFD reports are deliberately not a layer. They have no geometry — coroner
+# areas are not local authorities and must not be mapped as if they were
+# (docs/CAVEATS.md) — and the export keeps them geometry-free for the same
+# reason. The absence is pinned by a test, in the same shape as W-15's CQC
+# decision: what is not drawn is a decision rather than an oversight.
+#
+# The contracts layer is aggregated to one feature per buyer authority, where
+# the export emits one feature per notice: 98,636 points would be a payload
+# and a canvas no reader could use. The aggregation is stated in the layer's
+# caveats, which is how the export's "placed at the commissioning authority's
+# boundary" warning survives the change of shape.
+
+
+def layers(conn: sqlite3.Connection) -> dict:
+    """The geography map's toggleable overlay layers, each with its caveats."""
+    _public(["contracts", "authorities", "cqc_locations", "fingertips_la_values",
+              "fingertips_indicators", "public_health_grants",
+              "la_revenue_budgets", "ndtms_la_statistics",
+              "cdp_documents", "cdp_document_candidates", "committee_papers",
+              "committee_paper_candidates", "foi_requests",
+              "foi_request_candidates"])
+
+    contracts_features = _rows(conn, """
+        SELECT c.buyer_ons_code AS ons_code, a.name AS authority_name,
+               COUNT(*) AS count, COALESCE(SUM(c.value_core), 0) AS value_gbp
+        FROM contracts c
+        JOIN authorities a ON a.ons_code = c.buyer_ons_code
+        GROUP BY c.buyer_ons_code, a.name
+        ORDER BY count DESC""")
+
+    cqc_features = _rows(conn, """
+        SELECT location_id, location_name, region, overall_rating,
+               latitude, longitude, local_authority_ons_code AS ons_code
+        FROM cqc_locations
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        ORDER BY location_name""")
+
+    # The same query the export uses: latest published period per authority,
+    # so the overlay and the treatment_numbers.geojson download agree row for
+    # row — pinned by test.
+    treatment_features = _rows(conn, """
+        SELECT v.ons_code, a.name AS authority_name, v.time_period, v.value
+        FROM fingertips_la_values v
+        JOIN fingertips_indicators i ON i.indicator_id = v.indicator_id
+        JOIN authorities a ON a.ons_code = v.ons_code
+        WHERE v.area_level = 'local_authority'
+          AND i.topic = 'numbers_in_treatment'
+          AND a.geometry_geojson IS NOT NULL
+          AND v.value IS NOT NULL
+          AND v.time_period = (
+              SELECT MAX(v2.time_period) FROM fingertips_la_values v2
+               WHERE v2.indicator_id = v.indicator_id AND v2.ons_code = v.ons_code)""")
+    for feature in treatment_features:
+        feature["unit"] = "rate per 1,000 population"
+
+    coverage = _coverage_layer(conn)
+
+    return {
+        "layers": {
+            "contracts": {
+                "label": "Contracts",
+                "features": contracts_features,
+                "caveats": [
+                    "Aggregated to one point per commissioning authority — "
+                    f"{sum(f['count'] for f in contracts_features)} notices "
+                    "in total. The exports carry every notice individually.",
+                    *LAYER_CAVEATS["contracts"],
+                ],
+            },
+            "cqc_locations": {
+                "label": "CQC locations",
+                "features": cqc_features,
+                "caveats": LAYER_CAVEATS["cqc_locations"],
+            },
+            "treatment": {
+                "label": "Treatment numbers",
+                "features": treatment_features,
+                "caveats": LAYER_CAVEATS["treatment_numbers"],
+            },
+            "coverage": {
+                "label": "What is held here",
+                "features": coverage,
+                "caveats": [CAVEATS["coverage_absence"]],
+            },
+        },
+    }
+
+
+def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
+    """How many evidence kinds the warehouse holds per authority.
+
+    The W-12 ticks for every authority at once, counting distinct kinds from
+    the same COVERAGE_COLUMNS declaration the admin matrix uses. The count is
+    a statement about the pipeline's own knowledge, not about the authority —
+    the caveat is the whole point of the layer.
+    """
+    exists = {row["name"] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    names = dict(conn.execute("SELECT ons_code, name FROM authorities"))
+
+    held: dict[str, set[str]] = {}
+    for label, table, column, _module in health.COVERAGE_COLUMNS:
+        if table not in exists:
+            continue
+        # Table and column names come from health.COVERAGE_COLUMNS, which is
+        # code, not a request — the same trust as the admin matrix.
+        for (code,) in conn.execute(
+                f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL"):
+            if code in names:
+                held.setdefault(code, set()).add(label)
+
+    return [
+        {"ons_code": code, "authority_name": names[code],
+         "kinds_held": len(kinds)}
+        for code, kinds in held.items()
+    ]

@@ -1130,7 +1130,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**9**~~ | W-05, W-18, W-08, W-10, W-15 — the shared furniture | S–M | **done** |
 | ~~**10**~~ | W-06, W-16, W-09, W-20, W-21, O-03 — artefacts and the machine | S–M | **done** |
 | ~~**11**~~ | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | **done** |
-| **12** | W-23, W-26, W-25, W-24 — show what is already collected | M–L | Phase 9 |
+| ~~**12**~~ | W-23, W-26, W-25, W-24 — show what is already collected | M–L | **done** |
 | **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
 | **14** | P-03, F-05 — gated by runs and decisions, not by effort | M | yours |
 | ~~**15**~~ | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | **done** |
@@ -1590,7 +1590,15 @@ The map click and the typeahead are the two browser checks the plan named,
 and both were checked by hand against the real warehouse in the same pass
 that loaded every existing route.
 
-### Phase 12 — Show what is already collected · M–L — **planned**
+### Phase 12 — Show what is already collected · M–L — **done** (2026-08-15)
+
+Delivered **W-23**, **W-26**, **W-25** and **W-24**, in that order. 1,557 →
+**1,570 passed** (13 new), 3 skipped, 18 deselected; ruff clean; every new
+route and payload loaded against Jon's own warehouse over HTTP with no
+failures, and the two new routes served from the running server.
+
+What follows is the plan; the record of what changed as it landed is at the
+end of the entry.
 
 Delivers **W-23**, **W-26**, **W-25**, **W-24**. Depends on Phase 9.
 Independent of Phase 11.
@@ -1634,6 +1642,57 @@ Order within the phase, and the first entry has a clock on it:
   test that the disclosure matrix distinguishes "not matched" from "not
   searched".
 
+#### What changed as it landed
+
+The order held and every "verified by" above is a test. Five things the plan
+did not anticipate, one of them measured in the browser half of the phase:
+
+- **W-26's freshness belongs on its own route, and the measurement decided
+  it.** The first draft put the bars inside `/api/v1/summary` as the plan
+  said; on the real warehouse the 14-table MAX scan measured **3 seconds**
+  (contracts and `la_revenue_budgets` are 2.8s of it, and neither carries a
+  `retrieved_at` index by the P-05 decision that priced and declined the
+  twenty-table one). That is exactly the shape `health.freshness`'s docstring
+  was written against, and W-21's own correction was the precedent: the bars
+  moved to `/api/v1/freshness`, loaded lazily after first paint, so the
+  landing page paints before the scan finishes. The funnel stayed in
+  `summary` because it is cheap — three small candidate tables and three
+  small evidence tables.
+- **W-25 became a page, and the frozen lists were the plan's own head-room
+  for it.** "A sector-level section" over 1,539 reports, a term index and a
+  latest-reports table is more than the landing page wants, and the plan's
+  frozen-list note priced new surface in 12. It landed as `#/pfd` with
+  `/api/v1/pfd` — one route edit, one static path edit, and the `<noscript>`
+  block and `/api` page updated in the same pass, which is the point of
+  batching them.
+- **`report_date` is verbatim source text, so the year chart reads it with a
+  pattern, not a position.** The live corpus mixes '10/04/2026', '12 March
+  2026' and 'March 2026' (plus month-word-only and null dates), so
+  `_pfd_year` takes the first 19xx/20xx match and the table shows the
+  source's own wording. A year that cannot be found is absent from the
+  chart, never guessed. The "latest" table orders by the coroner's own
+  reference, which opens with the year.
+- **The disclosure caveat travels from the view, not from a copy.** Each gap
+  cell carries `v_provider_disclosure_gaps`'s own caveat text, so the pinned
+  warning is the view's sentence; "not searched" years carry a document URL
+  instead of search terms, which is the distinction the plan's test demands,
+  and the matrix draws the two as different cell states.
+- **The funnel is drawn with div bars, not a chart, and the freshness bars
+  reuse them.** A zero-length canvas bar reads as "no data", which is the
+  wrong reading for a zero-promotion funnel — the zero is the finding. Bars
+  with the count as a text label render zero as "0", and "never" replaces an
+  empty track on the freshness side. The funnel renders before the lazy
+  freshness fetch resolves, so a zero is visible even while the scan runs.
+
+Also measured and recorded: the runway's two-year window travels in the
+payload (`window_start`/`window_end`) so the caption states what the axis
+means; and the concern-term index has **8 distinct terms in 214 rows** on
+the live warehouse — the chart sums occurrences across reports rather than
+plotting the pairs, and 25 bars would have been 8. The two browser checks
+the plan named — the runway chart carrying its caveat, and the zero funnel —
+were checked by hand against the real warehouse in the same pass that loaded
+every route.
+
 ### Phase 13 — Comparison, and the inferences it forces · M — **done** (2026-08-15)
 
 Delivered **W-11**, **W-19**, and settled the three §3J entries. On its own
@@ -1672,7 +1731,6 @@ coded (this is the phase's first-hour deliverable):**
    authorities is a group. The compare view is the honest replacement for a
    peer group, and the entry is re-filed as a possible future behind a named
    claim that needs it.
-
 **W-11 — the compare view, and the shape the decisions forced.** The page's
 URL is the comparison: `#/compare?ons_code=...&ons_code=...&provider_key=...`,
 with the same parameter names the API takes, so a comparison is a shareable

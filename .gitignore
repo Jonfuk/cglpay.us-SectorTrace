@@ -12,6 +12,10 @@ data/warehouse.db-*
 # listings. Regenerable by `pipeline backup`, and the same size as the thing
 # they copy.
 data/backups/
+# Where an interrupted PostgreSQL migration keeps its place. Local state about
+# one machine's load of one warehouse into one server, and it names the target
+# — redacted, but still a hostname nobody has agreed to publish.
+data/pg-migration-state.json
 
 # Generated export payloads — reproducible from the warehouse with
 # `./start.sh export all`, and large. The schema that produces them IS

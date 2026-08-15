@@ -40,6 +40,20 @@
     <a href="#/providers" data-route="providers">Providers</a>
     <a href="#/pfd" data-route="pfd">Coroner reports</a>
   </nav>
+  <!--
+    W-17: "find my council". A navigator, not a filter: picking an authority
+    goes straight to its page, which is why it lives in the top bar rather
+    than the filter bar -- the filter bar's controls all declare a state key
+    that a page reads (tests/test_portal_controls.py), and a navigator holds
+    no state. A reader who knows their town, not their ONS code, has nowhere
+    else to start.
+  -->
+  <div class="findcouncil" role="search">
+    <input id="find-council" type="search" placeholder="Find your council"
+           aria-label="Find your council by name" autocomplete="off"
+           role="combobox" aria-expanded="false" aria-controls="find-council-list">
+    <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
+  </div>
   <a class="adminlink" href="/api" title="The read-only JSON API behind these pages">API</a>
   <a class="adminlink" href="/admin/" title="Pipeline operator tools">Admin &rarr;</a>
 </header>
@@ -103,6 +117,8 @@
       <li><code>/api/v1/boundaries</code> — authority boundary geometry</li>
       <li><code>/api/v1/fingertips</code> — treatment demand indicators</li>
       <li><code>/api/v1/ndtms</code> — NDTMS estimates with their confidence intervals</li>
+      <li><code>/api/v1/compare</code> — the existing series for two or more authorities or providers, on shared axes</li>
+      <li><code>/api/v1/layers</code> — the geography map's overlay layers, each with its own caveats</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
       <li><code>/api/v1/freshness</code> — when each source table was last collected</li>
       <li><code>/api/v1/export</code> — any of the above as CSV or JSON</li>

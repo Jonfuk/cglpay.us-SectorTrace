@@ -35,6 +35,14 @@
 #   ./start.sh web --host 127.0.0.1    # this machine only
 #   ./start.sh web --port 8080 --no-open
 #
+#   PostgreSQL. Set DATABASE_URL in .env and this script syncs the `postgres`
+#   extra, and every command above reads and writes that warehouse instead of
+#   data/warehouse.db. Moving the existing warehouse across is two commands,
+#   and the SQLite file is opened read-only by both:
+#   ./start.sh migrate-data --dry-run   # the plan and the preflight checks
+#   ./start.sh migrate-data             # load, then verify every value
+#   ./start.sh verify-migration         # check the two again, later
+#
 #   OCR. Set OCR_ENABLED=true in .env (or in the environment) and this script
 #   syncs the `ocr` extra as well, so Module 8 can read the two thirds of PFD
 #   reports that are scans rather than text. Left off, those reports are
@@ -164,9 +172,34 @@ if [[ -n "${OCR_ENABLED:-}" ]]; then
     esac
 fi
 
+# The `postgres` extra, on the same rule and for a sharper version of the same
+# reason. `uv sync` removes what the selected extras do not ask for, so with
+# DATABASE_URL set in .env and this check absent, every run of this script
+# uninstalled psycopg and the pipeline then failed at its first connection
+# with ModuleNotFoundError — a working configuration broken by the script that
+# exists to make it work.
+#
+# Presence of the URL is the selector, matching pipeline/config.py exactly:
+# there is deliberately no second switch that could disagree with it. An empty
+# value reads as unset on both sides.
+postgres_wanted=0
+if [[ -f .env ]] && grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*[^[:space:]]' .env; then
+    postgres_wanted=1
+fi
+if [[ -n "${DATABASE_URL:-}" ]]; then
+    postgres_wanted=1
+elif [[ -n "${DATABASE_URL+set}" ]]; then
+    # Explicitly empty in the environment, which is how the pipeline's own
+    # documented `DATABASE_URL= …` forces SQLite back on for one command.
+    postgres_wanted=0
+fi
+
 sync_args=(--quiet)
 if (( ocr_wanted )); then
     sync_args+=(--extra ocr)
+fi
+if (( postgres_wanted )); then
+    sync_args+=(--extra postgres)
 fi
 
 info "Syncing dependencies"
@@ -178,12 +211,24 @@ if ! uv sync "${sync_args[@]}"; then
     fi
     exit 1
 fi
+extras=""
 if (( ocr_wanted )); then
-    ok "dependencies in sync (including the ocr extra)"
-    warn "OCR is on. The first scanned report downloads ~105 MB of models to ~/.cache/onnxtr,"
-    warn "and reading one takes about nine seconds a page."
+    extras="${extras} ocr"
+fi
+if (( postgres_wanted )); then
+    extras="${extras} postgres"
+fi
+if [[ -n "$extras" ]]; then
+    ok "dependencies in sync (including the${extras} extra(s))"
 else
     ok "dependencies in sync"
+fi
+if (( ocr_wanted )); then
+    warn "OCR is on. The first scanned report downloads ~105 MB of models to ~/.cache/onnxtr,"
+    warn "and reading one takes about nine seconds a page."
+fi
+if (( postgres_wanted )); then
+    ok "DATABASE_URL is set: the warehouse is PostgreSQL, not data/warehouse.db"
 fi
 
 # --- run -------------------------------------------------------------------------

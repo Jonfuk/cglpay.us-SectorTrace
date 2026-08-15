@@ -30,16 +30,24 @@ m04 sees the company numbers m03/m05 publish and m09/m10 see the authority
 websites m15 registers. Where a small `--limit` upstream leaves a downstream
 module with nothing to work on, that module skips with a reason naming the
 upstream table — a skip that says why is honest; a pass over zero rows is not.
+
+With `DATABASE_URL` configured, that temporary warehouse is a **schema of its
+own** on the PostgreSQL server, built by the PostgreSQL migration tree and
+dropped at the end. This is the one place in the project where real modules
+write into a migrated schema, which the migration plan asked for deliberately;
+it is also the only way "temporary" can stay true on that backend, because
+`database_path` selects nothing once a URL is set.
 """
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from pipeline import db
+from pipeline import catalog, db
 from pipeline.config import get_settings
 from pipeline.registry import (
     MODULE_REGISTRY,
@@ -278,8 +286,10 @@ def _count(conn: sqlite3.Connection, table: str, module: str) -> int:
     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+def _columns(conn, table: str) -> set[str]:
+    # Through the catalog rather than `PRAGMA table_info`: with DATABASE_URL
+    # set, this suite runs against PostgreSQL, which has no such pragma.
+    return {column["name"] for column in catalog.columns_of(conn, table)}
 
 
 # --- fixtures ------------------------------------------------------------------
@@ -293,6 +303,32 @@ class Warehouse:
     settings: object
 
 
+def _configured_backend_settings():
+    """The operator's real settings, including `DATABASE_URL` from `.env`.
+
+    `tests/conftest.py` blanks `DATABASE_URL` in the environment for every
+    test, and that is right: an offline test that found a real server would
+    write to it. This file is the one place in the suite that is *meant* to
+    run against the working configuration — it uses the real API keys and the
+    real politeness delay for the same reason — so it reads the value back out
+    of `.env`, which is where the environment variable was hiding.
+
+    Safe only because of the schema isolation below. Before that existed this
+    would have pointed sixteen live modules at the working warehouse.
+    """
+    settings = get_settings()
+    if settings.database_url:
+        return settings
+    from dotenv import dotenv_values
+
+    from pipeline.config import REPO_ROOT
+
+    url = (dotenv_values(REPO_ROOT / ".env") or {}).get("DATABASE_URL")
+    if not url or not url.strip():
+        return settings
+    return settings.model_copy(update={"database_url": url.strip()})
+
+
 @pytest.fixture(scope="module")
 def warehouse(tmp_path_factory) -> Warehouse:
     """One throwaway warehouse shared by every module in this file.
@@ -300,17 +336,62 @@ def warehouse(tmp_path_factory) -> Warehouse:
     Real settings (so API keys and the real politeness delay apply), temporary
     paths (so a smoke run never writes into data/warehouse.db or mixes test
     bytes into the raw evidence archive).
+
+    Throwaway has to mean throwaway on either backend. With `DATABASE_URL`
+    set, `database_path` stops selecting anything — `db.get_connection` reads
+    the URL — so overriding the path alone would have pointed every module in
+    this file at the working PostgreSQL warehouse and written live-crawl rows
+    into it. That is the opposite of what the docstring above promises, and it
+    would be silent. So the PostgreSQL run gets a schema of its own, built by
+    the PostgreSQL migration tree and dropped afterwards, which is also what
+    the migration plan asked this run to prove: that real modules can write
+    into a migrated schema.
     """
     base = tmp_path_factory.mktemp("integration")
-    settings = get_settings().model_copy(update={
+    settings = _configured_backend_settings().model_copy(update={
         "database_path": base / "warehouse.db",
         "raw_archive_dir": base / "raw",
         "logs_dir": base / "logs",
     })
+
+    schema = None
+    if settings.database_backend == "postgres":
+        from pipeline import pg
+
+        schema = f"smoke_{datetime.now(timezone.utc):%Y%m%d%H%M%S}"
+        admin = pg.connect(settings.database_url)
+        try:
+            admin.execute(f"CREATE SCHEMA {catalog.quote(schema)}")
+            admin.commit()
+        finally:
+            admin.close()
+        settings = settings.model_copy(update={
+            "database_url": pg.with_schema(settings.database_url, schema),
+            # The read-only URL is not scoped and is not used by any module;
+            # dropped so nothing in a fixture reaches for it and lands in the
+            # working warehouse by accident.
+            "database_ro_url": None,
+        })
+
     conn = db.get_connection(settings)
-    db.apply_migrations(conn, settings.migrations_dir)
+    # migrations_dir_for, not settings.migrations_dir: the latter is always the
+    # SQLite tree, and naming it here applied SQLite DDL to PostgreSQL. It
+    # happened to be a no-op only because both trees hold the same filenames
+    # and the target was already migrated.
+    db.apply_migrations(conn, db.migrations_dir_for(settings))
+    conn.commit()
     yield Warehouse(conn=conn, settings=settings)
     conn.close()
+
+    if schema:
+        from pipeline import pg
+
+        admin = pg.connect(_configured_backend_settings().database_url)
+        try:
+            admin.execute(f"DROP SCHEMA {catalog.quote(schema)} CASCADE")
+            admin.commit()
+        finally:
+            admin.close()
 
 
 # --- the smoke tests ------------------------------------------------------------
@@ -382,16 +463,19 @@ def test_the_real_warehouse_carries_provenance_throughout() -> None:
     catches a table that lost provenance at some point in the warehouse's
     history — including from a module version that has since been fixed.
     """
-    settings = get_settings()
-    if not Path(settings.database_path).exists():
+    settings = _configured_backend_settings()
+    if (settings.database_backend == "sqlite"
+            and not Path(settings.database_path).exists()):
         pytest.skip(f"no warehouse at {settings.database_path} — nothing to sweep")
 
     conn = db.get_connection(settings)
     try:
-        tables = [row["name"] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name NOT LIKE 'restricted_%' AND name NOT LIKE 'sqlite_%' "
-            "ORDER BY name")]
+        # Through the catalog, so this sweeps whichever warehouse is
+        # configured. It was `sqlite_master`, which is the one table a
+        # PostgreSQL warehouse does not have — so the check that exists to
+        # sweep the *working* warehouse would have failed to run against it.
+        tables = [name for name in catalog.table_names(conn)
+                   if not name.startswith(db.RESTRICTED_PREFIX)]
         offenders: dict[str, int] = {}
         for table in tables:
             if not {"source_url", "retrieved_at"} <= _columns(conn, table):
