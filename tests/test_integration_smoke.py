@@ -100,9 +100,21 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
         produces=("contracts",),
         signal=(("contracts", "title"), ("contracts", "buyer_name"),
                 ("contracts", "date_published")),
+        limit=100,
         note="value_core is deliberately not a signal column — plenty of real "
               "notices publish no value, and asserting on it would fail honestly "
-              "empty rows.",
+              "empty rows. "
+              "--limit here counts releases *examined*, not written and not "
+              "pages: m01 filters every release against the keyword scope and "
+              "keeps the ones that match. At the suite default of 5 this asked "
+              "whether five arbitrary UK procurement notices include a "
+              "substance-misuse contract, which is a coin toss — measured "
+              "2026-08-15, matches run at about 21% of releases, so five gave "
+              "roughly a 3-in-10 chance of a spurious failure and the suite "
+              "duly failed on it. 100 is one API page per source: measured at "
+              "44 matching notices in 2 seconds, and it fails only if the "
+              "scope stops matching anything at all, which is the thing this "
+              "test is for.",
     ),
     Smoke(
         module="m02_tribunals",
@@ -165,21 +177,38 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
     Smoke(
         module="m09_cdp_documents",
         produces=("cdp_document_candidates", "review_queue"),
-        signal=(("cdp_document_candidates", "candidate_url"),),
+        signal=(("cdp_document_candidates", "candidate_url"),
+                ("review_queue", "context_json")),
         precondition="SELECT COUNT(*) FROM authority_foi_profiles WHERE home_page_url IS NOT NULL",
         precondition_note="m15 registered no authority websites, so there is "
                            "nowhere to search",
         note="A discovery module: finding no candidate is a real outcome, and "
-              "lands in review_queue. What must not happen is finding neither.",
+              "lands in review_queue. What must not happen is finding neither. "
+              "review_queue carries a signal column for exactly that case — "
+              "see m10, where the note explains what it is asserting.",
     ),
     Smoke(
         module="m10_committee_papers",
         produces=("committee_paper_candidates", "authority_committee_systems", "review_queue"),
-        signal=(("committee_paper_candidates", "document_url"),),
+        signal=(("committee_paper_candidates", "document_url"),
+                ("authority_committee_systems", "committee_system"),
+                ("review_queue", "context_json")),
         precondition="SELECT COUNT(*) FROM authority_foi_profiles WHERE home_page_url IS NOT NULL",
         precondition_note="m15 registered no authority websites, so there is "
                            "nowhere to search",
-        note="Same discovery caveat as m09.",
+        note="Same discovery caveat as m09, and this is the module that showed "
+              "why it needed a signal column of its own. Run against five "
+              "councils on a fresh warehouse, none of them ran a committee "
+              "system m10 recognises: it searched nothing, found nothing, and "
+              "wrote only review_queue rows saying so — a correct outcome that "
+              "the spec then failed, because the only table carrying a signal "
+              "was the one that stayed empty. "
+              "What the three columns assert between them: if candidates were "
+              "found they carry a URL; if a committee system was detected it "
+              "has a type; and if neither happened, the review items say why "
+              "rather than being contextless. An empty run that explains "
+              "itself passes. An empty run that does not is the shape-change "
+              "signature this file exists to catch.",
     ),
     Smoke(
         module="m11_public_health_grant",

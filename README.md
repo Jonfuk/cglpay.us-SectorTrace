@@ -680,6 +680,24 @@ half-loaded table. See
 [`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md)
 for creating the database, its two roles, and why the collation matters.
 
+### Which backend is faster
+
+Both, at different things, and the measurements are in
+[`docs/benchmarks/`](docs/benchmarks/README.md):
+
+```bash
+./start.sh benchmark                        # measures whichever backend is configured
+./start.sh benchmark --compare-to <earlier report>
+```
+
+PostgreSQL wins where the query is the cost — the portal's front page goes
+from 3.9 seconds to half a second, and the contracts list from 6 seconds to
+0.65 — and loses where the network round-trip is the cost, which is every
+case already under about 40 ms. Writes are ~16× slower per writer and scale
+almost linearly to eight of them, where SQLite's write slot means they do not
+scale at all. None of it makes a *collection* faster: that waits on one
+request per two seconds per host, and always will.
+
 ## Documentation
 
 | Document | Contents |
@@ -688,6 +706,7 @@ for creating the database, its two roles, and why the collation matters.
 | [`docs/SOURCES.md`](docs/SOURCES.md) | Each source's URL, licence, key requirement and applied rate limit |
 | [`docs/CAVEATS.md`](docs/CAVEATS.md) | Known limitations, and what must not be computed |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | Backing the warehouse up, restoring it, and how big the archive gets |
+| [`docs/benchmarks/README.md`](docs/benchmarks/README.md) | What each backend costs, measured, and what it says about optimising either |
 | [`pipeline/migrations/postgres/README.md`](pipeline/migrations/postgres/README.md) | The PostgreSQL dialect tree, the conversions it makes, and moving the data across |
 | `docs/verification/` | Per-run review worklists produced by `m06`, `m09` and `m10` |
 

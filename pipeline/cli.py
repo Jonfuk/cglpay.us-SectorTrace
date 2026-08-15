@@ -422,6 +422,72 @@ def verify_migration(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def benchmark(
+    output_dir: str = typer.Option(
+        "docs/benchmarks", help="Where the JSON report is written"),
+    reads: bool = typer.Option(True, "--reads/--no-reads"),
+    writes: bool = typer.Option(True, "--writes/--no-writes"),
+    compare_to: str = typer.Option(
+        None, "--compare-to", help="An earlier report to diff this one "
+                                    "against, case by case"),
+) -> None:
+    """Measure the configured backend, and record it so Phase 4 has a baseline.
+
+    Reads run against the working warehouse, because the point is the real
+    data. Writes go to a scratch warehouse — a temporary file on SQLite, a
+    temporary schema on PostgreSQL — so nothing here changes what it measures.
+
+    Changes nothing else either: this is a measurement, and the phase it
+    belongs to exists so that a later "this is faster" can be checked.
+    """
+    import json
+    from pathlib import Path
+
+    from pipeline import benchmark as benchmark_module
+
+    configure_logging("benchmark")
+    settings = get_settings()
+    report = benchmark_module.benchmark(
+        settings, reads=reads, writes=writes,
+        output_dir=Path(output_dir) if output_dir else None)
+
+    environment = report["environment"]
+    ui.heading(f"{environment['backend']} — {environment['server']}")
+    ui.muted(f"  {sum(report['tables'].values()):,} rows across the measured tables")
+
+    for case in report.get("reads", []):
+        if "error" in case:
+            ui.warn(f"  {case['name']}: {case['error']}")
+        else:
+            ui.info(f"  {case['name']:<34} p50 {case['p50_ms']:>9,.1f} ms   "
+                     f"p95 {case['p95_ms']:>9,.1f} ms")
+    if "write_throughput" in report:
+        throughput = report["write_throughput"]
+        ui.info(f"  {'writes (upsert + commit)':<34} "
+                 f"{throughput['rows_per_second']:,.0f} rows/s   "
+                 f"commit p50 {throughput['commit']['p50_ms']:.2f} ms")
+        for entry in report["write_contention"]["by_writers"]:
+            label = f"{entry['writers']} concurrent writer(s)"
+            ui.info(f"  {label:<34} {entry['rows_per_second']:>9,.0f} rows/s   "
+                     f"x{entry['scaling_vs_one_writer']} vs one")
+
+    if report.get("written_to"):
+        ui.success(f"recorded to {report['written_to']}")
+
+    if compare_to:
+        earlier = json.loads(Path(compare_to).read_text(encoding="utf-8"))
+        ui.heading(f"against {earlier['environment']['backend']} "
+                    f"({earlier['environment']['measured_at']})")
+        for row in benchmark_module.compare(earlier, report):
+            if "p50_ratio" not in row:
+                ui.warn(f"  {row['name']}: {row['note']}")
+                continue
+            ui.info(f"  {row['name']:<34} "
+                     f"{row['left_p50_ms']:>9,.1f} -> {row['right_p50_ms']:>9,.1f} ms   "
+                     f"x{row['p50_ratio']}")
+
+
 def _report_verification(report: dict) -> None:
     depth = "every value" if report["checks"].get("rows") else "counts and aggregates"
     if report["ok"]:

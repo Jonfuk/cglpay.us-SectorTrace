@@ -43,6 +43,11 @@
 #   ./start.sh migrate-data             # load, then verify every value
 #   ./start.sh verify-migration         # check the two again, later
 #
+#   Measure whichever backend is configured, and record it under
+#   docs/benchmarks/ so a later change can be judged against it rather than
+#   against a recollection. Changes nothing:
+#   ./start.sh benchmark
+#
 #   OCR. Set OCR_ENABLED=true in .env (or in the environment) and this script
 #   syncs the `ocr` extra as well, so Module 8 can read the two thirds of PFD
 #   reports that are scans rather than text. Left off, those reports are
