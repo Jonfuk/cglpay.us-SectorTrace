@@ -608,7 +608,14 @@ _NOTICE_SELECT = """
                -- columns should not have them move underneath them.
                c.source_system, c.notice_web_url
         FROM contracts c{clause}
-        ORDER BY c.date_published DESC, c.notice_id"""
+        -- NULLS LAST is said rather than left to the engine: SQLite puts them
+        -- last under DESC and PostgreSQL puts them first, so the same list
+        -- would open on a different notice depending on which backend
+        -- answered. SQLite is the backend of record, so its order is the one
+        -- written down. It is also what idx_contracts_date_published is built
+        -- to answer (migration 0044) — an ORDER BY the index does not match
+        -- is a sort of the whole table.
+        ORDER BY c.date_published DESC NULLS LAST, c.notice_id"""
 
 
 def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only):

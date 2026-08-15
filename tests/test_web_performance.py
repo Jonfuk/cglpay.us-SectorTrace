@@ -184,6 +184,25 @@ def test_the_coverage_aggregates_use_an_index(ro, table, column):
     assert "SCAN" not in plan or "USING" in plan, f"{table}.{column} is scanned: {plan}"
 
 
+def test_the_portal_contract_list_uses_its_index(ro):
+    """Migration 0044, and the ORDER BY that has to match it.
+
+    The portal's contract list is `ORDER BY date_published DESC NULLS LAST,
+    notice_id`, and 0044 indexes exactly that. The pairing is the fragile
+    part: drop the `NULLS LAST`, or reverse either column, and the index stops
+    being usable without anything failing — the page just goes back to sorting
+    98,636 rows to show the first fifty. That was 6 seconds on SQLite and
+    83ms on PostgreSQL before the index, and 1.9ms after.
+    """
+    from pipeline.web import public_queries
+
+    sql = public_queries._NOTICE_SELECT.format(clause="") + " LIMIT 500"
+    plan = plan_for(ro, sql)
+    assert "idx_contracts_date_published" in plan, (
+        f"the contract list is not using its index: {plan}. The ORDER BY and "
+        "migration 0044 have to agree, down to the NULLS clause.")
+
+
 def test_the_pending_queue_count_uses_an_index(ro):
     plan = plan_for(ro, "SELECT module, COUNT(*) FROM review_queue "
                          "WHERE status = 'pending' GROUP BY module")
