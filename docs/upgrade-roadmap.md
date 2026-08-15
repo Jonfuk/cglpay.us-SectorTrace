@@ -2,8 +2,8 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Fifteen phases have been worked**: 1–3, 5,
-6, 8–13, 15 and 16 are done — 14 is the standing gated pair, P-03 and F-05, and stays
+1 skipped, 18 deselected, 422s**). **Sixteen phases have been worked**: 1–3, 5,
+6, 8–13, 15, 16 and 18 are done — 14 is the standing gated pair, P-03 and F-05, and stays
 open until its two decisions are taken; Phase 4 delivered F-01 and U-01 and
 left F-03 open
 (D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
@@ -23,7 +23,11 @@ direct pay evidence: the sustained m16 crawl and the provider pay-page
 module on one side, the ONS ASHE comparator and the gender pay gap filings
 on the other, with the F-05 note that B3 was always making standing true
 (it feeds the one table history would be for, and the decision in Phase 14
-now has its mechanism).
+now has its mechanism). **Phase 18 landed the same day — the sector universe
+(F1, F2, F3) with D-04's remaining 3,160 review items folded in**, and the
+standing design question (new table or providers extension) settled as a new
+table — the argument is in migration `0045`. What is left of the plan is
+Phases 14 (gated on your say-so), 17 (gated on campaign throughput) and 19.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -53,7 +57,7 @@ already there.
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
-| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**. Remaining: Phases 17–19, in the order their dependencies fall. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab) — with D-04's 2,667 `unmatched_buyer_name` and 493 `possible_group_company` items folded into it**. Remaining: Phases 17 and 19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
@@ -1165,7 +1169,9 @@ is introduced in two phases (11 and 12) rather than in seven.
   review UI is that work done in its most expensive possible form, and it
   produces no universe at the end. Deferred into Phase 18 deliberately, and
   the queue count stays high in the meantime; that is the correct reading of
-  it, not a backlog.
+  it, not a backlog. *Delivered 2026-08-15: the universe build (m23) captures
+  every one of them systematically, and `resolve-answered` closes the items
+  with their evidence recorded in `review_resolutions` — see Phase 18.*
 - **B4 (full council-website coverage) comes after the campaign shows
   throughput, not before.** It multiplies candidate discovery from a verified
   handful to 347 councils. With 2,462 undecided candidates against zero
@@ -1187,7 +1193,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**15**~~ | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | **done** |
 | **16** | B3, G1, B1 — direct pay evidence and its comparators | M–L | none |
 | **17** | C1, C2 — the claims-to-evidence index | M | Phase 8's output |
-| **18** | F1, F2, F3, and D-04's remainder — the sector universe | L | Phase 15 |
+| ~~**18**~~ | F1, F2, F3, and D-04's remainder — the sector universe | L | **done 2026-08-15** |
 | **19** | B4, G5, G2, G8 — heavy, conditional, or gated on B4 | M–L | Phase 18 |
 
 Phases 8 and 9 were both delivered on 2026-08-14, by two sessions running at
@@ -2064,11 +2070,118 @@ and decision history is not a claim, the same standard migration `0030` sets
 for promotion. Nothing in the registry is computed — a claim is a statement
 linked to rows, and the linkage is a human judgement recorded like every other.
 
-### Phase 18 — The sector universe · L — **planned**
+### Phase 18 — The sector universe · L — **done** (2026-08-15)
+
+Delivered **F1** (m23, the universe build), **F2** (the coverage
+denominators), **F3** (the sector-shape export tab `10_Sector_Universe`) —
+**and D-04's remaining 3,160 review items, done here rather than in the
+queue**. Suite green: **1,883 passed**, 62 skipped, 25 deselected; ruff
+clean.
+
+The record of what changed as it landed is at the end of the entry. The plan
+as written:
 
 **F1** (the universe build), **F2** (coverage denominators), **F3** (sector
-shape as a publication) — **and D-04's remaining 3,160 review items, done here
-rather than in the queue.**
+shape as a publication) — **and D-04's remaining 3,160 review items, done
+here rather than in the queue.**
+
+That last part is the point of putting these together. `unmatched_buyer_name`
+(2,667) and `possible_group_company` (493) are the universe's reconciliation
+labour arriving one review item at a time, in the form that produces no
+universe at the end of it. Done here they are the same hours spent once, with
+a `sector_universe` (or extended `providers`) table to show for them.
+
+Universe membership keeps m04's match-basis discipline exactly — name-only
+matches stay name-only, unconfirmed stay unconfirmed — or the universe becomes
+a larger and less verifiable version of the problem it was built to solve. The
+one recorded-not-decided design question stands: new table, or extension of
+`providers`. Organisations are not personal data, so the `restricted_`
+discipline does not reach this.
+
+#### What changed as it landed
+
+- **The design question settled as a new table, and the argument is in
+  migration `0045`.** `providers` is reference/config — seeded from code,
+  no provenance, the human-curated thirteen. The universe is
+  evidence-derived, unbounded, and must keep provenance and match-basis per
+  row; extending `providers` would have made the config table unbounded and
+  the universe restricted to what config can hold. Not a compromise: the two
+  tables answer different questions, and the universe row's `provider_key`
+  links back into `providers` through the one door the discipline allows.
+- **The universe is a capture of who shows up in the corpus, not the "~M" a
+  headline wants.** The plan expected "hundreds of organisations"; the
+  actual data is **29,680 rows built in 6 seconds** [measured, on a copy of
+  the live warehouse]: 13 providers, 502 companies (9 collected by m04 plus
+  the 493 candidates), 3 charities, 4 CQC providers (all four merged into
+  their seeded company rows — same legal person), 26,069 name-only awardees,
+  1,310 PPON awardees and 1,783 funders, with 1,316 awardee names and 866
+  buyer names merging into rows that already held the same organisation.
+  The awardee side is dominated by one-off winners of in-scope lots, which
+  is exactly what the notices' CPV-prefix matching produces — so the export
+  tab's first caveat says the universe is never a complete list of the
+  sector, and the identified rows (register + PPON, 1,326 of them) are the
+  rows any "we track N of the sector's ~M" may count as N.
+- **The CQC half of the universe is a floor, not a census.** m05 collects
+  only the tracked handful, so that is all the build can reconcile. Widening
+  it is new collection (B4-adjacent), not reconciliation, and the ten
+  `possible_cqc_provider` items stay in the queue for the same reason.
+- **The 3,160 items closed through review_sweep, not inside the module.**
+  The build captures; the sweep's three new rules (`unmatched_buyer_
+  captured_as_funder`, `possible_group_company_in_universe`,
+  `unconfirmed_name_match_in_universe`) close the items once their universe
+  rows exist — evidence-driven, previewable, recorded in
+  `review_resolutions`, and reversible with `--reopen`. A buyer name that
+  matches an authority now (overrides change) is skipped by the build and
+  stays in the queue for m01's next run. The `possible_group_company`
+  evidence says in words that the capture is **not** confirmation of group
+  membership — that stays a human decision, on a row that now exists.
+  Against the live warehouse: **3,165 items** preview (2,667 + 493 + 5
+  `unconfirmed_name_match`), every one with a universe row behind it.
+- **F2's denominator is the table; the statements that use it are future
+  work, and said so.** The build logs the coverage counts
+  (`universe.run_complete` carries totals by type and by basis), and the
+  export tab's caveats name the reading rule — identified rows for N, basis
+  stated, never the whole capture. Publishing the sentence on the portal or
+  in the claims index is Phase 17's or 19's, not this phase's: the portal
+  surface is a frozen list and the claims index is gated on the campaign.
+- **F3 is the tenth sheets tab.** `10_Sector_Universe` carries every row
+  with its match-basis columns and six caveats (capture-not-census,
+  name-only meaning, PPON meaning, provider_key rule, funder meaning, the
+  one-layer `notices_count`), through the existing export machinery — so it
+  inherits the provenance companion, the bundle, the licence line and the
+  guard discipline for nothing.
+- **The universe normaliser is shared, not second-guessed.** One
+  `normalise_name` in m23 merges on, stripping both suffix families so a
+  funder and an awardee with the same name land on the same row; the funder
+  pass re-checks buyer names with m01's own matcher before capturing, and
+  `normalised_name` is stored so the sweep rules join in Python with the
+  same function rather than reimplementing it in SQL.
+- **`provider_key` is the one rule, and it is enforced structurally.** The
+  build reads `provider_identifiers` once and every register row's
+  provider_key comes through it (or through a company row m04 seeded);
+  `name_only_unconfirmed` rows have no identifiers and can never acquire
+  one. A test asserts zero name-only rows carry a provider_key — on the
+  live data, 20 rows link to a tracked provider, all by identifier.
+- **The migration number collided with the postgres workstream, and the
+  live warehouse is already on the phase.** The same hour this landed,
+  issue #21's phase-4 branch shipped `0044_contracts_by_date_published.sql`
+  and applied it to the live PostgreSQL warehouse, and a web-server startup
+  on this branch applied this phase's migration under the same number
+  before the rename. Renamed to **`0045`** (apply order decides the number
+  order), the phantom `0044_sector_universe` record removed from the live
+  `schema_migrations`, and the phase then applied to the live warehouse for
+  real: migration `0045`, the m23 build (29,680 rows, 20 identifier-linked
+  to tracked providers), and `resolve-answered` closing all 3,165 absorbed
+  items — the pending queue dropped 4,304 → 1,139, every closure recorded
+  in `review_resolutions` and reopenable.
+
+Below is the plan as written.
+
+---
+
+**F1** (the universe build), **F2** (coverage denominators), **F3** (sector
+shape as a publication) — **and D-04's remaining 3,160 review items, done
+here rather than in the queue.**
 
 That last part is the point of putting these together. `unmatched_buyer_name`
 (2,667) and `possible_group_company` (493) are the universe's reconciliation

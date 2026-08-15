@@ -1851,8 +1851,10 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
     figure on this page matches the page it came from and worth more than the
     statements it costs.
     """
-    # `sqlite_master` was named here directly until Phase 4, which made this
-    # route fail outright on the PostgreSQL backend.
+    # `sqlite_master` has no PostgreSQL equivalent, so "does the warehouse
+    # hold this table?" is asked through catalog, which speaks to both. Named
+    # directly here until Phase 4, which made this route fail outright on
+    # PostgreSQL.
     present = set(catalog.table_names(conn))
 
     # Table and column names come from health.COVERAGE_COLUMNS, which is code,
@@ -2277,6 +2279,9 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
     the caveat is the whole point of the layer.
     """
     present = set(catalog.table_names(conn))
+    # By column name rather than `dict(rows)`: that shorthand relies on a row
+    # being a two-element sequence, which is true of both backends' rows and
+    # is not the thing this line is about.
     names = {row["ons_code"]: row["name"] for row in
               conn.execute("SELECT ons_code, name FROM authorities")}
 

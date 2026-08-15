@@ -335,6 +335,20 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "figure parsed anywhere is a shape-change signature, not a "
               "successful crawl.",
     ),
+    Smoke(
+        module="m23_sector_universe",
+        produces=("sector_universe",),
+        signal=(("sector_universe", "canonical_name"),
+                ("sector_universe", "match_basis")),
+        precondition="SELECT COUNT(*) FROM contracts",
+        precondition_note="no contracts means no awardees, which is a universe "
+              "of nothing",
+        note="Fetches nothing: it reconciles what the upstream modules "
+              "collected, so a universe of zero rows means the sources "
+              "produced nothing to work from. --limit is ignored: the "
+              "universe is a whole-corpus reconciliation and a partial one "
+              "would be the wrong artefact.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

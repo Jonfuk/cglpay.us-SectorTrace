@@ -139,6 +139,7 @@ const MODULE_LICENCES = {
   m20_gender_pay_gap: 'ogl_v3',
   m21_ons_ashe: 'ogl_v3',
   m22_provider_pay_pages: 'provider_own',
+  m23_sector_universe: 'ogl_v3',
 };
 
 export function licenceFor(module) {
