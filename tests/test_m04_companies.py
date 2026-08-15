@@ -141,6 +141,14 @@ def _register_company_mocks(httpx_mock, number="03861209"):
     httpx_mock.add_response(
         url=re.compile(rf"{base}/search/disqualified-officers.*"),
         json={"total_results": 0, "items": []}, is_reusable=True)
+    # The PSC pass (Phase 15 / G3) fetches the register for every company.
+    # An empty register is the normal fixture state; the PSC-specific tests
+    # register a richer payload BEFORE this helper so their rule wins the
+    # first-call pick, which is why this one is optional.
+    httpx_mock.add_response(
+        url=re.compile(rf"{base}/company/{number}/persons-with-significant-control.*"),
+        json={"register_view": "active", "items": [], "total_count": 0},
+        is_reusable=True, is_optional=True)
 
 
 def test_run_from_seed_identifier(httpx_mock, settings, conn):
@@ -308,3 +316,168 @@ def test_seeded_company_is_linked_to_its_provider(httpx_mock, settings, conn):
     row = conn.execute("SELECT * FROM companies WHERE company_number='03861209'").fetchone()
     assert row["match_basis"] == "seed"
     assert row["provider_key"] == "change_grow_live"
+
+# --- People with Significant Control (Phase 15 / G3) ---------------------------
+
+PSC_INDIVIDUAL = {
+    "kind": "individual-person-with-significant-control",
+    "name": "SOMEONE, Example",
+    "date_of_birth": {"month": 6, "year": 1980},
+    "nationality": "British",
+    "country_of_residence": "United Kingdom",
+    "natures_of_control": ["ownership-of-shares-more-than-25-percent",
+                           "right-to-appoint-and-remove-directors"],
+    "notifiable": True,
+    "is_sanctioned": False,
+    "links": {"self": "/company/03861209/persons-with-significant-control/individual/abc123"},
+}
+PSC_CORPORATE = {
+    "kind": "corporate-entity-person-with-significant-control",
+    "name": "CGL HOLDINGS LIMITED",
+    "identification": {"company_number": "06228752", "legal_form": "Ltd",
+                        "country_registered": "United Kingdom"},
+    "natures_of_control": ["ownership-of-shares-more-than-25-percent"],
+    "notifiable": True,
+    "links": {"self": "/company/03861209/persons-with-significant-control/corporate-entity/def456"},
+}
+
+
+def _register_psc_mocks(httpx_mock, number="03861209", items=(PSC_INDIVIDUAL, PSC_CORPORATE),
+                         register_view="active", statement=None):
+    payload = {"register_view": register_view, "items": list(items),
+               "total_count": len(items)}
+    if statement is not None:
+        payload["statement"] = statement
+    httpx_mock.add_response(
+        url=re.compile(rf"https://api\.company-information\.service\.gov\.uk/company/{number}/persons-with-significant-control.*"),
+        json=payload, is_reusable=True)
+
+
+def test_psc_edges_are_stored_with_names_only_in_the_restricted_table(
+        httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"),
+                             json={"items": []}, is_reusable=True)
+    # PSC rules first: the first-call pick goes to the most specific rule
+    _register_psc_mocks(httpx_mock)
+    _register_company_mocks(httpx_mock)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)
+
+    edges = conn.execute("SELECT * FROM company_psc ORDER BY psc_ref").fetchall()
+    assert len(edges) == 2
+    individual = [e for e in edges if e["kind"].startswith("individual")][0]
+    assert individual["psc_ref"] == "abc123"
+    assert individual["natures_of_control"] == "ownership-of-shares-more-than-25-percent," \
+        "right-to-appoint-and-remove-directors"
+    assert individual["notifiable"] == 1
+    # the public row carries no name, no date of birth, no nationality
+    public_blob = " ".join(str(v) for v in tuple(individual) if v is not None)
+    assert "SOMEONE" not in public_blob and "1980" not in public_blob
+
+    restricted = conn.execute(
+        "SELECT * FROM restricted_company_psc WHERE psc_ref='abc123'").fetchone()
+    assert restricted["name"] == "SOMEONE, Example"
+    assert restricted["date_of_birth_month"] == 6
+    assert restricted["date_of_birth_year"] == 1980
+    assert restricted["nationality"] == "British"
+
+
+def test_a_corporate_psc_carries_its_own_asserted_company_number(
+        httpx_mock, settings, conn):
+    """The register asserts the owning company's number; that identifier is
+    authoritative and travels on the public edge for the entity graph. The
+    corporate entity's name is not a person's name and is not restricted."""
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"),
+                             json={"items": []}, is_reusable=True)
+    _register_psc_mocks(httpx_mock)
+    _register_company_mocks(httpx_mock)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)
+
+    corporate = conn.execute(
+        "SELECT * FROM company_psc WHERE psc_ref='def456'").fetchone()
+    assert corporate["identification_company_number"] == "06228752"
+    assert corporate["identification_legal_form"] == "Ltd"
+    # corporate entities are not people: no restricted row for them
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM restricted_company_psc WHERE psc_ref='def456'"
+    ).fetchone()["c"] == 0
+
+
+def test_a_redacted_register_is_a_review_item_not_an_absence(
+        httpx_mock, settings, conn):
+    """A company whose register is exempt or protected answers with a
+    statement rather than a list. Recording nothing would make a redaction
+    look like a finding."""
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"),
+                             json={"items": []}, is_reusable=True)
+    _register_psc_mocks(httpx_mock, items=[], register_view="exemptions",
+                        statement={"text": "The register is exempt from " 
+                                            "disclosure under regulation 15."})
+    _register_company_mocks(httpx_mock)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)
+
+    assert conn.execute("SELECT COUNT(*) c FROM company_psc").fetchone()["c"] == 0
+    review = conn.execute("SELECT * FROM review_queue WHERE item_type='psc_register_statement'").fetchall()
+    assert len(review) == 1
+    assert review[0]["raw_value"] == "03861209"
+
+
+def test_an_unavailable_psc_register_is_recorded(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"),
+                             json={"items": []}, is_reusable=True)
+    httpx_mock.add_response(
+        url=re.compile(r".*/persons-with-significant-control.*"), status_code=404)
+    _register_company_mocks(httpx_mock)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)
+
+    review = conn.execute("SELECT * FROM review_queue WHERE item_type='company_psc_unavailable'").fetchall()
+    assert len(review) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM company_psc").fetchone()["c"] == 0
+
+
+def test_psc_pagination_reads_the_whole_register(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"),
+                             json={"items": []}, is_reusable=True)
+    first = {"register_view": "active",
+             "items": [dict(PSC_INDIVIDUAL, links={"self": "/company/03861209/persons-with-significant-control/individual/aaa"})],
+             "total_count": 2}
+    second = {"register_view": "active",
+              "items": [dict(PSC_INDIVIDUAL, links={"self": "/company/03861209/persons-with-significant-control/individual/bbb"})],
+              "total_count": 2}
+    httpx_mock.add_response(
+        url=re.compile(r".*persons-with-significant-control.*start_index=0"), json=first)
+    httpx_mock.add_response(
+        url=re.compile(r".*persons-with-significant-control.*start_index=1"), json=second)
+    _register_company_mocks(httpx_mock)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)
+
+    assert conn.execute("SELECT COUNT(*) c FROM company_psc").fetchone()["c"] == 2

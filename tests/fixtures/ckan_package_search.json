@@ -1,0 +1,58 @@
+{
+  "help": "https://ckan.publishing.service.gov.uk/api/3/action/help_show?name=package_search",
+  "success": true,
+  "result": {
+    "count": 2,
+    "facets": {},
+    "results": [
+      {
+        "id": "b0f1b81a-8c69-4ae0-87ec-788c64656d7d",
+        "name": "camden-substance-misuse-needs-assessment",
+        "title": "Camden Substance Misuse Needs Assessment",
+        "notes": "This public health intelligence profile describes the patterns in alcohol and substance misuse prevalence and treatment in Camden.",
+        "url": "https://opendata.camden.gov.uk/d/wc9b-i8n2",
+        "license_id": "uk-ogl",
+        "license_title": "UK Open Government Licence (OGL)",
+        "license_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+        "date_released": "2015-09-01",
+        "date_updated": "2015-09-01",
+        "metadata_modified": "2021-08-06T13:35:16.155872",
+        "state": "active",
+        "organization": {
+          "id": "679a9f85-9a24-4ed3-ae5b-be180fff321d",
+          "name": "london-borough-of-camden",
+          "title": "London Borough of Camden",
+          "type": "organization"
+        },
+        "resources": [
+          {
+            "id": "db4e67a5-500e-4f54-bb6d-3050bf048f07",
+            "name": "Download",
+            "format": "PDF",
+            "url": "https://opendata.camden.gov.uk/download/wc9b-i8n2/application/pdf",
+            "description": null,
+            "position": 0
+          }
+        ]
+      },
+      {
+        "id": "2560359f-8b30-4ad1-93ed-2ca8c07c04a6",
+        "name": "substance_misuse_among_prisoners",
+        "title": "Substance misuse among prisoners",
+        "notes": "Secondary analysis of the ONS survey of psychiatric morbidity among prisoners in England and Wales.",
+        "url": null,
+        "license_id": "uk-ogl",
+        "license_title": "UK Open Government Licence (OGL)",
+        "metadata_modified": "2026-07-08T13:31:24.419097",
+        "state": "active",
+        "organization": {
+          "id": "d5b50862-3f2a-4b7b-ad85-841b6def43be",
+          "name": "office-for-national-statistics",
+          "title": "Office for National Statistics",
+          "type": "organization"
+        },
+        "resources": []
+      }
+    ]
+  }
+}

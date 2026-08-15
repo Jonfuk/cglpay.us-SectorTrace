@@ -84,12 +84,13 @@ one as constructed wherever it appears.
 
 | | |
 | --- | --- |
-| Source | GOV.UK Search API, format `employment_tribunal_decision` |
+| Source | GOV.UK Search API, formats `employment_tribunal_decision` and `employment_appeal_tribunal_decision` |
 | Endpoints | `https://www.gov.uk/api/search.json`, `https://www.gov.uk/api/content/{path}` |
 | Licence | OGL v3.0 |
 | Key | None |
 | Rate limit | Default |
-| Personal data | Decision titles, URL slugs and indexed text name the claimant. Names are stored only in `restricted_tribunal_parties` |
+| Personal data | Decision titles, URL slugs and indexed text name the parties. Names are stored only in `restricted_tribunal_parties` and `restricted_eat_parties` |
+| Also collects | **Employment Appeal Tribunal decisions** (G4, Phase 15) — the appellate layer, in its own tables (`eat_cases`, `eat_documents`). An appeal is a different layer from the judgment it reviews and is never combined with it. Both sides of the title are matched because either party may be a provider; a decision that merely *mentions* a provider in its body is queued as `eat_body_mention_only` and never attributed |
 
 ## Module 3 — Charity finance
 
@@ -112,7 +113,7 @@ one as constructed wherever it appears.
 | Key | **`COMPANIES_HOUSE_API_KEY`** — free registration. HTTP basic auth, key as username |
 | Rate limit | Default (the API's own documented limit is 600 requests / 5 minutes) |
 | Personal data | Officers are named. Stored only in `restricted_company_officers` |
-| Also collects | **Insolvency cases** (`/company/{n}/insolvency`) and a **disqualified-director check** (`/search/disqualified-officers`) — see below |
+| Also collects | **Insolvency cases** (`/company/{n}/insolvency`), **People with Significant Control** (`/company/{n}/persons-with-significant-control`, Phase 15/G3), and a **disqualified-director check** (`/search/disqualified-officers`) — see below |
 
 **Insolvency.** Fetched only where the company profile publishes
 `links.insolvency` or `has_insolvency_history`, so a company with no case
@@ -139,6 +140,16 @@ published **month and year of birth** as well as the name, or where the person
 numbers match outright. Anything weaker is a review item. Expect the table to
 be empty — acting while disqualified is a criminal offence, so this is a
 checkable negative, not a discovery engine.
+
+**People with Significant Control.** The ownership edges for the entity
+graph — who owns or controls the companies that hold the sector's contracts.
+Fetched per target company on the same key and client. A corporate PSC's own
+company number arrives asserted by Companies House and is stored on the
+public row; individual PSCs are named, and the name (and the month-and-year
+of birth Companies House publishes with it) lives only in
+`restricted_company_psc`. A company whose register is redacted answers with a
+statement rather than a list — recorded as a review item, because the absence
+of PSCs is then a redaction, not a finding.
 
 ## Module 5 — CQC
 
@@ -286,6 +297,39 @@ that point is the fallback.
 Coverage is a **floor, never a total.** NHS Jobs carries NHS and some
 commissioned-provider adverts; a provider advertising only on its own site is
 invisible here.
+
+## Module 17 — National Minimum Wage and National Living Wage rates
+
+| | |
+| --- | --- |
+| Source | The GOV.UK rates page — **deliberately not an API**: the government publishes no machine-readable rates endpoint; the page is the publication |
+| Endpoint | `https://www.gov.uk/api/content/national-minimum-wage-rates` (the content API serves the page's own HTML) |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | One row per (period, band), the band labels verbatim because the living-wage band itself changes between eras ("25 and over" → "23 and over" → "21 and over"). The living wage band is identified by the page's own layout (it always leads each table). The gate applies in advance: a floor comparison is **side-by-side**, and any ratio ("X% above the NLW") is a CAVEATS decision, not this module's |
+
+## Module 18 — Living Wage Foundation registrations
+
+| | |
+| --- | --- |
+| Source | Living Wage Foundation accredited-employer list (Drupal views page) |
+| Endpoint | `https://www.livingwage.org.uk/accredited-living-wage-employers-list?search_api_fulltext={name}` |
+| Licence | Not OGL. The list is factual data published by a charity; check the foundation's terms before republishing it in bulk |
+| Key | None |
+| Rate limit | Default (robots.txt checked; the list path is allowed) |
+| Notes | One lookup per provider, its canonical name variant. Exact normalised name match only — a near miss is a review item, never a stored accreditation. The search window is the first 3 result pages; where the register's own count exceeds the window, a review item says so. `accredited = 0` is "no accredited employer under this name as of this fetch", not "this employer is not accredited anywhere" — accreditation could sit under another legal name |
+
+## Module 19 — data.gov.uk CKAN catalogue
+
+| | |
+| --- | --- |
+| Source | data.gov.uk CKAN API (the central open-data catalogue) |
+| Endpoints | `https://www.data.gov.uk/api/3/action/package_search`, `.../organization_list` |
+| Licence | OGL v3.0 for the catalogue metadata this module records; each dataset's own terms travel on its row (`license_*`), because the catalogue mixes OGL and non-OGL |
+| Key | None |
+| Rate limit | Default |
+| Notes | Discovery metadata — what datasets exist and where their resources live — not the data itself. Two passes: the substance-misuse keyword vocabulary, and exact-normalised organisation-name matches against the authorities and providers tables. A query is read to the catalogue's own count, capped at 300 datasets; hitting the cap raises a review item. The catalogue is only what data.gov.uk harvests: absence from this table is absence from the index, never absence of the data |
 
 ---
 

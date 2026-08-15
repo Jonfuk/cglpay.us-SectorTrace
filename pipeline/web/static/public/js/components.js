@@ -99,6 +99,14 @@ const LICENCES = {
     attribution: 'NHS Jobs service, Crown copyright.',
     caution: 'The text of each advert belongs to the employer that placed it.',
   },
+  lwf_own: {
+    name: 'Living Wage Foundation — charity-published register', url: null,
+    attribution: 'Accredited employer list published by the Living Wage '
+      + 'Foundation (a Citizens UK initiative).',
+    caution: 'Not open-licensed. The list is factual data about which '
+      + 'employers are accredited; check the foundation’s terms before '
+      + 'republishing it in bulk.',
+  },
 };
 
 const MODULE_LICENCES = {
@@ -119,6 +127,9 @@ const MODULE_LICENCES = {
   m14_annual_reports: 'charity_own',
   m15_foi: 'mysociety_mixed',
   m16_nhs_jobs: 'nhs_jobs',
+  m17_statutory_pay_rates: 'ogl_v3',
+  m18_living_wage: 'lwf_own',
+  m19_data_gov_uk: 'ogl_v3',
 };
 
 export function licenceFor(module) {

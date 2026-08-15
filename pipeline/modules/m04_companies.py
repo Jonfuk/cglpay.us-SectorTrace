@@ -50,6 +50,16 @@ client, because the register already holds the answers:
     everyone — so `company_status` says how a company ended and only the
     insolvency tables say whether it failed.
 
+  * People with Significant Control (PSC, Phase 15/G3). The ownership edges
+    for the entity graph: who owns or controls the companies that hold the
+    sector's contracts. One fetch per target company, same key and client,
+    stored in `company_psc` with names and month-and-year-of-birth in
+    `restricted_company_psc`. A corporate PSC arrives with its own company
+    number asserted by Companies House (`identification.company_number`) —
+    that is an authoritative identifier and travels on the public row, but
+    nothing is linked to a provider on a name, and a PSC who is an individual
+    is never exported.
+
   * Disqualified directors. Companies House publishes no link from an
     appointment to a disqualification, so the only route is a name search of
     the register. That is exactly the kind of match this module already
@@ -303,6 +313,91 @@ def _fetch_insolvency(client: PipelineHTTPClient, conn, module_name: str,
             }, natural_key=["company_number", "case_number", "practitioner_name"])
 
     return written
+
+
+def _fetch_psc(client: PipelineHTTPClient, conn, module_name: str,
+                company_number: str) -> int:
+    """People with Significant Control — the ownership edges.
+
+    One paged fetch per company; every company answers this endpoint (with a
+    register, a statement, or nothing), so unlike insolvency there is no gate
+    and a non-ok answer is recorded rather than passed over. A company whose
+    register is redacted answers with a statement rather than items; that is
+    worth a review item, because the absence of PSCs is then a redaction, not
+    a fact.
+    """
+    written = 0
+    start_index = 0
+    statement_recorded = False
+
+    while True:
+        result = client.get(
+            f"{API_BASE}/company/{company_number}/persons-with-significant-control",
+            params={"items_per_page": 100, "start_index": start_index})
+        if not result.ok:
+            db.record_review_item(conn, module_name, "company_psc_unavailable",
+                                   company_number,
+                                   json.dumps({"status": result.status_code}))
+            return written
+        data = json.loads(result.body)
+        register_view = data.get("register_view")
+        items = data.get("items") or []
+
+        if data.get("statement") and not statement_recorded:
+            statement_recorded = True
+            db.record_review_item(
+                conn, module_name, "psc_register_statement", company_number,
+                json.dumps({"register_view": register_view,
+                            "note": "the register returns a statement rather than "
+                                    "a list of PSCs (typically an exemption or a "
+                                    "protected register); the absence of rows is "
+                                    "a redaction, not a finding"}))
+
+        for item in items:
+            links = item.get("links") or {}
+            self_link = links.get("self") or ""
+            psc_ref = self_link.rstrip("/").rpartition("/")[2]
+            if not psc_ref:
+                # No register id: derive a stable one from the item's own
+                # fields so re-runs stay idempotent.
+                basis = f"{company_number}|{item.get('kind')}|{item.get('name')}"
+                psc_ref = "H" + hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+            identification = item.get("identification") or {}
+            db.upsert(conn, "company_psc", {
+                "company_number": company_number,
+                "psc_ref": psc_ref,
+                "kind": item.get("kind"),
+                "natures_of_control": ",".join(item.get("natures_of_control") or []) or None,
+                "notifiable": 1 if item.get("notifiable") else 0,
+                "is_sanctioned": 1 if item.get("is_sanctioned") else 0,
+                "ceased_on": item.get("ceased_on"),
+                "notified_on": item.get("notified_on"),
+                "identification_company_number": identification.get("company_number"),
+                "identification_legal_form": identification.get("legal_form"),
+                "identification_country_registered": identification.get("country_registered"),
+                "register_view": register_view,
+                **_provenance(result),
+            }, natural_key=["company_number", "psc_ref"])
+            written += 1
+
+            if "individual" in str(item.get("kind") or ""):
+                born = item.get("date_of_birth") or {}
+                db.upsert(conn, "restricted_company_psc", {
+                    "company_number": company_number,
+                    "psc_ref": psc_ref,
+                    "name": item.get("name"),
+                    "date_of_birth_month": born.get("month"),
+                    "date_of_birth_year": born.get("year"),
+                    "nationality": item.get("nationality"),
+                    "country_of_residence": item.get("country_of_residence"),
+                    "ceased_on": item.get("ceased_on"),
+                }, natural_key=["company_number", "psc_ref"])
+
+        total_count = data.get("total_count", 0)
+        start_index += len(items)
+        if not items or start_index >= total_count:
+            return written
 
 
 def _fetch_filings(client: PipelineHTTPClient, conn, module_name: str, company_number: str,
@@ -648,6 +743,7 @@ def run(ctx: ModuleContext) -> None:
     officers_written = 0
     filings_written = 0
     insolvency_cases = 0
+    psc_written = 0
     serving_directors: list[dict] = []
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
@@ -693,6 +789,7 @@ def run(ctx: ModuleContext) -> None:
             filings_written += _fetch_filings(client, conn, module_name, company_number, ctx.limit)
             insolvency_cases += _fetch_insolvency(
                 client, conn, module_name, company_number, data)
+            psc_written += _fetch_psc(client, conn, module_name, company_number)
 
             if not ctx.dry_run:
                 conn.commit()
@@ -708,6 +805,7 @@ def run(ctx: ModuleContext) -> None:
     log.info("companies.run_complete", companies=companies_written,
               officers=officers_written, filings=filings_written,
               insolvency_cases=insolvency_cases,
+              psc=psc_written,
               serving_directors_checked=len(serving_directors),
               disqualifications=disqualifications,
               unconfirmed_disqualification_names=unconfirmed)

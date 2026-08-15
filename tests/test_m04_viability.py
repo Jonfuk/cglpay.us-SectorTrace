@@ -85,6 +85,11 @@ def _mock_company(httpx_mock, number, *, insolvency=False, status="active",
         json={"total_count": 0, "items": []})
     httpx_mock.add_response(url=re.compile(rf".*{BASE}/search/companies.*"),
                              json={"items": []}, is_reusable=True)
+    # The PSC pass (Phase 15 / G3) fetches the register for every company; an
+    # empty register is the normal fixture state here.
+    httpx_mock.add_response(
+        url=re.compile(rf"{BASE}/company/{number}/persons-with-significant-control.*"),
+        json={"register_view": "active", "items": [], "total_count": 0}, is_reusable=True)
     if insolvency_body is not None:
         httpx_mock.add_response(url=f"{BASE}/company/{number}/insolvency",
                                  json=insolvency_body)

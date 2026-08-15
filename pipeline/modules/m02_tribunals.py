@@ -1,10 +1,23 @@
-"""Module 2 — Employment tribunal judgments.
+"""Module 2 — Employment tribunal judgments, and Employment Appeal Tribunal
+decisions.
 
 Discovery via the GOV.UK Search API with format filter
 `employment_tribunal_decision` (verified against a known CGL case before
 being used at scale — see tests), querying each respondent name variant
 separately because the comma form ("Change, Grow, Live") appears in real
 judgments and matches differently from the unspaced form.
+
+The EAT pass (G4, Phase 15) searches `employment_appeal_tribunal_decision`
+on the same host and through the same client. An appeal is a different layer
+from the judgment it reviews — a decision affirmed or overturned is a
+materially different datum — so appeals live in their own tables and are
+never arithmetically combined with first-instance cases. In an appeal either
+party can be a provider (a provider may appeal, or a claimant may appeal
+against one), so both sides of the title are matched and the side recorded.
+The search engine indexes judgment bodies, so a hit can mention a provider
+in its text without either party being one — the title match decides
+attribution, and a body-only mention is queued for review rather than
+attributed.
 
 Field confidence, per the brief: `tribunal_decision_categories`,
 `tribunal_decision_decision_date` and `tribunal_decision_country` come from
@@ -14,9 +27,9 @@ body text and flagged LOW — a downstream consumer can filter on
 outcome_confidence rather than being silently handed a guess.
 
 Personal data: GOV.UK puts the claimant's name in the title, the URL slug
-and the indexed body text. Names go only to restricted_tribunal_parties;
-the public table keys on case_number plus a deterministic claim_ref
-pseudonym derived from it.
+and the indexed body text. Names go only to restricted_tribunal_parties
+and restricted_eat_parties; the public tables key on case_number or the
+neutral citation plus a deterministic claim_ref pseudonym derived from it.
 
 Region: the case-number office prefix is extracted mechanically, but this
 pipeline has no verified prefix->region mapping, so region stays NULL and
@@ -44,6 +57,7 @@ SOURCE_SYSTEM = "govuk_employment_tribunal_decisions"
 GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json"
 GOVUK_CONTENT_BASE = "https://www.gov.uk/api/content"
 DECISION_FORMAT = "employment_tribunal_decision"
+EAT_FORMAT = "employment_appeal_tribunal_decision"
 
 SEARCH_FIELDS = [
     "title", "link",
@@ -206,6 +220,210 @@ def extract_hearing_venue(body_text: str | None) -> str | None:
     return venue.strip() or None
 
 
+# --- Employment Appeal Tribunal (G4, Phase 15) ---------------------------------
+
+# EAT decisions cite themselves as "[2026] EAT 34"; the title is
+# "Appellant v Respondent: [2026] EAT 34".
+EAT_CITATION_RE = re.compile(r"\[(20\d{2})\]\s*EAT\s*(\d+)\b")
+# The first-instance cases an appeal reviews are referenced in its body as
+# "Case No.: 2303961/2024" (all three real punctuations observed live).
+ET_CASE_NO_RE = re.compile(r"Case\s*No\.?\s*:?\s*(\d{6,8}/20\d{2})")
+
+# Outcome phrases from the judgment body, matched in order: "allowed in part"
+# must be tested before "allowed". Small, explicit, unambiguous; anything
+# else stays NULL rather than force-fitted.
+EAT_OUTCOME_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("allowed_in_part", re.compile(r"\bappeal\s+(?:is\s+)?allowed\s+in\s+part\b", re.IGNORECASE)),
+    ("allowed", re.compile(
+        r"\bappeal\s+(?:is\s+)?allowed\b|\bwe\s+allow\s+the\s+appeal\b|\bappeal\s+succeeds\b",
+        re.IGNORECASE)),
+    ("dismissed", re.compile(r"\bappeal\s+(?:is\s+)?dismissed\b|\bappeal\s+fails\b", re.IGNORECASE)),
+    ("withdrawn", re.compile(r"\bappeal\s+(?:is\s+)?withdrawn\b", re.IGNORECASE)),
+    ("remitted", re.compile(r"\bappeal\s+(?:is\s+)?remitted\b|\bremitted\s+to\b", re.IGNORECASE)),
+]
+
+
+def extract_eat_citation(title: str | None) -> str | None:
+    """The neutral citation, "[2026] EAT 34", from an EAT decision title."""
+    if not title:
+        return None
+    m = EAT_CITATION_RE.search(title)
+    return f"[{m.group(1)}] EAT {m.group(2)}" if m else None
+
+
+def split_eat_parties(title: str | None) -> tuple[str | None, str | None]:
+    """(appellant, respondent) from "Appellant v Respondent: [2026] EAT 34".
+    EAT titles put both names before the citation, so the head split on " v "
+    gives the two parties; unlike first-instance decisions there is no case
+    number inside the title to get in the way.
+    """
+    if not title:
+        return None, None
+    head = title.split(":")[0]
+    parts = re.split(r"\s+v\s+", head, maxsplit=1)
+    if len(parts) != 2:
+        return None, None
+    appellant, respondent = parts[0].strip(), parts[1].strip()
+    return (appellant or None), (respondent or None)
+
+
+def extract_eat_outcome(body_text: str | None) -> str | None:
+    """Best-effort outcome from the judgment body. Always LOW confidence —
+    the caller records that; nothing here is structured metadata."""
+    if not body_text:
+        return None
+    for label, pattern in EAT_OUTCOME_PATTERNS:
+        if pattern.search(body_text):
+            return label
+    return None
+
+
+def extract_underlying_et_cases(body_text: str | None) -> str | None:
+    """The first-instance case numbers an appeal reviews, comma-joined and
+    deduplicated, exactly as the judgment spells them."""
+    if not body_text:
+        return None
+    found = []
+    for match in ET_CASE_NO_RE.finditer(body_text):
+        if match.group(1) not in found:
+            found.append(match.group(1))
+    return ",".join(found) or None
+
+
+def _collect_eat_decisions(client: PipelineHTTPClient, conn, module_name: str,
+                            ctx: ModuleContext) -> dict:
+    """The EAT pass: one search per name variant, both title parties
+    matched, body-only mentions queued for review rather than attributed.
+
+    Returns a counts dict for the run summary.
+    """
+    counts = {"cases": 0, "documents": 0, "unmatched": 0, "body_mentions": 0}
+
+    def _search_eat(query: str) -> list[dict]:
+        results: list[dict] = []
+        start = 0
+        page_size = 100 if not ctx.limit else min(100, ctx.limit)
+        while True:
+            result = client.get(GOVUK_SEARCH_URL, params={
+                "q": f'"{query}"',
+                "filter_format": EAT_FORMAT,
+                "fields": ",".join(SEARCH_FIELDS),
+                "count": page_size,
+                "start": start,
+            })
+            if not result.ok:
+                return results
+            data = json.loads(result.body)
+            batch = data.get("results", [])
+            for row in batch:
+                results.append({"row": row, "result": result})
+            if ctx.limit and len(results) >= ctx.limit:
+                return results[:ctx.limit]
+            start += len(batch)
+            if not batch or start >= data.get("total", 0):
+                return results
+
+    for variant in ctx.track(SUPPLIER_NAME_VARIANTS["change_grow_live"], "EAT name variants"):
+        for hit in _search_eat(variant):
+            row, search_result = hit["row"], hit["result"]
+            title, link = row.get("title"), row.get("link")
+            citation = extract_eat_citation(title)
+            if citation is None:
+                db.record_parse_failure(conn, module_name, "eat_citation", title or link or "",
+                                         "could not extract a neutral citation from the title",
+                                         source_url=search_result.url)
+                continue
+
+            appellant, respondent = split_eat_parties(title)
+            provider_key, side, basis = None, None, None
+            for candidate, candidate_side in ((appellant, "appellant"),
+                                               (respondent, "respondent")):
+                matched_key, matched_basis = match_respondent(candidate)
+                if matched_key:
+                    provider_key, side, basis = matched_key, candidate_side, matched_basis
+                    break
+
+            if provider_key is None:
+                # The search engine indexes bodies, so a hit can name a
+                # provider without either party being one (the Attorney
+                # General's restriction-order judgments list the target's
+                # litigation history, including provider cases, in the body).
+                # Attribution is never made on a body mention; it is queued.
+                db.record_review_item(
+                    conn, module_name, "eat_body_mention_only", citation,
+                    json.dumps({"searched_variant": variant, "link": link,
+                                "note": "neither title party matched a provider; the "
+                                        "search may have matched the judgment body. "
+                                        "Read the decision before treating it as "
+                                        "provider evidence."}))
+                counts["body_mentions"] += 1
+                continue
+
+            if ctx.is_before_since(row.get("tribunal_decision_decision_date")):
+                continue
+
+            content_result = client.get(f"{GOVUK_CONTENT_BASE}{link}")
+            body_text = None
+            attachments: list[dict] = []
+            landmark = None
+            if content_result.ok:
+                content = json.loads(content_result.body)
+                details = content.get("details", {})
+                body_text = (details.get("metadata") or {}).get("hidden_indexable_content")
+                landmark = (details.get("metadata") or {}).get("tribunal_decision_landmark")
+                attachments = details.get("attachments", []) or []
+            else:
+                db.record_parse_failure(conn, module_name, "eat_decision_page", link or "",
+                                         f"content API returned {content_result.status_code}",
+                                         source_url=content_result.url)
+
+            outcome = extract_eat_outcome(body_text)
+
+            db.upsert(conn, "eat_cases", {
+                "neutral_citation": citation,
+                "decision_date": row.get("tribunal_decision_decision_date"),
+                "provider_key": provider_key,
+                "provider_side": side,
+                "provider_match_basis": basis,
+                "categories": ",".join(row.get("tribunal_decision_categories") or []) or None,
+                "landmark": landmark,
+                "outcome": outcome,
+                # Outcome is only ever body-text derived: GOV.UK publishes no
+                # structured outcome field for EAT decisions either.
+                "outcome_confidence": "low" if outcome else None,
+                "underlying_et_cases": extract_underlying_et_cases(body_text),
+                "document_count": len(attachments),
+                **_provenance(search_result),
+            }, natural_key=["neutral_citation"])
+            counts["cases"] += 1
+
+            db.upsert(conn, "restricted_eat_parties", {
+                "neutral_citation": citation,
+                "appellant_name_raw": appellant,
+                "respondent_name_raw": respondent,
+                "page_title_raw": title,
+                "source_slug": link,
+            }, natural_key=["neutral_citation"])
+
+            for attachment in attachments:
+                url = attachment.get("url")
+                if not url or not url.startswith("http"):
+                    continue
+                db.upsert(conn, "eat_documents", {
+                    "neutral_citation": citation,
+                    "document_url": url,
+                    "document_title": attachment.get("title"),
+                    "content_type": attachment.get("content_type"),
+                    **_provenance(content_result),
+                }, natural_key=["neutral_citation", "document_url"])
+                counts["documents"] += 1
+
+            if not ctx.dry_run:
+                conn.commit()
+
+    return counts
+
+
 def _provenance(result) -> dict:
     return {
         "source_url": result.url,
@@ -267,7 +485,6 @@ def run(ctx: ModuleContext) -> None:
                 SUPPLIER_NAME_VARIANTS["change_grow_live"], "name variants"):
             hits = _search_decisions(client, variant, ctx.limit)
             log.info("tribunals.searched", variant=variant, hits=len(hits))
-
             for hit in hits:
                 row, search_result = hit["row"], hit["result"]
                 title, link = row.get("title"), row.get("link")
@@ -377,6 +594,12 @@ def run(ctx: ModuleContext) -> None:
                 if not ctx.dry_run:
                     conn.commit()
 
+        # The appeal pass runs after the first-instance pass so the two
+        # evidence layers are collected and committed in the same order a
+        # reader would meet them, and so the log lines read top-down.
+        ctx.phase("searching appeal decisions")
+        eat = _collect_eat_decisions(client, conn, module_name, ctx)
+
     for prefix in sorted(unmapped_prefixes):
         db.record_review_item(conn, module_name, "unmapped_tribunal_office_prefix", prefix,
                                json.dumps({"note": "populate tribunal_office_regions from a citable source; "
@@ -384,7 +607,9 @@ def run(ctx: ModuleContext) -> None:
 
     log.info("tribunals.run_complete", cases=total_cases, documents=total_documents,
               skipped_unmatched_respondents=skipped_unmatched,
-              unmapped_prefixes=sorted(unmapped_prefixes))
+              unmapped_prefixes=sorted(unmapped_prefixes),
+              eat_cases=eat["cases"], eat_documents=eat["documents"],
+              eat_body_only_mentions=eat["body_mentions"])
 
 
 def _document_type(attachment_title: str | None) -> str | None:

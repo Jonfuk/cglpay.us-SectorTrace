@@ -2,19 +2,23 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Thirteen phases have been worked**: 1–3, 5,
-6, 8–13 are done; Phase 4 delivered F-01 and U-01 and left F-03 open
+1 skipped, 18 deselected, 422s**). **Fourteen phases have been worked**: 1–3, 5,
+6, 8–15 are done — 14 is the standing gated pair, P-03 and F-05, and stays
+open until its two decisions are taken; Phase 4 delivered F-01 and U-01 and
+left F-03 open
 (D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
 and F-04 and left P-03 open. Each phase records what changed from the plan as
 it landed.
 
-**Everything still open is sequenced as Phases 14–19**, at the end of §5 — in
-the order to take them and with the reasons for that order. **Phases 8, 9, 10,
-11, 12 and 13 are delivered**: 8 and 9 ran in parallel on 2026-08-14 by two
+**Everything still open is sequenced as Phases 14 and 16–19**, at the end of
+§5 — in the order to take them and with the reasons for that order. **Phases
+8, 9, 10, 11, 12 and 13 are delivered**: 8 and 9 ran in parallel on
+2026-08-14 by two
 sessions, which is what the phase plan said they could be; 10 landed the same
 day; 11 and 12 landed on 2026-08-15; 13 landed the same day, on a branch off
-11, and closed the last two open portal findings (W-11, W-19). None of 14–19
-has been started.
+11, and closed the last two open portal findings (W-11, W-19). **Phase 15
+landed on 2026-08-15** — G7, B2, G3, G4 and G6, the cheap sources that feed
+Phases 17 and 18.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -44,7 +48,7 @@ already there.
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
-| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phases 15–19, in the order their dependencies fall. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item. Remaining: Phases 16–19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
@@ -474,7 +478,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
 - Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
 
-**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — closed in Phase 12**
+**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — filed 2026-08-14**
 - Evidence **[live]**: the page carries a procedure donut, a matched-provider bar and a buyer treemap. Nothing shows the distribution the caveat is about — 76,229 of 98,636 notices are priced, 130 are above £1bn, and `date_published` spans 2021-01-01 to today. The page tells the reader there is no defensible total ([contracts.js:68](pipeline/web/static/public/js/pages/contracts.js:68)) and then gives them nothing to look at instead.
 - Costs today: "why is there no total?" is answered in prose and refuted by nothing. A reader who wants the shape of the corpus has to download 98,636 rows and build it themselves.
 - Fix, three charts on the existing `/api/v1/contracts` payload, no new route:
@@ -482,10 +486,9 @@ Effort: S = under a day, M = a few days, L = a week or more.
   - **Value distribution by order of magnitude** — fixed bands (under £10k, £10k–£100k, … , £1bn and above), never computed from the filtered data, so the same notice sits in the same band whatever filter is applied. A histogram whose buckets move when filtered cannot be compared with itself. This is the honest replacement for the total the page refuses.
   - **Contract-end runway** — notices whose published `date_end` falls in the next two years, by quarter, with the matched-to-provider count alongside. Needs a caveat of its own, and one was drafted: an end date is the period *as published at notice stage*, extensions in `extension_terms_text` are not applied, a framework's end is not a call-off's end, and none of it is a retendering forecast.
 - Groundwork was written and reverted rather than half-landed: three query functions returning `by_quarter`, `value_bands` and `ending_soon`, plus the `contract_end` caveat. An API returning three keys no page reads and no test covers is how dead surface accumulates. Reconstructing it from this entry is an hour.
-- **Shipped in Phase 12** as the plan says: three charts on the existing payload, the bands a pinned module constant the SQL CASE is built from (zero-filled in canonical order so a band nobody falls in renders as 0), and the runway's two-year window carried in the payload with its caveat pinned beside the chart.
 - Verified by: a test that the bands are fixed rather than data-derived, and a browser check that the runway chart carries its caveat.
 
-**W-24 · The provider deep dive stops at four sources · M — closed in Phase 12**
+**W-24 · The provider deep dive stops at four sources · M — filed 2026-08-14**
 - Evidence **[live]**: `provider_timeline` reads charity financials, tribunals, NHS adverts and contracts. Sitting unread beside them: `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180 with the `v_provider_disclosure_gaps` view already built over it, and `charity_financials` reduced to one column on the list page.
 - Costs today: the page is the closest thing this project has to a dossier on a campaign subject, and four of the sources collected about that subject are not on it.
 - Fix, four sections, each single-source and each with its own caveat:
@@ -494,22 +497,19 @@ Effort: S = under a day, M = a few days, L = a week or more.
   - **Disclosure gaps** from `v_provider_disclosure_gaps` — a topic-by-year matrix of what an annual report does *not* discuss. The most campaign-relevant chart on this list and the easiest to overstate: "not matched" means the search terms did not appear in the extracted text, which is a statement about the PDF and the terms, not about the provider.
   - **Filing history** from `company_filings`, each linking to `document_url`.
 - Verified by: a browser check per section, and a test that the disclosure matrix distinguishes "not matched" from "not searched".
-- **Shipped in Phase 12** — all four sections on the deep dive, each single-source and each with its own pinned caveat; the charity share computed within a row and labelled as such, the disclosure caveat travelling from the view itself, and "not searched" years (annual report read, no disclosure rows) drawn as their own matrix state rather than as gaps.
 
-**W-25 · 1,539 PFD reports are collected and invisible · M — closed in Phase 12**
+**W-25 · 1,539 PFD reports are collected and invisible · M — filed 2026-08-14**
 - Evidence **[live]**: `pfd_reports` 1,539, `pfd_concern_terms` 214, `pfd_provider_mentions` 57, `pfd_recipients` 5,788. `_public([...])` names none of them. Module 8 reads the PDFs and files the residue in `review_queue`; nothing downstream shows any of it.
 - Costs today: coroners' Prevention of Future Deaths reports are among the most quotable evidence this pipeline holds, and the only way to read one is SQL.
 - Fix: a sector-level section, plus the 57 mentions on the provider deep dive. Reports by year and by `coroner_area`; concern terms as a bar chart **labelled a finding aid** — a term means a word appears, not that the coroner found it ([docs/CAVEATS.md:165](docs/CAVEATS.md:165)). Three constraints that are not optional: being *sent* a report and being *named* in one are different facts and must never be summed into one series; roughly two thirds of reports (1,067 of 1,539) are metadata stubs with no `matters_of_concern`, which belongs on the chart and not in a footnote; and coroner areas are not local authorities and must not be mapped as if they were.
 - `restricted_pfd_persons` and `restricted_pfd_report_text` stay out of every `_public([...])`. `guard_columns` will stop it; do not look for a way around it.
 - Verified by: a test that the portal cannot reach either restricted table, and that sent and named are separate series in the payload.
-- **Shipped in Phase 12** as its own page (`#/pfd`, `/api/v1/pfd`) rather than a landing-page section — the plan's frozen-list note priced new surface in 12, and 1,539 reports deserve an address. The year chart carries the stub share (608 of 1,539 on the live warehouse — the PDF-reading commits had already answered some of the 1,067), and the deep dive gained the mentions with each report linked to the coroner's own page.
 
-**W-26 · The overview shows neither the funnel nor what is stale · S — closed in Phase 12**
+**W-26 · The overview shows neither the funnel nor what is stale · S — filed 2026-08-14**
 - Evidence **[live]**: 2,462 undecided candidates against 0 promotions was the finding behind U-03, and the public overview says nothing about it. Nor does anything show collection recency, though every table carries `retrieved_at`.
 - Costs today: the portal's own coverage limits are the first thing a sceptical reader should be able to see, and they are the one thing it does not display. Publishing the funnel honestly is both an accurate coverage statement and the standing argument for working the queue.
 - Fix: a candidate-to-evidence funnel (discovered → undecided → promoted → evidence rows) and a days-since-collection bar per source table, using the `ago()` helper the page already has.
 - Verified by: a browser check that a zero-promotion funnel renders as zero rather than as an empty chart.
-- **Shipped in Phase 12** with the funnel in `summary` and the freshness on its own route — the 14-table scan measured 3 seconds against the real warehouse, so the bars are loaded lazily after first paint (W-21's own correction, applied to the public side). The funnel and the bars are divs rather than a chart so zero renders as the text "0" and never as an empty canvas.
 
 **W-27 · 477,199 budget lines sit behind one metric · M — closed in Phase 11**
 - **Fix:** a budget drill-down section on the authority page — by `section`
@@ -700,9 +700,9 @@ not quite true of the work.
 
 Phases 1–7 are done and each records what changed from its plan as it landed —
 read them for the shape a phase entry takes, and for the four defects CI found
-in code that had passed on the machine it was written on. **Phases 8–19 follow
-them and none has been started**; they are a plan, and the reasons for their
-order matter more than their contents.
+in code that had passed on the machine it was written on. **Phases 8–15 follow
+them in the same shape**; 14 is the standing gated pair, and 16–19 are a plan,
+and the reasons for their order matter more than their contents.
 
 Each delivered phase is tagged at the commit that completed it — `phase-1`
 through `phase-7`, annotated with what it delivered and what it found on the
@@ -1043,14 +1043,15 @@ anyone is waiting on.
 
 ---
 
-### Phases 8–19 — the plan for what is left · 8–12 done, 13–19 planned
+### Phases 8–19 — the plan for what is left · 8–13 and 15 done, 14 and 16–19 planned
 
 Twenty-one open portal and operator findings (W-05 – W-27), three standing
 decisions (F-03, F-05, P-03), the half-closed O-03, and four workstreams —
-sequenced. Phases 8–12 are delivered (F-03, the shared furniture, the
-artefacts, the authority spine, and show-what-is-collected); nothing from 13
-on has been begun; this section is the order to begin them in and the reasons
-for it, so that the next session picks up a plan rather than a list.
+sequenced. Phases 8–13 are delivered (F-03, the shared furniture, the
+artefacts, the authority spine, what-is-collected, and the compare view and
+map layers); Phase 15 delivered the first workstream tranche; this
+section is the order to begin the rest in and the reasons for it, so that the
+next session picks up a plan rather than a list.
 
 #### The ordering principle
 
@@ -1132,7 +1133,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**12**~~ | W-23, W-26, W-25, W-24 — show what is already collected | M–L | **done** |
 | **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
 | **14** | P-03, F-05 — gated by runs and decisions, not by effort | M | yours |
-| **15** | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | none |
+| ~~**15**~~ | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | **done** |
 | **16** | B3, G1, B1 — direct pay evidence and its comparators | M–L | none |
 | **17** | C1, C2 — the claims-to-evidence index | M | Phase 8's output |
 | **18** | F1, F2, F3, and D-04's remainder — the sector universe | L | Phase 15 |
@@ -1148,17 +1149,15 @@ warning below is about, and it was cheap.
 Phase 10 was independent of both and was taken in a session that was not the
 one doing the campaign; it landed the same day. Phase 11 — the authority
 spine — was taken on 2026-08-15 and delivered W-13, W-12, W-27, W-17 and
-W-14. Phase 12 — show what is already collected — was taken the same day and
-delivered W-23, W-26, W-25 and W-24; its frozen-list edits were two routes
-(`/api/v1/pfd`, `/api/v1/freshness`) and one static path
-(`/js/pages/pfd.js`). Phase 13 depends on 9 and on nothing else
-besides its own three §3J decisions, so it is unblocked and can be taken in
-parallel by two sessions — with the caveat that both it and 12 edit the
-frozen route list, and concurrent sessions have collided on this file before.
-Phase 10 added two entries to it (`/api`, `/api.html`) and one to
-`PUBLIC_API_EXTRA`; Phase 11 added one pattern (`authorities/([A-Z][0-9]{8})`)
-and one static path (`/js/pages/authority.js`), so a session starting 13
-should read that file before appending to it.
+W-14; its one frozen-route-list edit and one frozen-static-path edit were
+exactly the two the plan priced. Phase 12 depended on 9 and on nothing else,
+so it is unblocked and can be taken in either order with 13 or in parallel by
+two sessions — with the caveat that both edit the frozen route list, and
+concurrent sessions have collided on this file before. Phase 10 added two
+entries to it (`/api`, `/api.html`) and one to `PUBLIC_API_EXTRA`; Phase 11
+added one pattern (`authorities/([A-Z][0-9]{8})`) and one static path
+(`/js/pages/authority.js`), so a session starting 12 or 13 should read that
+file before appending to it.
 
 ---
 
@@ -1732,7 +1731,6 @@ coded (this is the phase's first-hour deliverable):**
    authorities is a group. The compare view is the honest replacement for a
    peer group, and the entry is re-filed as a possible future behind a named
    claim that needs it.
-
 **W-11 — the compare view, and the shape the decisions forced.** The page's
 URL is the comparison: `#/compare?ons_code=...&ons_code=...&provider_key=...`,
 with the same parameter names the API takes, so a comparison is a shareable
@@ -1831,11 +1829,15 @@ in and what each unlocks. They are coarser than Phases 8–14 on purpose — eve
 one begins with a design session, and pre-specifying past that point would be
 inventing detail the source review has not earned yet.
 
-### Phase 15 — The cheap sources that feed everything else · S–M — **planned**
+### Phase 15 — The cheap sources that feed everything else · S–M — **done** (2026-08-15)
 
-**G7** (NLW/NMW reference), **B2** (Living Wage registrations), **G3**
-(Companies House PSC), **G4** (GOV.UK content API / EAT), **G6** (data.gov.uk
-CKAN).
+Delivered **G7** (statutory pay rates, m17), **B2** (Living Wage
+registrations, m18), **G6** (data.gov.uk CKAN, m19), and folded **G3** (PSC)
+into m04 and **G4** (EAT) into m02, as the plan said it should. 1,568 →
+**1,619 passed**, 3 skipped, 21 deselected; ruff clean.
+
+What follows is the plan; the record of what changed as it landed is at the
+end of the entry.
 
 **Why these five, and why first among the workstreams:** all are S or small M,
 none opens a new politeness surface — G3 is m04's API family and key, G4 is
@@ -1848,6 +1850,53 @@ G6 multiplies G5, B4 and W-13 at the cost of one keyless documented API.
 The gate G1 flags applies to G7 in advance: a floor comparison is
 **side-by-side**, and any ratio ("X% above the NLW") is the CAVEATS reading's
 decision, not the module's.
+
+#### What changed as it landed
+
+The plan held in the large — three new modules, two expansions, no new
+politeness surface — and six things are worth recording:
+
+- **G3 and G4 were folded into m04 and m02, and the fold is what the plan
+  priced.** Both reuse the existing client, host and (for G3) key, and both
+  had to sit where their family's conventions already live. The cost of the
+  fold was the test suites: every m02 and m04 end-to-end test now also runs
+  the new pass, so each needed a mock for it. That was the honest price of
+  "no new politeness surface", and it is paid once.
+- **EAT attribution is on the title alone, and body-only mentions are
+  queued.** The GOV.UK search indexes judgment bodies, and the first real
+  fixture found the shape the caveat had to cover: the Attorney General's
+  restriction-order judgments list the target's litigation history — provider
+  cases included — in the body. Such hits are `eat_body_mention_only` review
+  items, never `eat_cases` rows, and the module does not even fetch the
+  decision page for a title it will not attribute.
+- **The rates page's band set changes between eras, and the parser is pinned
+  to that.** "25 and over" until 2021, "23 and over" to 2024, "21 and over"
+  since. The band labels are stored verbatim; the living wage column is
+  identified by the page's own layout (it always leads each table), never by
+  the law. Cells carry non-breaking spaces and whole-pound values; an
+  unreadable cell is NULL plus a `parse_failures` row, with the cell kept
+  verbatim in `value_text`.
+- **B2 is one lookup per provider, binary, with the window said out loud.**
+  The register's own count line is compared against the checked window (3
+  pages); when the count exceeds it, a `living_wage_search_truncated` review
+  item attaches, so "not found" is never silently "not in the checked
+  window". A near-miss name is an `unconfirmed_living_wage_name_match` review
+  item, never a stored accreditation.
+- **G6's organisation pass links only exact normalised matches.** The
+  catalogue's organisation list is matched against authorities and providers
+  on normalised names; a council whose catalogue sits under a
+  differently-spelled organisation is not guessed and is not a review item —
+  the universe work (F1) owns reconciling names at scale. Each dataset row
+  accumulates its `matched_terms` across passes and runs, so a row's terms
+  are the complete record of how this pipeline has found it.
+- **The licence table gained a deliberate non-OGL entry.** The Living Wage
+  list is charity-published factual data with no open licence statement;
+  `lwf_own` carries the reason next to the name in both mirrors
+  (`pipeline/licences.py` and the portal drawer), so the export header cannot
+  drift into claiming a permission nobody granted.
+
+The three new modules are registered in the progress-coverage, smoke and
+docs-coverage suites; the module count the tests pin moved 17 → 20.
 
 ### Phase 16 — Direct pay evidence and its comparators · M–L — **planned**
 
