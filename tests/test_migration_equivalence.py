@@ -97,8 +97,9 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 45
+        # through. 47 = 45 + 0046 (council spend, Phase 19 G5) + 0047
+        # (Skills for Care, Phase 19 G2).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 47
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

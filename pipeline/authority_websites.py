@@ -68,6 +68,9 @@ class AuthorityWebsite:
 
 
 # Verified by request. Extend deliberately; see module docstring.
+# Phase 19 (B4) added the last verified base URLs (Broadland and South
+# Norfolk share a domain) and verified committee portals for eight more
+# authorities on 2026-08-16 — see the block at the end of this dict.
 AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E10000016": AuthorityWebsite(
         ons_code="E10000016",
@@ -768,9 +771,13 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E07000149": AuthorityWebsite(
         ons_code="E07000149",
         name="South Norfolk",
-        base_url=None,
+        # The 2026-08-14 list candidate www.south-norfolk.gov.uk does not
+        # resolve; Phase 19 (B4) verified the shared Broadland/South Norfolk
+        # domain on 2026-08-16.
+        base_url="https://www.southnorfolkandbroadland.gov.uk",
         committee_url="https://democracy.southnorfolkandbroadland.gov.uk",
         committee_system="moderngov",
+        base_url_verified_on="2026-08-16",
         verified_on="2026-08-13",
     ),
     "E07000179": AuthorityWebsite(
@@ -1417,9 +1424,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000108",
         name="Dover",
         base_url="https://www.dover.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.dover.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E09000009": AuthorityWebsite(
         ons_code="E09000009",
@@ -1689,9 +1697,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E06000053",
         name="Isles of Scilly",
         base_url="https://www.scilly.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="http://committees.scilly.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E09000020": AuthorityWebsite(
         ons_code="E09000020",
@@ -2065,9 +2074,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000111",
         name="Sevenoaks",
         base_url="https://www.sevenoaks.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="http://cds.sevenoaks.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E06000051": AuthorityWebsite(
         ons_code="E06000051",
@@ -2113,9 +2123,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000141",
         name="South Kesteven",
         base_url="https://www.southkesteven.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.southkesteven.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E07000126": AuthorityWebsite(
         ons_code="E07000126",
@@ -2265,17 +2276,19 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000102",
         name="Three Rivers",
         base_url="https://www.threerivers.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.threerivers.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E07000115": AuthorityWebsite(
         ons_code="E07000115",
         name="Tonbridge and Malling",
         base_url="https://www.tmbc.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://democracy.tmbc.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E06000027": AuthorityWebsite(
         ons_code="E06000027",
@@ -2401,9 +2414,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000245",
         name="West Suffolk",
         base_url="https://www.westsuffolk.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://democracy.westsuffolk.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E10000032": AuthorityWebsite(
         ons_code="E10000032",
@@ -2476,6 +2490,30 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+    ),
+
+    # --- Phase 19 (B4), verified 2026-08-16 ---
+    #
+    # B4's job is full registry coverage, and this pass did the two parts it
+    # can: re-fetched the 49 home pages the 2026-08-14 pass could not verify
+    # (two answered this time — Broadland and South Norfolk share a domain),
+    # and ran the same committee-system discovery m10 does at runtime — a
+    # committee-system link on the council's own home page, confirmed by
+    # probing the system's signature paths — for the 212 authorities with no
+    # committee URL, committing the answers so the next run of m10 does not
+    # re-discover them. 174 councils still publish no committee-system link
+    # on their home page; those stay `committee_url_unknown` in the queue,
+    # and the review UI remains the answer route (D-05).
+    "E07000144": AuthorityWebsite(
+        ons_code="E07000144",
+        name="Broadland",
+        # The 2026-08-14 candidate www.broadland.gov.uk does not resolve.
+        # Broadland and South Norfolk share a website and a democracy portal;
+        # both were verified by request on 2026-08-16.
+        base_url="https://www.southnorfolkandbroadland.gov.uk",
+        committee_url="https://democracy.southnorfolkandbroadland.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-16",
     ),
 }
 

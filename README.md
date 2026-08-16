@@ -149,6 +149,8 @@ one or both.
 | `m21_ons_ashe` | ONS developer API | Median gross hourly pay (excl. overtime) by occupation and industry, UK and England — the comparator market for the sector's advertised pay, side-by-side only |
 | `m22_provider_pay_pages` | The tracked providers' own websites | Pay figures published on provider career and reward pages — advertised bands and listed rates, attributed exactly (the page is the provider's own site) |
 | `m23_sector_universe` | *(fetches nothing)* | The sector population reconstructed from what is collected: the tracked providers, their companies/charities/CQC registrations, every distinct awardee in the notices, and unmatched buyers captured as funders — the denominator for every "we track N of the sector's ~M" statement, with m04's match-basis discipline on every row |
+| `m24_council_spend` | Council websites | £500+ spend-transparency files discovered on each council's own domain — "council X paid provider Y £Z in [period]", actual money rather than notices, with the NULL discipline doing the work on unreadable lines and files |
+| `m25_skills_for_care` | Skills for Care | ASC-WDS adult social care workforce estimates: pay and turnover comparators per (area, sector, service, job role), from the publisher's Excel data downloads, stored as published |
 
 ### Run order
 
@@ -167,7 +169,7 @@ deterministic and two logs are comparable). Three orderings matter:
 | --- | --- | --- |
 | everything | `m00_geography` | every source joins to the authorities table |
 | `m04_companies` | `m03_charity_finance`, `m05_cqc` | both publish company numbers; without them every company name match stays unconfirmed |
-| `m09`, `m10` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched |
+| `m09`, `m10`, `m24` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched, and m24 has no way to discover a spend file |
 | `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
 | `m20_gender_pay_gap` | `m04_companies` | company-number matching reads the identifiers `m04` discovered |
 | `m23_sector_universe` | `m01_procurement`, `m03_charity_finance`, `m04_companies`, `m05_cqc` | it reconciles their output — awardees, charities, companies, CQC providers — into one population; without them it is a capture of nothing |

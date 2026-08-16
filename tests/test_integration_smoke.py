@@ -349,6 +349,35 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "universe is a whole-corpus reconciliation and a partial one "
               "would be the wrong artefact.",
     ),
+    Smoke(
+        module="m24_council_spend",
+        produces=("council_spend_files", "council_spend"),
+        signal=(("council_spend", "payee"), ("council_spend", "amount_text")),
+        note="Discoveries vary council to council: many sites 403 or never "
+              "link a spend file under the likely paths, which is recorded "
+              "per authority in the review queue. The signal is that where a "
+              "file was discovered and parsed, its line items carry a payee "
+              "and the verbatim amount text — a run whose parser matched no "
+              "column anywhere is a shape-change signature. amount_text over "
+              "amount: plenty of real lines publish amounts this pipeline "
+              "cannot read as numbers, and the verbatim text is the honest "
+              "evidence either way.",
+    ),
+    Smoke(
+        module="m25_skills_for_care",
+        produces=("skills_for_care_files", "skills_for_care_estimates"),
+        signal=(("skills_for_care_estimates", "area_code"),
+                ("skills_for_care_estimates", "job_role")),
+        note="The appendix and trended workbooks are recorded per file but "
+              "their shapes are not parsed, so the signal is on the "
+              "current-year data sheets' rows: area_code is the workbook's "
+              "own ONS code and job_role its own label — a run in which "
+              "neither parsed is a shape change. hourly_pay is not a signal "
+              "column: ASC-WDS suppresses small cells with '*', which is "
+              "NULL, and a valid run may legitimately parse few published "
+              "figures. --limit is ignored: the downloads page names five "
+              "files and all five are fetched.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`
