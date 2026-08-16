@@ -170,6 +170,33 @@ def _registry_answers_committee_url(conn: sqlite3.Connection) -> list[tuple]:
     return out
 
 
+def _website_answers_authority_website(conn: sqlite3.Connection) -> list[tuple]:
+    """`authority_website_unknown` items whose authority has a base URL now.
+
+    The item is filed by m09 when `website_for()` returns nothing. It is
+    answered by exactly the same call returning an entry with a base_url —
+    from a reviewer's override, the tracked verified file, the hand-verified
+    registry, or m15's mySociety profiles. Mirroring the module's own
+    condition (rather than naming one source) keeps the two from disagreeing
+    about what "known" means: if m09 would not raise the item today, the
+    item is stale.
+    """
+    from pipeline.authority_websites import website_for
+
+    rows = conn.execute(
+        "SELECT id, raw_value FROM review_queue "
+        "WHERE item_type = 'authority_website_unknown' AND status = 'pending'"
+    ).fetchall()
+    out = []
+    for item_id, ons_code in rows:
+        entry = website_for(str(ons_code), conn)
+        if entry is not None and entry.base_url:
+            out.append((item_id,
+                         f"the authority has a base URL now: {entry.base_url} "
+                         f"({entry.source}); m09 would not raise this item today"))
+    return out
+
+
 # Each rule finds pending items of one type that the warehouse can now answer,
 # and says in words what answered them. A rule is either a `sql` returning
 # (review_item_id, evidence), or a `find(conn)` doing the same in Python for
@@ -181,6 +208,14 @@ RULES: dict[str, dict] = {
                  "committee URL has since been verified and committed to "
                  "pipeline/authority_websites.py"),
         "find": _registry_answers_committee_url,
+    },
+    "authority_website_available": {
+        "module": "m09_cdp_documents",
+        "why": ("filed when website_for() returned no base URL for this "
+                 "authority; it has one now — a reviewer's override, the "
+                 "tracked verified file, the hand-verified registry, or m15's "
+                 "mySociety profiles — and m09 would not raise the item today"),
+        "find": _website_answers_authority_website,
     },
     "unmatched_buyer_captured_as_funder": {
         "module": "m23_sector_universe",
