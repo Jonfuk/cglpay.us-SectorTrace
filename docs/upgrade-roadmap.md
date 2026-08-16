@@ -2,15 +2,16 @@
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
-1 skipped, 18 deselected, 422s**). **Sixteen phases have been worked**: 1–3, 5,
-6, 8–13, 15, 16 and 18 are done — 14 is the standing gated pair, P-03 and F-05, and stays
-open until its two decisions are taken; Phase 4 delivered F-01 and U-01 and
+1 skipped, 18 deselected, 422s**). **Seventeen phases have been worked**: 1–3, 5,
+6, 8–16 and 18 are done — 14 was the standing gated pair, P-03 and F-05, and its
+two decisions were taken on 2026-08-16 (both no: P-03 refused again,
+F-05 decided against; see Phase 14); Phase 4 delivered F-01 and U-01 and
 left F-03 open
 (D-04 followed on 2026-08-13, F-03 closed in Phase 8); Phase 7 measured P-01
 and F-04 and left P-03 open. Each phase records what changed from the plan as
 it landed.
 
-**Everything still open is sequenced as Phases 14 and 17–19**, at the end of
+**Everything still open is sequenced as Phases 17–19**, at the end of
 §5 — in the order to take them and with the reasons for that order. **Phases
 8, 9, 10, 11, 12 and 13 are delivered**: 8 and 9 ran in parallel on
 2026-08-14 by two
@@ -26,15 +27,21 @@ on the other, with the F-05 note that B3 was always making standing true
 now has its mechanism). **Phase 18 landed the same day — the sector universe
 (F1, F2, F3) with D-04's remaining 3,160 review items folded in**, and the
 standing design question (new table or providers extension) settled as a new
-table — the argument is in migration `0045`. What is left of the plan is
-Phases 14 (gated on your say-so), 17 (gated on campaign throughput) and 19.
+table — the argument is in migration `0045`. **Phase 14 landed on 2026-08-16
+and took its two decisions — both no: P-03 refused again, F-05 decided
+against — so it is done without a diff** (the record of the refusals is in
+the phase entry). What is left of the plan is Phases
+17 (gated on campaign throughput) and 19.
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
 
 **What is left, as of 2026-08-14.** Everything the audit filed has been
-delivered, measured and declined, or is listed here. **Two remain**, and
-neither is blocked on effort — each needs a decision first. F-03, the third,
+delivered, measured and declined, or is listed here. **Two remain** — both
+were the standing gated pair, and **Phase 14 took their decisions on
+2026-08-16**: F-05 is decided against and P-03 refused unchanged (neither was
+blocked on effort; each needed a decision first, and now both have one).
+F-03, the third,
 was closed by Phase 8 the same day. D-05 and D-06, both
 filed after the override table was emptied, were closed the same day. On
 2026-08-14 the portal was compared against the systems its audience actually
@@ -52,18 +59,21 @@ already there.
 | | Finding | What it needs |
 |---|---|---|
 | ~~**F-03**~~ | *Closed 2026-08-14 (Phase 8)* — `census_verifications`, two triggers, and a Census tab that shows each figure beside the archived page it was parsed from. | |
-| **F-05** | Nothing is tracked over time | A decision before a design, and my recommendation is still *not yet* — history invites exactly the differencing `docs/CAVEATS.md` forbids. Add it to one table if one specific claim needs it. |
+| ~~**F-05**~~ | *Closed 2026-08-16 (Phase 14)* — the decision in open question 2 was taken: **not yet**. No table gets history; the §3J versioned-datasets entry is decided here or not at all, and it was not. Revisit only behind a named claim — advertised bands over time is the plausible one. | |
 | ~~**D-05**~~ | *Closed 2026-08-13* (`1198dea`) — a resolution now writes `pipeline/verified_websites.json`, tracked in git and read ahead of the seed registry. | |
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
-| **P-03** | `--jobs > 1` is still opt-in | Two full collections to compare, several hours each against live public bodies. Your say-so, not a phase. |
+| **P-03** | `--jobs > 1` is still opt-in — *refused again 2026-08-16 (Phase 14):* no comparison runs scheduled; `--jobs 1` stays the default, conservative rather than evidenced | Two full collections to compare, several hours each against live public bodies. The decision is yours, and it is recorded rather than re-opened by default. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
 | **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab) — with D-04's 2,667 `unmatched_buyer_name` and 493 `possible_group_company` items folded into it**. Remaining: Phases 17 and 19, in the order their dependencies fall. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
-waiting on people, which is open question 1. F-05 and P-03 are Phase 14,
-together, because both are gated on your say-so and neither should be started
-inside a phase that is about something else.
+waiting on people, which is open question 1. F-05 and P-03 were Phase 14
+together, because both are gated on say-so rather than effort and neither
+should be started
+inside a phase that is about something else — and Phase 14 took both
+decisions on 2026-08-16 (F-05: *not yet*; P-03: refused, no runs scheduled).
+See the phase entry.
 
 A third arrived with Phase 9, and it is a minute rather than a decision:
 **does `https://www.cqc.org.uk/location/{location_id}` load a real CQC
@@ -139,10 +149,11 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence **[live]**: `module_cursors` holds 2 rows, both `m01_procurement`. [README.md:108](README.md:108) describes resumable cursors as a property of modules generally.
 - Inferred, not confirmed: the other 16 may re-derive position cheaply or may re-crawl. Worth one pass to find out and then either fix the modules or soften the README.
 
-**F-05 · Nothing is tracked over time · L, and a decision before a design**
+**F-05 · Nothing is tracked over time · L, and a decision before a design — decided 2026-08-16 (Phase 14): *not yet***
 - Evidence: every domain table upserts on a natural key (e.g. [pipeline/modules/m13_la_budgets.py:372](pipeline/modules/m13_la_budgets.py:372)); a re-run overwrites in place.
 - Costs today: the warehouse can say what a CQC rating or advertised band *is*, never that it changed. For a pay campaign, the change is often the claim.
 - Risk: **high** — history multiplies row counts and invites exactly the cross-year differencing [docs/CAVEATS.md:25](docs/CAVEATS.md:25) forbids for the census. See Open questions.
+- **Decision (Phase 14):** open question 2 was taken, and the answer is *not yet* — no table gets history, and the §3J "versioned datasets, ONS-style" entry was decided here or not at all, and it was not. Revisit only behind a named claim; advertised bands over time is the plausible one. The record is in Phase 14.
 
 ### B. Data quality and provenance
 
@@ -189,9 +200,10 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence **[live]**: `data/raw` is **3.6 GB across 6,322 files**; the warehouse it backs is 242.7 MB.
 - It is the audit trail, so deletion is not the answer. Compaction, per-source retention, or simply measuring and documenting the growth curve is.
 
-**P-03 · `--jobs > 1` is still opt-in · M, evidence-gated — still open after Phase 7; needs two full runs**
+**P-03 · `--jobs > 1` is still opt-in · M, evidence-gated — refused again 2026-08-16 (Phase 14); needs two full runs, and none are scheduled**
 - `--jobs 1` remains the default ([README.md:198](README.md:198)), with the parallel path covered by [tests/test_parallel.py](tests/test_parallel.py) and [tests/test_run_waves.py](tests/test_run_waves.py) (332 and 482 lines).
 - What would settle it is one full `--jobs 4` run compared against a serial one on row counts, review items and parse failures — not another test.
+- **Refusal (Phase 14):** the comparison is still worth running once, "so the default is evidenced rather than merely conservative" — and it is still not scheduled. Two complete collections, ~6,300 requests each, several hours each, against live public bodies, is a deliberate act against a campaign calendar, and it is not on one. The finding stays open because it is evidence-gated; the standing decision is that `--jobs 1` is the conservative default and costs nothing anyone is waiting on.
 
 ### D. Web server performance
 
@@ -664,9 +676,10 @@ somewhere it survives.
 - What: full-text search across contract titles, buyers and suppliers, PFD reports, committee and CDP candidates, FOI requests and NDTMS rows — the search every comparable portal leads with (WhatDoTheyKnow is search-first, LG Inform has advanced operators, Fingertips searches indicators by keyword).
 - Why it is here rather than in the register: a client-side index over 98,636 notices is a payload and a freshness problem, and a server-side one is SQLite FTS5 — a schema decision carrying the same maintenance burden the roadmap has already declined once for the archived documents (Section 6, "Full-text search over archived documents"). The difference: warehouse tables are ~520 MB against the 3.5 GiB archive, so this is the cheaper half of that rejection. Revisit once the promotion work has given it verified documents to search rather than candidates.
 
-**Versioned datasets, ONS-style · L — F-05 with a delivery shape**
+**Versioned datasets, ONS-style · L — F-05 with a delivery shape — decided in Phase 14: no**
 - What: ONS publishes editions and versions of each dataset; a re-run that changes rows is a new version, with the previous one still citable ([developer.ons.gov.uk](https://developer.ons.gov.uk/)). Under this shape, "the 2026-08 version of the contracts table" would be a real thing to link.
 - Why it is here rather than in the register: every domain table upserts on a natural key, so nothing can be cited as a version today. F-05's decision stands and the recommendation is unchanged: not yet, and as history on one table only if one specific claim needs it.
+- **Phase 14 decided it, as its plan said it would ("here or not at all"):** no versions. The claim that would justify them — advertised bands over time — has not been made. A refusal that is written down cannot be re-litigated by default; this entry stays filed so the delivery shape is remembered if the claim arrives.
 
 **Matrix ("tartan rug") views · M — decided in Phase 13: deferred**
 - What: Fingertips' Overview view — authorities × periods as a colour-coded matrix, one glance at the whole distribution (Fingertips calls it a tartan rug).
@@ -1098,10 +1111,12 @@ anyone is waiting on.
 
 ---
 
-### Phases 8–19 — the plan for what is left · 8–13 and 15 done, 14 and 16–19 planned
+### Phases 8–19 — the plan for what is left · 8–16 and 18 done, 17 and 19 planned
 
 Twenty-one open portal and operator findings (W-05 – W-27), three standing
-decisions (F-03, F-05, P-03), the half-closed O-03, and four workstreams —
+decisions (F-03, F-05, P-03) — the last two decided on 2026-08-16, Phase 14
+(F-05: *not yet*; P-03: refused, `--jobs 1` stays the default) — the
+half-closed O-03, and four workstreams —
 sequenced. Phases 8–13 are delivered (F-03, the shared furniture, the
 artefacts, the authority spine, what-is-collected, and the compare view and
 map layers); Phase 15 delivered the first workstream tranche; this
@@ -1161,7 +1176,9 @@ is introduced in two phases (11 and 12) rather than in seven.
   the same hours. What the campaign must not do is wait for the portal.
   **Both halves of that happened on 2026-08-14**: Phase 8 landed the census
   mechanism and Phase 9 landed the portal furniture, in parallel. The campaign
-  is now waiting on people rather than on either.
+  is now waiting on people rather than on either. *Phase 14 has since closed
+  the span — 2026-08-16 — and its two decisions (F-05 *not yet*, P-03 refused)
+  are recorded there rather than in this judgement.*
 - **D-04's remaining 3,160 items are not queue work — they are F1's input.**
   `unmatched_buyer_name` (2,667) and `possible_group_company` (493) are, item
   by item, the same reconciliation the sector universe does systematically
@@ -1189,7 +1206,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**11**~~ | W-13, W-12, W-27, W-17, W-14 — the authority spine | M–L | **done** |
 | ~~**12**~~ | W-23, W-26, W-25, W-24 — show what is already collected | M–L | **done** |
 | **13** | W-11, W-19 — comparison, and the inferences it forces | M | three §3J decisions |
-| **14** | P-03, F-05 — gated by runs and decisions, not by effort | M | yours |
+| ~~**14**~~ | P-03, F-05 — gated by runs and decisions, not by effort | M | **done 2026-08-16 — both refused, decisions recorded** |
 | ~~**15**~~ | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | **done** |
 | **16** | B3, G1, B1 — direct pay evidence and its comparators | M–L | none |
 | **17** | C1, C2 — the claims-to-evidence index | M | Phase 8's output |
@@ -1853,9 +1870,12 @@ a portal that already renders every series it would compare.
   cross-layer caveat present on the shared axis; a test that every toggled
   layer carries its own caveat text.
 
-### Phase 14 — Gated by runs and decisions, not by effort · M — **planned**
+### Phase 14 — Gated by runs and decisions, not by effort · M — **done (2026-08-16)**
 
-Delivers **P-03** and **F-05**, or records their refusal again.
+Delivered **P-03** and **F-05**, or records their refusal again. The answer
+to both was no, so this is the phase's predicted "paragraph in the register
+and a day" outcome — a successful one, and the refusals are recorded here
+rather than allowed to re-open by default.
 
 Neither is blocked on code, and neither should be started inside another
 phase — which is why they are a phase and not a footnote to one.
@@ -1876,6 +1896,34 @@ phase — which is why they are a phase and not a footnote to one.
 **If the answer to both is no, this phase is a paragraph in the register and a
 day.** That is a successful outcome, not a skipped phase — Phase 7 ended the
 same way and the numbers it wrote down are why nobody has to re-derive P-01.
+
+#### What changed as it landed
+
+The phase ended in the outcome its plan priced, and the record is two
+decisions rather than a diff. Suite green on the surrounding commits — this
+phase ships no code, and its test is that the register now says so.
+
+**P-03 — refused, not deferred.** `--jobs 1` remains the default, and no
+comparison runs are scheduled. The acceptance is unchanged and stated again
+so it is not re-derived: one full `--jobs 4` run against one full serial run,
+on rows, review items and parse failures — two complete collections,
+~6,300 requests each, several hours each, against live public bodies. The
+recommendation that the default stays *conservative rather than evidenced*
+is now the standing decision; the runs would be a deliberate act to schedule
+against a campaign calendar, and they are not on one. The finding stays open
+in the register because it is evidence-gated, not because anything is
+blocking it — see the P-03 entry in §3C.
+
+**F-05 — the decision in open question 2 was taken, and it is *not yet*.**
+No table gets history. The §3J "versioned datasets, ONS-style" entry is
+therefore decided here as well, as its plan said it would be: no versions,
+no time series, and the claim that would justify one — advertised bands over
+time, the B3 feed — has not been made. The decision is recorded, which is
+the whole point of this phase: a refusal that is written down cannot be
+re-litigated by default, and a claim that arrives later starts from the
+standing shape rather than from first principles. `nhs_job_adverts` and
+`provider_pay_pages` stay snapshot tables; re-runs replace, which is what
+the F-05 note in m22's own code says is the non-versioned case.
 
 ---
 
@@ -2238,7 +2286,7 @@ question.
 ## 7. Open questions
 
 1. **Who verifies candidates, and to what standard?** *Phase 4 built it on the recommendation below; the question of who actually does the verifying is still yours.* My recommendation: one named reviewer per row, the same identity `review_decisions` already records, and no bulk promote for anything above a candidate's source page — bulk *reject* is fine. Depends on whether anyone besides you will do it.
-2. **Do you want history at all (F-05)?** Recommendation: not yet, and not as a general "version every table". If a specific claim needs it — advertised bands over time is the plausible one — add history to that table alone, with a caveat forbidding the differencing the census taught you to forbid.
+2. ~~**Do you want history at all (F-05)?**~~ *Settled 2026-08-16 (Phase 14):* **not yet**. Recommendation: not yet, and not as a general "version every table". If a specific claim needs it — advertised bands over time is the plausible one — add history to that table alone, with a caveat forbidding the differencing the census taught you to forbid.
 3. ~~**Should `m13` be re-run now?**~~ *Settled in Phase 1:* re-run, and it had been a dry run all along. 477,199 rows.
 4. **Retention for `data/raw` (P-02).** Recommendation: keep everything until it hurts, but measure and document the curve now so the decision is not taken in a hurry at 20 GB.
 5. **Is `--jobs 4` worth promoting to default?** Recommendation: only after Phase 7's comparison, and probably not — the current default is the conservative one and the run is not interactive.
@@ -2260,7 +2308,8 @@ from the sources review (Workstream G).
 Workstream A (the verification campaign) is not a section here — it is F-01,
 F-03 and the queue itself, already in the register, and its cost is labour and
 the open-question-1 decision, not code. Workstreams D and E are existing
-entries: D is F-05 and P-03, E is W-13, the §3J search entry and the unfiled
+entries: D is F-05 and P-03 — *both decided on 2026-08-16 (Phase 14), which
+is D decided and recorded* — E is W-13, the §3J search entry and the unfiled
 prerender idea.
 
 The thesis the workstreams share: the project's ceiling is the number of
@@ -2293,7 +2342,9 @@ career and reward pages — advertised bands, "rewards package" pages, listed
 rates — plus a sustained crawl of the NHS Jobs feed the module already reads.
 Claim shape: the advertised band and rate per provider per period — and the
 F-05 decision (open question 2) is what turns that snapshot into the time
-series the campaign's "the change is the claim" argument needs.
+series the campaign's "the change is the claim" argument needs. *Decided
+2026-08-16 (Phase 14): not yet — B3 stays a snapshot, and the claim that
+would justify history has not been made.*
 
 **B4. Authority-website registry to full coverage · M** — m09/m10/m15 are
 coverage-limited by the hand-verified registry in `authority_websites.py`, and
