@@ -2301,3 +2301,117 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
          "kinds_held": len(kinds)}
         for code, kinds in held.items()
     ]
+
+
+# --- claims (Workstream C, Phase 17) ------------------------------------------
+#
+# The "What we can say" page: campaign claims as rows, each with its citations
+# and its caveats. Everything here is the registry rendered — nothing is
+# computed, which is the point of the phase. The claim text is what a person
+# wrote, the citations are rows a person picked (resolved here to something
+# the reader can follow), and the caveats are lines a person wrote about what
+# may not be computed from it.
+#
+# Two rules shape the payload:
+#
+#   * Only published claims are served. Drafts, rejections and retractions
+#     are the worklist, not the portal: 'published' is the one status a
+#     reviewer authorised making public, and the registry's trigger
+#     discipline is what guarantees it got there through a named decision.
+#   * A citation that no longer resolves is shown as unresolvable, not
+#     dropped and not guessed at. A module re-run can replace the row a
+#     citation names, and the reader deserves to see that the claim rests on
+#     rows the warehouse no longer holds rather than a link that silently
+#     went elsewhere.
+
+# The page's own pinned caveat: a claim is a statement, not a figure this
+# pipeline computed. It travels with every response, like every other caveat
+# here.
+CLAIMS_CAVEAT = (
+    "A claim is a statement the campaign makes, written by a person, linked "
+    "to the evidence rows that support it, and approved by a named reviewer. "
+    "It is not a figure computed by this pipeline, and the caveats on each "
+    "claim say what may not be computed from its citations."
+)
+
+
+def claims(conn: sqlite3.Connection) -> dict:
+    """Published claims with their citations and caveats, for the portal."""
+    _public(["claims", "claim_citations", "claim_verifications",
+              *claims_registry_tables()])
+
+    rows = _rows(conn, """
+        SELECT c.id, c.claim_text, c.caveats, c.created_by, c.created_at,
+               c.note, v.decided_by, v.decided_at AS published_at
+        FROM claims c
+        JOIN claim_verifications v ON v.claim_id = c.id
+          AND v.decision = 'published'
+          AND v.id = (SELECT MAX(w.id) FROM claim_verifications w
+                       WHERE w.claim_id = c.id AND w.decision = 'published')
+        WHERE c.status = 'published'
+        ORDER BY v.decided_at DESC, c.id""")
+
+    out = []
+    for row in rows:
+        citations = []
+        for citation in _rows(conn, """
+                SELECT evidence_table, evidence_key, cited_by, cited_at, note
+                FROM claim_citations WHERE claim_id = ? ORDER BY id""",
+                              (row["id"],)):
+            resolved = claims_resolve(
+                conn, citation["evidence_table"], citation["evidence_key"])
+            citations.append({
+                "table": citation["evidence_table"],
+                "key": citation["evidence_key"],
+                "resolved": resolved,
+            })
+        out.append({
+            "id": row["id"],
+            "claim_text": row["claim_text"],
+            # The claim's own "you may not compute this from it" lines, as a
+            # list. Empty when the author wrote none — the portal then shows
+            # the page caveat only.
+            "caveats": [line for line in (row["caveats"] or "").splitlines()
+                        if line.strip()],
+            "citations": citations,
+            "created_by": row["created_by"],
+            "created_at": row["created_at"],
+            "published_by": row["decided_by"],
+            "published_at": row["published_at"],
+            "note": row["note"],
+        })
+
+    return {"claims": out, "caveat": CLAIMS_CAVEAT}
+
+
+def claims_registry_tables() -> list[str]:
+    """The evidence tables the claims registry may cite.
+
+    Imported lazily: `pipeline.claims` pulls in the citation registry, and
+    this module's import is not the place for a chain it does not always
+    need.
+    """
+    from pipeline import claims as claims_module
+
+    return claims_module.citable_tables()
+
+
+def claims_resolve(conn: sqlite3.Connection, table: str,
+                   key: str) -> dict | None:
+    """Resolve one citation to what the reader can follow, or None.
+
+    None means the row is no longer in the warehouse — a module re-run
+    replaced it — and the portal renders that rather than a dead link. Same
+    shape census_verify.stale() gives a verification whose source moved.
+    """
+    from pipeline import claims as claims_module
+
+    resolved = claims_module.resolve_citation(conn, table, key)
+    if resolved is None:
+        return None
+    return {
+        "label": resolved["label"],
+        "url": resolved["url"],
+        "source_url": resolved["source_url"],
+        "retrieved_at": resolved["retrieved_at"],
+    }

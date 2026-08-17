@@ -446,10 +446,19 @@ portal is at `/`, and the operator tools — the review queue and the raw
 warehouse browser — moved to `/admin`, linked from the portal's header.
 
 The portal is built for people who need to read this evidence rather than run
-the pipeline: union researchers, journalists, public health analysts. Seven
+the pipeline: union researchers, journalists, public health analysts. Eight
 sections — overview, pay evidence, contracts, geography, treatment demand,
-coroners' Prevention of Future Deaths reports, and a page per provider — over
-a read-only `/api/v1/` API.
+coroners' Prevention of Future Deaths reports, *What we can say* (the claims
+index), and a page per provider — over a read-only `/api/v1/` API.
+
+*What we can say* is the claims-to-evidence index (Workstream C): the claims
+the campaign makes, each rendered with the evidence rows that support it and
+its own "you may not compute this from it" lines. Nothing on that page is
+computed — a claim is a statement written by a person, linked to rows a
+person picked, and approved by a named reviewer, the same standard migration
+0030 sets for promotion. Only published claims are served, and a claim is
+published only by a recorded decision (migration 0048's triggers enforce
+that). The claims are maintained in the operator UI's Claims tab.
 
 Since Phase 11 the portal also has a page per authority, and since Phase 13 a
 compare view: `#/compare?ons_code=...&ons_code=...` draws two or more
@@ -552,11 +561,22 @@ It binds every interface, so another machine on the network reaches it at
 start.cmd web
 ```
 
-Five screens: an overview of what is pending by module and item type; the
+Six screens: an overview of what is pending by module and item type; the
 queue itself, filterable and searchable, with approve/reject/reset per item or
 across a selection; the Candidates tab, where a document becomes evidence; the
 Census tab, where a parsed figure is checked against the archived page it came
-from; a browser for every table and view; and a SQL box.
+from; the Claims tab, where a campaign claim is written, linked to its
+evidence and decided; a browser for every table and view; and a SQL box.
+
+The Claims tab is the maintenance half of the portal's *What we can say*
+page. A claim is a statement written by a person, linked to the evidence rows
+that support it — picked by searching a citable evidence table, never typed —
+and decided by a named reviewer. Draft, published, rejected and retracted are
+the lifecycle, and migration 0048 refuses a decided claim without a recorded
+decision behind it, the same structural guarantee 0030 gives promotion. A
+published claim reaches the portal; the others stay on this tab with their
+decision history, which is what makes "who said this claim could be made?"
+answerable.
 
 Three things exist because the queue is thousands of rows and two item types
 are 72% of it:

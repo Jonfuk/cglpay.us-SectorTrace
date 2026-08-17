@@ -44,6 +44,7 @@
     <button class="tab" data-tab="health" role="tab">Health</button>
     <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
     <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
+    <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
@@ -393,6 +394,71 @@
         bad parse is findable from the parser's side too.
       </p>
       <div id="census-history"></div>
+    </div>
+  </section>
+
+  <!-- Claims registry --------------------------------------------------------->
+  <!-- Rendered by /admin/js/claims.js. -->
+  <section id="tab-claims" class="tabpanel">
+    <p class="muted small">
+      What the campaign says, and what it says it from. A claim is a
+      statement written by a person, linked to the evidence rows that support
+      it, and decided by a named reviewer — the same threshold migration
+      0030 sets for promotion, recorded the same way. Nothing here is
+      computed: the text is what was written, the citations are rows that
+      were picked, and the caveats are lines about what may not be computed
+      from it. Only <em>published</em> claims reach the portal's
+      <em>What we can say</em> page, and a claim is published only by a
+      recorded decision.
+    </p>
+
+    <div id="claim-counts" class="chips"></div>
+
+    <div class="runbar">
+      <select id="claim-status-filter" aria-label="Status">
+        <option value="all">All</option>
+        <option value="draft">Draft</option>
+        <option value="published">Published</option>
+        <option value="rejected">Rejected</option>
+        <option value="retracted">Retracted</option>
+      </select>
+      <span class="spacer"></span>
+      <span id="claim-status" class="muted small"></span>
+    </div>
+
+    <!--
+      Writing a claim is three acts, each attributed: the statement, the
+      citations (evidence rows picked from the search), and the decision.
+      The form writes a draft; deciding is a separate button on the draft.
+    -->
+    <div class="panel" id="claim-new">
+      <h2>Write a claim</h2>
+      <p class="muted small">
+        The statement as it would be quoted, and the caveats that govern it —
+        one "you may not compute this from it" line per line. It is a draft
+        until somebody decides it.
+      </p>
+      <textarea id="claim-new-text" rows="3" spellcheck="false"
+        placeholder="The statement itself, as the campaign would quote it."></textarea>
+      <textarea id="claim-new-caveats" rows="2" spellcheck="false"
+        placeholder="Caveats, one per line: what may not be computed from this claim."></textarea>
+      <input id="claim-new-note" type="text" placeholder="note (optional)">
+      <div class="row">
+        <button class="btn primary" id="claim-create">Write draft</button>
+        <span class="muted small">the reviewer box above names who wrote it</span>
+      </div>
+    </div>
+
+    <div id="claim-list"></div>
+    <div class="pager" id="claim-pager"></div>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>Recent decisions</h2>
+      <p class="muted small">
+        Every claim decision, with who made it. Kept whether or not the claim
+        is later reset — the judgement was still taken.
+      </p>
+      <div id="claim-history"></div>
     </div>
   </section>
 

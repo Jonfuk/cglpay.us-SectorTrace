@@ -53,8 +53,9 @@ Nothing in the application inserts an explicit id except the job registry.
 
 ### Triggers raise `integrity_constraint_violation`
 
-The five refusals in `0030` and `0033` are the mechanism behind settled
-decision 4 — nothing becomes evidence without a person. Under SQLite,
+The seven refusals in `0030`, `0033` and `0048` are the mechanism behind settled
+decision 4 (and the claims registry's "nothing is decided without a human"
+rule). Under SQLite,
 `RAISE(ABORT, …)` surfaces in Python as `sqlite3.IntegrityError`, and the
 promotion and census test suites assert exactly that.
 
@@ -112,11 +113,15 @@ Four things about that are decisions rather than mechanics, and each is
 argued in the module docstrings:
 
 **The load order is parents-first, and it includes edges no foreign key
-expresses.** Three triggers ask whether an `evidence_promotions` row exists
-and two ask about `census_verifications`, and neither dependency is a column
-reference — the first identifies its target by an `<authority>|<url>` string,
-the second matches on four columns including a whole line of PDF text. Loading
-those two tables first means `COPY` fires every trigger and every one of them
+expresses.** Three triggers ask whether an `evidence_promotions` row exists,
+two ask about `census_verifications`, and two ask about `claim_verifications`
+(0048) — and none of these dependencies is a column
+reference: the first identifies its target by an `<authority>|<url>` string,
+the second matches on four columns including a whole line of PDF text, and
+the third matches on a claim id that the verification table deliberately
+carries without a foreign key, so that it can be written before the claim.
+Loading
+those three tables first means `COPY` fires every trigger and every one of them
 answers yes, so the guarantee behind settled decision 4 is never suspended for
 the one operation that writes every evidence row this project has.
 

@@ -16,13 +16,15 @@ recreate leaves a warehouse whose unique indexes are gone, and every
 being a natural-key upsert. That is a correctness failure bought with a few
 minutes, so the indexes stay.
 
-**It does not disable the triggers.** The five refusals from migrations 0030
-and 0033 are the mechanism behind settled decision 4, and `COPY` fires
+**It does not disable the triggers.** The seven refusals from migrations 0030,
+0033 and 0048 are the mechanism behind settled decision 4 (and its claims
+registry sibling), and `COPY` fires
 `BEFORE INSERT` triggers exactly as `INSERT` does. The obvious move is
 `ALTER TABLE ... DISABLE TRIGGER USER` around the load, which suspends the
 guarantee for the one operation that writes every evidence row this project
 has. It is not needed: each of those triggers asks whether a row exists in
-`evidence_promotions` or `census_verifications`, so loading those two tables
+`evidence_promotions`, `census_verifications` or `claim_verifications`, so
+loading those three tables
 *first* makes every check pass on its own terms. The ordering below encodes
 that, and `pipeline/pgverify.py` re-asks the triggers' own questions after the
 load rather than trusting that they ran.
@@ -72,13 +74,15 @@ SOURCE_ONLY_TABLES = frozenset({"schema_migrations"})
 
 # Load-order edges that are not foreign keys.
 #
-# Each of these is a trigger from 0030 or 0033 asking whether a decision row
-# exists before it will accept the row that depends on it. A foreign key would
-# have said the same thing to `catalog.foreign_keys`, but these deliberately
-# are not foreign keys: `evidence_promotions` identifies its target by a
-# `<authority>|<url>` key string rather than by a column reference, and a
-# census verification matches on four columns including a whole line of PDF
-# text. So the dependency is real, is enforced on every insert, and is
+# Each of these is a trigger from 0030, 0033 or 0048 asking whether a decision
+# row exists before it will accept the row that depends on it. A foreign key
+# would have said the same thing to `catalog.foreign_keys`, but these
+# deliberately are not foreign keys: `evidence_promotions` identifies its
+# target by a `<authority>|<url>` key string rather than by a column
+# reference, a census verification matches on four columns including a whole
+# line of PDF text, and a claim verification names its claim by id but is
+# written without an FK so that it can be loaded ahead of the claims it
+# vouches for. So the dependency is real, is enforced on every insert, and is
 # invisible to the FK graph — which is exactly the shape of thing that gets
 # discovered at row 400,000 of a load.
 TRIGGER_EDGES: dict[str, tuple[str, ...]] = {
@@ -86,6 +90,7 @@ TRIGGER_EDGES: dict[str, tuple[str, ...]] = {
     "committee_papers": ("evidence_promotions",),
     "foi_requests": ("evidence_promotions",),
     "workforce_census_metrics": ("census_verifications",),
+    "claims": ("claim_verifications",),
 }
 
 # What each PostgreSQL type accepts from SQLite, and nothing else.
