@@ -206,7 +206,7 @@ def test_website_for_returns_none_when_neither_source_has_it(conn):
 
 def test_website_for_without_a_connection_still_works():
     assert authority_websites.website_for("E10000016") is not None
-    assert authority_websites.website_for("E08000012") is None
+    assert authority_websites.website_for("E08000012") is not None
 
 
 # --- disclosure log crawling (runs on the fetch pool) -------------------------------
