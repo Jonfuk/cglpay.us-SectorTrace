@@ -31,6 +31,7 @@ from pathlib import Path
 import structlog
 
 from pipeline import db
+from pipeline.archive import get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.notice_urls import published_notice_url
 
@@ -73,7 +74,7 @@ def backfill(conn: sqlite3.Connection, settings: Settings | None = None,
     several suppliers.
     """
     settings = settings or get_settings()
-    raw_dir = settings.raw_archive_dir
+    archive = get_archive(settings)
 
     todo: dict[tuple[str, str], list[str]] = defaultdict(list)
     rows = conn.execute(
@@ -87,7 +88,11 @@ def backfill(conn: sqlite3.Connection, settings: Settings | None = None,
     pending: list[tuple[str, str]] = []
 
     for (source_system, sha256), notice_ids in todo.items():
-        page = _archived_page(raw_dir, source_system, sha256)
+        try:
+            obj = archive.lookup(source_system, sha256)
+            page = json.loads(obj.read_bytes()) if obj else None
+        except (OSError, ValueError, UnicodeDecodeError):
+            page = None
         if page is None:
             stats["pages_missing"] += 1
             stats["rows_without_a_published_url"] += len(notice_ids)

@@ -109,15 +109,19 @@ function renderStorage(rows) {
 
   target.replaceChildren(el('table', {},
     el('thead', {}, el('tr', {},
-      el('th', { text: 'Directory' }), el('th', { class: 'num', text: 'Files' }),
-      el('th', { class: 'num', text: 'Size' }), el('th', { text: 'Newest' }),
+      el('th', { text: 'Directory' }), el('th', { text: 'Backend' }),
+      el('th', { class: 'num', text: 'Files' }), el('th', { class: 'num', text: 'Size' }),
+      el('th', { text: 'Mirror lag' }), el('th', { text: 'Newest' }),
       el('th', { text: 'What it is' }))),
     el('tbody', {}, rows.map((row) => el('tr', {},
       el('td', {},
         el('div', { class: 'mono small', text: row.path }),
         row.exists ? null : el('div', { class: 'muted small', text: 'not created yet' })),
+      el('td', { class: 'mono small', text: row.backend || '—' }),
       el('td', { class: 'num', text: num(row.files) }),
       el('td', { class: 'num', text: bytes(row.bytes) }),
+      el('td', { class: 'num', text: row.mirror_lag
+        ? `${num(row.mirror_lag.objects)} objects · ${bytes(row.mirror_lag.bytes)}` : '—' }),
       el('td', {}, when(row.newest)),
       el('td', { class: 'muted small', text: row.note }))))));
 }

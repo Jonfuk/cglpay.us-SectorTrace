@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # and `pipeline.web.queries` says so where it happens.
     database_ro_url: str | None = None
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
+    archive_s3_bucket: str | None = None
+    archive_s3_endpoint: str | None = None
+    archive_s3_region: str | None = None
+    archive_s3_url_style: str | None = None
+    archive_s3_access_key: str | None = None
+    archive_s3_secret: str | None = None
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"
     keywords_path: Path = REPO_ROOT / "pipeline" / "keywords.py"
     logs_dir: Path = REPO_ROOT / "logs"
@@ -224,6 +230,22 @@ class Settings(BaseSettings):
                 "or unset this one."
             )
         return self
+
+    @model_validator(mode="after")
+    def _archive_configuration(self) -> Settings:
+        values = (self.archive_s3_bucket, self.archive_s3_endpoint,
+                  self.archive_s3_region, self.archive_s3_url_style,
+                  self.archive_s3_access_key, self.archive_s3_secret)
+        if any(values) and not all(values):
+            raise ValueError("ARCHIVE_S3_BUCKET, ENDPOINT, REGION, URL_STYLE, ACCESS_KEY, "
+                             "and SECRET must be set together")
+        if self.archive_s3_url_style and self.archive_s3_url_style not in {"virtual", "path"}:
+            raise ValueError("ARCHIVE_S3_URL_STYLE must be 'virtual' or 'path'")
+        return self
+
+    @property
+    def archive_backend(self) -> str:
+        return "s3" if self.archive_s3_bucket else "filesystem"
 
     @property
     def database_backend(self) -> str:
