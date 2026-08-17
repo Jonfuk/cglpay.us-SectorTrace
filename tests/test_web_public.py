@@ -62,6 +62,77 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         " 'Vacancy rate 7.0%', 'https://nhsbn.example/census', "
         " '2026-08-01T00:00:00Z', 200, 'nhs_benchmarking', 'cen123')")
 
+    # The newer public layers are intentionally heterogeneous. These fixtures
+    # make the portal prove it returns each one as its own cited record rather
+    # than silently producing a composite pay or spend calculation.
+    conn.execute(
+        "INSERT INTO statutory_pay_rates (period_label, effective_from, band_label, "
+        "band_role, amount, value_text, source_url, retrieved_at, http_status, "
+        "source_system, payload_sha256) VALUES "
+        "('April 2026', '2026-04-01', '21 and over', 'national_living_wage', "
+        "12.71, '£12.71', 'https://gov.example/rates', '2026-08-01T00:00:00Z', "
+        "200, 'gov_uk', 'rate123')")
+    conn.execute(
+        "INSERT INTO living_wage_accreditations (provider_key, searched_variant, "
+        "accredited, employer_name, employer_node_id, match_basis, pages_checked, "
+        "employers_total, source_url, retrieved_at, http_status, source_system, "
+        "payload_sha256) VALUES ('change_grow_live', 'change grow live', 0, NULL, "
+        "NULL, NULL, 1, 1, 'https://livingwage.example/search', "
+        "'2026-08-01T00:00:00Z', 200, 'living_wage_foundation', 'living123')")
+    conn.execute(
+        "INSERT INTO gender_pay_gap_reports (provider_key, reporting_year, "
+        "reporting_year_label, employer_id, match_basis, employer_name, "
+        "diff_mean_hourly_percent, diff_median_hourly_percent, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES "
+        "('change_grow_live', '2025', '2025 to 2026', 'employer-1', "
+        "'name_exact', 'Change Grow Live', 4.2, 3.1, "
+        "'https://gpg.example/download', '2026-08-01T00:00:00Z', 200, "
+        "'gender_pay_gap_service', 'gpg123')")
+    conn.execute(
+        "INSERT INTO ons_ashe_observations (dataset_id, dataset_title, edition, "
+        "version, hoursandearnings, averagesandpercentiles, sex, workingpattern, "
+        "dimension_kind, dimension_code, dimension_label, geography_code, "
+        "geography_label, time, value, value_text, unit_of_measure, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES "
+        "('ashe-tables-3', 'ASHE table 3', 'time-series', '7', "
+        "'hourly-pay-excluding-overtime', 'median', 'all', 'all', 'occupation', "
+        "'32', 'Health and social care associate professionals', 'E92000001', "
+        "'England', '2024', 15.42, '15.42', 'Pounds', 'https://ons.example/ashe', "
+        "'2026-08-01T00:00:00Z', 200, 'ons_ashe', 'ashe123')")
+    conn.execute(
+        "INSERT INTO provider_pay_mentions (page_url, mention_index, provider_key, "
+        "section, mention_text, salary_raw, salary_min, salary_max, salary_period, "
+        "salary_basis, match_basis, source_url, retrieved_at, http_status, "
+        "source_system, payload_sha256) VALUES ('https://provider.example/jobs', 0, "
+        "'change_grow_live', 'Recovery worker', 'Salary £28,000 per year', "
+        "'£28,000', 28000, 28000, 'year', 'single', 'site_owned', "
+        "'https://provider.example/jobs', '2026-08-01T00:00:00Z', 200, "
+        "'provider_pay_pages', 'page123')")
+    conn.execute(
+        "INSERT INTO skills_for_care_estimates (file_url, year, area_code, "
+        "area_level, area, sector, service, job_role_group, job_role, "
+        "fte_annual_pay, hourly_pay, turnover_rate, vacancy_rate, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES "
+        "('https://skills.example/file.xlsx', '2024/25', 'E92000001', 'National', "
+        "'England', 'Adult social care', 'Community', 'Direct care', 'Care worker', "
+        "24000, 12.5, 24.0, 8.0, 'https://skills.example/file.xlsx', "
+        "'2026-08-01T00:00:00Z', 200, 'skills_for_care', 'skills123')")
+    conn.execute(
+        "INSERT INTO council_spend_files (authority_ons_code, file_url, "
+        "file_format, parse_status, row_count, source_url, retrieved_at, "
+        "http_status, source_system, payload_sha256) VALUES ('E08000025', "
+        "'https://birmingham.example/spend.csv', 'csv', 'parsed', 1, "
+        "'https://birmingham.example/spend.csv', '2026-08-01T00:00:00Z', 200, "
+        "'council_spend_transparency', 'spendfile123')")
+    conn.execute(
+        "INSERT INTO council_spend (authority_ons_code, file_url, row_index, "
+        "period, payee, amount, amount_text, description, provider_key, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES "
+        "('E08000025', 'https://birmingham.example/spend.csv', 2, 'April 2026', "
+        "'Change Grow Live', 1234.56, '1,234.56', 'Treatment service', "
+        "'change_grow_live', 'https://birmingham.example/spend.csv', "
+        "'2026-08-01T00:00:00Z', 200, 'council_spend_transparency', 'spend123')")
+
     conn.execute("CREATE TABLE IF NOT EXISTS restricted_people "
                   "(id INTEGER PRIMARY KEY, name TEXT)")
     conn.execute("INSERT INTO restricted_people (name) VALUES ('A Person')")
@@ -101,6 +172,7 @@ def test_no_public_query_touches_a_restricted_table(ro):
     public_queries.providers(ro)
     public_queries.contracts(ro)
     public_queries.pay(ro)
+    public_queries.council_spend(ro)
     public_queries.geography(ro, metric="grant_total")
     public_queries.fingertips(ro)
     public_queries.boundaries(ro)
@@ -138,8 +210,31 @@ def test_every_headline_payload_carries_its_caveat(ro):
     assert public_queries.summary(ro)["contracts"]["caveat"]
     assert public_queries.contracts(ro)["caveats"]["value"]
     assert public_queries.pay(ro)["caveats"]["indicative_wage_note"]
+    assert public_queries.council_spend(ro)["caveats"]["payments"]
     assert public_queries.geography(ro, metric="grant_total")["caveat"]
     assert public_queries.fingertips(ro)["caveat"]
+
+
+def test_new_evidence_layers_remain_separate_and_caveated(ro):
+    """No new pay/spend route may turn sourced rows into a derived headline."""
+    pay = public_queries.pay(ro, provider_key="change_grow_live")
+    assert pay["statutory_pay_rates"][0]["amount"] == 12.71
+    assert pay["living_wage_accreditations"][0]["accredited"] == 0
+    assert pay["gender_pay_gap_reports"][0]["diff_median_hourly_percent"] == 3.1
+    assert pay["provider_published_pay"][0]["salary_raw"] == "£28,000"
+    assert pay["ons_ashe_observations"][0]["value"] == 15.42
+    assert pay["skills_for_care_estimates"][0]["hourly_pay"] == 12.5
+    assert all(pay["caveats"][key] for key in (
+        "statutory_pay_rates_note", "living_wage_note", "gender_pay_gap_note",
+        "provider_published_pay_note", "ashe_note", "skills_for_care_note"))
+    assert not any("ratio" in key or "gap_ratio" in key for key in pay)
+
+    spend = public_queries.council_spend(ro, provider_key="change_grow_live")
+    assert spend["total"] == 1
+    assert spend["payments"][0]["amount_text"] == "1,234.56"
+    assert "total_amount" not in spend
+    assert spend["caveats"]["payments"]
+    assert spend["caveats"]["provider_match"]
 
 
 def test_unverified_census_figures_are_marked_as_such(ro):
@@ -481,7 +576,7 @@ def test_the_portal_and_the_operator_ui_are_both_served(client):
 
 def test_public_endpoints_answer(client):
     for path in ["/api/v1/summary", "/api/v1/providers", "/api/v1/contracts",
-                  "/api/v1/pay", "/api/v1/geography", "/api/v1/fingertips",
+                  "/api/v1/pay", "/api/v1/council_spend", "/api/v1/geography", "/api/v1/fingertips",
                   "/api/v1/authorities", "/api/v1/boundaries"]:
         response = client.get(path)
         assert response.status_code == 200, path
