@@ -189,8 +189,21 @@ if defined DATABASE_URL (
     )
 )
 
+REM The storage extra follows the archive backend selector for the same reason:
+REM uv sync removes packages that are not named by the selected extras. Without
+REM this check, a local run with ARCHIVE_S3_BUCKET configured uninstalls boto3
+REM before the command that needs to construct the S3 archive can import it.
+set "STORAGE_EXTRA="
+if defined ARCHIVE_S3_BUCKET (
+    if not "%ARCHIVE_S3_BUCKET%"=="" set "STORAGE_EXTRA=--extra storage"
+) else (
+    if exist ".env" (
+        findstr /i /r /c:"^ *ARCHIVE_S3_BUCKET *= *[^ ]" ".env" >nul 2>nul && set "STORAGE_EXTRA=--extra storage"
+    )
+)
+
 echo ==^> Syncing dependencies
-uv sync --quiet %OCR_EXTRA% %PG_EXTRA%
+uv sync --quiet %OCR_EXTRA% %PG_EXTRA% %STORAGE_EXTRA%
 if errorlevel 1 (
     echo error: uv sync failed. Run "uv sync" without --quiet to see the full output. 1>&2
     if defined OCR_EXTRA (
@@ -199,6 +212,9 @@ if errorlevel 1 (
     )
     if defined PG_EXTRA (
         echo   DATABASE_URL is set, so this tried "uv sync --extra postgres". 1>&2
+    )
+    if defined STORAGE_EXTRA (
+        echo   ARCHIVE_S3_BUCKET is set, so this tried "uv sync --extra storage". 1>&2
     )
     popd
     exit /b 1
@@ -210,6 +226,8 @@ if defined OCR_EXTRA (
 ) else (
     if defined PG_EXTRA (
         echo   ok dependencies in sync ^(including the postgres extra^)
+    ) else if defined STORAGE_EXTRA (
+        echo   ok dependencies in sync ^(including the storage extra^)
     ) else (
         echo   ok dependencies in sync
     )
