@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-08-17T22:55:19Z",
+  "window": "2021-2026",
+  "backend": "postgres",
+  "detail_level": "aggregate_only",
+  "read_only_role_verified": false,
+  "coverage_cells": 2067,
+  "coverage_status_counts": {
+    "present": 1247,
+    "candidate": 147,
+    "pending_review": 659,
+    "unexplained": 14
+  },
+  "review_queue_total": 5347,
+  "review_queue_status_counts": {
+    "approved": 568,
+    "answered": 3729,
+    "pending": 1050
+  },
+  "source_tables_measured": 21,
+  "missing_provenance_rows": 0,
+  "notes": [
+    "This file intentionally excludes authority, provider, URL, and row-level details.",
+    "DATABASE_RO_URL currently authenticates as a role with write privileges; replace it with a SELECT-only role before collection or backfill."
+  ]
+}
