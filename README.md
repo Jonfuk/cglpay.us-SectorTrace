@@ -94,7 +94,8 @@ Free registration; only needed for the modules that use them. Set them in
 | `CHARITY_COMMISSION_API_KEY` | `m03_charity_finance` | Charity Commission register API |
 | `COMPANIES_HOUSE_API_KEY` | `m04_companies` | Companies House public API |
 | `CQC_SUBSCRIPTION_KEY` | `m05_cqc` | CQC public API |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Sheets export | **path** to a credential file, not the JSON itself |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Sheets export | local path to a credential file |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_B64` | Sheets export | Railway secret containing base64-encoded JSON |
 
 Modules that need a key fail immediately with a message naming the missing
 variable, rather than part-way through a run.
