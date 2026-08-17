@@ -229,6 +229,7 @@ const ROUTES = {
   '/authorities': () => import('/js/pages/authority.js'),
   '/compare': () => import('/js/pages/compare.js'),
   '/claims': () => import('/js/pages/claims.js'),
+  '/coverage': () => import('/js/pages/coverage.js'),
 };
 
 let disposeCurrent = null;
@@ -450,6 +451,18 @@ async function initFindCouncil() {
   });
 }
 
+// Bootstrap's dismissal data API deliberately prevents an anchor's normal
+// action. Navigation links therefore never carry data-bs-dismiss: when the
+// mobile offcanvas is open, close it here while leaving the link's hash or URL
+// action intact. On desktop the same links are ordinary anchors.
+function initMobileNavigation() {
+  const nav = $('#portal-nav');
+  nav?.addEventListener('click', (event) => {
+    if (!event.target.closest('a') || !nav.classList.contains('show')) return;
+    window.bootstrap?.Offcanvas.getInstance(nav)?.hide();
+  });
+}
+
 // --- boot --------------------------------------------------------------------
 
 function boot() {
@@ -458,6 +471,7 @@ function boot() {
   readStateFromUrl();
   initFilterBar();
   initFindCouncil();
+  initMobileNavigation();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
   render();

@@ -629,6 +629,17 @@ html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
   word-break: break-all;
 }
 
+/* Coverage is deliberately prose-first: it explains the boundary around the
+   evidence before showing recency. The status terms are not controls, so they
+   read as a compact reference list on a phone as well as on a wide display. */
+.coverage-statuses { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-3); }
+.coverage-status { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); padding: var(--space-3); }
+.coverage-status h3 { margin-bottom: var(--space-1); }
+.coverage-status p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.freshness-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-3); }
+.freshness-item { border-left: 3px solid var(--accent-teal); background: var(--bg-surface); padding: var(--space-3) var(--space-4); }
+.freshness-item .small { display: block; color: var(--text-secondary); }
+
 /* Print.
  *
  * This evidence gets printed and carried into rooms, and the failure this

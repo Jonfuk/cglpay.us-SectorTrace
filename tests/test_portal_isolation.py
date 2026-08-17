@@ -50,6 +50,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/authority.js",
     "/js/pages/compare.js",
     "/js/pages/claims.js",
+    "/js/pages/coverage.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -140,6 +141,22 @@ def test_every_mapped_file_exists_on_disk():
     """A missing asset is a 500 at request time. Cheaper to find here."""
     for path, (filename, _type, directory) in STATIC_FILES.items():
         assert (directory / filename).is_file(), f"{path} maps to a missing file"
+
+
+def test_header_navigation_links_do_not_use_bootstrap_dismissal():
+    """Bootstrap prevents a dismissed anchor's native navigation action.
+
+    The mobile menu is closed by app.js after a link is clicked instead, which
+    leaves desktop links and browser link semantics intact.
+    """
+    html = (PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+    nav_start = html.index('<nav class="mainnav')
+    nav = html[nav_start:html.index("</nav>", nav_start)]
+    app = (PUBLIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'data-bs-dismiss="offcanvas"' not in nav
+    assert "function initMobileNavigation()" in app
+    assert "initMobileNavigation();" in app
 
 
 # --- the public API -----------------------------------------------------------

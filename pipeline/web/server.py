@@ -112,7 +112,7 @@ for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
-              "pfd", "authority", "compare", "claims"):
+              "pfd", "authority", "compare", "claims", "coverage"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
