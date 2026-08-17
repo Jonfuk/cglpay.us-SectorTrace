@@ -38,8 +38,8 @@ sweep rule (B4); m24, the council spend-transparency harvest module (G5);
 m25, the Skills for Care workforce intelligence module (G2, the access-shape
 review passed and the module followed); and the Adzuna terms review failed
 as the plan said it might, so G8 is dropped and the refusal is recorded in
-the phase entry. The one thing still gated is Phase 17 (the claims index,
-on campaign throughput).
+the phase entry. **Phase 17 landed on 2026-08-17 — C1 and C2, the claims
+index, the plan's last item** (see the phase entry).
 Read [the ordering principle](#the-ordering-principle) before picking one up:
 the plan's whole value is that the shared machinery lands before the five
 sections that would otherwise each retrofit it.
@@ -63,9 +63,10 @@ workstreams — new evidence terrain, the claims-to-evidence index, the sector
 universe, and further sources — were filed as §8; the third workstream of the
 first review, the verification campaign, is the register's own F-01 and F-03,
 already there. **Phase 19 (2026-08-16) closed the last four items of the
-plan — B4, G5, G2 and G8 — so what is left of the plan is Phase 17 (the
-claims index, gated on campaign throughput), P-03, and the two standing
-decisions above.**
+plan — B4, G5, G2 and G8 — and Phase 17 (2026-08-17) closed the claims index,
+so the plan is fully delivered: everything it sequenced has been worked.
+What remains open is P-03, and the two standing decisions above — both now
+recorded refusals rather than open questions.**
 
 | | Finding | What it needs |
 |---|---|---|
@@ -75,7 +76,7 @@ decisions above.**
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in — *refused again 2026-08-16 (Phase 14):* no comparison runs scheduled; `--jobs 1` stays the default, conservative rather than evidenced | Two full collections to compare, several hours each against live public bodies. The decision is yours, and it is recorded rather than re-opened by default. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
-| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab) — with D-04's 2,667 `unmatched_buyer_name` and 493 `possible_group_company` items folded into it**; **Phase 19 delivered B4 (registry to full verified coverage), G5 (m24, council spend) and G2 (m25, Skills for Care), and dropped G8 (Adzuna) when its terms review failed**. Remaining: Phase 17, gated on campaign throughput. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab) — with D-04's 2,667 `unmatched_buyer_name` and 493 `possible_group_company` items folded into it**; **Phase 19 delivered B4 (registry to full verified coverage), G5 (m24, council spend) and G2 (m25, Skills for Care), and dropped G8 (Adzuna) when its terms review failed**; **Phase 17 (2026-08-17) delivered Workstream C whole — C1 (the claim registry, migration `0048`) and C2 (the "What we can say" portal page)**. All four workstreams are now delivered. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
@@ -1222,7 +1223,7 @@ is introduced in two phases (11 and 12) rather than in seven.
 | ~~**14**~~ | P-03, F-05 — gated by runs and decisions, not by effort | M | **done 2026-08-16 — both refused, decisions recorded** |
 | ~~**15**~~ | G7, B2, G3, G4, G6 — the cheap sources that feed the rest | S–M | **done** |
 | **16** | B3, G1, B1 — direct pay evidence and its comparators | M–L | none |
-| **17** | C1, C2 — the claims-to-evidence index | M | Phase 8's output |
+| ~~**17**~~ | C1, C2 — the claims-to-evidence index | M | **done 2026-08-17 — the campaign's throughput met the gate (1,575 promotions, 68 verified census metrics)** |
 | ~~**18**~~ | F1, F2, F3, and D-04's remainder — the sector universe | L | **done 2026-08-15** |
 | **19** | B4, G5, G2, G8 — heavy, conditional, or gated on B4 | M–L | Phase 18 |
 
@@ -2119,17 +2120,59 @@ for m22 (`provider_own`) — a provider's website is its own copyright, and
 the export header must not claim a permission nobody granted. Both mirrors
 updated, per the licence test.
 
-### Phase 17 — The claims-to-evidence index · M — **planned**
+### Phase 17 — The claims-to-evidence index · M — **done** (2026-08-17)
 
-**C1** (the claim registry migration), **C2** (the "What we can say" page).
+Delivered **C1** (the claim registry migration) and **C2** (the "What we can
+say" page) — the last item of the plan. **The gate was met when this phase
+started:** the campaign had produced 1,575 `evidence_promotions` rows and 68
+verified census metrics in the live warehouse [live], which is what the plan
+meant by "enough verified evidence for the first claims to be real".
 
-**Gated on Phase 8's output, not on its code.** A claims index over zero
-verified rows is a schema with nothing in it. Start it once the campaign has
-produced enough verified evidence for the first claims to be real, and take
-open question 1's answer straight into it: a claim without a recorded reviewer
-and decision history is not a claim, the same standard migration `0030` sets
-for promotion. Nothing in the registry is computed — a claim is a statement
-linked to rows, and the linkage is a human judgement recorded like every other.
+**C1** is migration `0048` in both trees: `claims`, `claim_citations` and
+`claim_verifications`, with two triggers refusing a claim that is decided —
+or born decided — without a `claim_verifications` row behind it. That is the
+plan's standard taken literally: "a claim without a recorded reviewer and
+decision history is not a claim", the same shape migration `0030` gives
+promotion. The write half is `pipeline/claims.py`: create (draft only, by a
+named person), cite/uncite (draft only, the citation keyed to the row's own
+natural key and **refused if it does not resolve**, the same refusal
+promotion makes for a dead link), decide (published/rejected/retracted, one
+claim per request, decision row written before the status moves), reset
+(decisions stay). The lifecycle is draft → published/rejected, published →
+retracted, anything → draft by reset; a decided claim's text and citations
+are not editable underneath the decision.
+
+**C2** is the portal's `#/claims` page and `/api/v1/claims`. Only published
+claims are served; each renders with its citations resolved to labels and
+links, its own "you may not compute this from it" lines, and the reviewer and
+date. A citation whose row a module re-run replaced renders as unresolvable
+rather than dropped or guessed at — the census `stale()` honesty, one level
+up.
+
+What changed from the plan as it landed:
+
+- **The citation registry is a whitelist with per-table resolvers, not a
+  generic link.** A claim may cite nine evidence tables — the three promoted
+  document tables, verified census metrics (cited by their `metric_key`, and
+  only `verified = 1` rows are citable), statutory pay rates, ASHE
+  observations, NHS Jobs adverts, provider pay mentions and gender pay gap
+  filings. Contracts are deliberately not citable: a claim rests on rows with
+  a human verification step, and the notice corpus has none. The whitelist is
+  `CITABLE` in `pipeline/claims.py`, the same shape `promote.py`'s `KINDS`
+  has, and a test pins it.
+- **The open question was folded in as recommended.** Who writes claims and
+  does a claim need one named reviewer per row? Yes to both, recorded the
+  same identity `review_decisions` already uses: `created_by` on the claim,
+  `decided_by` on every decision, neither ever defaulted.
+- **The admin surface is a Claims tab in the census shape** — counts pill,
+  status-filtered worklist, an evidence picker per claim, decide buttons
+  behind the reviewer box, and a decision history that survives resets.
+- **The claims tables needed the pgload machinery.** `claim_verifications`
+  deliberately carries no foreign key (the loader writes verifications ahead
+  of the claims they vouch for, the same arrangement 0033 documents), so
+  `pgload.TRIGGER_EDGES` and `pgverify.GUARANTEES` each gained an entry.
+
+Suite green: **2,114 passed**, 3 skipped, 27 deselected; ruff clean.
 
 ### Phase 18 — The sector universe · L — **done** (2026-08-15)
 
@@ -2483,28 +2526,30 @@ coverage means candidate discovery everywhere rather than on the verified
 handful — the difference between searching one council and 315 that the
 README records m09/m10 once paying for ([README.md:163](README.md:163)).
 
-### Workstream C — The claims-to-evidence index
+### Workstream C — The claims-to-evidence index — **DELIVERED 2026-08-17 (Phase 17)**
 
 The difference between a data portal and an evidence portfolio: claims as
 rows, each linked to the verified evidence that supports it, with the caveats
 that travel with it. Changes no CAVEATS — it packages them.
 
-**C1. A claim registry (migration) · M** — a sanctioned table where campaign
+**C1. A claim registry (migration) · M — DELIVERED** — a sanctioned table where campaign
 claims are rows: the claim's text, the verified evidence rows supporting it,
 the caveats attached, the reviewer and the date. Nothing in it is computed —
 a claim is a statement linked to rows, and the linkage is a human judgement
 recorded like every other decision. The promotion guarantee (migration `0030`)
 sets the standard: a claim without a recorded reviewer and decision history
-is not a claim.
+is not a claim. See migration `0048` and the Phase 17 record.
 
-**C2. The "What we can say" portal page · M** — renders the registry: each
+**C2. The "What we can say" portal page · M — DELIVERED** — renders the registry: each
 claim with its citations and its "you may not compute this from it" lines.
 Read-only like every portal surface; the claims themselves are maintained in
-the same review-and-decide workflow as everything else.
+the same review-and-decide workflow as everything else — the operator UI's
+Claims tab.
 
 Open question folded in: who writes claims, and does a claim need one named
 reviewer per row, the same identity `review_decisions` already records? The
-recommendation is the one open question 1 already makes for candidates.
+recommendation is the one open question 1 already makes for candidates —
+**adopted**: `created_by` on the claim, `decided_by` on every decision.
 
 ### Workstream F — The sector universe (the population workstream)
 

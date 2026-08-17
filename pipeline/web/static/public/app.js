@@ -231,6 +231,7 @@ const ROUTES = {
   '/pfd': () => import('/js/pages/pfd.js'),
   '/authorities': () => import('/js/pages/authority.js'),
   '/compare': () => import('/js/pages/compare.js'),
+  '/claims': () => import('/js/pages/claims.js'),
 };
 
 let disposeCurrent = null;

@@ -518,6 +518,39 @@ main:focus { outline: none; }
   text-transform: uppercase; letter-spacing: 0.05em; }
 .params td:first-child { white-space: nowrap; width: 1%; padding-right: var(--space-4); }
 
+/* What we can say — the claims index (Phase 17).
+ *
+ * A claim is a statement, so it is set as a quotation rather than as data:
+ * the blockquote is the claim, the citations list is what it rests on, and
+ * the caveats underneath are the lines that govern it. Nothing here is
+ * computed, and the page's job is to make that visible — the reader should
+ * see at a glance which parts of the card are the campaign's words and which
+ * are the evidence rows behind them. */
+.claim {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-surface); padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+.claim-text {
+  margin: 0; padding: 0 0 var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent-teal);
+  font-size: 17px; line-height: 1.5; color: var(--text-primary);
+}
+.claim-caveats { margin: var(--space-2) 0; }
+.claim-caveats .caveat-pinned { margin-bottom: var(--space-2); }
+.claim-citations { margin-top: var(--space-3); }
+.claim-citations h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin: 0 0 var(--space-2);
+}
+.claim-citations ul { list-style: none; margin: 0; padding: 0; }
+.claim-citations li { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
+.claim-citations li:first-child { border-top: none; }
+.citation-unresolved {
+  color: var(--accent-red); font-family: var(--mono); font-size: 12.5px;
+  word-break: break-all;
+}
+
 /* Print.
  *
  * This evidence gets printed and carried into rooms, and the failure this
