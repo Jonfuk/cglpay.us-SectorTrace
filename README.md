@@ -149,6 +149,8 @@ one or both.
 | `m21_ons_ashe` | ONS developer API | Median gross hourly pay (excl. overtime) by occupation and industry, UK and England — the comparator market for the sector's advertised pay, side-by-side only |
 | `m22_provider_pay_pages` | The tracked providers' own websites | Pay figures published on provider career and reward pages — advertised bands and listed rates, attributed exactly (the page is the provider's own site) |
 | `m23_sector_universe` | *(fetches nothing)* | The sector population reconstructed from what is collected: the tracked providers, their companies/charities/CQC registrations, every distinct awardee in the notices, and unmatched buyers captured as funders — the denominator for every "we track N of the sector's ~M" statement, with m04's match-basis discipline on every row |
+| `m24_council_spend` | Council websites | £500+ spend-transparency files discovered on each council's own domain — "council X paid provider Y £Z in [period]", actual money rather than notices, with the NULL discipline doing the work on unreadable lines and files |
+| `m25_skills_for_care` | Skills for Care | ASC-WDS adult social care workforce estimates: pay and turnover comparators per (area, sector, service, job role), from the publisher's Excel data downloads, stored as published |
 
 ### Run order
 
@@ -167,7 +169,7 @@ deterministic and two logs are comparable). Three orderings matter:
 | --- | --- | --- |
 | everything | `m00_geography` | every source joins to the authorities table |
 | `m04_companies` | `m03_charity_finance`, `m05_cqc` | both publish company numbers; without them every company name match stays unconfirmed |
-| `m09`, `m10` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched |
+| `m09`, `m10`, `m24` | `m15_foi` | supplies an authoritative website for each authority — without it only the hand-verified handful can be searched, and m24 has no way to discover a spend file |
 | `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
 | `m20_gender_pay_gap` | `m04_companies` | company-number matching reads the identifiers `m04` discovered |
 | `m23_sector_universe` | `m01_procurement`, `m03_charity_finance`, `m04_companies`, `m05_cqc` | it reconciles their output — awardees, charities, companies, CQC providers — into one population; without them it is a capture of nothing |
@@ -444,10 +446,19 @@ portal is at `/`, and the operator tools — the review queue and the raw
 warehouse browser — moved to `/admin`, linked from the portal's header.
 
 The portal is built for people who need to read this evidence rather than run
-the pipeline: union researchers, journalists, public health analysts. Seven
+the pipeline: union researchers, journalists, public health analysts. Eight
 sections — overview, pay evidence, contracts, geography, treatment demand,
-coroners' Prevention of Future Deaths reports, and a page per provider — over
-a read-only `/api/v1/` API.
+coroners' Prevention of Future Deaths reports, *What we can say* (the claims
+index), and a page per provider — over a read-only `/api/v1/` API.
+
+*What we can say* is the claims-to-evidence index (Workstream C): the claims
+the campaign makes, each rendered with the evidence rows that support it and
+its own "you may not compute this from it" lines. Nothing on that page is
+computed — a claim is a statement written by a person, linked to rows a
+person picked, and approved by a named reviewer, the same standard migration
+0030 sets for promotion. Only published claims are served, and a claim is
+published only by a recorded decision (migration 0048's triggers enforce
+that). The claims are maintained in the operator UI's Claims tab.
 
 Since Phase 11 the portal also has a page per authority, and since Phase 13 a
 compare view: `#/compare?ons_code=...&ons_code=...` draws two or more
@@ -550,11 +561,22 @@ It binds every interface, so another machine on the network reaches it at
 start.cmd web
 ```
 
-Five screens: an overview of what is pending by module and item type; the
+Six screens: an overview of what is pending by module and item type; the
 queue itself, filterable and searchable, with approve/reject/reset per item or
 across a selection; the Candidates tab, where a document becomes evidence; the
 Census tab, where a parsed figure is checked against the archived page it came
-from; a browser for every table and view; and a SQL box.
+from; the Claims tab, where a campaign claim is written, linked to its
+evidence and decided; a browser for every table and view; and a SQL box.
+
+The Claims tab is the maintenance half of the portal's *What we can say*
+page. A claim is a statement written by a person, linked to the evidence rows
+that support it — picked by searching a citable evidence table, never typed —
+and decided by a named reviewer. Draft, published, rejected and retracted are
+the lifecycle, and migration 0048 refuses a decided claim without a recorded
+decision behind it, the same structural guarantee 0030 gives promotion. A
+published claim reaches the portal; the others stay on this tab with their
+decision history, which is what makes "who said this claim could be made?"
+answerable.
 
 Three things exist because the queue is thousands of rows and two item types
 are 72% of it:

@@ -437,6 +437,29 @@
     <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="claims">
+    <h3><code>/api/v1/claims</code></h3>
+    <p>
+      The campaign's claims, each linked to the evidence that supports it
+      and approved by a named reviewer. Nothing in this response is
+      computed: the claim text is what a person wrote, the citations are
+      rows a person picked, and the caveats are lines a person wrote about
+      what may not be computed from it.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>claims</code>: an array of <code>id</code>,
+      <code>claim_text</code>, <code>caveats</code> (one line each),
+      <code>citations</code> (each with a <code>resolved</code> object of
+      <code>label</code>, <code>url</code>, <code>source_url</code> and
+      <code>retrieved_at</code> — or <code>null</code> when the row it named
+      is no longer in the warehouse), <code>published_by</code>,
+      <code>published_at</code> and <code>note</code>. Only published claims
+      are served; a claim is published only by a recorded decision.
+    </p>
+    <p><a href="/api/v1/claims"><code>/api/v1/claims</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="freshness">
     <h3><code>/api/v1/freshness</code></h3>
     <p>

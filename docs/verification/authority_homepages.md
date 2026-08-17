@@ -155,3 +155,32 @@ Kent is the one authority holding a `base_url` that did not answer today: it
 was verified by request on 2026-08-11 and returned `403` on the 14th, which
 is a bot block appearing rather than a URL going wrong. Its entry keeps its
 original date.
+
+## Re-verified 2026-08-16 (Phase 19, B4)
+
+The same 49 candidates were fetched again through the pipeline's own client,
+plus the replacements this document named without testing. **Two answered**
+and are now in the registry:
+
+| Authority | ONS code | Stored |
+| --- | --- | --- |
+| Broadland | `E07000144` | https://www.southnorfolkandbroadland.gov.uk |
+| South Norfolk | `E07000149` | https://www.southnorfolkandbroadland.gov.uk |
+
+The other 47 answered exactly as before: 34 still refuse the client (403 bot
+blocks that do not move between passes), six still serve a bot challenge or
+an unrecognisable page under a 200, six still fail TLS or connection
+verification, and Liverpool's robots.txt still disallows the fetch. Those
+stay unverified — a bot block that appears in August is no more a verified
+URL than one that appeared in June, and the queue remains the answer route
+for each of them.
+
+The same pass ran the committee-system discovery m10 uses at runtime over
+the 212 authorities with no committee URL: a committee-system link on the
+council's own home page, confirmed by probing the system's signature paths.
+**Eight answered** (Isles of Scilly, Three Rivers, Dover, Sevenoaks,
+Tonbridge and Malling, South Kesteven, West Suffolk, and Broadland via the
+shared South Norfolk portal) and are committed to the registry. The other
+174 councils do not publish a committee-system link on their home page;
+their `committee_url_unknown` items stay in the queue, and the review UI
+remains the answer route (D-05).

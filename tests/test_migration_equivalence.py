@@ -97,8 +97,8 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 45
+        # through. 48 = 47 + 0048 (the claims registry, Phase 17).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 48
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):
@@ -198,7 +198,10 @@ class TestPostgresTreeSpecifics:
             assert raises == errcodes, (
                 f"{path.name}: {raises} RAISE EXCEPTION but {errcodes} with an errcode")
 
-    def test_all_five_refusals_are_present(self):
+    def test_all_refusals_are_present(self):
+        """The seven refusals are settled decision 4's mechanism, plus the
+        claims registry's (migration 0048): the trigger set is now seven, and
+        this list is the contract a new one must be added to deliberately."""
         triggers = declarations(POSTGRES)["triggers"]
         assert triggers == {
             "cdp_documents_need_a_promotion",
@@ -206,6 +209,8 @@ class TestPostgresTreeSpecifics:
             "foi_requests_need_a_promotion",
             "census_metric_verify_needs_a_decision",
             "census_metric_insert_needs_a_decision",
+            "claims_insert_needs_a_decision",
+            "claims_status_needs_a_decision",
         }
 
     def test_every_trigger_function_returns_new(self):

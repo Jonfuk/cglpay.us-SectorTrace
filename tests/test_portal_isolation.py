@@ -49,6 +49,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/pfd.js",
     "/js/pages/authority.js",
     "/js/pages/compare.js",
+    "/js/pages/claims.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -72,6 +73,7 @@ PUBLIC_API_ROUTES = {
     "layers",
     "pfd",
     "freshness",
+    "claims",
 }
 
 # Route patterns under /api/v1/ that take a parameter.
