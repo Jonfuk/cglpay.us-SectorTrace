@@ -50,6 +50,7 @@ def test_readme_documents_every_export_target():
     text = README.read_text(encoding="utf-8")
     missing = [t for t in EXPORT_TARGETS if f"export {t}" not in text]
     assert missing == [], f"export targets missing from README.md: {missing}"
+    assert "ten CSV tabs" in text
 
 
 def test_readme_documents_both_entry_points():
@@ -99,3 +100,9 @@ def test_caveats_leads_with_what_must_not_be_computed():
     # the specific prohibitions the brief calls out
     assert "claims-per-employee" in caveats
     assert "workforce census" in caveats.lower()
+
+
+def test_caveats_cover_the_newest_evidence_modules():
+    caveats = (REPO_ROOT / "docs" / "CAVEATS.md").read_text(encoding="utf-8")
+    assert "Council spend files (Module 24)" in caveats
+    assert "Skills for Care estimates (Module 25)" in caveats

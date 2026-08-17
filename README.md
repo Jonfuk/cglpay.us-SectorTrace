@@ -38,6 +38,7 @@ arguments they show the help menu.
 ./start.sh run m02_tribunals --limit 5                # smoke test
 ./start.sh run m03_charity_finance --dry-run          # fetch/parse, write nothing
 ./start.sh export all                                 # generate every export
+./start.sh coverage-report --output docs/coverage-baseline.json # read-only scorecard
 ./start.sh web                                        # browse the warehouse, clear the review queue
 ```
 
@@ -114,7 +115,7 @@ safe to repeat.
 **Re-runs are cheap, but only `m01_procurement` truly resumes.** It is the one
 module that records a cursor (`module_cursors`), because Find a Tender is
 paged and picking the page back up is the difference between minutes and
-hours. The other twenty-three restart from the beginning — what makes that
+hours. The other twenty-five restart from the beginning — what makes that
 acceptable rather than wasteful is the conditional-request cache: a document
 that has not changed answers `304` and is read from the raw archive instead of
 downloaded again. The requests are still made, at the same one per two seconds
@@ -203,10 +204,10 @@ the next only begins once it has finished — `m04` still never starts before
 
 | Wave | Modules | Backends |
 | --- | --- | --- |
-| 1 | `m00`, `m02`, `m03`, `m06`, `m08` | ArcGIS, GOV.UK, Charity Commission, NHS, Judiciary — all different |
-| 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15` | FTS/CF, CQC, GOV.UK ×3, Fingertips, local, WDTK |
-| 3 | `m04`, `m09`, `m10` | Companies House, council sites |
-| 4 | `m23` | none — reconciliation only |
+| 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25` | Independent geography, provider, workforce, pay and comparator sources |
+| 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15`, `m19` | Sources that use geography, provider accounts, or both |
+| 3 | `m04`, `m09`, `m10`, `m24` | Companies House and council sites, after their identifiers and home pages exist |
+| 4 | `m20`, `m23` | Gender pay matching and sector reconciliation, after company/source evidence exists |
 
 This is safe because the per-host rate limit is enforced **process-wide**. The
 four modules that share `www.gov.uk` queue behind each other on that host and
@@ -281,7 +282,7 @@ the parser understands) and `committee_system_unsupported`.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then bundle
-./start.sh export sheets     # nine CSV tabs
+./start.sh export sheets     # ten CSV tabs
 ./start.sh export geojson    # four Leaflet layers
 ./start.sh export echarts    # dashboard series
 ./start.sh export docs       # regenerate DATA_DICTIONARY.md
@@ -456,9 +457,9 @@ index), and a page per provider — over a read-only `/api/v1/` API.
 the campaign makes, each rendered with the evidence rows that support it and
 its own "you may not compute this from it" lines. Nothing on that page is
 computed — a claim is a statement written by a person, linked to rows a
-person picked, and approved by a named reviewer, the same standard migration
-0030 sets for promotion. Only published claims are served, and a claim is
-published only by a recorded decision (migration 0048's triggers enforce
+person picked, and approved by a named reviewer. Only published claims are
+served, and a claim is published only by a recorded decision (migration
+0048's triggers enforce
 that). The claims are maintained in the operator UI's Claims tab.
 
 Since Phase 11 the portal also has a page per authority, and since Phase 13 a

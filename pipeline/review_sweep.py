@@ -49,103 +49,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _universe_answers_buyer(conn: sqlite3.Connection) -> list[tuple]:
-    """`unmatched_buyer_name` items whose name the universe build captured.
-
-    The item was filed because m01 could not match the buyer to an authority.
-    Phase 18's build (m23) then captured every such name systematically as a
-    funder — the queue's labour, done once in a form that produces the
-    universe instead of 2,667 unconnected items. The item is answered when
-    the name is now a `sector_universe` row (or an awardee row it merged
-    into); the evidence names the row and its basis, and says plainly that
-    the name is not an authority. A name the build found to be an authority
-    after all (overrides changed since m01 ran) is skipped here — that is
-    m01's answer to give, on its next run.
-    """
-    from pipeline.modules.m23_sector_universe import normalise_name
-
-    rows = conn.execute(
-        "SELECT id, raw_value FROM review_queue "
-        "WHERE item_type = 'unmatched_buyer_name' AND status = 'pending'"
-    ).fetchall()
-    universe = {r["normalised_name"]: r for r in conn.execute(
-        "SELECT normalised_name, canonical_name, entity_type, match_basis "
-        "FROM sector_universe WHERE normalised_name IS NOT NULL"
-    ).fetchall()}
-    out = []
-    for item_id, raw in rows:
-        row = universe.get(normalise_name(str(raw)))
-        if row is None:
-            continue
-        out.append((item_id,
-                     f"the name is not an authority; the universe build captured it as "
-                     f"a {row['entity_type']} ({row['canonical_name']!r}, match_basis "
-                     f"{row['match_basis']}) in sector_universe"))
-    return out
-
-
-def _universe_answers_group_company(conn: sqlite3.Connection) -> list[tuple]:
-    """`possible_group_company` items whose company the universe build
-    captured.
-
-    The item asked whether a fuzzy search hit belonged to a tracked
-    provider's group. m23 captures every such candidate under its company
-    number with m04's 'name_only_unconfirmed' basis — recorded, never
-    linked. The item is answered in the sense review_sweep answers: the
-    systematic capture exists and the item's form of that labour (one review
-    row per candidate, producing nothing) is done. The evidence says so, and
-    says that confirmation is still a human's, on the universe row.
-    """
-    rows = conn.execute(
-        "SELECT id, raw_value FROM review_queue "
-        "WHERE item_type = 'possible_group_company' AND status = 'pending'"
-    ).fetchall()
-    companies = {r["company_number"]: r for r in conn.execute(
-        "SELECT company_number, canonical_name, match_basis "
-        "FROM sector_universe WHERE company_number IS NOT NULL"
-    ).fetchall()}
-    out = []
-    for item_id, raw in rows:
-        number = str(raw).split(" ", 1)[0].strip()
-        row = companies.get(number)
-        if row is None:
-            continue
-        out.append((item_id,
-                     f"the company is captured in sector_universe under {number} "
-                     f"({row['canonical_name']!r}, match_basis {row['match_basis']}); "
-                     f"NOT confirmed as part of any provider's group — confirmation "
-                     f"is a human decision, tracked on the universe row"))
-    return out
-
-
-def _universe_answers_name_match(conn: sqlite3.Connection) -> list[tuple]:
-    """`unconfirmed_name_match` items whose company the universe build
-    captured. The same shape as the group-company rule; the company was
-    already in `companies` (m04 stored exact name matches), and m23 carries
-    it into the universe with the same unconfirmed basis.
-    """
-    rows = conn.execute(
-        "SELECT id, raw_value FROM review_queue "
-        "WHERE item_type = 'unconfirmed_name_match' AND status = 'pending'"
-    ).fetchall()
-    companies = {r["company_number"]: r for r in conn.execute(
-        "SELECT company_number, canonical_name, match_basis "
-        "FROM sector_universe WHERE company_number IS NOT NULL"
-    ).fetchall()}
-    out = []
-    for item_id, raw in rows:
-        number = str(raw).split(" ", 1)[0].strip()
-        row = companies.get(number)
-        if row is None:
-            continue
-        out.append((item_id,
-                     f"the company is captured in sector_universe under {number} "
-                     f"({row['canonical_name']!r}, match_basis {row['match_basis']}); "
-                     f"the link to the provider is still unconfirmed and stays a "
-                     f"human decision"))
-    return out
-
-
 def _registry_answers_committee_url(conn: sqlite3.Connection) -> list[tuple]:
     """`committee_url_unknown` items whose authority is now in the registry.
 
@@ -217,27 +120,6 @@ RULES: dict[str, dict] = {
                  "mySociety profiles — and m09 would not raise the item today"),
         "find": _website_answers_authority_website,
     },
-    "unmatched_buyer_captured_as_funder": {
-        "module": "m23_sector_universe",
-        "why": ("filed when the buyer name matched no authority; the universe "
-                 "build now captures every such name systematically as a "
-                 "funder (Phase 18, F1)"),
-        "find": _universe_answers_buyer,
-    },
-    "possible_group_company_in_universe": {
-        "module": "m23_sector_universe",
-        "why": ("filed when a company-name search hit did not exactly match a "
-                 "provider variant; the universe build captures every such "
-                 "candidate under its number with m04's unconfirmed basis"),
-        "find": _universe_answers_group_company,
-    },
-    "unconfirmed_name_match_in_universe": {
-        "module": "m23_sector_universe",
-        "why": ("filed when an exact company-name match still needed a human; "
-                 "the universe build now carries the company with the same "
-                 "unconfirmed basis"),
-        "find": _universe_answers_name_match,
-    },
     "pfd_concerns_in_pdf_only": {
         "module": "m08_pfd_reports",
         "why": ("filed when the report's concerns were in a PDF this pipeline "
@@ -291,25 +173,34 @@ def sweep(conn: sqlite3.Connection, rule: str | None = None,
         if rule and name != rule:
             continue
         rows = _matches(conn, spec)
-        closed[name] = len(rows)
         if dry_run or not rows:
+            closed[name] = len(rows)
             continue
 
-        for item_id, evidence in rows:
-            conn.execute(
-                "INSERT INTO review_resolutions "
-                "(review_item_id, rule, evidence, status_before, resolved_at) "
-                "VALUES (?, ?, ?, 'pending', ?)",
-                (item_id, name, evidence, resolved_at))
-            # Guarded on 'pending' in the UPDATE as well as in the SELECT: the
-            # two are not one statement, and a person deciding an item between
-            # them must win.
-            conn.execute(
-                "UPDATE review_queue SET status = 'answered', resolved_at = ? "
-                "WHERE id = ? AND status = 'pending'",
-                (resolved_at, item_id))
-        conn.commit()
-        log.info("review.swept", rule=name, closed=len(rows), module=spec["module"])
+        applied = 0
+        try:
+            for item_id, evidence in rows:
+                # Change state first and record a resolution only when the
+                # conditional update actually won. A concurrent human decision
+                # must not acquire a false automated audit row.
+                cursor = conn.execute(
+                    "UPDATE review_queue SET status = 'answered', resolved_at = ? "
+                    "WHERE id = ? AND status = 'pending'",
+                    (resolved_at, item_id))
+                if cursor.rowcount != 1:
+                    continue
+                conn.execute(
+                    "INSERT INTO review_resolutions "
+                    "(review_item_id, rule, evidence, status_before, resolved_at) "
+                    "VALUES (?, ?, ?, 'pending', ?)",
+                    (item_id, name, evidence, resolved_at))
+                applied += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        closed[name] = applied
+        log.info("review.swept", rule=name, closed=applied, module=spec["module"])
 
     return {"closed": closed, "total": sum(closed.values()), "dry_run": dry_run,
              "resolved_at": resolved_at}

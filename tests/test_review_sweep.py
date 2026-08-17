@@ -87,6 +87,28 @@ def test_it_is_idempotent(queued):
         "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 1
 
 
+def test_it_counts_and_records_only_successful_conditional_updates(queued, monkeypatch):
+    """A stale/duplicate match must not create an audit row for an update that
+    did not actually move a pending item to answered."""
+    item_id = queued.execute(
+        "SELECT id FROM review_queue WHERE raw_value = '2026-0001'").fetchone()[0]
+    monkeypatch.setattr(review_sweep, "RULES", {
+        "duplicate_match": {
+            "module": "test",
+            "why": "exercise the conditional update",
+            "find": lambda conn: [(item_id, "first"), (item_id, "stale second")],
+        }
+    })
+
+    result = review_sweep.sweep(queued)
+
+    assert result["closed"] == {"duplicate_match": 1}
+    assert result["total"] == 1
+    assert queued.execute(
+        "SELECT COUNT(*) FROM review_resolutions WHERE rule = 'duplicate_match'"
+    ).fetchone()[0] == 1
+
+
 # --- what it refuses to touch --------------------------------------------------
 
 

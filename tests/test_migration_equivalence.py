@@ -97,8 +97,8 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 48 = 47 + 0048 (the claims registry, Phase 17).
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 48
+        # through. 49 = 48 + 0049 (promotion decision provenance).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 49
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):
@@ -211,6 +211,7 @@ class TestPostgresTreeSpecifics:
             "census_metric_insert_needs_a_decision",
             "claims_insert_needs_a_decision",
             "claims_status_needs_a_decision",
+            "ai_promotion_requires_provenance",
         }
 
     def test_every_trigger_function_returns_new(self):

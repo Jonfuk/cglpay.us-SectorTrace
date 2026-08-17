@@ -668,9 +668,38 @@ def benchmark(
             if "p50_ratio" not in row:
                 ui.warn(f"  {row['name']}: {row['note']}")
                 continue
-            ui.info(f"  {row['name']:<34} "
+                ui.info(f"  {row['name']:<34} "
                      f"{row['left_p50_ms']:>9,.1f} -> {row['right_p50_ms']:>9,.1f} ms   "
                      f"x{row['p50_ratio']}")
+
+
+@app.command("coverage-report")
+def coverage_report(
+    output: str = typer.Option(
+        None, help="Write the JSON baseline to this path instead of stdout"),
+    tier: str = typer.Option("upper", help="upper or all authority tier"),
+) -> None:
+    """Build a read-only coverage, review, freshness and provenance baseline."""
+    import json
+    from pathlib import Path
+
+    from pipeline import completeness
+    from pipeline.web.queries import readonly_connection
+
+    configure_logging("coverage-report")
+    settings = get_settings()
+    conn = readonly_connection(settings)
+    try:
+        report = completeness.baseline(conn, tier=tier)
+    finally:
+        conn.close()
+
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if output:
+        Path(output).write_text(payload, encoding="utf-8")
+        typer.echo(f"coverage baseline written to {output}")
+    else:
+        typer.echo(payload, nl=False)
 
 
 def _report_verification(report: dict) -> None:

@@ -306,8 +306,9 @@ def _evidence_funnel(conn: sqlite3.Connection) -> dict:
     The same semantics as the admin Candidates tab (`candidates.counts`):
     undecided is total minus promoted minus rejected, because a candidate
     that was rejected is not waiting and a candidate that was promoted is
-    not undecided. Promoted means a human verified it, which is the only
-    way anything crosses into an evidence table (migration `0030`).
+    not undecided. Promoted means an eligible recorded decision exists in
+    `evidence_promotions`; its actor type distinguishes human and autonomous
+    decisions (migration `0049`).
     """
     discovered = promoted = rejected = 0
     for table in ("cdp_document_candidates", "committee_paper_candidates",
@@ -452,6 +453,17 @@ FRESHNESS_TABLES: tuple[tuple[str, str], ...] = (
     ("NHS job adverts", "nhs_job_adverts"),
     ("Tribunal cases", "tribunal_cases"),
     ("Authorities", "authorities"),
+    ("Statutory pay rates", "statutory_pay_rates"),
+    ("Living Wage accreditation", "living_wage_accreditations"),
+    ("data.gov.uk catalogue", "data_gov_uk_datasets"),
+    ("Gender pay gap reports", "gender_pay_gap_reports"),
+    ("ONS ASHE observations", "ons_ashe_observations"),
+    ("Provider pay pages", "provider_pay_pages"),
+    # File-level rows survive a parser gap. They therefore distinguish a
+    # source that has gone stale from a current publication whose data rows
+    # could not be read, just as the authority coverage matrix does for m24.
+    ("Council spend files", "council_spend_files"),
+    ("Skills for Care files", "skills_for_care_files"),
 )
 
 
