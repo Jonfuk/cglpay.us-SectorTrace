@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-17T22:55:19Z",
+  "generated_at": "2026-08-17T23:19:31Z",
   "window": "2021-2026",
   "backend": "postgres",
   "detail_level": "aggregate_only",
-  "read_only_role_verified": false,
+  "read_only_role_verified": true,
   "coverage_cells": 2067,
   "coverage_status_counts": {
     "present": 1247,
@@ -21,6 +21,6 @@
   "missing_provenance_rows": 0,
   "notes": [
     "This file intentionally excludes authority, provider, URL, and row-level details.",
-    "DATABASE_RO_URL currently authenticates as a role with write privileges; replace it with a SELECT-only role before collection or backfill."
+    "The baseline was refreshed through the SELECT-only sectortrace_reader role."
   ]
 }
