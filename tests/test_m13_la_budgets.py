@@ -34,6 +34,15 @@ def test_detect_multiplier_handles_millions():
     assert budgets.detect_multiplier([["Data are reported in £ million."]]) == 1_000_000
 
 
+def test_detect_multiplier_accepts_later_preamble_cells():
+    rows = [
+        ["Worksheet"],
+        ["Notes", "", "The amounts are expressed in £000s."],
+        ["E-code", "ONS Code", "Local authority"],
+    ]
+    assert budgets.detect_multiplier(rows) == 1000
+
+
 def test_detect_multiplier_returns_none_when_absent():
     """Never a default: being wrong here is a 1,000x error on a public figure."""
     assert budgets.detect_multiplier([["Some sheet"], ["with no denomination"]]) is None

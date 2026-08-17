@@ -70,8 +70,12 @@ PAY_BAND_RE = re.compile(
 # an ASCII apostrophe, and may be absent entirely, so all forms are accepted.
 _APOS = r"[’‘'`´]?"
 MULTIPLIER_PATTERNS: list[tuple[re.Pattern, int]] = [
-    (re.compile(rf"£\s*{_APOS}\s*000|\bin thousands\b", re.IGNORECASE), 1000),
-    (re.compile(rf"£\s*{_APOS}\s*m\b|\bin millions\b|£\s?million", re.IGNORECASE), 1_000_000),
+    (re.compile(
+        rf"£\s*{_APOS}\s*000s?|\bin thousand(?:s)?\b|£\s*thousand(?:s)?\b",
+        re.IGNORECASE), 1000),
+    (re.compile(
+        rf"£\s*{_APOS}m\b|\bin million(?:s)?\b|£\s?million(?:s)?\b",
+        re.IGNORECASE), 1_000_000),
 ]
 
 
