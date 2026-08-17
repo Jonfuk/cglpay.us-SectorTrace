@@ -471,7 +471,9 @@ def _region_for_prefix(conn, office_prefix: str) -> str | None:
 def run(ctx: ModuleContext) -> None:
     module_name = "m02_tribunals"
     conn = ctx.conn
+    log.info("tribunals.phase", phase="seeding providers")
     providers.seed_providers(conn, commit=not ctx.dry_run)
+    log.info("tribunals.phase", phase="providers seeded")
 
     seen_cases: set[str] = set()
     unmapped_prefixes: set[str] = set()
@@ -479,7 +481,9 @@ def run(ctx: ModuleContext) -> None:
     total_documents = 0
     skipped_unmatched = 0
 
+    log.info("tribunals.phase", phase="opening HTTP client")
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
+        log.info("tribunals.phase", phase="HTTP client ready")
         ctx.phase("searching decisions")
         for variant in ctx.track(
                 SUPPLIER_NAME_VARIANTS["change_grow_live"], "name variants"):
