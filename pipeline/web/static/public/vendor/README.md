@@ -21,10 +21,11 @@ what is actually in the tree.
 | `tabulator.min.js` | `tabulator-tables` | 6.3.0 | 442,539 | https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js |
 | `tabulator_midnight.min.css` | `tabulator-tables` | 6.3.0 | 30,358 | https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_midnight.min.css |
 | `fuse.min.js` | `fuse.js` | 7.0.0 | 23,850 | https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js |
-| `date-fns.cdn.min.js` | `date-fns` | 3.6.0 | 98,562 | https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js |
+| `bootstrap.min.css` | `bootstrap` | 5.3.8 | 232,111 | https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css |
+| `bootstrap.bundle.min.js` | `bootstrap` | 5.3.8 | 80,496 | https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js |
 
-Globals exposed: `echarts`, `d3`, `Tabulator`, `Fuse`, `dateFns`.
+Globals exposed: `echarts`, `d3`, `Tabulator`, `Fuse`, and Bootstrap's `bootstrap` namespace.
 
-Licences: ECharts is Apache-2.0; D3, Tabulator, Fuse.js and date-fns are MIT.
+Licences: Bootstrap is MIT; ECharts is Apache-2.0; D3, Tabulator and Fuse.js are MIT.
 Each file carries its own copyright banner, which is why these are the
 unmodified minified builds rather than a re-bundle.

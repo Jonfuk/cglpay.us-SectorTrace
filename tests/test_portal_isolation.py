@@ -55,7 +55,8 @@ PUBLIC_STATIC_PATHS = {
     "/vendor/tabulator.min.js",
     "/vendor/tabulator_midnight.min.css",
     "/vendor/fuse.min.js",
-    "/vendor/date-fns.cdn.min.js",
+    "/vendor/bootstrap.min.css",
+    "/vendor/bootstrap.bundle.min.js",
 }
 
 # The portal's read-only API, as route names under /api/v1/.
@@ -244,6 +245,14 @@ def test_the_portal_page_loads_only_its_own_assets():
     # Links may cross the boundary; they still have to go somewhere real.
     for reference in ANCHOR_REFERENCE.findall(html):
         assert reference in STATIC_FILES, f"the portal links to {reference}, which is not served"
+
+
+def test_bootstrap_is_local_and_the_portal_has_no_cdn_dependency():
+    html = (PUBLIC_DIR / "index.html").read_text(encoding="utf-8")
+    assert '/vendor/bootstrap.min.css' in html
+    assert '/vendor/bootstrap.bundle.min.js' in html
+    assert 'cdn.' not in html.lower()
+    assert 'date-fns' not in html.lower()
 
 
 def test_the_admin_modules_import_only_from_each_other():
