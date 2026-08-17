@@ -102,6 +102,10 @@ postgres = [
     "psycopg_pool>=3.2",
 ]
 
+storage = [
+    "boto3>=1.34",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script

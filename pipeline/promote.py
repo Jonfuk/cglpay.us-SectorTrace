@@ -218,12 +218,12 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
              promoted_by.strip(), promoted_at, note,
              json.dumps(found, default=str), result.url, result.status_code,
              result.payload_sha256,
-             str(result.archived_path) if result.archived_path else None))
+            result.archived_ref))
 
         row = {
             spec["authority_column"]: authority,
             spec["target_url_column"]: url,
-            "archived_path": str(result.archived_path) if result.archived_path else None,
+            "archived_path": result.archived_ref,
             # Text extraction is not promotion's job. The bytes are archived
             # and hashed, which is what makes the row citable; m14 is where
             # reading documents lives.

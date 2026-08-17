@@ -345,7 +345,7 @@ def run(ctx: ModuleContext) -> None:
                 "financial_year": pub["financial_year"],
                 "title": pub["title"],
                 "document_url": attachment["url"],
-                "archived_path": str(file_result.archived_path) if file_result.archived_path else None,
+                "archived_path": file_result.archived_ref,
                 "sheets_total": len(tables),
                 "sheets_local_authority": la_sheets,
                 **provenance,

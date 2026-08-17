@@ -31,11 +31,11 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import structlog
 
 from pipeline import db, pdftext, providers
+from pipeline.archive import ArchiveError, get_archive
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -183,6 +183,7 @@ def run(ctx: ModuleContext) -> None:
     reports_read = 0
     passages_written = 0
     gaps_recorded = 0
+    archive = get_archive(ctx.settings)
 
     for row in ctx.track(reports, "annual reports"):
         if ctx.is_before_since(row["financial_year_end"]):
@@ -198,7 +199,11 @@ def run(ctx: ModuleContext) -> None:
             continue
 
         archived = row["archived_path"]
-        if not archived or not Path(archived).is_file():
+        try:
+            archived_bytes = archive.read(archived) if archived else None
+        except (ArchiveError, OSError, FileNotFoundError, ValueError):
+            archived_bytes = None
+        if archived_bytes is None:
             db.record_review_item(
                 conn, module_name, "annual_report_archive_missing", row["document_url"],
                 json.dumps({"provider_key": provider_key,
@@ -211,7 +216,7 @@ def run(ctx: ModuleContext) -> None:
             # note. Keyed on the payload hash it recorded, so a hit is
             # provably the same bytes rather than probably the same file.
             pages = pdftext.numbered_pages(
-                ctx.settings, M03_SOURCE_SYSTEM, row["payload_sha256"], archived)
+                ctx.settings, M03_SOURCE_SYSTEM, row["payload_sha256"], archived_bytes)
         except Exception as exc:
             db.record_review_item(
                 conn, module_name, "annual_report_unreadable", row["document_url"],

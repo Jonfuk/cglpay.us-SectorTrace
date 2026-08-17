@@ -48,6 +48,7 @@ from pathlib import Path
 import structlog
 
 from pipeline import db
+from pipeline.archive import get_archive
 from pipeline.config import Settings, get_settings
 
 log = structlog.get_logger()
@@ -232,7 +233,11 @@ def create(settings: Settings | None = None, destination: Path | None = None,
         conn.close()
 
     verified = verify_copy(source, target)
-    archive, listing = archive_inventory(settings.raw_archive_dir)
+    if settings.archive_backend == "filesystem":
+        archive, listing = archive_inventory(settings.raw_archive_dir)
+    else:
+        archive = get_archive(settings).inventory()
+        listing = [row["key"] for row in archive["objects"]]
 
     manifest = {
         "created_at": started.isoformat(timespec="seconds"),
