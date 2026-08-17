@@ -34,7 +34,7 @@ export async function render(main) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Treatment demand' }),
+      el('h1', { text: 'Treatment data' }),
       el('p', { class: 'lede' },
         'Indicators published by OHID through Fingertips, by local authority ',
         'and against the England figure.')),

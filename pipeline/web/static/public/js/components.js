@@ -333,7 +333,7 @@ export function statCard({ value, label, sub, caveat: caveatText, plain = false,
     el('div', { class: `value${plain ? ' plain' : ''}`, text: value }),
     el('div', { class: 'label' }, label, note ? note.button : null),
     sub ? el('div', { class: 'sub' }, sub) : null,
-    unverified ? el('span', { class: 'badge unverified', text: 'AWAITING VERIFICATION' }) : null,
+    unverified ? el('span', { class: 'badge unverified', text: 'Not yet human-verified' }) : null,
     note ? note.body : null);
 }
 

@@ -23,6 +23,12 @@ import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, caveat, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml } from '/js/components.js';
 
+const SOURCE_LABELS = {
+  contracts_finder: 'Contracts Finder',
+  all_staff: 'All staff',
+  change_grow_live: 'Change Grow Live',
+};
+
 export async function render(main) {
   const charts = [];
   let summary;
@@ -36,13 +42,11 @@ export async function render(main) {
   const cards = el('div', { class: 'grid cards' });
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'England-wide evidence on substance misuse treatment' }),
+      el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
       el('p', { class: 'lede' },
-        'A standing evidence base for the drug and alcohol treatment sector, ',
-        'assembled from public-domain sources. ',
-        el('strong', { text: 'Nothing here is inferred or defaulted' }),
-        ': a value that could not be parsed is empty with a logged reason, ',
-        'and every figure carries the document it came from.'),
+        'Explore published evidence about pay, commissioning, providers, treatment activity ',
+        'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
+        'missing values are never guessed.'),
       cards),
     el('div', { id: 'sources' }),
     el('div', { id: 'funnel' }),
@@ -133,11 +137,11 @@ function renderSources(container, summary) {
   const sources = summary.pipeline?.sources || [];
   const chips = sources.map((s) => el('div', { class: 'sourcechip' },
     el('span', { class: `dot ${s.last_retrieved ? 'green' : ''}` }),
-    el('span', { class: 'mono', text: s.source_system }),
+    el('span', { text: SOURCE_LABELS[s.source_system] || s.source_system }),
     el('span', { class: 'muted small', text: ago(s.last_retrieved) })));
 
   replace(container, section(
-    'What has been collected',
+    'Sources and latest updates',
     'Each source system, and when the pipeline last fetched from it.',
     el('div', { class: 'sourcestrip' }, chips.length ? chips
       : el('span', { class: 'muted', text: 'Nothing collected yet.' })),

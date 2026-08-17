@@ -36,7 +36,7 @@ export async function render(main) {
   const claims = data.claims || [];
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'What we can say' }),
+      el('h1', { text: 'Evidence-backed claims' }),
       el('p', { class: 'lede' },
         'The claims the campaign makes, each linked to the evidence that ',
         'supports it and approved by a named reviewer. ',
