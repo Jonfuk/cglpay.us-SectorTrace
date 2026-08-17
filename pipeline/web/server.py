@@ -555,6 +555,13 @@ class Handler(BaseHTTPRequestHandler):
                 or path == "/api/admin" or path.startswith("/api/admin/")
             ):
                 raise ApiError(f"No route for {path}", status=404)
+            if path == "/health" and self.command in ("GET", "HEAD"):
+                # Process-level readiness probe. Schema migration runs before
+                # the server starts; keeping this endpoint dependency-free
+                # means Railway can distinguish a live HTTP process from a
+                # database query failure reported by the application APIs.
+                return self._send(200, b"ok\n", "text/plain; charset=utf-8",
+                                  max_age=0)
             if path in STATIC_FILES and self.command in ("GET", "HEAD"):
                 return self._serve_static(path)
             if path.startswith("/api/"):

@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     # hostname or a password. `redacted_database_url` is what goes in a log.
     database_url: str | None = None
 
+    # A second PostgreSQL URL used only by the explicit mirror commands. It
+    # never selects the application's backend: DATABASE_URL remains the
+    # database normal commands write to. Keeping the source opt-in prevents a
+    # stale local URL from changing ordinary Railway or local runs.
+    database_source_url: str | None = None
+
     # The same warehouse, as a role that holds SELECT and nothing else.
     #
     # This is what the portal and the operator UI read through, and it is the
@@ -179,6 +185,10 @@ class Settings(BaseSettings):
     cqc_subscription_key: str | None = None
 
     google_service_account_json: Path | None = None
+    # Railway cannot see a local credential path. Deployments may provide the
+    # same JSON as base64 in this secret variable; the Sheets exporter decodes
+    # it in memory and never writes it into the container filesystem.
+    google_service_account_json_b64: str | None = None
     google_sheets_spreadsheet_id: str | None = None
 
     @field_validator("contact_email")
@@ -191,7 +201,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("database_url", "database_ro_url")
+    @field_validator("database_url", "database_ro_url", "database_source_url")
     @classmethod
     def _usable_database_url(cls, v: str | None) -> str | None:
         """An unusable URL is refused here, not at the first connection.
