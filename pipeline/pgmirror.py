@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pipeline import catalog, db, pgload, pgverify
+from pipeline import catalog, pgload, pgverify
 
 
 class MirrorError(RuntimeError):
