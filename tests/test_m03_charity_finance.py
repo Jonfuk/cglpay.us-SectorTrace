@@ -18,6 +18,8 @@ REAL_NOTE = (FIXTURES / "charity_accounts_staff_note.txt").read_text(encoding="u
     ("amounts in £'000", 1000),                   # ascii apostrophe
     ("£000 £000", 1000),                          # no apostrophe
     ("figures are in thousands", 1000),
+    ("Amounts are presented in £000s", 1000),
+    ("Amounts are shown in millions", 1_000_000),
     ("£m £m", 1_000_000),
     ("£ million", 1_000_000),
 ])

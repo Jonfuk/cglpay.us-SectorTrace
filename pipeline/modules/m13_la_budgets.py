@@ -81,9 +81,19 @@ def classify_body_type(ons_code: str) -> str:
     return _BODY_TYPE_BY_PREFIX.get((ons_code or "")[:3], "other_precepting_body")
 
 
-_MULTIPLIER_RE = re.compile(r"reported in\s*£?\s*(thousand|million)", re.IGNORECASE)
+_MULTIPLIER_RE = re.compile(
+    r"(?:reported|presented|shown|expressed)\s+in\s*£?\s*(thousands?|millions?)\b",
+    re.IGNORECASE,
+)
 _APOS = r"[’‘'`´]?"
-_THOUSAND_RE = re.compile(rf"£\s*{_APOS}\s*000|\bin thousands?\b", re.IGNORECASE)
+_THOUSAND_RE = re.compile(
+    rf"£\s*{_APOS}\s*000s?|\bin thousands?\b|£\s*thousands?\b",
+    re.IGNORECASE,
+)
+_MILLION_RE = re.compile(
+    r"£\s*(?:m|millions?)\b|\bin millions?\b",
+    re.IGNORECASE,
+)
 
 
 class BudgetParseError(RuntimeError):
@@ -103,13 +113,21 @@ def detect_multiplier(rows: list[list[str]]) -> int | None:
     """Denomination from the sheet's own preamble. None when absent — never
     a default, since being wrong here is a 1,000x error.
     """
-    for row in rows[:12]:
-        for cell in row[:3]:
+    # The preamble has moved between sheets and years.  Restrict the search
+    # to text before the data header so a budget-line description containing
+    # "million" cannot manufacture a denomination, but do not assume a fixed
+    # number of preamble rows or a fixed number of populated cells.
+    header = find_header_row(rows)
+    preamble = rows[:header] if header is not None else rows[:12]
+    for row in preamble:
+        for cell in row:
             m = _MULTIPLIER_RE.search(cell or "")
             if m:
-                return 1000 if m.group(1).lower() == "thousand" else 1_000_000
+                return 1000 if m.group(1).lower().startswith("thousand") else 1_000_000
             if _THOUSAND_RE.search(cell or ""):
                 return 1000
+            if _MILLION_RE.search(cell or ""):
+                return 1_000_000
     return None
 
 
