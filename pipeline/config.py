@@ -179,6 +179,10 @@ class Settings(BaseSettings):
     cqc_subscription_key: str | None = None
 
     google_service_account_json: Path | None = None
+    # Railway cannot see a local credential path. Deployments may provide the
+    # same JSON as base64 in this secret variable; the Sheets exporter decodes
+    # it in memory and never writes it into the container filesystem.
+    google_service_account_json_b64: str | None = None
     google_sheets_spreadsheet_id: str | None = None
 
     @field_validator("contact_email")
