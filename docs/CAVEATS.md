@@ -516,21 +516,21 @@ anyone using it.
   provider. A coverage statement ("we track N of the sector's ~M") must
   count identified rows for N and name its basis, or it is not the statement
   it looks like.
-- **`provider_key` is set only through an identifier** in
-  `provider_identifiers` (or a company row m04 seeded) — never through a
-  name. This is the one rule the whole universe exists to enforce.
+- **`provider_key` is set only through a verified identifier** in
+  `provider_identifiers` (or a company row m04 seeded) — never through an
+  unverified discovery or a name. This is the one rule the whole universe
+  exists to enforce.
 - **A funder is a buyer that matched no authority.** The funder rows include
   NHS bodies, police and other public bodies, suppliers that also
   commission, and names that are simply unidentifiable; they were captured
   from the name as published. A funder that is also an awardee appears under
   its awardee row.
-- **The 3,160 `unmatched_buyer_name` and `possible_group_company` items
-  were answered, not decided.** Phase 18 captured their names
-  systematically; `resolve-answered` then marked each item answered with its
-  evidence in `review_resolutions`, and `--reopen` undoes it. An answered
-  `possible_group_company` is still NOT a confirmed group company — the
-  evidence says so, and confirmation remains a human decision recorded on
-  the universe row.
+- **Capturing an `unmatched_buyer_name` or `possible_group_company` does not
+  answer its identity question.** Phase 18 captures these names
+  systematically as `name_only_unconfirmed` universe leads, while their
+  review items remain pending. A universe row is not confirmation that a
+  buyer is outside the authority spine or that a company belongs to a
+  provider group.
 - **`notices_count` is one layer and nothing more.** It counts distinct
   notices naming the organisation, by ppon or exact normalised name. It may
   be used as a share of that layer; it is not a size measure of the

@@ -264,8 +264,9 @@ def _evidence_funnel(conn: sqlite3.Connection) -> dict:
     The same semantics as the admin Candidates tab (`candidates.counts`):
     undecided is total minus promoted minus rejected, because a candidate
     that was rejected is not waiting and a candidate that was promoted is
-    not undecided. Promoted means a human verified it, which is the only
-    way anything crosses into an evidence table (migration `0030`).
+    not undecided. Promoted means an eligible recorded decision exists in
+    `evidence_promotions`; its actor type distinguishes human and autonomous
+    decisions (migration `0049`).
     """
     discovered = promoted = rejected = 0
     for table in ("cdp_document_candidates", "committee_paper_candidates",

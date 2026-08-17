@@ -15,6 +15,12 @@ rather than supplied, on instruction. Two decisions worth stating:
 
 Every column listed here must exist in the warehouse and must not be a
 restricted_ or personal-data column — tests assert both.
+
+The Sheets target is intentionally a readable campaign bundle, not a dump of
+every table. Modules m07, m09, m10, m12–m22, m24 and m25 remain available from
+the GeoJSON, ECharts, JSON and CSV export targets and the public API; they are
+explicitly outside the ten-tab Sheets contract until a tab can carry their
+source-specific caveats without becoming an unreadable bulk extract.
 """
 from __future__ import annotations
 

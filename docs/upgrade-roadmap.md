@@ -26,7 +26,7 @@ module on one side, the ONS ASHE comparator and the gender pay gap filings
 on the other, with the F-05 note that B3 was always making standing true
 (it feeds the one table history would be for, and the decision in Phase 14
 now has its mechanism). **Phase 18 landed the same day — the sector universe
-(F1, F2, F3) with D-04's remaining 3,160 review items folded in**, and the
+(F1, F2, F3), with D-04's identity leads enriched but still pending**, and the
 standing design question (new table or providers extension) settled as a new
 table — the argument is in migration `0045`. **Phase 14 landed on 2026-08-16
 and took its two decisions — both no: P-03 refused again, F-05 decided
@@ -76,7 +76,7 @@ recorded refusals rather than open questions.**
 | ~~**D-06**~~ | *Closed 2026-08-13* (`778476b`) — `backup --keep N`, labelled backups never pruned, cron and Task Scheduler lines in `docs/BACKUP.md`. | |
 | **P-03** | `--jobs > 1` is still opt-in — *refused again 2026-08-16 (Phase 14):* no comparison runs scheduled; `--jobs 1` stays the default, conservative rather than evidenced | Two full collections to compare, several hours each against live public bodies. The decision is yours, and it is recorded rather than re-opened by default. |
 | **W-05 – W-27** | ~~All twenty-one closed~~ | Phases 9–13 closed every finding from the 2026-08-14 comparison. **Phase 9 closed five** (W-05, W-08, W-10, W-18 outright, W-15 but for CQC — one URL check, below); **Phase 10 closed five more** (W-06, W-09, W-16, W-20, W-21); **Phase 11 closed five more** (W-13, W-12, W-27, W-17, W-14 — the authority spine); **Phase 12 closed four more** (W-23, W-26, W-25, W-24 — show what is already collected); **Phase 13 closed the last two** (W-11, W-19 — comparison, and the map layers, with the three §3J entries they ride with settled). |
-| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab) — with D-04's 2,667 `unmatched_buyer_name` and 493 `possible_group_company` items folded into it**; **Phase 19 delivered B4 (registry to full verified coverage), G5 (m24, council spend) and G2 (m25, Skills for Care), and dropped G8 (Adzuna) when its terms review failed**; **Phase 17 (2026-08-17) delivered Workstream C whole — C1 (the claim registry, migration `0048`) and C2 (the "What we can say" portal page)**. All four workstreams are now delivered. |
+| **§8 workstreams** | B, C, F, G — new terrain, the claims index, the sector universe, further sources | Phase 15 delivered the cheap half of G and B's smallest item; **Phase 16 delivered B3 whole (the provider pay-page module and the sustained m16 crawl), G1 (ONS ASHE) and B1 (gender pay gap filings)**; **Phase 18 delivered Workstream F whole — F1 (the universe build, m23), F2 (the coverage denominators), F3 (the sector-shape export tab)**; the captured identity leads remain visibly unresolved for review; **Phase 19 delivered B4 (registry to full verified coverage), G5 (m24, council spend) and G2 (m25, Skills for Care), and dropped G8 (Adzuna) when its terms review failed**; **Phase 17 (2026-08-17) delivered Workstream C whole — C1 (the claim registry, migration `0048`) and C2 (the "What we can say" portal page)**. All four workstreams are now delivered, with identity review still open. |
 
 **Phase 8 is delivered.** F-03 is closed and the mechanism it was gating
 exists, so the verification campaign is no longer waiting on a session — it is
@@ -1201,8 +1201,9 @@ is introduced in two phases (11 and 12) rather than in seven.
   produces no universe at the end. Deferred into Phase 18 deliberately, and
   the queue count stays high in the meantime; that is the correct reading of
   it, not a backlog. *Delivered 2026-08-15: the universe build (m23) captures
-  every one of them systematically, and `resolve-answered` closes the items
-  with their evidence recorded in `review_resolutions` — see Phase 18.*
+  every one of them systematically as unresolved leads. It does not answer
+  the identity question, and the items remain visible for review — see Phase
+  18.*
 - **B4 (full council-website coverage) comes after the campaign shows
   throughput, not before.** It multiplies candidate discovery from a verified
   handful to 347 councils. With 2,462 undecided candidates against zero
@@ -2178,16 +2179,16 @@ Suite green: **2,114 passed**, 3 skipped, 27 deselected; ruff clean.
 
 Delivered **F1** (m23, the universe build), **F2** (the coverage
 denominators), **F3** (the sector-shape export tab `10_Sector_Universe`) —
-**and D-04's remaining 3,160 review items, done here rather than in the
-queue**. Suite green: **1,883 passed**, 62 skipped, 25 deselected; ruff
+with D-04's remaining 3,160 review items enriched as unresolved leads. Suite
+green: **1,883 passed**, 62 skipped, 25 deselected; ruff
 clean.
 
 The record of what changed as it landed is at the end of the entry. The plan
 as written:
 
 **F1** (the universe build), **F2** (coverage denominators), **F3** (sector
-shape as a publication) — **and D-04's remaining 3,160 review items, done
-here rather than in the queue.**
+shape as a publication); D-04's identity leads remain in the queue for
+accountable decisions.
 
 That last part is the point of putting these together. `unmatched_buyer_name`
 (2,667) and `possible_group_company` (493) are the universe's reconciliation
@@ -2229,18 +2230,11 @@ discipline does not reach this.
   only the tracked handful, so that is all the build can reconcile. Widening
   it is new collection (B4-adjacent), not reconciliation, and the ten
   `possible_cqc_provider` items stay in the queue for the same reason.
-- **The 3,160 items closed through review_sweep, not inside the module.**
-  The build captures; the sweep's three new rules (`unmatched_buyer_
-  captured_as_funder`, `possible_group_company_in_universe`,
-  `unconfirmed_name_match_in_universe`) close the items once their universe
-  rows exist — evidence-driven, previewable, recorded in
-  `review_resolutions`, and reversible with `--reopen`. A buyer name that
-  matches an authority now (overrides change) is skipped by the build and
-  stays in the queue for m01's next run. The `possible_group_company`
-  evidence says in words that the capture is **not** confirmation of group
-  membership — that stays a human decision, on a row that now exists.
-  Against the live warehouse: **3,165 items** preview (2,667 + 493 + 5
-  `unconfirmed_name_match`), every one with a universe row behind it.
+- **The 3,160 items remain visible review leads.** The build captures them
+  systematically as name-only rows, but review_sweep no longer marks them
+  answered: the authority, provider, or group identity question is still a
+  human judgement. Every captured lead has a universe row behind it, but that
+  is enrichment, not confirmation.
 - **F2's denominator is the table; the statements that use it are future
   work, and said so.** The build logs the coverage counts
   (`universe.run_complete` carries totals by type and by basis), and the
@@ -2275,17 +2269,16 @@ discipline does not reach this.
   order), the phantom `0044_sector_universe` record removed from the live
   `schema_migrations`, and the phase then applied to the live warehouse for
   real: migration `0045`, the m23 build (29,680 rows, 20 identifier-linked
-  to tracked providers), and `resolve-answered` closing all 3,165 absorbed
-  items — the pending queue dropped 4,304 → 1,139, every closure recorded
-  in `review_resolutions` and reopenable.
+  to tracked providers). The captured identity leads remain pending until a
+  person decides them.
 
 Below is the plan as written.
 
 ---
 
 **F1** (the universe build), **F2** (coverage denominators), **F3** (sector
-shape as a publication) — **and D-04's remaining 3,160 review items, done
-here rather than in the queue.**
+shape as a publication). The remaining D-04 identity leads are captured here
+as enrichment but remain in the review queue for accountable decisions.
 
 That last part is the point of putting these together. `unmatched_buyer_name`
 (2,667) and `possible_group_company` (493) are the universe's reconciliation
@@ -2338,11 +2331,10 @@ question.
 
 - **The B4 gate was lifted, and the record of why is in the queue itself.**
   The phase plan gated B4 on campaign throughput — "multiplying discovery
-  into a queue that is the bottleneck is not progress". Phase 18 had since
-  closed 3,165 items and taken the pending queue from 4,304 to 1,139, so the
-  bottleneck that justified the gate had demonstrably cleared, and running
-  the phase was the decision to proceed. The judgement is recorded here so
-  the gate's reasoning and its lifting both survive.
+  into a queue that is the bottleneck is not progress". Phase 18 made the
+  identity leads easier to research by enriching them with universe rows;
+  the leads themselves remain visible, so the queue is still the campaign's
+  honest measure of unresolved identity work.
 - **B4's registry work was a re-verification pass, and it was honest about
   what did not move.** The 49 home pages the 2026-08-14 pass could not verify
   were fetched again through the pipeline's own client, plus the

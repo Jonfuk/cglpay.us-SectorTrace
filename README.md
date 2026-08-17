@@ -38,6 +38,7 @@ arguments they show the help menu.
 ./start.sh run m02_tribunals --limit 5                # smoke test
 ./start.sh run m03_charity_finance --dry-run          # fetch/parse, write nothing
 ./start.sh export all                                 # generate every export
+./start.sh coverage-report --output docs/coverage-baseline.json # read-only scorecard
 ./start.sh web                                        # browse the warehouse, clear the review queue
 ```
 
@@ -456,9 +457,9 @@ index), and a page per provider — over a read-only `/api/v1/` API.
 the campaign makes, each rendered with the evidence rows that support it and
 its own "you may not compute this from it" lines. Nothing on that page is
 computed — a claim is a statement written by a person, linked to rows a
-person picked, and approved by a named reviewer, the same standard migration
-0030 sets for promotion. Only published claims are served, and a claim is
-published only by a recorded decision (migration 0048's triggers enforce
+person picked, and approved by a named reviewer. Only published claims are
+served, and a claim is published only by a recorded decision (migration
+0048's triggers enforce
 that). The claims are maintained in the operator UI's Claims tab.
 
 Since Phase 11 the portal also has a page per authority, and since Phase 13 a

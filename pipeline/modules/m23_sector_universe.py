@@ -23,15 +23,11 @@ The inputs, and what each contributes:
     construction companies that won one in-scope lot. The universe is a
     capture of who shows up in the corpus, never a complete list of the
     sector.
-  * `review_queue` — the 2,667 `unmatched_buyer_name` and 493
-    `possible_group_company` items. These were the universe's reconciliation
-    labour arriving one review item at a time, in a form that produces no
-    universe at the end of it. The build is that labour done systematically
-    once: unmatched buyers are captured as funders (with a fresh check against
-    the authorities table, since overrides may have changed since m01 ran),
-    and possible-group companies are captured as candidates. Closure of the
-    items themselves happens through review_sweep's rules once their rows
-    exist, so every closure is recorded, previewable and reversible.
+  * `review_queue` — the `unmatched_buyer_name` and `possible_group_company`
+    items. The build captures those names systematically as unresolved leads:
+    unmatched buyers become name-only funders (after a fresh authority check)
+    and possible-group companies become name-only candidates. Capture is not
+    resolution: the original identity questions stay pending for a person.
 
 The match-basis discipline is m04's, kept exactly — see migration 0045 for
 the vocabulary. The one rule this module exists to enforce is its simplest
@@ -98,11 +94,13 @@ def _row_key(prefix: str, identifier: str) -> str:
 
 def _provider_identifiers(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
     """scheme -> {identifier: provider_key}, read once and shared by every
-    pass. Only these can ever set provider_key on a universe row.
+    pass. Only verified identifiers can set provider_key on a universe row;
+    discoveries stay unverified until a person confirms them.
     """
     by_scheme: dict[str, dict[str, str]] = {}
     for row in conn.execute(
-        "SELECT provider_key, scheme, identifier FROM provider_identifiers"
+        "SELECT provider_key, scheme, identifier FROM provider_identifiers "
+        "WHERE status = 'verified'"
     ).fetchall():
         by_scheme.setdefault(row["scheme"], {})[row["identifier"]] = row["provider_key"]
     return by_scheme
@@ -414,11 +412,10 @@ def _capture_funders(rows: dict[str, dict], stats: dict[str, dict],
     organisation — or become a name-only funder row. Returns (new rows,
     merged into existing).
 
-    Items are read whether 'pending' or 'answered': the sweep's answer to an
-    item IS its universe row, so a re-run after a sweep must rebuild the same
-    rows, not lose them. A person's own decision ('approved'/'rejected') is
-    respected — the build does not resurrect an item a human has disposed
-    of."""
+    Pending items are captured as unresolved leads. Historical `answered`
+    items are also read so older warehouses rebuild deterministically; new
+    captures are never marked answered. A person's own decision
+    ('approved'/'rejected') is respected."""
     created = 0
     merged = 0
     seen: set[str] = set()
@@ -460,9 +457,9 @@ def _capture_possible_group_companies(rows: dict[str, dict], stats: dict[str, di
     recorded, never linked. The confirmation the item asked for remains a
     human's, and it now has a row to confirm on.
 
-    Pending and answered items are read alike, for the same reason as the
-    funder pass: the answer the sweep records is the universe row, and a
-    rebuild must reproduce it. Decided items are not read."""
+    Pending and historical answered items are read alike so older warehouses
+    rebuild deterministically. The universe row is an unresolved lead, not an
+    answer to group membership. Decided items are not read."""
     from pipeline.modules.m04_companies import normalise_company_number
 
     created = 0

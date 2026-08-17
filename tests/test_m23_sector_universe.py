@@ -1,13 +1,12 @@
-"""Module 23 — the sector universe build, and the sweep rules that close the
-review items it absorbs.
+"""Module 23 — the sector universe build and its unresolved review leads.
 
 The phase plan's core claim is that the universe build and the 3,160
 `unmatched_buyer_name` / `possible_group_company` items are the same
 reconciliation labour, and that done systematically it produces a table
 instead of a queue. So most of these tests are about the discipline that
 keeps the universe defensible: provider_key only ever arrives through an
-identifier, name-only captures stay name-only, and the sweep only touches
-pending items and records every closure.
+identifier, name-only captures stay name-only, and capture never hides an
+identity question that still needs a person.
 """
 from __future__ import annotations
 
@@ -246,6 +245,21 @@ def test_no_provider_key_outside_provider_identifiers(universe_conn):
     assert row["provider_key"] is None
 
 
+def test_unverified_provider_identifier_does_not_link(universe_conn):
+    """A discovered identifier is a lead until a person verifies it."""
+    add_charity(universe_conn, number="9999998", provider_key="change_grow_live")
+    universe_conn.commit()
+    assert universe_conn.execute(
+        "SELECT status FROM provider_identifiers WHERE scheme = 'charity_number' "
+        "AND identifier = '9999998'").fetchone()["status"] == "unverified"
+
+    run_build(universe_conn)
+
+    row = universe_row(universe_conn, "charity:9999998")
+    assert row["match_basis"] == "register"
+    assert row["provider_key"] is None
+
+
 # --- idempotence and dry runs --------------------------------------------------
 
 def test_a_rebuild_produces_the_same_universe(universe_conn):
@@ -263,9 +277,7 @@ def test_a_rebuild_produces_the_same_universe(universe_conn):
 
 
 def test_a_rebuild_after_the_sweep_still_rebuilds_funders_and_candidates(universe_conn):
-    """The sweep's answer to an item IS its universe row, so a re-run after a
-    sweep must reproduce the same rows rather than losing the ones whose
-    items are no longer pending."""
+    """An unrelated deterministic sweep does not change universe inputs."""
     run_build(universe_conn)
     review_sweep.sweep(universe_conn)
     run_build(universe_conn)
@@ -301,7 +313,7 @@ def test_a_dry_run_writes_nothing(universe_conn):
         "SELECT COUNT(*) c FROM sector_universe").fetchone()["c"] == 0
 
 
-# --- the sweep closes what the universe captured -------------------------------
+# --- capture remains unresolved ------------------------------------------------
 
 def _pending_by_type(conn):
     return dict(conn.execute(
@@ -309,53 +321,16 @@ def _pending_by_type(conn):
         "GROUP BY item_type").fetchall())
 
 
-def test_the_sweep_closes_items_whose_universe_rows_exist(universe_conn):
+def test_the_sweep_leaves_captured_identity_questions_pending(universe_conn):
     run_build(universe_conn)
     review_sweep.sweep(universe_conn)
 
     statuses = {(r["item_type"], r["raw_value"]): r["status"] for r in universe_conn.execute(
         "SELECT item_type, raw_value, status FROM review_queue").fetchall()}
-    assert statuses[("unmatched_buyer_name", "NHS Barnsley ICB")] == "answered"
-    assert statuses[("unmatched_buyer_name", "Change Grow Live")] == "answered"
-    assert statuses[("possible_group_company", "14438204 CHANGE LIVE GROW LTD")] == "answered"
-    assert statuses[("unconfirmed_name_match", "01865768 Forward Trust Limited")] == "answered"
-
-    # The authority-named buyer never became a funder, so its item stays.
-    assert statuses[("unmatched_buyer_name",
-                     "Barnsley Metropolitan Borough Council")] == "pending"
-
-
-def test_every_closure_is_recorded_with_evidence(universe_conn):
-    run_build(universe_conn)
-    review_sweep.sweep(universe_conn)
-
-    rows = universe_conn.execute(
-        "SELECT rule, evidence, status_before FROM review_resolutions "
-        "WHERE rule IN ('possible_group_company_in_universe', "
-        "'unconfirmed_name_match_in_universe', "
-        "'unmatched_buyer_captured_as_funder') ORDER BY rule").fetchall()
-    rules = sorted({r["rule"] for r in rows})
-    assert rules == [
-        "possible_group_company_in_universe",
-        "unconfirmed_name_match_in_universe",
-        "unmatched_buyer_captured_as_funder",
-    ]
-    for row in rows:
-        assert row["status_before"] == "pending"
-        assert "sector_universe" in row["evidence"]
-
-
-def test_the_group_company_evidence_does_not_claim_confirmation(universe_conn):
-    """The item asked whether the company belongs to a provider's group. The
-    universe capture is not that answer, and the evidence must not say it
-    is."""
-    run_build(universe_conn)
-    review_sweep.sweep(universe_conn)
-    evidence = universe_conn.execute(
-        "SELECT evidence FROM review_resolutions "
-        "WHERE rule = 'possible_group_company_in_universe'").fetchone()["evidence"]
-    assert "NOT confirmed as part of any provider's group" in evidence
-    assert "human decision" in evidence
+    for status in statuses.values():
+        assert status == "pending"
+    assert universe_conn.execute(
+        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 0
 
 
 def test_the_sweep_leaves_decided_items_alone(universe_conn):
@@ -372,22 +347,12 @@ def test_the_sweep_leaves_decided_items_alone(universe_conn):
         "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()["status"] == "approved"
 
 
-def test_reopen_restores_the_items_in_one_operation(universe_conn):
-    run_build(universe_conn)
-    review_sweep.sweep(universe_conn)
-    count = review_sweep.reopen(universe_conn, "unmatched_buyer_captured_as_funder")
-    assert count == 2  # the ICB and the provider-buyer
-    pending = universe_conn.execute(
-        "SELECT COUNT(*) c FROM review_queue "
-        "WHERE item_type = 'unmatched_buyer_name' AND status = 'pending'").fetchone()["c"]
-    assert pending == 3
-
-
-def test_preview_counts_do_not_change_anything(universe_conn):
+def test_preview_has_no_universe_capture_resolution_rules(universe_conn):
     run_build(universe_conn)
     preview = review_sweep.preview(universe_conn)
-    assert preview["unmatched_buyer_captured_as_funder"] == 2
-    assert preview["possible_group_company_in_universe"] == 1
+    assert "unmatched_buyer_captured_as_funder" not in preview
+    assert "possible_group_company_in_universe" not in preview
+    assert "unconfirmed_name_match_in_universe" not in preview
     assert _pending_by_type(universe_conn)["unmatched_buyer_name"] == 3
 
 
