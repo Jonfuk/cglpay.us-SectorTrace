@@ -15,9 +15,12 @@ import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
 
 export async function render(main) {
   const charts = [];
-  let data;
+  let data, spending;
   try {
-    data = await fetchJSON('contracts', filterParams({ limit: 1000 }));
+    [data, spending] = await Promise.all([
+      fetchJSON('contracts', filterParams({ limit: 1000 })),
+      fetchJSON('council_spend', filterParams({ limit: 500 })),
+    ]);
   } catch (error) {
     replace(main, errorCard(error.message, () => render(main)));
     return () => {};
@@ -45,8 +48,39 @@ export async function render(main) {
   renderBreakdown(page.querySelector('#breakdown'), data, charts);
   renderBuyers(page.querySelector('#buyers'), data, charts);
   renderNotices(page.querySelector('#notices'), data);
+  renderCouncilSpend(page.querySelector('#notices').parentNode, spending);
 
   return () => disposeCharts(charts);
+}
+
+function renderCouncilSpend(container, data) {
+  const payments = data.payments || [];
+  const files = data.files || [];
+  const hasUnreadable = files.some((file) => file.parse_status === 'unreadable');
+  const sectionNode = section(
+    'Published council payments',
+    `${num(data.total)} payment line${data.total === 1 ? '' : 's'} in council spend-transparency files. These are actual published payments, separate from notice-stage contract values and authority budgets.`,
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveats?.payments, 'Not a sector-spend total'),
+      pinnedCaveat(data.caveats?.provider_match, 'Provider links are exact-name matches only'),
+      payments.length ? tableCard('Payment lines', [
+        { title: 'Authority', field: 'authority_name' },
+        { title: 'Period', field: 'period' },
+        { title: 'Payee', field: 'payee' },
+        { title: 'Published amount', field: 'amount_text' },
+        { title: 'Description', field: 'description' },
+        { title: 'Matched provider', field: 'canonical_name' },
+      ], payments, { height: 360 }) : noData('published council payment lines', './start.sh run m24_council_spend'),
+      hasUnreadable ? el('p', { class: 'small muted', text: 'Some collected files were unreadable. Their status is shown below; this is not evidence that the council published no payments.' }) : null,
+      files.length ? tableCard('Collected spend files', [
+        { title: 'Authority', field: 'authority_name' },
+        { title: 'Format', field: 'file_format' },
+        { title: 'Status', field: 'parse_status' },
+        { title: 'Rows', field: 'row_count' },
+        { title: 'Retrieved', field: 'retrieved_at', formatter: (c) => isoDate(c.getValue()) },
+      ], files, { height: 240 }) : null,
+      provenance(payments, { tables: ['council_spend', 'council_spend_files'], module: 'm24_council_spend' })));
+  container.append(sectionNode);
 }
 
 function renderShape(container, data, charts) {

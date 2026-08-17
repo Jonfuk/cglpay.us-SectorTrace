@@ -27,19 +27,119 @@ export async function render(main) {
     el('div', { class: 'hero' },
       el('h1', { text: 'Pay evidence' }),
       el('p', { class: 'lede' },
-        'What the public record shows about what this sector pays. ',
-        'Three separate sources, none of which is a payroll: charity accounts, ',
-        'advertised salaries, and a workforce census.')),
+        'Published pay evidence and labour-market comparators, kept in their ',
+        'own layers. None is a payroll, and this portal does not turn unlike ',
+        'sources into a single pay figure.')),
     el('div', { id: 'wage' }),
     el('div', { id: 'adverts' }),
+    el('div', { id: 'published-pay' }),
+    el('div', { id: 'benchmarks' }),
     el('div', { id: 'census' }));
   replace(main, page);
 
   renderWage(page.querySelector('#wage'), data, charts);
   renderAdverts(page.querySelector('#adverts'), data, charts);
+  renderPublishedPay(page.querySelector('#published-pay'), data);
+  renderBenchmarks(page.querySelector('#benchmarks'), data);
   renderCensus(page.querySelector('#census'), data, charts);
 
   return () => disposeCharts(charts);
+}
+
+// --- 2c. provider-published and statutory pay evidence ---------------------
+
+function renderPublishedPay(container, data) {
+  const rates = data.statutory_pay_rates || [];
+  const published = data.provider_published_pay || [];
+  const accreditations = data.living_wage_accreditations || [];
+  const genderPayGap = data.gender_pay_gap_reports || [];
+
+  replace(container, section(
+    'Published pay and employment evidence',
+    'Statutory hourly rates, provider-owned pages, Living Wage Foundation checks and gender pay gap filings. These are separate records, not a combined comparison.',
+    el('div', { class: 'grid two' },
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Statutory minimum rates' }),
+        pinnedCaveat(data.caveats?.statutory_pay_rates_note, 'Hourly floors only'),
+        rates.length ? tableCard('Published rates', [
+          { title: 'Period', field: 'period_label' },
+          { title: 'Band', field: 'band_label' },
+          { title: 'Role', field: 'band_role' },
+          { title: 'Rate (hourly)', field: 'amount', formatter: (c) => gbp(c.getValue(), { compact: false }) },
+          { title: 'Published value', field: 'value_text' },
+        ], rates, { height: 280 }) : noData('statutory pay rates', './start.sh run m17_statutory_pay_rates'),
+        provenanceFromRows(rates, { tables: ['statutory_pay_rates'], module: 'm17_statutory_pay_rates' })),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Living Wage Foundation checks' }),
+        pinnedCaveat(data.caveats?.living_wage_note, 'How to read “not found”'),
+        accreditations.length ? tableCard('Accreditation checks', [
+          { title: 'Provider', field: 'canonical_name' },
+          { title: 'Checked name', field: 'searched_variant' },
+          { title: 'Result', field: 'accredited', formatter: (c) => c.getValue() ? 'Exact name found on register' : 'Not found under checked name' },
+          { title: 'Register name', field: 'employer_name' },
+          { title: 'Retrieved', field: 'retrieved_at', formatter: (c) => isoDate(c.getValue()) },
+        ], accreditations, { height: 280 }) : noData('Living Wage Foundation checks', './start.sh run m18_living_wage'),
+        provenanceFromRows(accreditations, { tables: ['living_wage_accreditations'], module: 'm18_living_wage' }))),
+    el('div', { class: 'panel' },
+      el('h3', { text: 'Pay published on provider-owned pages' }),
+      pinnedCaveat(data.caveats?.provider_published_pay_note, 'An offer is not a payroll'),
+      published.length ? tableCard('Provider-published pay', [
+        { title: 'Provider', field: 'canonical_name' },
+        { title: 'Page section', field: 'section' },
+        { title: 'Published pay', field: 'salary_raw' },
+        { title: 'Period', field: 'salary_period' },
+        { title: 'Context', field: 'mention_text' },
+      ], published, { height: 320 }) : noData('provider-owned pay pages', './start.sh run m22_provider_pay_pages'),
+      provenanceFromRows(published, { tables: ['provider_pay_mentions'], module: 'm22_provider_pay_pages' })),
+    el('div', { class: 'panel' },
+      el('h3', { text: 'Gender pay gap filings' }),
+      pinnedCaveat(data.caveats?.gender_pay_gap_note, 'Missing is not zero'),
+      genderPayGap.length ? tableCard('Matched filings', [
+        { title: 'Provider', field: 'canonical_name' },
+        { title: 'Reporting year', field: 'reporting_year_label' },
+        { title: 'Employer', field: 'employer_name' },
+        { title: 'Median hourly gap', field: 'diff_median_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
+        { title: 'Mean hourly gap', field: 'diff_mean_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
+        { title: 'Employer size', field: 'employer_size' },
+      ], genderPayGap, { height: 320 }) : noData('matched gender pay gap filings', './start.sh run m20_gender_pay_gap'),
+      provenanceFromRows(genderPayGap, { tables: ['gender_pay_gap_reports'], module: 'm20_gender_pay_gap' }))));
+}
+
+// --- 2d. contextual comparators ---------------------------------------------
+
+function renderBenchmarks(container, data) {
+  const ashe = data.ons_ashe_observations || [];
+  const skills = data.skills_for_care_estimates || [];
+
+  replace(container, section(
+    'Pay and workforce comparators',
+    'Published benchmarks for the labour market. They can be read beside compatible evidence, but this portal does not calculate gaps, ratios or trends from them.',
+    el('div', { class: 'grid two' },
+      el('div', { class: 'panel' },
+        el('h3', { text: 'ONS ASHE median hourly pay' }),
+        pinnedCaveat(data.caveats?.ashe_note, 'Survey comparator, not a calculated gap'),
+        ashe.length ? tableCard('ASHE observations', [
+          { title: 'Year', field: 'time' },
+          { title: 'Dimension', field: 'dimension_kind' },
+          { title: 'Group', field: 'dimension_label' },
+          { title: 'Geography', field: 'geography_label' },
+          { title: 'Median hourly pay', field: 'value', formatter: (c) => gbp(c.getValue(), { compact: false }) },
+          { title: 'Unit', field: 'unit_of_measure' },
+        ], ashe, { height: 320 }) : noData('ONS ASHE observations', './start.sh run m21_ons_ashe'),
+        provenanceFromRows(ashe, { tables: ['ons_ashe_observations'], module: 'm21_ons_ashe' })),
+      el('div', { class: 'panel' },
+        el('h3', { text: 'Skills for Care estimates' }),
+        pinnedCaveat(data.caveats?.skills_for_care_note, 'Labour-market comparator only'),
+        skills.length ? tableCard('National estimates', [
+          { title: 'Year', field: 'year' },
+          { title: 'Sector', field: 'sector' },
+          { title: 'Service', field: 'service' },
+          { title: 'Role', field: 'job_role' },
+          { title: 'Hourly pay', field: 'hourly_pay', formatter: (c) => gbp(c.getValue(), { compact: false }) },
+          { title: 'FTE annual pay', field: 'fte_annual_pay', formatter: (c) => gbp(c.getValue(), { compact: false }) },
+          { title: 'Turnover', field: 'turnover_rate', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
+        ], skills, { height: 320 }) : noData('Skills for Care estimates', './start.sh run m25_skills_for_care'),
+        provenanceFromRows(skills, { tables: ['skills_for_care_estimates'], module: 'm25_skills_for_care' })))));
 }
 
 // --- 2a. indicative wage per employee ----------------------------------------

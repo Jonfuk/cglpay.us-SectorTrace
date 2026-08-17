@@ -229,6 +229,48 @@ CAVEATS = {
         "figures and may share an axis with each other, and with nothing else "
         "on this page."
     ),
+    "statutory_pay_rates": (
+        "Statutory rates are published hourly floors. They are shown as the "
+        "government published them: this portal does not annualise them or "
+        "calculate a percentage difference from an advertised rate."
+    ),
+    "living_wage_accreditations": (
+        "A result of 'not found' means no accredited employer was found under "
+        "the checked name on the retrieval date. Accreditation can sit under "
+        "another legal name, so it is not evidence that a provider is not "
+        "accredited."
+    ),
+    "gender_pay_gap": (
+        "Gender pay gap figures are the employer's submitted filing. A missing "
+        "filing is not a zero gap: the employer may be out of scope or may not "
+        "have filed."
+    ),
+    "ashe": (
+        "ASHE is a sample survey of PAYE jobs. These are published median gross "
+        "hourly pay figures excluding overtime, shown alongside other hourly "
+        "evidence only; this portal does not calculate a pay gap or ratio."
+    ),
+    "provider_published_pay": (
+        "Provider-owned pages show what the provider published for a role or "
+        "offer on a retrieval date. They are not a pay scale or evidence of "
+        "what staff currently earn, and hourly and annual values are not "
+        "converted."
+    ),
+    "skills_for_care": (
+        "Skills for Care figures are rounded modelled estimates for the adult "
+        "social-care workforce. They are labour-market comparators, not a "
+        "measure of a tracked provider's workforce or pay."
+    ),
+    "council_spend": (
+        "Each row is a payment line a council published in a spend-transparency "
+        "file. It is actual published payment evidence, not a procurement notice "
+        "or a budget, and this portal does not add payments into a sector total."
+    ),
+    "council_spend_match": (
+        "A payment is linked to a tracked provider only when the council's payee "
+        "name exactly matches a known provider name variant. Unmatched rows are "
+        "not evidence that no tracked provider was paid."
+    ),
 }
 
 
@@ -885,7 +927,10 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
     """The campaign's central evidence, and the most caveat-heavy payload here."""
     _public(["v_wage_per_employee", "charity_financials", "provider_identifiers",
               "providers", "nhs_job_adverts", "v_nhs_repeat_advertised_roles",
-              "workforce_census_metrics"])
+              "workforce_census_metrics", "statutory_pay_rates",
+              "living_wage_accreditations", "gender_pay_gap_reports",
+              "ons_ashe_observations", "provider_pay_mentions",
+              "skills_for_care_estimates"])
 
     wage_where, wage_params = [], {}
     if provider_key:
@@ -962,12 +1007,77 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
 
     census_verified = sum(1 for row in census if row["verified"])
 
+    # These evidence layers deliberately remain separate arrays. The browser
+    # can place two compatible hourly figures beside one another, but it has
+    # no total or percentage to quote as though different sources measured the
+    # same population and period.
+    statutory_rates = _rows(conn, """
+        SELECT period_label, effective_from, band_label, band_role, amount,
+               value_text, source_url, retrieved_at, source_system, payload_sha256
+        FROM statutory_pay_rates
+        ORDER BY effective_from DESC, period_label DESC, band_label""")
+
+    provider_params = {"provider_key": provider_key} if provider_key else {}
+    living_wage = _rows(conn, f"""
+        SELECT l.provider_key, p.canonical_name, l.searched_variant, l.accredited,
+               l.employer_name, l.employer_node_id, l.match_basis, l.pages_checked,
+               l.employers_total, l.source_url, l.retrieved_at, l.source_system,
+               l.payload_sha256
+        FROM living_wage_accreditations l
+        LEFT JOIN providers p ON p.provider_key = l.provider_key
+        {'WHERE l.provider_key = :provider_key' if provider_key else ''}
+        ORDER BY p.canonical_name, l.searched_variant""", provider_params)
+    gender_pay_gap = _rows(conn, f"""
+        SELECT g.provider_key, p.canonical_name, g.reporting_year,
+               g.reporting_year_label, g.employer_name, g.employer_id,
+               g.match_basis, g.diff_mean_hourly_percent,
+               g.diff_median_hourly_percent, g.diff_mean_bonus_percent,
+               g.diff_median_bonus_percent, g.employer_size,
+               g.written_statement_url, g.source_url, g.retrieved_at,
+               g.source_system, g.payload_sha256
+        FROM gender_pay_gap_reports g
+        LEFT JOIN providers p ON p.provider_key = g.provider_key
+        {'WHERE g.provider_key = :provider_key' if provider_key else ''}
+        ORDER BY g.reporting_year DESC, p.canonical_name, g.employer_name""",
+        provider_params)
+    provider_published_pay = _rows(conn, f"""
+        SELECT m.provider_key, p.canonical_name, m.page_url, m.section,
+               m.mention_text, m.salary_raw, m.salary_min, m.salary_max,
+               m.salary_period, m.salary_basis, m.match_basis, m.source_url,
+               m.retrieved_at, m.source_system, m.payload_sha256
+        FROM provider_pay_mentions m
+        LEFT JOIN providers p ON p.provider_key = m.provider_key
+        {'WHERE m.provider_key = :provider_key' if provider_key else ''}
+        ORDER BY p.canonical_name, m.page_url, m.mention_index""", provider_params)
+    ashe = _rows(conn, """
+        SELECT dataset_id, dataset_title, edition, version, dimension_kind,
+               dimension_code, dimension_label, geography_code, geography_label,
+               time, value, value_text, unit_of_measure, source_url, retrieved_at,
+               source_system, payload_sha256
+        FROM ons_ashe_observations
+        ORDER BY time DESC, dimension_kind, dimension_label, geography_label""")
+    skills_for_care = _rows(conn, """
+        SELECT file_url, year, area_code, area_level, region, area, sector,
+               service, job_role_group, job_role, fte_annual_pay, hourly_pay,
+               turnover_rate, vacancy_rate, source_url, retrieved_at,
+               source_system, payload_sha256
+        FROM skills_for_care_estimates
+        WHERE area_level = 'National'
+        ORDER BY year DESC, sector, service, job_role_group, job_role
+        LIMIT 500""")
+
     return {
         "charity_wage_series": charity_wage_series,
         "nhs_job_adverts": adverts,
         "nhs_job_by_band": by_band,
         "repeat_advertised_roles": repeat_roles,
         "workforce_census": census,
+        "statutory_pay_rates": statutory_rates,
+        "living_wage_accreditations": living_wage,
+        "gender_pay_gap_reports": gender_pay_gap,
+        "provider_published_pay": provider_published_pay,
+        "ons_ashe_observations": ashe,
+        "skills_for_care_estimates": skills_for_care,
         "census_all_unverified": bool(census) and census_verified == 0,
         # The counts, so the page can pin the caveat that is true rather than
         # only the one that is true while nothing has been checked. The chart
@@ -981,6 +1091,62 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
             "census_comparability_note": CAVEATS["census_comparability"],
             "census_unverified_note": CAVEATS["census_unverified"],
             "census_partly_verified_note": CAVEATS["census_partly_verified"],
+            "statutory_pay_rates_note": CAVEATS["statutory_pay_rates"],
+            "living_wage_note": CAVEATS["living_wage_accreditations"],
+            "gender_pay_gap_note": CAVEATS["gender_pay_gap"],
+            "ashe_note": CAVEATS["ashe"],
+            "provider_published_pay_note": CAVEATS["provider_published_pay"],
+            "skills_for_care_note": CAVEATS["skills_for_care"],
+        },
+    }
+
+
+def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
+                  provider_key=None, limit: int = 500) -> dict:
+    """Published council payment lines, kept separate from contract notices."""
+    _public(["council_spend", "council_spend_files", "authorities", "providers"])
+
+    where, params = [], {}
+    if authority_ons_code:
+        where.append("s.authority_ons_code = :authority_ons_code")
+        params["authority_ons_code"] = authority_ons_code
+    if provider_key:
+        where.append("s.provider_key = :provider_key")
+        params["provider_key"] = provider_key
+    clause = f" WHERE {' AND '.join(where)}" if where else ""
+    total = _one(conn, f"SELECT COUNT(*) AS n FROM council_spend s{clause}", params).get("n", 0)
+    rows = _rows(conn, f"""
+        SELECT s.authority_ons_code, a.name AS authority_name, s.file_url,
+               s.row_index, s.period, s.payee, s.amount, s.amount_text,
+               s.description, s.provider_key, p.canonical_name,
+               s.source_url, s.retrieved_at, s.source_system, s.payload_sha256
+        FROM council_spend s
+        LEFT JOIN authorities a ON a.ons_code = s.authority_ons_code
+        LEFT JOIN providers p ON p.provider_key = s.provider_key
+        {clause}
+        ORDER BY s.retrieved_at DESC, s.authority_ons_code, s.file_url, s.row_index
+        LIMIT :limit""", {**params, "limit": limit})
+
+    file_where, file_params = [], {}
+    if authority_ons_code:
+        file_where.append("f.authority_ons_code = :authority_ons_code")
+        file_params["authority_ons_code"] = authority_ons_code
+    file_clause = f" WHERE {' AND '.join(file_where)}" if file_where else ""
+    files = _rows(conn, f"""
+        SELECT f.authority_ons_code, a.name AS authority_name, f.file_url,
+               f.discovered_from, f.file_format, f.parse_status, f.row_count,
+               f.source_url, f.retrieved_at, f.source_system, f.payload_sha256
+        FROM council_spend_files f
+        LEFT JOIN authorities a ON a.ons_code = f.authority_ons_code
+        {file_clause}
+        ORDER BY f.retrieved_at DESC, f.authority_ons_code, f.file_url""", file_params)
+    return {
+        "total": total,
+        "payments": rows,
+        "files": files,
+        "caveats": {
+            "payments": CAVEATS["council_spend"],
+            "provider_match": CAVEATS["council_spend_match"],
         },
     }
 

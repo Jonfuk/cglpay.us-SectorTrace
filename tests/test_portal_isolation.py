@@ -67,6 +67,7 @@ PUBLIC_API_ROUTES = {
     "authorities",
     "contracts",
     "pay",
+    "council_spend",
     "geography",
     "boundaries",
     "fingertips",

@@ -1119,6 +1119,12 @@ class Handler(BaseHTTPRequestHandler):
                 provider_key=_str(params, "provider_key") or None,
                 year_from=_str(params, "year_from") or None,
                 year_to=_str(params, "year_to") or None)
+        if route == "council_spend":
+            return public_queries.council_spend(
+                conn,
+                authority_ons_code=_str(params, "authority_ons_code") or None,
+                provider_key=_str(params, "provider_key") or None,
+                limit=_int(params, "limit", 500))
         if route == "geography":
             metric = _str(params, "metric") or "grant_total"
             return {**public_queries.geography(
