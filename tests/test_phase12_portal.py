@@ -272,6 +272,20 @@ def test_freshness_lists_every_source_table(warehouse):
     assert payload["caveat"]
 
 
+def test_freshness_includes_the_newer_collection_modules():
+    declared = {table for _label, table in public_queries.FRESHNESS_TABLES}
+    assert {
+        "statutory_pay_rates",
+        "living_wage_accreditations",
+        "data_gov_uk_datasets",
+        "gender_pay_gap_reports",
+        "ons_ashe_observations",
+        "provider_pay_pages",
+        "council_spend_files",
+        "skills_for_care_files",
+    } <= declared
+
+
 # --- W-25: PFD becomes visible -----------------------------------------------
 
 

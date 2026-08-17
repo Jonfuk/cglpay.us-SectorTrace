@@ -536,6 +536,40 @@ anyone using it.
   be used as a share of that layer; it is not a size measure of the
   organisation, and it is never combined with figures from any other layer.
 
+### Council spend files (Module 24)
+
+- **A published payment row is not a contract total.** Councils choose their
+  own periods, thresholds, column layouts and correction practices. Rows are
+  retained as published and are not summed across files, councils or periods.
+- **A matched provider is an exact-name result only.** `provider_key` is set
+  only when the payee exactly normalises to a tracked provider variant. A NULL
+  key is an unresolved payee, not evidence that the payment was unrelated to
+  the sector.
+- **File coverage and parsed evidence are different.** An unreadable workbook
+  remains in `council_spend_files` with its parse status and review item. It
+  must not be reported as a council that published no spend or as a successful
+  zero-row collection.
+- **Amounts are never repaired or inferred.** `amount_text` is the council's
+  value; `amount` is NULL when that text cannot be parsed. Period labels and
+  descriptions are likewise kept verbatim rather than standardised into a
+  comparison the source did not publish.
+
+### Skills for Care estimates (Module 25)
+
+- **These are modelled adult social care estimates, not provider evidence.**
+  They describe the ASC-WDS workforce population and are contextual labour-
+  market comparators; no figure may be attributed to a tracked provider.
+- **The workbook's values are stored, not derived.** Annual pay, hourly pay,
+  turnover and vacancy rates remain in their published units and categories.
+  The pipeline does not convert between hourly and annual pay or calculate a
+  change between years.
+- **Published categories are not interchangeable.** Area level, sector,
+  service and job role define the estimate. Aggregating across overlapping
+  categories can double-count the same workforce and is not performed here.
+- **An unreadable workbook is a known gap, not an empty result.** It remains in
+  `skills_for_care_files` with its parse status, archived bytes, parse failure
+  and review item.
+
 ---
 
 ## Personal data

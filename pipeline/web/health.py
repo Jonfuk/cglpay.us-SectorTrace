@@ -61,6 +61,12 @@ COVERAGE_COLUMNS: tuple[tuple[str, str, str, str], ...] = (
       "m10_committee_papers"),
     ("FOI", "foi_requests", "ons_code", "m15_foi"),
     ("FOI cands", "foi_request_candidates", "ons_code", "m15_foi"),
+    # The file-level row is the honest coverage signal for council spend. An
+    # unreadable file is still a council reached and a publication found; the
+    # parse status says why it produced no line-item rows. Counting only
+    # `council_spend` would turn that known parser gap into an apparent absence.
+    ("Spend files", "council_spend_files", "authority_ons_code",
+     "m24_council_spend"),
 )
 
 

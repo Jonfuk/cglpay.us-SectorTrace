@@ -158,6 +158,32 @@ def test_candidate_tables_are_shown_beside_confirmed_ones(geography, settings):
     assert "Papers" in labels and "Paper cands" in labels
 
 
+def test_council_spend_coverage_uses_the_file_record(geography, settings):
+    """Finding a file is coverage even when its rows cannot be parsed.
+
+    m24 records that distinction in council_spend_files.parse_status. Basing
+    the matrix on line items would make an unreadable publication look like a
+    council the crawler never reached.
+    """
+    geography.execute(
+        "INSERT INTO council_spend_files "
+        "(authority_ons_code, file_url, file_format, parse_status, row_count, "
+        " source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('E08000025', 'https://example.test/spend.csv', 'csv', "
+        "        'unreadable', NULL, 'https://example.test/spend.csv', "
+        "        '2026-08-17T00:00:00Z', 200, 'council_spend', 'abc')")
+    geography.commit()
+
+    result = health.coverage(geography)
+    column = next(c for c in result["columns"] if c["label"] == "Spend files")
+    birmingham = next(a for a in result["authorities"]
+                      if a["ons_code"] == "E08000025")
+
+    assert column["module"] == "m24_council_spend"
+    assert column["covered"] == 1
+    assert birmingham["cells"]["Spend files"] == 1
+
+
 def test_coverage_survives_a_table_that_is_not_there_yet(geography, settings, monkeypatch):
     monkeypatch.setattr(health, "COVERAGE_COLUMNS",
                          (("Imaginary", "not_a_table", "ons_code", "m99"),))

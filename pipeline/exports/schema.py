@@ -1,6 +1,6 @@
-"""Export schema: the nine Google Sheets tabs, defined in one place.
+"""Export schema: the ten Google Sheets tabs, defined in one place.
 
-The brief asked for the existing nine-tab structure; this schema was designed
+The brief asked for the original nine-tab structure; this schema was designed
 rather than supplied, on instruction. Two decisions worth stating:
 
 1. Tabs carry the human-readable evidence — things a campaigner or organiser

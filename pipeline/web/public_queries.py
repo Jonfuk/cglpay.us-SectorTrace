@@ -410,6 +410,17 @@ FRESHNESS_TABLES: tuple[tuple[str, str], ...] = (
     ("NHS job adverts", "nhs_job_adverts"),
     ("Tribunal cases", "tribunal_cases"),
     ("Authorities", "authorities"),
+    ("Statutory pay rates", "statutory_pay_rates"),
+    ("Living Wage accreditation", "living_wage_accreditations"),
+    ("data.gov.uk catalogue", "data_gov_uk_datasets"),
+    ("Gender pay gap reports", "gender_pay_gap_reports"),
+    ("ONS ASHE observations", "ons_ashe_observations"),
+    ("Provider pay pages", "provider_pay_pages"),
+    # File-level rows survive a parser gap. They therefore distinguish a
+    # source that has gone stale from a current publication whose data rows
+    # could not be read, just as the authority coverage matrix does for m24.
+    ("Council spend files", "council_spend_files"),
+    ("Skills for Care files", "skills_for_care_files"),
 )
 
 
