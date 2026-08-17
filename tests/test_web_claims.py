@@ -295,3 +295,13 @@ def test_the_screen_and_the_module_agree_on_their_element_ids(client):
         assert f'id="{element_id}"' in html, f"{element_id} is not in the page"
         assert f"'{element_id}'" in script or element_id == "tab-claims", (
             f"{element_id} is not read by claims.js")
+
+
+def test_the_router_knows_the_claims_tab(client):
+    """The tab button, the panel and the module can all exist while the tab
+    never loads: app.js's TABS list is the router, and a tab it does not know
+    falls back to overview when clicked. This is exactly how the Claims tab
+    shipped broken — the button rendered and the panel stayed empty."""
+    app = client.get("/admin/app.js").text
+    assert "'claims'" in app, "app.js's TABS list does not name the claims tab"
+    assert "'census'" in app, "app.js's TABS list has lost the census tab"
