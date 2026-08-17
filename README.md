@@ -686,23 +686,29 @@ a dead drive. See [`docs/BACKUP.md`](docs/BACKUP.md).
 
 ## PostgreSQL
 
-SQLite is the backend of record and the default. Setting `DATABASE_URL` in
-`.env` points every command at a PostgreSQL warehouse instead — same SQL, same
-migrations under a second dialect tree, same behaviour. Nothing else changes,
-and unsetting the variable puts it back.
+SQLite remains the local default. Setting `DATABASE_URL` in `.env` or Railway
+points every command at a PostgreSQL warehouse instead — same SQL, same
+migrations under a second dialect tree, same behaviour. The explicit
+`migrate` command is used by the Railway startup script; local commands also
+apply any pending migrations automatically.
 
 ```bash
+./start.sh migrate                 # apply the configured backend's schema
 ./start.sh migrate-data --dry-run   # the load order, and every preflight check
 ./start.sh migrate-data             # load, then compare every value
 ./start.sh verify-migration         # compare the two again, any time later
+
+# PostgreSQL -> PostgreSQL: source is DATABASE_SOURCE_URL, target is DATABASE_URL
+./start.sh migrate-postgres         # initial local PostgreSQL -> Railway import
+./start.sh check-postgres-sync      # compare two PostgreSQL warehouses
+./start.sh migrate-postgres --truncate  # full replacement, never a merge
 ```
 
-The SQLite warehouse is opened `mode=ro` throughout and stays authoritative:
-the way back from a bad migration is to unset the URL, not to restore
-anything. Before writing a row, the loader checks that both schemas hold the
-same tables, columns and foreign keys, that no value is stored as a type its
-column did not declare, and that no primary key contains a `NULL` — SQLite
-permits all three and PostgreSQL permits none of them.
+For an initial move, the SQLite warehouse is opened `mode=ro` throughout and
+the loader checks that both schemas hold the same tables, columns and foreign
+keys, that no value is stored as a type its column did not declare, and that no
+primary key contains a `NULL` — SQLite permits all three and PostgreSQL permits
+none of them.
 
 Tables are loaded parents-first, which is also what lets the five promotion
 and verification triggers stay armed through the load rather than being
@@ -733,6 +739,13 @@ The rebuild goes through the SQLite migration tree, is compared value by value
 against the warehouse it came from before it is installed, and never deletes
 what it replaces. It is not a merge and not a second collection: the same
 evidence is never fetched twice.
+
+For two PostgreSQL warehouses, use `DATABASE_URL` for the target and
+`DATABASE_SOURCE_URL` for the other warehouse. The initial cutover points the
+target at Railway and the source at local PostgreSQL. After cutover, reverse
+those URLs to refresh the local mirror from Railway. `migrate-postgres`
+refuses a populated target unless `--truncate` is explicit and verifies every
+value after the transfer; it never attempts a bidirectional merge.
 
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) has the server's roles and
 collation, the cutover checklist, what dual maintenance costs, and what a
