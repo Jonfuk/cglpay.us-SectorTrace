@@ -10,7 +10,7 @@ from pipeline.web.server import build_server
 
 
 def test_admin_ui_can_be_disabled_without_disabling_the_public_portal(
-    warehouse, settings
+    settings
 ):
     settings.admin_ui_enabled = False
     server = build_server(settings, host="127.0.0.1", port=0)
