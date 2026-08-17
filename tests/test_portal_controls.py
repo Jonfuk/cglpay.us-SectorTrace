@@ -53,7 +53,9 @@ def filter_bar(index: str) -> str:
     Taken from the document rather than assumed, because the point of the file
     is to check what the portal actually renders.
     """
-    start = index.index('<div class="filterbar"')
+    marker = re.search(r'<div\s+class="[^"]*\bfilterbar\b[^"]*"', index)
+    assert marker, "the filter bar element is not present"
+    start = marker.start()
     depth, cursor = 0, start
     for match in re.finditer(r"<div\b|</div>", index[start:]):
         depth += 1 if match.group(0) == "<div" else -1

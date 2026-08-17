@@ -61,3 +61,30 @@ export function registerTheme() {
   window.echarts.registerTheme('sectorTrace', THEME);
   registered = true;
 }
+
+const THEME_KEY = 'sectortrace-theme';
+
+export function applyPortalTheme(choice = 'system') {
+  const theme = ['system', 'light', 'dark'].includes(choice) ? choice : 'system';
+  const root = document.documentElement;
+  root.dataset.bsTheme = theme === 'system'
+    ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : theme;
+  root.dataset.portalTheme = theme;
+  const select = document.querySelector('#theme-select');
+  if (select) select.value = theme;
+}
+
+export function initPortalTheme() {
+  let choice = 'system';
+  try { choice = localStorage.getItem(THEME_KEY) || choice; } catch (e) { /* private mode */ }
+  applyPortalTheme(choice);
+  document.querySelector('#theme-select')?.addEventListener('change', (event) => {
+    const next = event.target.value;
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
+    applyPortalTheme(next);
+  });
+  window.matchMedia?.('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (document.documentElement.dataset.portalTheme === 'system') applyPortalTheme('system');
+  });
+}

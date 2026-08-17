@@ -123,7 +123,8 @@ for _lib, _type in (
     ("tabulator.min.js", JS),
     ("tabulator_midnight.min.css", CSS),
     ("fuse.min.js", JS),
-    ("date-fns.cdn.min.js", JS),
+    ("bootstrap.min.css", CSS),
+    ("bootstrap.bundle.min.js", JS),
 ):
     STATIC_FILES[f"/vendor/{_lib}"] = (f"vendor/{_lib}", _type, PUBLIC_DIR)
 
