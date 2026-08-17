@@ -1,0 +1,20 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --extra postgres --extra storage
+
+COPY pipeline ./pipeline
+COPY deploy ./deploy
+
+RUN uv sync --frozen --no-dev --extra postgres --extra storage
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# The worker service overrides this command per deployment when a different
+# bounded canary or backfill is scheduled. Keeping a non-web default prevents
+# the public railway.toml startup script from taking over this image.
+CMD ["python", "-m", "pipeline", "run", "m02_tribunals", "--since", "2021-01-01", "--limit", "1"]
