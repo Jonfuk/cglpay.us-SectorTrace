@@ -22,6 +22,12 @@ class Settings(BaseSettings):
 
     contact_email: str = Field(..., description="Used in User-Agent and as an operator contact point")
 
+    # The operator UI is useful on a local checkout but should not be exposed
+    # by a hosted public service. Keep it enabled by default so existing local
+    # invocations continue to work; hosted deployments can set
+    # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
+    admin_ui_enabled: bool = True
+
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural
     # config modules will extend. Contracts Finder documents a harsh

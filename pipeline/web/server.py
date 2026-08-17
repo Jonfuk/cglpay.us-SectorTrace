@@ -550,6 +550,11 @@ class Handler(BaseHTTPRequestHandler):
         self._responded = False
 
         try:
+            if not self.settings.admin_ui_enabled and (
+                path == "/admin" or path.startswith("/admin/")
+                or path == "/api/admin" or path.startswith("/api/admin/")
+            ):
+                raise ApiError(f"No route for {path}", status=404)
             if path in STATIC_FILES and self.command in ("GET", "HEAD"):
                 return self._serve_static(path)
             if path.startswith("/api/"):

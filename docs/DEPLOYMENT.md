@@ -208,6 +208,11 @@ will tell you.
 The port was written to make this a configuration change rather than a port of
 its own. What a hosted deployment needs, in full:
 
+Set `ADMIN_UI_ENABLED=false` in the Railway service variables. This removes
+`/admin` and `/api/admin/*` from the hosted process while leaving the public
+portal and public API available. The setting defaults to `true` for local
+development.
+
 | | |
 | --- | --- |
 | **The database** | `DATABASE_URL` from the platform. Nothing else changes; `postgres://` URLs are accepted as well as `postgresql://`, which is what Railway and Heroku hand out. |
