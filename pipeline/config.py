@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     # hostname or a password. `redacted_database_url` is what goes in a log.
     database_url: str | None = None
 
+    # A second PostgreSQL URL used only by the explicit mirror commands. It
+    # never selects the application's backend: DATABASE_URL remains the
+    # database normal commands write to. Keeping the source opt-in prevents a
+    # stale local URL from changing ordinary Railway or local runs.
+    database_source_url: str | None = None
+
     # The same warehouse, as a role that holds SELECT and nothing else.
     #
     # This is what the portal and the operator UI read through, and it is the
@@ -185,7 +191,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("database_url", "database_ro_url")
+    @field_validator("database_url", "database_ro_url", "database_source_url")
     @classmethod
     def _usable_database_url(cls, v: str | None) -> str | None:
         """An unusable URL is refused here, not at the first connection.

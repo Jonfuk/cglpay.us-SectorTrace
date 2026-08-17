@@ -205,24 +205,79 @@ will tell you.
 
 ## Somewhere else: Railway, or any managed PostgreSQL
 
-The port was written to make this a configuration change rather than a port of
-its own. What a hosted deployment needs, in full:
+The repository now includes a Railway deployment path in `Dockerfile`,
+`railway.toml`, and `deploy/railway-start.sh`. The image installs the
+PostgreSQL and S3 extras, runs `pipeline migrate` before serving traffic, and
+binds the web process to Railway's `PORT`. Migrations are recorded in the
+database ledger, so a restart or concurrent release safely re-runs the check.
+
+Create a Railway PostgreSQL service in the same project, then add these
+variables to the SectorTrace service:
+
+```
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+CONTACT_EMAIL=operator@example.org
+ARCHIVE_S3_BUCKET=...
+ARCHIVE_S3_ENDPOINT=...
+ARCHIVE_S3_REGION=...
+ARCHIVE_S3_URL_STYLE=virtual
+ARCHIVE_S3_ACCESS_KEY=...
+ARCHIVE_S3_SECRET=...
+```
+
+Use Railway's actual PostgreSQL service name in the reference if it is not
+`Postgres`. The database URL is the only backend selector; leaving it unset on
+a local machine continues to use SQLite. What a hosted deployment needs is:
 
 | | |
 | --- | --- |
 | **The database** | `DATABASE_URL` from the platform. Nothing else changes; `postgres://` URLs are accepted as well as `postgresql://`, which is what Railway and Heroku hand out. |
 | **The migrations** | applied by any command on startup, from `pipeline/migrations/postgres/`. |
 | **The read role** | `DATABASE_RO_URL`. A managed database usually gives one superuser-ish role; creating a `SELECT`-only role is a `CREATE ROLE` + two `GRANT`s and is worth doing rather than pointing both variables at the same user. |
-| **The raw archive** | **the unsolved half.** 4.5 GB of content-addressed files under `data/raw/`, on a filesystem. A container filesystem does not survive a redeploy. |
+| **The raw archive** | An S3-compatible bucket, configured through `ARCHIVE_S3_*`. A container filesystem does not survive a redeploy. |
 
-The archive is the one thing that does not follow `DATABASE_URL`, and it is
-deliberately not built here. The warehouse stores `payload_sha256` and
-`archived_path` as strings; the seam is `_archive_raw`/`_find_archived` in
-[`pipeline/http.py`](../pipeline/http.py), which is the only code that turns
-either into a file. An S3-compatible bucket behind those two functions is the
-whole of the work, and Railway's Storage Buckets are S3-compatible — so it
-stays provider-neutral if nothing else in the codebase learns about buckets.
+The archive is independent of `DATABASE_URL`: the warehouse stores
+`payload_sha256` and `archived_path` as strings, while `pipeline/archive.py`
+selects the filesystem or S3-compatible backend. Migrate it separately with
+`archive-migrate`, verify it with `archive-verify`, and retain the local
+filesystem as a recovery mirror with `archive-mirror`/`archive-reconcile`.
 
-Do not build it as part of a migration. The evidence archive is the thing this
-project cannot re-fetch politely, and moving it deserves its own phase, its
-own verification pass and its own way back.
+Database mirroring is likewise explicit rather than bidirectional replication:
+
+```bash
+# Local SQLite -> Railway PostgreSQL (initial load, after a backup)
+DATABASE_URL=... ./start.sh migrate-data --dry-run
+DATABASE_URL=... ./start.sh migrate-data
+
+# Railway PostgreSQL -> local SQLite recovery mirror
+DATABASE_URL=... ./start.sh sync-sqlite --check
+DATABASE_URL=... ./start.sh sync-sqlite
+```
+
+Only the configured PostgreSQL warehouse should receive live collection writes.
+The SQLite file is rebuilt and verified from it, which prevents two writable
+copies from silently diverging while preserving a practical local rollback.
+
+### Two PostgreSQL warehouses
+
+If the local mirror is PostgreSQL rather than SQLite, use the same migration
+tree and the explicit PostgreSQL transfer commands. `DATABASE_URL` is always
+the target; `DATABASE_SOURCE_URL` is always the read-only source for that
+command:
+
+```bash
+# First deployment: existing local PostgreSQL -> empty Railway PostgreSQL
+DATABASE_URL=railway-url DATABASE_SOURCE_URL=local-url \
+  ./start.sh migrate-postgres
+
+# Later local refresh: Railway PostgreSQL -> local PostgreSQL
+DATABASE_URL=local-url DATABASE_SOURCE_URL=railway-url \
+  ./start.sh check-postgres-sync
+DATABASE_URL=local-url DATABASE_SOURCE_URL=railway-url \
+  ./start.sh migrate-postgres --truncate
+```
+
+The transfer refuses to merge into a populated target, rejects schema
+differences, preserves primary keys, resets identity sequences, and compares
+every value after loading. It is deliberately one-way per invocation: Railway
+should be the only live writer after the initial import.

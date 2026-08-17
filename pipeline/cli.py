@@ -415,6 +415,83 @@ def migrate_data(
         target.close()
 
 
+def _postgres_source(settings, command: str):
+    """Open the explicit source URL used by PostgreSQL mirror commands."""
+    if settings.database_backend != "postgres":
+        typer.echo(f"{command} needs DATABASE_URL set to the target PostgreSQL warehouse.",
+                   err=True)
+        raise typer.Exit(code=1)
+    if not settings.database_source_url:
+        typer.echo(
+            f"{command} needs DATABASE_SOURCE_URL for the other PostgreSQL warehouse.",
+            err=True)
+        raise typer.Exit(code=1)
+    from pipeline import pg
+
+    return pg.connect(settings.database_source_url, readonly=True,
+                      application_name=f"sectortrace-{command}")
+
+
+@app.command("migrate-postgres")
+def migrate_postgres(
+    truncate: bool = typer.Option(
+        False, "--truncate", help="Replace all target rows instead of refusing a populated target"),
+    verify: bool = typer.Option(
+        True, "--verify/--no-verify", help="Compare every value after copying"),
+) -> None:
+    """Copy DATABASE_SOURCE_URL into the configured PostgreSQL warehouse.
+
+    Use this for the initial local-PostgreSQL -> Railway import. Later, point
+    DATABASE_URL at local PostgreSQL and DATABASE_SOURCE_URL at Railway to
+    refresh the local mirror from the authoritative warehouse.
+    """
+    from pipeline import pgmirror
+
+    configure_logging("pgmirror")
+    settings = get_settings()
+    source = _postgres_source(settings, "migrate-postgres")
+    target = _postgres_target(settings, "migrate-postgres")
+    try:
+        def announce(table: str, rows: int) -> None:
+            ui.success(f"  {table}: {rows:,} rows")
+
+        result = pgmirror.transfer(source, target, truncate=truncate,
+                                   verify=verify, on_table=announce)
+    except pgmirror.MirrorError as exc:
+        ui.error(str(exc))
+        raise typer.Exit(code=1) from None
+    finally:
+        source.close()
+        target.close()
+    ui.heading(f"{result['rows']:,} rows in {result['tables']} tables copied")
+    if result["verified"]:
+        ui.success("  source and target agree on every value")
+
+
+@app.command("check-postgres-sync")
+def check_postgres_sync() -> None:
+    """Compare the two PostgreSQL warehouses without changing either one."""
+    from pipeline import pgmirror
+
+    configure_logging("pgmirror_check")
+    settings = get_settings()
+    source = _postgres_source(settings, "check-postgres-sync")
+    target = _postgres_target(settings, "check-postgres-sync")
+    try:
+        report = pgmirror.compare(source, target)
+    finally:
+        source.close()
+        target.close()
+    if "tables" in report:
+        _report_verification(report)
+    else:
+        ui.error("PostgreSQL sync preflight failed:")
+        for problem in report["problems"]:
+            ui.warn(f"  {problem}")
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
 @app.command("verify-migration")
 def verify_migration(
     quick: bool = typer.Option(
@@ -606,6 +683,30 @@ def _report_verification(report: dict) -> None:
               f"{report['tables']} tables:")
     for problem in report["problems"]:
         ui.warn(f"  {problem}")
+
+
+@app.command()
+def migrate() -> None:
+    """Apply the schema migrations for the configured warehouse.
+
+    This is intentionally a small, explicit deployment command. Railway can
+    run it before starting the web process, while local commands continue to
+    apply migrations lazily as they do today.
+    """
+    configure_logging("migrate")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        applied = db.apply_migrations(conn, settings=settings)
+        conn.commit()
+    finally:
+        conn.close()
+
+    backend = settings.database_backend
+    if applied:
+        typer.echo(f"{backend}: applied {len(applied)} migration(s): {', '.join(applied)}")
+    else:
+        typer.echo(f"{backend}: schema is current")
 
 
 @app.command()
