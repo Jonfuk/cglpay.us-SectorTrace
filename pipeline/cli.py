@@ -898,11 +898,15 @@ def run(
 
 
 @app.command("archive-migrate")
-def archive_migrate(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+def archive_migrate(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    workers: int = typer.Option(8, "--workers", min=1, max=64,
+                                help="Concurrent remote archive workers."),
+) -> None:
     """Inventory the local mirror, then resumably upload it to the active archive."""
     from pathlib import Path
 
-    from pipeline.archive import FilesystemArchive, get_archive
+    from pipeline.archive import ArchiveError, FilesystemArchive, get_archive
 
     settings = get_settings()
     local = FilesystemArchive(Path(settings.raw_archive_dir))
@@ -915,33 +919,48 @@ def archive_migrate(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
     if dry_run:
         return
     remote = get_archive(settings)
-    uploaded = 0
-    for row in inventory["objects"]:
-        source, sha = row["key"].split("/")[2:4]
+    remote_keys = {row["key"] for row in remote.inventory()["objects"]}
+
+    def migrate_one(row: dict) -> bool:
+        source, filename = row["key"].split("/")[2:4]
+        sha = filename.split(".", 1)[0]
         body = local.read(row["key"])
-        remote_object = remote.lookup(source, sha.split(".", 1)[0])
-        try:
-            already_verified = remote_object is not None and remote_object.read_bytes() == body
-        except Exception:
-            already_verified = False
-        if not already_verified:
-            from mimetypes import guess_type
-            remote.put(source, sha.split(".", 1)[0], guess_type(sha)[0], body)
-            uploaded += 1
-    manifest = remote.verify()
+        if row["key"] in remote_keys:
+            try:
+                if remote.read(row["key"]) == body:
+                    return False
+            except (FileNotFoundError, ArchiveError):
+                pass
+        from mimetypes import guess_type
+        remote.put(source, sha, guess_type(filename)[0], body)
+        return True
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="archive-migrate") as pool:
+        uploaded = sum(pool.map(migrate_one, inventory["objects"]))
+
+    # Migration records the post-upload inventory. The required complete
+    # byte/hash proof remains an explicit `archive-verify` step, so interrupted
+    # migrations do not download the whole archive twice before resuming.
+    manifest = remote.inventory()
+    manifest["verification_required"] = True
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     (Path(settings.backup_dir) / "archive-manifest.json").write_text(
         __import__("json").dumps(manifest, indent=2), encoding="utf-8")
-    typer.echo(f"uploaded: {uploaded:,}; verified: {manifest['files']:,} objects")
-    if not manifest["ok"]:
-        raise typer.Exit(code=1)
+    typer.echo(f"uploaded: {uploaded:,}; inventoried: {manifest['files']:,} objects")
+    typer.echo("run archive-verify for complete byte-count and SHA-256 verification")
 
 
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
     from pipeline.archive import get_archive
-    report = get_archive(get_settings()).verify()
+    settings = get_settings()
+    report = get_archive(settings).verify()
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    (settings.backup_dir / "archive-manifest.json").write_text(
+        __import__("json").dumps(report, indent=2), encoding="utf-8")
     typer.echo(__import__("json").dumps(report, indent=2))
     if not report["ok"]:
         raise typer.Exit(code=1)

@@ -5,6 +5,7 @@ default and close() does not flush pending changes.
 """
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -24,8 +25,58 @@ def _settings_for(tmp_path: Path) -> Settings:
         raw_archive_dir=tmp_path / "raw",
         migrations_dir=MIGRATIONS_DIR,
         logs_dir=tmp_path / "logs",
+        backup_dir=tmp_path / "backups",
         _env_file=None,
     )
+
+
+def test_archive_migrate_uses_one_inventory_and_workers(tmp_path, monkeypatch):
+    from pipeline import archive as archive_module
+
+    settings = _settings_for(tmp_path)
+    raw = settings.raw_archive_dir / "source"
+    raw.mkdir(parents=True)
+    existing = b"already there"
+    missing = b"needs upload"
+    existing_sha = hashlib.sha256(existing).hexdigest()
+    missing_sha = hashlib.sha256(missing).hexdigest()
+    (raw / f"{existing_sha}.bin").write_bytes(existing)
+    (raw / f"{missing_sha}.bin").write_bytes(missing)
+
+    class FakeArchive:
+        backend = "s3"
+
+        def __init__(self):
+            self.objects = {f"data/raw/source/{existing_sha}.bin": existing}
+            self.inventory_calls = 0
+            self.put_calls = []
+
+        def inventory(self, verify_hashes=False):
+            self.inventory_calls += 1
+            return {"objects": [{"key": key, "bytes": len(body)}
+                                 for key, body in self.objects.items()],
+                    "files": len(self.objects),
+                    "bytes": sum(map(len, self.objects.values()))}
+
+        def read(self, logical):
+            return self.objects[logical]
+
+        def put(self, source, sha, content_type, body):
+            logical = f"data/raw/{source}/{sha}.bin"
+            self.put_calls.append(logical)
+            self.objects[logical] = body
+            return logical
+
+    remote = FakeArchive()
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(archive_module, "get_archive", lambda _: remote)
+
+    result = CliRunner().invoke(cli_module.app, ["archive-migrate", "--workers", "2"])
+
+    assert result.exit_code == 0, result.output or repr(result.exception)
+    assert remote.inventory_calls == 2
+    assert remote.put_calls == [f"data/raw/source/{missing_sha}.bin"]
+    assert "run archive-verify" in result.output
 
 
 @register_module("fake_writer_for_tests")
