@@ -1,0 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.worker"
+
+[deploy]
+startCommand = "python -m pipeline run m02_tribunals --since 2021-01-01 --limit 1"
+restartPolicyType = "NEVER"

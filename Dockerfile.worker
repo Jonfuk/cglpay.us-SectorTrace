@@ -9,6 +9,7 @@ COPY pipeline ./pipeline
 COPY deploy ./deploy
 
 RUN uv sync --frozen --no-dev --extra postgres --extra storage
+RUN chmod +x deploy/railway-start.sh
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
