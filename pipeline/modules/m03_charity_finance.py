@@ -474,7 +474,7 @@ def run(ctx: ModuleContext) -> None:
                         "financial_year_end": doc["financial_year_end"],
                         "document_url": doc["document_url"],
                         "document_label": doc["document_label"],
-                        "archived_path": str(pdf_result.archived_path) if pdf_result.archived_path else None,
+                        "archived_path": pdf_result.archived_ref,
                         "page_count": figures.get("page_count"),
                         **_provenance(pdf_result, SOURCE_ACCOUNTS),
                     }, natural_key=["charity_number", "financial_year_end"])

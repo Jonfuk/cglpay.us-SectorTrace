@@ -294,7 +294,7 @@ def run(ctx: ModuleContext) -> None:
                 "census_year": year,
                 "report_title": f"Drug and Alcohol Workforce Census {year}",
                 "document_url": document_url,
-                "archived_path": str(pdf_result.archived_path) if pdf_result.archived_path else None,
+                "archived_path": pdf_result.archived_ref,
                 "page_count": len(pages),
                 "publisher": "NHS Benchmarking Network / NHS England",
                 **provenance,

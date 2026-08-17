@@ -897,5 +897,93 @@ def run(
         raise typer.Exit(code=1)
 
 
+@app.command("archive-migrate")
+def archive_migrate(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+    """Inventory the local mirror, then resumably upload it to the active archive."""
+    from pathlib import Path
+
+    from pipeline.archive import FilesystemArchive, get_archive
+
+    settings = get_settings()
+    local = FilesystemArchive(Path(settings.raw_archive_dir))
+    inventory = local.inventory(True)
+    report = local.verify()
+    if not report["ok"]:
+        typer.echo(f"local archive is not valid: {report['failures']}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"local: {inventory['files']:,} objects, {inventory['bytes']:,} bytes")
+    if dry_run:
+        return
+    remote = get_archive(settings)
+    uploaded = 0
+    for row in inventory["objects"]:
+        source, sha = row["key"].split("/")[2:4]
+        body = local.read(row["key"])
+        remote_object = remote.lookup(source, sha.split(".", 1)[0])
+        try:
+            already_verified = remote_object is not None and remote_object.read_bytes() == body
+        except Exception:
+            already_verified = False
+        if not already_verified:
+            from mimetypes import guess_type
+            remote.put(source, sha.split(".", 1)[0], guess_type(sha)[0], body)
+            uploaded += 1
+    manifest = remote.verify()
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    (Path(settings.backup_dir) / "archive-manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2), encoding="utf-8")
+    typer.echo(f"uploaded: {uploaded:,}; verified: {manifest['files']:,} objects")
+    if not manifest["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("archive-verify")
+def archive_verify() -> None:
+    """Perform a complete key, byte-count and SHA-256 verification."""
+    from pipeline.archive import get_archive
+    report = get_archive(get_settings()).verify()
+    typer.echo(__import__("json").dumps(report, indent=2))
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("archive-mirror")
+def archive_mirror() -> None:
+    """Download bucket objects missing from the local recovery mirror."""
+    from pipeline.archive import FilesystemArchive, get_archive
+    settings = get_settings()
+    remote, local = get_archive(settings), FilesystemArchive(settings.raw_archive_dir)
+    copied = 0
+    for row in remote.inventory()["objects"]:
+        source, filename = row["key"].split("/")[2:4]
+        sha = filename.split(".", 1)[0]
+        if local.lookup(source, sha) is None:
+            from mimetypes import guess_type
+            local.put(source, sha, guess_type(filename)[0], remote.read(row["key"]))
+            copied += 1
+    typer.echo(f"mirrored: {copied:,} objects; local files are never deleted")
+
+
+@app.command("archive-reconcile")
+def archive_reconcile(repair_from_local: bool = typer.Option(False, "--repair-from-local")) -> None:
+    """Report bucket/local differences; repair only with explicit opt-in."""
+    from pipeline.archive import FilesystemArchive, get_archive
+    settings = get_settings()
+    remote, local = get_archive(settings), FilesystemArchive(settings.raw_archive_dir)
+    repaired = 0
+    if repair_from_local:
+        for row in local.inventory(True)["objects"]:
+            source, filename = row["key"].split("/")[2:4]
+            sha = filename.split(".", 1)[0]
+            if remote.lookup(source, sha) is None or remote.lookup(source, sha).read_bytes() != local.read(row["key"]):
+                from mimetypes import guess_type
+                remote.put(source, sha, guess_type(filename)[0], local.read(row["key"]))
+                repaired += 1
+    report = remote.verify()
+    typer.echo(f"remote: {report['files']:,} objects, {report['bytes']:,} bytes; repaired {repaired:,}")
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()
