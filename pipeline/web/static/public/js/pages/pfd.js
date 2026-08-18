@@ -18,7 +18,8 @@
 
 import { el, replace, fetchJSON, num, sourceLink } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenanceFromRows, tableCard, shareButton } from '/js/components.js';
+          disposeCharts, provenanceFromRows, tableCard, shareButton,
+          findingBlock, evidenceMeta } from '/js/components.js';
 
 export async function render(main) {
   const charts = [];
@@ -44,6 +45,16 @@ export async function render(main) {
           text: 'Explore source-linked coroners’ reports in SectorTrace.',
           label: 'Share this view',
         }))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'Safety and legal evidence distinguishes reports sent by coroners from provider mentions; metadata stubs and missing links remain visible limitations rather than evidence of absence.',
+        value: `${num(totals.reports)} coroner reports`, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: data.caveats?.stubs || 'A provider mention is not a finding of fault, causation, prevalence, or responsibility.',
+      });
+    })(),
     el('details', { class: 'read-first' },
       el('summary', { text: 'Read reports responsibly' }),
       el('p', { text: 'A provider mention is not a finding of fault, causation, prevalence, or responsibility. “Sent to” and “named in” are different facts.' }),

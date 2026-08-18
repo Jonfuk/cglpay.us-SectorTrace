@@ -23,7 +23,7 @@
 
 import { el, replace, fetchJSON, ago, sourceLink } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, provenance,
-          shareButton } from '/js/components.js';
+          shareButton, findingBlock } from '/js/components.js';
 
 export async function render(main) {
   let data;
@@ -83,6 +83,13 @@ function renderClaim(claim) {
     el('div', { class: 'takeaway' },
       el('span', { class: 'badge good', text: 'PUBLISHED' }),
       el('blockquote', { class: 'claim-text', text: claim.claim_text })),
+    findingBlock({
+      finding: claim.claim_text,
+      evidenceStatus: 'Human-reviewed',
+      caveat: caveats.join(' ') || 'Read the supporting citations before repeating this claim.',
+      sources: (claim.citations || []).map((citation) => citation.source_url).filter(Boolean),
+      retrievedAt: (claim.citations || []).map((citation) => citation.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10),
+    }),
     caveats.length
       ? el('div', { class: 'claim-caveats' },
           caveats.map((line) => pinnedCaveat(line, 'You may not compute this from it')))
