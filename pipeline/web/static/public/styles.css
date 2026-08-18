@@ -453,6 +453,84 @@ main:focus { outline: none; }
   color: var(--text-secondary); font-size: 13px; max-width: 1440px; margin: 0 auto;
 }
 
+/* Bootstrap is the layout foundation; these tokens keep its components in
+ * the portal's evidence palette. The application rules below remain the
+ * authority for the intentionally distinctive SectorTrace cards and tables. */
+:root {
+  --bs-body-bg: var(--bg-base);
+  --bs-body-color: var(--text-primary);
+  --bs-secondary-color: var(--text-secondary);
+  --bs-border-color: var(--border-subtle);
+  --bs-primary: var(--accent-teal);
+  --bs-warning: var(--accent-amber);
+  --bs-danger: var(--accent-red);
+  --bs-success: var(--accent-green);
+  --bs-font-sans-serif: var(--sans);
+  --bs-border-radius: var(--radius-md);
+  --bs-link-color: var(--accent-teal);
+}
+
+html[data-bs-theme="light"] {
+  --bg-base: #f6f8fa; --bg-surface: #ffffff; --bg-elevated: #eef2f5;
+  --text-primary: #17212b; --text-secondary: #52606d; --text-muted: #687786;
+  --border-subtle: #d9e1e8; --border-accent: #b8c5d0;
+  --glass-bg: rgba(255, 255, 255, .88); --glass-border: 1px solid rgba(184,197,208,.8);
+  --caveat-bg: rgba(245,158,11,.10); --unverified-bg: repeating-linear-gradient(45deg, rgba(245,158,11,.10), rgba(245,158,11,.10) 4px, transparent 4px, transparent 12px);
+}
+
+html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
+.topbar { min-height: 64px; flex-wrap: nowrap; }
+.portal-nav { display: flex; flex: 1 1 auto; min-width: 0; }
+.portal-nav .offcanvas-body { display: flex; align-items: center; padding: 0; }
+.mainnav { align-items: center; min-width: 0; }
+.nav-tools { display: flex; gap: var(--space-1); margin-left: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border-subtle); }
+.nav-tools a { color: var(--text-muted); font-size: 12.5px; }
+.menu-toggle { display: none; }
+.theme-control { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.theme-control select { min-width: 0; width: auto; padding: 5px 24px 5px 7px; font-size: 12px; }
+.search-icon { color: var(--accent-teal); font-size: 20px; line-height: 1; }
+.findcouncil { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.findcouncil input { min-width: 175px; }
+
+.filterbar.offcanvas { z-index: 45; }
+.filterbar.offcanvas:not(.is-mobile-filter) { position: sticky; top: 64px; visibility: visible; transform: none; width: auto; height: auto; max-width: none; flex-direction: row; }
+.filterbar-body { display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap; padding: var(--space-3) var(--space-6); }
+.filterbar .offcanvas-header { display: none; }
+.filters-toggle { display: none; }
+.filter-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 1440px; margin: 16px auto -16px; padding: 0 24px; }
+.filter-summary-label { color: var(--text-muted); font-size: 12px; }
+.filter-chip, .filter-clear { border: 1px solid var(--border-accent); border-radius: 999px; background: var(--bg-elevated); color: var(--text-primary); padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.filter-clear { background: transparent; color: var(--accent-teal); border-color: transparent; }
+
+@media (max-width: 1100px) {
+  .topbar { gap: var(--space-3); }
+  .mainnav a { padding-left: 8px; padding-right: 8px; }
+  .findcouncil input { min-width: 145px; }
+}
+
+@media (max-width: 720px) {
+  .topbar { min-height: 58px; padding: 8px 16px; }
+  .menu-toggle { display: block; order: 4; }
+  .portal-nav { flex: 0 0 auto; }
+  .portal-nav .offcanvas-body { display: block; padding: 16px; }
+  .portal-nav .mainnav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
+  .portal-nav .nav-tools { display: block; margin: 16px 0 0; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border-subtle); }
+  .portal-nav .nav-tools a { display: block; }
+  .findcouncil { order: 3; margin-left: auto; }
+  .findcouncil input { min-width: 0; width: min(35vw, 150px); }
+  .theme-control { display: none; }
+  .filterbar.offcanvas.is-mobile-filter { position: fixed; top: 0; right: 0; bottom: 0; visibility: hidden; transform: translateX(100%); width: min(92vw, 380px); height: 100%; flex-direction: column; }
+  .filterbar.offcanvas.is-mobile-filter.show { visibility: visible; transform: none; }
+  .filterbar .offcanvas-header { display: flex; }
+  .filterbar-body { display: flex; flex-direction: column; align-items: stretch; padding: 0 24px 24px; }
+  .filterbar-body .filter { width: 100%; }
+  .filterbar-body input { width: 100%; }
+  .filters-toggle { display: inline-flex; margin: 12px 16px 0 auto; }
+  .filter-summary { margin: 12px 0 -12px; padding: 0 16px; }
+  main { padding-top: 24px; }
+}
+
 .busybar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; overflow: hidden; }
 .busybar-run { width: 40%; height: 100%; background: var(--accent-teal); animation: busyslide 1.1s ease-in-out infinite; }
 @keyframes busyslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
@@ -517,6 +595,50 @@ main:focus { outline: none; }
 .params th { color: var(--text-muted); font-weight: 600; font-size: 12px;
   text-transform: uppercase; letter-spacing: 0.05em; }
 .params td:first-child { white-space: nowrap; width: 1%; padding-right: var(--space-4); }
+
+/* What we can say — the claims index (Phase 17).
+ *
+ * A claim is a statement, so it is set as a quotation rather than as data:
+ * the blockquote is the claim, the citations list is what it rests on, and
+ * the caveats underneath are the lines that govern it. Nothing here is
+ * computed, and the page's job is to make that visible — the reader should
+ * see at a glance which parts of the card are the campaign's words and which
+ * are the evidence rows behind them. */
+.claim {
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  background: var(--bg-surface); padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+.claim-text {
+  margin: 0; padding: 0 0 var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent-teal);
+  font-size: 17px; line-height: 1.5; color: var(--text-primary);
+}
+.claim-caveats { margin: var(--space-2) 0; }
+.claim-caveats .caveat-pinned { margin-bottom: var(--space-2); }
+.claim-citations { margin-top: var(--space-3); }
+.claim-citations h3 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin: 0 0 var(--space-2);
+}
+.claim-citations ul { list-style: none; margin: 0; padding: 0; }
+.claim-citations li { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
+.claim-citations li:first-child { border-top: none; }
+.citation-unresolved {
+  color: var(--accent-red); font-family: var(--mono); font-size: 12.5px;
+  word-break: break-all;
+}
+
+/* Coverage is deliberately prose-first: it explains the boundary around the
+   evidence before showing recency. The status terms are not controls, so they
+   read as a compact reference list on a phone as well as on a wide display. */
+.coverage-statuses { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-3); }
+.coverage-status { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); padding: var(--space-3); }
+.coverage-status h3 { margin-bottom: var(--space-1); }
+.coverage-status p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.freshness-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-3); }
+.freshness-item { border-left: 3px solid var(--accent-teal); background: var(--bg-surface); padding: var(--space-3) var(--space-4); }
+.freshness-item .small { display: block; color: var(--text-secondary); }
 
 /* Print.
  *

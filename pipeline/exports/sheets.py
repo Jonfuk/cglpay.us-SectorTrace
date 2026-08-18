@@ -1,4 +1,4 @@
-"""Google Sheets export — nine tabs, defined in exports/schema.py.
+"""Google Sheets export — ten tabs, defined in exports/schema.py.
 
 Always writes CSV to exports/output/sheets/ so the export is reproducible and
 diffable without credentials. If GOOGLE_SERVICE_ACCOUNT_JSON and
@@ -100,14 +100,29 @@ def _push_to_google(conn: sqlite3.Connection, settings) -> None:
                   reason="gspread/google-auth not installed (install the 'sheets' extra)")
         return
 
-    credential_path = settings.require_google_service_account()
     spreadsheet_id = settings.google_sheets_spreadsheet_id
     if not spreadsheet_id:
         log.info("sheets.google_push_skipped", reason="GOOGLE_SHEETS_SPREADSHEET_ID not set")
         return
 
-    credentials = Credentials.from_service_account_file(
-        str(credential_path), scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    if settings.google_service_account_json_b64:
+        import base64
+        import json
+
+        try:
+            raw = base64.b64decode(settings.google_service_account_json_b64, validate=True)
+            service_account_info = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "GOOGLE_SERVICE_ACCOUNT_JSON_B64 is not valid base64-encoded "
+                "service-account JSON.") from exc
+        credentials = Credentials.from_service_account_info(
+            service_account_info, scopes=scopes)
+    else:
+        credential_path = settings.require_google_service_account()
+        credentials = Credentials.from_service_account_file(
+            str(credential_path), scopes=scopes)
     client = gspread.authorize(credentials)
     spreadsheet = client.open_by_key(spreadsheet_id)
 

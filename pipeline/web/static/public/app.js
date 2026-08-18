@@ -11,7 +11,7 @@
  */
 'use strict';
 
-import { registerTheme } from '/js/theme.js';
+import { initPortalTheme, registerTheme } from '/js/theme.js';
 
 // --- DOM helpers -------------------------------------------------------------
 
@@ -81,9 +81,6 @@ export function ago(value) {
   if (!value) return 'never';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  if (window.dateFns?.formatDistanceToNow) {
-    return `${window.dateFns.formatDistanceToNow(date)} ago`;
-  }
   const seconds = (Date.now() - date.getTime()) / 1000;
   const units = [['year', 31536000], ['month', 2592000], ['day', 86400],
     ['hour', 3600], ['minute', 60]];
@@ -231,6 +228,8 @@ const ROUTES = {
   '/pfd': () => import('/js/pages/pfd.js'),
   '/authorities': () => import('/js/pages/authority.js'),
   '/compare': () => import('/js/pages/compare.js'),
+  '/claims': () => import('/js/pages/claims.js'),
+  '/coverage': () => import('/js/pages/coverage.js'),
 };
 
 let disposeCurrent = null;
@@ -242,6 +241,7 @@ async function render() {
   const base = path.startsWith('/providers/') ? '/providers'
     : path.startsWith('/authorities/') ? '/authorities' : path;
   const load = ROUTES[base] || ROUTES['/'];
+  updateFilterVisibility(base);
 
   for (const link of document.querySelectorAll('.mainnav a')) {
     const route = link.dataset.route;
@@ -272,6 +272,49 @@ async function render() {
         el('span', { class: 'small', text: error.message }),
         el('button', { class: 'btn', onclick: () => render() }, 'Retry'))));
   }
+}
+
+const FILTER_ROUTES = new Set(['/pay', '/contracts', '/providers', '/pfd', '/treatment', '/geography', '/authorities', '/compare']);
+
+function updateFilterVisibility(base) {
+  const bar = $('#filterbar');
+  const toggle = $('#filters-toggle');
+  const relevant = FILTER_ROUTES.has(base);
+  if (!relevant) {
+    bar.hidden = true;
+    toggle.hidden = true;
+    $('#filter-summary').hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  toggle.hidden = false;
+  const mobile = window.matchMedia?.('(max-width: 720px)').matches;
+  bar.classList.toggle('is-mobile-filter', Boolean(mobile));
+  if (!mobile) {
+    bar.classList.remove('show');
+    bar.removeAttribute('aria-modal');
+  }
+  renderFilterSummary();
+}
+
+function renderFilterSummary() {
+  const summary = $('#filter-summary');
+  const s = getState();
+  const active = Object.entries(s).filter(([, value]) => value);
+  summary.replaceChildren();
+  summary.hidden = active.length === 0;
+  if (!active.length) return;
+  summary.append(el('span', { class: 'filter-summary-label', text: 'Showing:' }));
+  for (const [key, value] of active) {
+    const label = key === 'provider' ? `Provider: ${value}` : `${key === 'yearFrom' ? 'From' : 'To'} ${value}`;
+    summary.append(el('button', { class: 'filter-chip', type: 'button', onclick: () => setState({ [key]: null }) }, `${label} ×`));
+  }
+  summary.append(el('button', { class: 'filter-clear', type: 'button', onclick: () => clearFilters() }, 'Clear all'));
+}
+
+function clearFilters() {
+  setState({ provider: null, yearFrom: null, yearTo: null });
+  for (const control of document.querySelectorAll('#filterbar [data-filter]')) control.value = '';
 }
 
 // --- global filter bar -------------------------------------------------------
@@ -348,6 +391,7 @@ async function initFilterBar() {
   }
   if (s.yearFrom) $('#f-year-from').value = s.yearFrom;
   if (s.yearTo) $('#f-year-to').value = s.yearTo;
+  renderFilterSummary();
 }
 
 // --- find your council -------------------------------------------------------
@@ -407,13 +451,27 @@ async function initFindCouncil() {
   });
 }
 
+// Bootstrap's dismissal data API deliberately prevents an anchor's normal
+// action. Navigation links therefore never carry data-bs-dismiss: when the
+// mobile offcanvas is open, close it here while leaving the link's hash or URL
+// action intact. On desktop the same links are ordinary anchors.
+function initMobileNavigation() {
+  const nav = $('#portal-nav');
+  nav?.addEventListener('click', (event) => {
+    if (!event.target.closest('a') || !nav.classList.contains('show')) return;
+    window.bootstrap?.Offcanvas.getInstance(nav)?.hide();
+  });
+}
+
 // --- boot --------------------------------------------------------------------
 
 function boot() {
   registerTheme();
+  initPortalTheme();
   readStateFromUrl();
   initFilterBar();
   initFindCouncil();
+  initMobileNavigation();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
   render();

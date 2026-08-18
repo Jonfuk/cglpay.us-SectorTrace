@@ -415,6 +415,83 @@ def migrate_data(
         target.close()
 
 
+def _postgres_source(settings, command: str):
+    """Open the explicit source URL used by PostgreSQL mirror commands."""
+    if settings.database_backend != "postgres":
+        typer.echo(f"{command} needs DATABASE_URL set to the target PostgreSQL warehouse.",
+                   err=True)
+        raise typer.Exit(code=1)
+    if not settings.database_source_url:
+        typer.echo(
+            f"{command} needs DATABASE_SOURCE_URL for the other PostgreSQL warehouse.",
+            err=True)
+        raise typer.Exit(code=1)
+    from pipeline import pg
+
+    return pg.connect(settings.database_source_url, readonly=True,
+                      application_name=f"sectortrace-{command}")
+
+
+@app.command("migrate-postgres")
+def migrate_postgres(
+    truncate: bool = typer.Option(
+        False, "--truncate", help="Replace all target rows instead of refusing a populated target"),
+    verify: bool = typer.Option(
+        True, "--verify/--no-verify", help="Compare every value after copying"),
+) -> None:
+    """Copy DATABASE_SOURCE_URL into the configured PostgreSQL warehouse.
+
+    Use this for the initial local-PostgreSQL -> Railway import. Later, point
+    DATABASE_URL at local PostgreSQL and DATABASE_SOURCE_URL at Railway to
+    refresh the local mirror from the authoritative warehouse.
+    """
+    from pipeline import pgmirror
+
+    configure_logging("pgmirror")
+    settings = get_settings()
+    source = _postgres_source(settings, "migrate-postgres")
+    target = _postgres_target(settings, "migrate-postgres")
+    try:
+        def announce(table: str, rows: int) -> None:
+            ui.success(f"  {table}: {rows:,} rows")
+
+        result = pgmirror.transfer(source, target, truncate=truncate,
+                                   verify=verify, on_table=announce)
+    except pgmirror.MirrorError as exc:
+        ui.error(str(exc))
+        raise typer.Exit(code=1) from None
+    finally:
+        source.close()
+        target.close()
+    ui.heading(f"{result['rows']:,} rows in {result['tables']} tables copied")
+    if result["verified"]:
+        ui.success("  source and target agree on every value")
+
+
+@app.command("check-postgres-sync")
+def check_postgres_sync() -> None:
+    """Compare the two PostgreSQL warehouses without changing either one."""
+    from pipeline import pgmirror
+
+    configure_logging("pgmirror_check")
+    settings = get_settings()
+    source = _postgres_source(settings, "check-postgres-sync")
+    target = _postgres_target(settings, "check-postgres-sync")
+    try:
+        report = pgmirror.compare(source, target)
+    finally:
+        source.close()
+        target.close()
+    if "tables" in report:
+        _report_verification(report)
+    else:
+        ui.error("PostgreSQL sync preflight failed:")
+        for problem in report["problems"]:
+            ui.warn(f"  {problem}")
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
 @app.command("verify-migration")
 def verify_migration(
     quick: bool = typer.Option(
@@ -591,9 +668,38 @@ def benchmark(
             if "p50_ratio" not in row:
                 ui.warn(f"  {row['name']}: {row['note']}")
                 continue
-            ui.info(f"  {row['name']:<34} "
+                ui.info(f"  {row['name']:<34} "
                      f"{row['left_p50_ms']:>9,.1f} -> {row['right_p50_ms']:>9,.1f} ms   "
                      f"x{row['p50_ratio']}")
+
+
+@app.command("coverage-report")
+def coverage_report(
+    output: str = typer.Option(
+        None, help="Write the JSON baseline to this path instead of stdout"),
+    tier: str = typer.Option("upper", help="upper or all authority tier"),
+) -> None:
+    """Build a read-only coverage, review, freshness and provenance baseline."""
+    import json
+    from pathlib import Path
+
+    from pipeline import completeness
+    from pipeline.web.queries import readonly_connection
+
+    configure_logging("coverage-report")
+    settings = get_settings()
+    conn = readonly_connection(settings)
+    try:
+        report = completeness.baseline(conn, tier=tier)
+    finally:
+        conn.close()
+
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if output:
+        Path(output).write_text(payload, encoding="utf-8")
+        typer.echo(f"coverage baseline written to {output}")
+    else:
+        typer.echo(payload, nl=False)
 
 
 def _report_verification(report: dict) -> None:
@@ -606,6 +712,30 @@ def _report_verification(report: dict) -> None:
               f"{report['tables']} tables:")
     for problem in report["problems"]:
         ui.warn(f"  {problem}")
+
+
+@app.command()
+def migrate() -> None:
+    """Apply the schema migrations for the configured warehouse.
+
+    This is intentionally a small, explicit deployment command. Railway can
+    run it before starting the web process, while local commands continue to
+    apply migrations lazily as they do today.
+    """
+    configure_logging("migrate")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        applied = db.apply_migrations(conn, settings=settings)
+        conn.commit()
+    finally:
+        conn.close()
+
+    backend = settings.database_backend
+    if applied:
+        typer.echo(f"{backend}: applied {len(applied)} migration(s): {', '.join(applied)}")
+    else:
+        typer.echo(f"{backend}: schema is current")
 
 
 @app.command()
@@ -894,6 +1024,113 @@ def run(
         # A failing module is a failing run, but the modules that succeeded
         # keep their work and are reported above -- an aborted crawl that
         # discards the sources it already asked is the worst outcome here.
+        raise typer.Exit(code=1)
+
+
+@app.command("archive-migrate")
+def archive_migrate(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    workers: int = typer.Option(8, "--workers", min=1, max=64,
+                                help="Concurrent remote archive workers."),
+) -> None:
+    """Inventory the local mirror, then resumably upload it to the active archive."""
+    from pathlib import Path
+
+    from pipeline.archive import ArchiveError, FilesystemArchive, get_archive
+
+    settings = get_settings()
+    local = FilesystemArchive(Path(settings.raw_archive_dir))
+    inventory = local.inventory(True)
+    report = local.verify()
+    if not report["ok"]:
+        typer.echo(f"local archive is not valid: {report['failures']}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"local: {inventory['files']:,} objects, {inventory['bytes']:,} bytes")
+    if dry_run:
+        return
+    remote = get_archive(settings)
+    remote_keys = {row["key"] for row in remote.inventory()["objects"]}
+
+    def migrate_one(row: dict) -> bool:
+        source, filename = row["key"].split("/")[2:4]
+        sha = filename.split(".", 1)[0]
+        body = local.read(row["key"])
+        if row["key"] in remote_keys:
+            try:
+                if remote.read(row["key"]) == body:
+                    return False
+            except (FileNotFoundError, ArchiveError):
+                pass
+        from mimetypes import guess_type
+        remote.put(source, sha, guess_type(filename)[0], body)
+        return True
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="archive-migrate") as pool:
+        uploaded = sum(pool.map(migrate_one, inventory["objects"]))
+
+    # Migration records the post-upload inventory. The required complete
+    # byte/hash proof remains an explicit `archive-verify` step, so interrupted
+    # migrations do not download the whole archive twice before resuming.
+    manifest = remote.inventory()
+    manifest["verification_required"] = True
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    (Path(settings.backup_dir) / "archive-manifest.json").write_text(
+        __import__("json").dumps(manifest, indent=2), encoding="utf-8")
+    typer.echo(f"uploaded: {uploaded:,}; inventoried: {manifest['files']:,} objects")
+    typer.echo("run archive-verify for complete byte-count and SHA-256 verification")
+
+
+@app.command("archive-verify")
+def archive_verify() -> None:
+    """Perform a complete key, byte-count and SHA-256 verification."""
+    from pipeline.archive import get_archive
+    settings = get_settings()
+    report = get_archive(settings).verify()
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    (settings.backup_dir / "archive-manifest.json").write_text(
+        __import__("json").dumps(report, indent=2), encoding="utf-8")
+    typer.echo(__import__("json").dumps(report, indent=2))
+    if not report["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command("archive-mirror")
+def archive_mirror() -> None:
+    """Download bucket objects missing from the local recovery mirror."""
+    from pipeline.archive import FilesystemArchive, get_archive
+    settings = get_settings()
+    remote, local = get_archive(settings), FilesystemArchive(settings.raw_archive_dir)
+    copied = 0
+    for row in remote.inventory()["objects"]:
+        source, filename = row["key"].split("/")[2:4]
+        sha = filename.split(".", 1)[0]
+        if local.lookup(source, sha) is None:
+            from mimetypes import guess_type
+            local.put(source, sha, guess_type(filename)[0], remote.read(row["key"]))
+            copied += 1
+    typer.echo(f"mirrored: {copied:,} objects; local files are never deleted")
+
+
+@app.command("archive-reconcile")
+def archive_reconcile(repair_from_local: bool = typer.Option(False, "--repair-from-local")) -> None:
+    """Report bucket/local differences; repair only with explicit opt-in."""
+    from pipeline.archive import FilesystemArchive, get_archive
+    settings = get_settings()
+    remote, local = get_archive(settings), FilesystemArchive(settings.raw_archive_dir)
+    repaired = 0
+    if repair_from_local:
+        for row in local.inventory(True)["objects"]:
+            source, filename = row["key"].split("/")[2:4]
+            sha = filename.split(".", 1)[0]
+            if remote.lookup(source, sha) is None or remote.lookup(source, sha).read_bytes() != local.read(row["key"]):
+                from mimetypes import guess_type
+                remote.put(source, sha, guess_type(filename)[0], local.read(row["key"]))
+                repaired += 1
+    report = remote.verify()
+    typer.echo(f"remote: {report['files']:,} objects, {report['bytes']:,} bytes; repaired {repaired:,}")
+    if not report["ok"]:
         raise typer.Exit(code=1)
 
 

@@ -13,33 +13,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SectorTrace — England-wide evidence on substance misuse treatment</title>
 <meta name="description" content="Evidence on the England-wide drug and alcohol treatment sector, assembled from public-domain sources with full provenance.">
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/vendor/bootstrap.min.css">
 <link rel="stylesheet" href="/vendor/tabulator_midnight.min.css">
+<link rel="stylesheet" href="/styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#128202;</text></svg>">
 <script src="/vendor/echarts.min.js" defer></script>
 <script src="/vendor/d3.min.js" defer></script>
 <script src="/vendor/tabulator.min.js" defer></script>
 <script src="/vendor/fuse.min.js" defer></script>
-<script src="/vendor/date-fns.cdn.min.js" defer></script>
+<script src="/vendor/bootstrap.bundle.min.js" defer></script>
 </head>
 <body>
 
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="topbar">
+<header class="topbar navbar navbar-expand-lg" data-bs-theme="dark">
   <a class="brand" href="#/">
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-text">Sector<strong>Trace</strong></span>
   </a>
-  <nav class="mainnav" aria-label="Sections">
-    <a href="#/" data-route="">Overview</a>
-    <a href="#/pay" data-route="pay">Pay evidence</a>
-    <a href="#/contracts" data-route="contracts">Contracts</a>
-    <a href="#/geography" data-route="geography">Geography</a>
-    <a href="#/treatment" data-route="treatment">Treatment demand</a>
-    <a href="#/providers" data-route="providers">Providers</a>
-    <a href="#/pfd" data-route="pfd">Coroner reports</a>
-  </nav>
+  <button class="menu-toggle navbar-toggler" type="button" data-bs-toggle="offcanvas"
+          data-bs-target="#portal-nav" aria-controls="portal-nav" aria-label="Open section menu">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+  <div class="offcanvas-lg offcanvas-end portal-nav" tabindex="-1" id="portal-nav" aria-labelledby="portal-nav-title">
+    <div class="offcanvas-header">
+      <h2 class="offcanvas-title" id="portal-nav-title">Explore evidence</h2>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#portal-nav" aria-label="Close section menu"></button>
+    </div>
+    <nav class="mainnav offcanvas-body" aria-label="Sections">
+      <a href="#/" data-route="">Overview</a>
+      <a href="#/pay" data-route="pay">Pay &amp; benchmarks</a>
+      <a href="#/contracts" data-route="contracts">Funding &amp; contracts</a>
+      <a href="#/geography" data-route="geography">Places</a>
+      <a href="#/providers" data-route="providers">Providers</a>
+      <a href="#/treatment" data-route="treatment">Treatment data</a>
+      <a href="#/pfd" data-route="pfd">Safety &amp; legal</a>
+      <a href="#/claims" data-route="claims">Evidence-backed claims</a>
+      <div class="nav-tools">
+        <a href="#/coverage" data-route="coverage">Coverage &amp; limitations</a>
+        <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
+        <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
+      </div>
+    </nav>
+  </div>
   <!--
     W-17: "find my council". A navigator, not a filter: picking an authority
     goes straight to its page, which is why it lives in the top bar rather
@@ -49,13 +66,17 @@
     else to start.
   -->
   <div class="findcouncil" role="search">
+    <span class="search-icon" aria-hidden="true">⌕</span>
     <input id="find-council" type="search" placeholder="Find your council"
            aria-label="Find your council by name" autocomplete="off"
            role="combobox" aria-expanded="false" aria-controls="find-council-list">
     <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
   </div>
-  <a class="adminlink" href="/api" title="The read-only JSON API behind these pages">API</a>
-  <a class="adminlink" href="/admin/" title="Pipeline operator tools">Admin &rarr;</a>
+  <label class="theme-control" for="theme-select">Theme
+    <select id="theme-select" aria-label="Colour theme">
+      <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+    </select>
+  </label>
 </header>
 
 <!--
@@ -66,7 +87,12 @@
   "no figure without its caveat" rule does not cover -- the reader sees the
   same numbers and has no way to know the control was ignored.
 -->
-<div class="filterbar" id="filterbar" hidden>
+<button class="filters-toggle btn primary" id="filters-toggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#filterbar" aria-controls="filterbar" hidden>
+  Filters <span class="filter-count" id="filter-count" aria-label="active filters">0</span>
+</button>
+<div class="filterbar offcanvas offcanvas-end" id="filterbar" tabindex="-1" aria-labelledby="filter-title" hidden>
+  <div class="offcanvas-header"><h2 id="filter-title">Filters</h2><button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close filters"></button></div>
+  <div class="filterbar-body offcanvas-body">
   <div class="filter">
     <label for="f-provider">Provider</label>
     <div class="typeahead">
@@ -86,7 +112,10 @@
   </div>
   <button class="btn ghost" id="f-reset">Reset filters</button>
   <span class="filter-note" id="filter-note"></span>
+  </div>
 </div>
+
+<div class="filter-summary" id="filter-summary" aria-live="polite" hidden></div>
 
 <div id="busybar" class="busybar" hidden><div class="busybar-run"></div></div>
 
@@ -110,6 +139,7 @@
     <ul>
       <li><code>/api/v1/summary</code> — headline counts and their caveats</li>
       <li><code>/api/v1/pay</code> — pay evidence</li>
+      <li><code>/api/v1/council_spend</code> — published council payment lines</li>
       <li><code>/api/v1/contracts</code> — contract notices</li>
       <li><code>/api/v1/providers</code> — one entry per provider</li>
       <li><code>/api/v1/authorities</code> — commissioning authorities</li>
@@ -120,6 +150,7 @@
       <li><code>/api/v1/compare</code> — the existing series for two or more authorities or providers, on shared axes</li>
       <li><code>/api/v1/layers</code> — the geography map's overlay layers, each with its own caveats</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
+      <li><code>/api/v1/claims</code> — what the campaign says, with the evidence behind each claim</li>
       <li><code>/api/v1/freshness</code> — when each source table was last collected</li>
       <li><code>/api/v1/export</code> — any of the above as CSV or JSON</li>
     </ul>

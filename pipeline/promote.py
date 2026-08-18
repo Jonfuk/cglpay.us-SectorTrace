@@ -186,7 +186,12 @@ def _fetch_document(url: str, spec: dict, settings: Settings,
 
 def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
              fields: dict | None = None, note: str | None = None,
-             settings: Settings | None = None, resolver=None) -> dict:
+             settings: Settings | None = None, resolver=None, *,
+             actor_type: str = "human", actor_id: str | None = None,
+             model_id: str | None = None, policy_version: str | None = None,
+             evidence_manifest_sha256: str | None = None,
+             independent_review_count: int = 0, confidence: float | None = None,
+             qa_status: str = "not_required") -> dict:
     """Promote one candidate. Fetches the document; writes two rows or none."""
     settings = settings or get_settings()
     spec = _spec(kind)
@@ -195,6 +200,18 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
     if not (promoted_by or "").strip():
         raise PromotionError(
             "promotions are attributed. Say who is promoting this.")
+    if actor_type not in {"human", "ai"}:
+        raise PromotionError("actor_type must be 'human' or 'ai'.")
+    if actor_type == "ai":
+        required = (actor_id, model_id, policy_version,
+                    evidence_manifest_sha256)
+        if (any(not str(value or "").strip() for value in required)
+                or independent_review_count < 2
+                or confidence is None or not 0 <= confidence <= 1):
+            raise PromotionError(
+                "AI promotions require actor_id, model_id, policy_version, "
+                "evidence_manifest_sha256, at least two independent reviews, "
+                "and confidence between 0 and 1.")
 
     found = candidate(conn, kind, url)
     if found is None:
@@ -248,18 +265,21 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
             "INSERT INTO evidence_promotions "
             "(candidate_table, candidate_url, target_table, target_key, "
             " promoted_by, promoted_at, note, candidate_context_json, "
-            " fetched_url, http_status, payload_sha256, archived_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             " fetched_url, http_status, payload_sha256, archived_path, "
+             " actor_type, actor_id, model_id, policy_version, "
+             " evidence_manifest_sha256, independent_review_count, confidence, qa_status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (spec["candidate_table"], url, spec["target_table"], target_key,
              promoted_by.strip(), promoted_at, note,
              json.dumps(found, default=str), result.url, result.status_code,
-             result.payload_sha256,
-             str(result.archived_path) if result.archived_path else None))
+             result.payload_sha256, result.archived_ref, actor_type, actor_id,
+             model_id, policy_version, evidence_manifest_sha256,
+             independent_review_count, confidence, qa_status))
 
         row = {
             spec["authority_column"]: authority,
             spec["target_url_column"]: url,
-            "archived_path": str(result.archived_path) if result.archived_path else None,
+            "archived_path": result.archived_ref,
             # Text extraction is not promotion's job. The bytes are archived
             # and hashed, which is what makes the row citable; m14 is where
             # reading documents lives.
@@ -289,6 +309,7 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
               target=spec["target_table"], sha256=result.payload_sha256)
     return {"kind": kind, "url": url, "target_table": spec["target_table"],
              "target_key": target_key, "promoted_by": promoted_by.strip(),
+             "actor_type": actor_type,
              "promoted_at": promoted_at, "payload_sha256": result.payload_sha256,
              "http_status": result.status_code}
 

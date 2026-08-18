@@ -57,12 +57,19 @@ def directives(response) -> dict[str, str]:
     "/api/v1/summary",        # portal API
     "/api/overview",          # operator API
     "/api/schema",
+    "/health",                 # Railway process probe
 ])
 def test_every_response_carries_them(client, path):
     response = client.get(path)
     assert response.status_code == 200, path
     for header in REQUIRED:
         assert header in response.headers, f"{path} is missing {header}"
+
+
+def test_health_probe_has_no_database_payload(client):
+    response = client.get("/health")
+    assert response.text == "ok\n"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_a_404_carries_them_too(client):

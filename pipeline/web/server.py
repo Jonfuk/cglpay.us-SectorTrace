@@ -41,12 +41,15 @@ from urllib.parse import parse_qs, urlparse
 import structlog
 
 from pipeline import census_verify, db, promote
+from pipeline import claims as claims_core
+from pipeline.claims import ClaimError
 from pipeline.config import Settings, get_settings
 from pipeline.web import (
     admin,
     artefacts,
     candidates,
     census,
+    claims,
     health,
     public_export,
     public_queries,
@@ -102,14 +105,14 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
 for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "candidates", "census"):
+                 "exports", "candidates", "census", "claims"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
 for _module in ("theme", "components"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
-              "pfd", "authority", "compare"):
+              "pfd", "authority", "compare", "claims", "coverage"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -120,7 +123,8 @@ for _lib, _type in (
     ("tabulator.min.js", JS),
     ("tabulator_midnight.min.css", CSS),
     ("fuse.min.js", JS),
-    ("date-fns.cdn.min.js", JS),
+    ("bootstrap.min.css", CSS),
+    ("bootstrap.bundle.min.js", JS),
 ):
     STATIC_FILES[f"/vendor/{_lib}"] = (f"vendor/{_lib}", _type, PUBLIC_DIR)
 
@@ -272,6 +276,19 @@ def _safe_name_part(value: str) -> str:
 
 def _str(params: dict[str, list[str]], name: str, default: str = "") -> str:
     return (params.get(name, [default])[0] or "").strip()
+
+
+def _claim_id(body: dict) -> int:
+    """The claim id a write route was sent, as an int, or a refusal.
+
+    In a helper rather than inline in five handlers because the refusals must
+    agree: a claim id that is not a whole number is a request error, not a
+    ClaimError about the claim.
+    """
+    try:
+        return int(body.get("claim_id") or 0)
+    except (TypeError, ValueError):
+        raise ApiError("claim_id must be a whole number.") from None
 
 
 def _contract_query(params: dict[str, list[str]]) -> dict:
@@ -534,6 +551,18 @@ class Handler(BaseHTTPRequestHandler):
         self._responded = False
 
         try:
+            if not self.settings.admin_ui_enabled and (
+                path == "/admin" or path.startswith("/admin/")
+                or path == "/api/admin" or path.startswith("/api/admin/")
+            ):
+                raise ApiError(f"No route for {path}", status=404)
+            if path == "/health" and self.command in ("GET", "HEAD"):
+                # Process-level readiness probe. Schema migration runs before
+                # the server starts; keeping this endpoint dependency-free
+                # means Railway can distinguish a live HTTP process from a
+                # database query failure reported by the application APIs.
+                return self._send(200, b"ok\n", "text/plain; charset=utf-8",
+                                  max_age=0)
             if path in STATIC_FILES and self.command in ("GET", "HEAD"):
                 return self._serve_static(path)
             if path.startswith("/api/"):
@@ -551,6 +580,8 @@ class Handler(BaseHTTPRequestHandler):
         except review.DecisionError as exc:
             self._fail(400, str(exc))
         except resolve.ResolveError as exc:
+            self._fail(400, str(exc))
+        except ClaimError as exc:
             self._fail(400, str(exc))
         except public_export.ExportError as exc:
             self._fail(400, str(exc))
@@ -973,6 +1004,39 @@ class Handler(BaseHTTPRequestHandler):
             except census_verify.VerificationError as exc:
                 raise ApiError(str(exc), status=404) from None
 
+        # The claim worklist. Separate from /api/admin/candidates and
+        # /api/admin/census because the act is different yet again: nothing is
+        # fetched and nothing crosses into another table; a claim is a
+        # statement, written by a person and linked to evidence rows the
+        # person picked, and deciding it is the same named-person act the
+        # other two record. See pipeline/claims.py.
+        if path == "/api/admin/claims":
+            return claims.listing(
+                conn,
+                status=_str(params, "status") or "all",
+                offset=_int(params, "offset", 0),
+                limit=_int(params, "limit", claims.PAGE))
+
+        if path == "/api/admin/claims/counts":
+            return claims.counts(conn)
+
+        # The evidence-row picker behind the Citations box: rows of a citable
+        # table that match a search term, as {key, label, url} candidates.
+        # Called with no table it returns the citable list instead, so the
+        # picker can build its select without a second route.
+        if path == "/api/admin/claims/evidence":
+            try:
+                table = _str(params, "table")
+                if not table:
+                    return {"tables": claims_core.citable_tables(), "rows": []}
+                return {"rows": claims.evidence_search(
+                    conn,
+                    table=table,
+                    q=_str(params, "q") or "",
+                    limit=_int(params, "limit", 20))}
+            except ClaimError as exc:
+                raise ApiError(str(exc), status=400) from None
+
         if path == "/api/admin/exports":
             listed = artefacts.listing(self.settings)
             return {**listed,
@@ -1055,6 +1119,12 @@ class Handler(BaseHTTPRequestHandler):
                 provider_key=_str(params, "provider_key") or None,
                 year_from=_str(params, "year_from") or None,
                 year_to=_str(params, "year_to") or None)
+        if route == "council_spend":
+            return public_queries.council_spend(
+                conn,
+                authority_ons_code=_str(params, "authority_ons_code") or None,
+                provider_key=_str(params, "provider_key") or None,
+                limit=_int(params, "limit", 500))
         if route == "geography":
             metric = _str(params, "metric") or "grant_total"
             return {**public_queries.geography(
@@ -1076,6 +1146,8 @@ class Handler(BaseHTTPRequestHandler):
                 substance=_str(params, "substance") or None)
         if route == "pfd":
             return public_queries.pfd(conn)
+        if route == "claims":
+            return public_queries.claims(conn)
         if route == "freshness":
             # Its own route rather than a key of `summary` for the same
             # reason the admin one is: seconds of full table scans, and the
@@ -1120,6 +1192,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/census/verify": self._verify_census,
             "/api/admin/census/reject": self._reject_census,
             "/api/admin/census/reset": self._reset_census,
+            "/api/admin/claims/create": self._create_claim,
+            "/api/admin/claims/update": self._update_claim,
+            "/api/admin/claims/cite": self._cite_claim,
+            "/api/admin/claims/uncite": self._uncite_claim,
+            "/api/admin/claims/decide": self._decide_claim,
+            "/api/admin/claims/reset": self._reset_claim,
         }
 
     def _verify_census(self, body: dict) -> Any:
@@ -1173,6 +1251,118 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(str(exc), status=400) from None
         finally:
             conn.close()
+
+    def _create_claim(self, body: dict) -> Any:
+        """Write a draft claim. One, never a list, the same rule `_promote`
+        follows: the act being recorded is that somebody wrote the statement,
+        and a route taking an array would be a route that made claiming cheap.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.create(
+                conn,
+                claim_text=str(body.get("claim_text", "")),
+                created_by=str(body.get("created_by", "")),
+                caveats=str(body.get("caveats", "")),
+                note=body.get("note"),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_created", claim_id=result["id"],
+                  by=result["created_by"])
+        return result
+
+    def _update_claim(self, body: dict) -> Any:
+        """Edit a draft claim's text, caveats and note."""
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.update_text(
+                conn,
+                claim_id=_claim_id(body),
+                claim_text=str(body.get("claim_text", "")),
+                caveats=str(body.get("caveats", "")),
+                note=body.get("note"),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_updated", claim_id=result["id"])
+        return result
+
+    def _cite_claim(self, body: dict) -> Any:
+        """Link one evidence row to a draft claim."""
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.cite(
+                conn,
+                claim_id=_claim_id(body),
+                evidence_table=str(body.get("evidence_table", "")),
+                evidence_key=str(body.get("evidence_key", "")),
+                cited_by=str(body.get("cited_by", "")),
+                note=body.get("note"),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_cited", claim_id=result["id"])
+        return result
+
+    def _uncite_claim(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.uncite(
+                conn,
+                claim_id=_claim_id(body),
+                evidence_table=str(body.get("evidence_table", "")),
+                evidence_key=str(body.get("evidence_key", "")),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_uncited", claim_id=result["id"])
+        return result
+
+    def _decide_claim(self, body: dict) -> Any:
+        """Move a claim to a decided status, recording who decided it.
+
+        One claim per request, the same rule `_verify_census` follows: the
+        act being recorded is that a person reviewed this statement.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.decide(
+                conn,
+                claim_id=_claim_id(body),
+                decision=str(body.get("decision", "")),
+                decided_by=str(body.get("decided_by", "")),
+                note=body.get("note"),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_decided", claim_id=result["id"],
+                  decision=result["status"])
+        return result
+
+    def _reset_claim(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            result = claims_core.reset(
+                conn,
+                claim_id=_claim_id(body),
+            )
+        except ClaimError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_reset", claim_id=result["id"])
+        return result
 
     def _promote(self, body: dict) -> Any:
         """Promote one candidate into the evidence base.

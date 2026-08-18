@@ -33,7 +33,7 @@ export async function render(main) {
   const totals = data.totals || {};
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Prevention of Future Deaths reports' }),
+      el('h1', { text: 'Coroners’ reports' }),
       el('p', { class: 'lede' },
         `${num(totals.reports)} reports from coroners, read from judiciary.uk. `,
         'A report is the coroner\'s own words about how a death could have ',

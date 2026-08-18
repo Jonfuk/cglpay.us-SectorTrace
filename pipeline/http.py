@@ -27,6 +27,7 @@ from tenacity import (
 )
 
 from pipeline import db
+from pipeline.archive import get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
 
@@ -74,7 +75,8 @@ class FetchResult:
     retrieved_at: datetime
     payload_sha256: str
     not_modified: bool
-    archived_path: Path | None
+    archived_path: object | None
+    archived_ref: str | None = None
     # Where the request actually landed, redirects followed. Distinct from
     # `url`, which is what was asked for: a council that has moved domain
     # answers on the old one and serves from the new, and a caller storing a
@@ -384,6 +386,7 @@ class PipelineHTTPClient:
         """
         self.source_system = source_system
         self.settings = settings or get_settings()
+        self.archive = get_archive(self.settings)
         self.conn = conn
         hooks = {}
         if guard_destination:
@@ -522,6 +525,7 @@ class PipelineHTTPClient:
 
         not_modified = response.status_code == 304
         archived_path = None
+        archived_ref = None
 
         if not_modified:
             # A 304 means "unchanged since you last fetched it" — the caller
@@ -531,9 +535,13 @@ class PipelineHTTPClient:
             # rows. If the archive is missing, re-fetch unconditionally: a
             # cache entry without its payload is not a usable cache hit.
             sha256 = cached["payload_sha256"] if cached else ""
-            archived_path = _find_archived(self.settings.raw_archive_dir, self.source_system, sha256)
-            if archived_path is not None:
-                body = archived_path.read_bytes()
+            archived = self.archive.lookup(self.source_system, sha256)
+            if archived is not None:
+                body = archived.read_bytes()
+                archived_path = (Path(self.settings.raw_archive_dir) /
+                                 archived.logical_path.removeprefix("data/raw/")
+                                 if self.archive.backend == "filesystem" else archived)
+                archived_ref = archived.logical_path
             else:
                 log.info("http.cache_miss_refetch", url=request_url, source_system=self.source_system)
                 response = self._do_request("GET", url, params=params, headers=dict(headers or {}))
@@ -542,18 +550,24 @@ class PipelineHTTPClient:
                 body = response.content
                 sha256 = hashlib.sha256(body).hexdigest() if body else ""
                 if archive and body:
-                    archived_path = _archive_raw(
-                        self.settings.raw_archive_dir, self.source_system, sha256,
-                        response.headers.get("content-type"), body,
-                    )
+                    logical = self.archive.put(self.source_system, sha256,
+                                                response.headers.get("content-type"), body)
+                    archived_path = (Path(self.settings.raw_archive_dir) /
+                                     logical.removeprefix("data/raw/")
+                                     if self.archive.backend == "filesystem"
+                                     else self.archive.lookup(self.source_system, sha256))
+                    archived_ref = logical
         else:
             body = response.content
             sha256 = hashlib.sha256(body).hexdigest() if body else ""
             if archive and body:
-                archived_path = _archive_raw(
-                    self.settings.raw_archive_dir, self.source_system, sha256,
-                    response.headers.get("content-type"), body,
-                )
+                logical = self.archive.put(self.source_system, sha256,
+                                            response.headers.get("content-type"), body)
+                archived_path = (Path(self.settings.raw_archive_dir) /
+                                 logical.removeprefix("data/raw/")
+                                 if self.archive.backend == "filesystem"
+                                 else self.archive.lookup(self.source_system, sha256))
+                archived_ref = logical
 
         if self.conn is not None:
             entry = dict(
@@ -586,5 +600,6 @@ class PipelineHTTPClient:
             payload_sha256=sha256,
             not_modified=not_modified,
             archived_path=archived_path,
+            archived_ref=archived_ref,
             final_url=str(response.url),
         )

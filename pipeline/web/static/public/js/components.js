@@ -113,6 +113,16 @@ const LICENCES = {
     caution: 'A public website, not an open licence. Passages are held as '
       + 'evidence rather than republished wholesale.',
   },
+  skills_for_care: {
+    name: 'OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)',
+    url: OGL_URL,
+    attribution: 'Adult Social Care Workforce Data Set (ASC-WDS) workforce '
+      + 'estimates, published by Skills for Care.',
+    caution: 'The data.gov.uk catalogue entry for ASC-WDS states OGL v3.0; '
+      + 'the publisher’s own pages carry a site-wide copyright line. '
+      + 'Official statistics under the Code of Practice for Statistics; '
+      + 'check the publisher’s terms before republishing.',
+  },
 };
 
 const MODULE_LICENCES = {
@@ -140,6 +150,8 @@ const MODULE_LICENCES = {
   m21_ons_ashe: 'ogl_v3',
   m22_provider_pay_pages: 'provider_own',
   m23_sector_universe: 'ogl_v3',
+  m24_council_spend: 'authority_varies',
+  m25_skills_for_care: 'skills_for_care',
 };
 
 export function licenceFor(module) {
@@ -321,7 +333,7 @@ export function statCard({ value, label, sub, caveat: caveatText, plain = false,
     el('div', { class: `value${plain ? ' plain' : ''}`, text: value }),
     el('div', { class: 'label' }, label, note ? note.button : null),
     sub ? el('div', { class: 'sub' }, sub) : null,
-    unverified ? el('span', { class: 'badge unverified', text: 'AWAITING VERIFICATION' }) : null,
+    unverified ? el('span', { class: 'badge unverified', text: 'Not yet human-verified' }) : null,
     note ? note.body : null);
 }
 

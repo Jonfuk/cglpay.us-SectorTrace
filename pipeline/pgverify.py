@@ -55,7 +55,7 @@ log = structlog.get_logger()
 # list is being read for; the fix is never "read all 400,000 of them".
 MAX_REPORTED_DIFFERENCES = 5
 
-# The five refusals from migrations 0030 and 0033, re-asked as queries.
+# The seven refusals from migrations 0030, 0033 and 0048, re-asked as queries.
 #
 # Each is the trigger's own condition with `NEW.` removed. They are written
 # out rather than derived from the trigger definitions on purpose: a check
@@ -84,6 +84,13 @@ GUARANTEES: tuple[tuple[str, str], ...] = (
      "  WHERE v.census_year = m.census_year AND v.metric = m.metric "
      "    AND v.workforce_segment = m.workforce_segment "
      "    AND v.raw_text = m.raw_text AND v.decision = 'verified')"),
+    # Migration 0048: no decided claim without the verification that decided
+    # it. The claim trigger's own condition with `NEW.` removed, like the
+    # rest of this tuple.
+    ("claims",
+     "SELECT COUNT(*) FROM claims c WHERE c.status <> 'draft' AND NOT EXISTS ("
+     "  SELECT 1 FROM claim_verifications v "
+     "  WHERE v.claim_id = c.id AND v.decision = c.status)"),
 )
 
 

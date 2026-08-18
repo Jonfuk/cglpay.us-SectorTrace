@@ -210,12 +210,29 @@ elif [[ -n "${DATABASE_URL+set}" ]]; then
     postgres_wanted=0
 fi
 
+# The storage extra follows the archive backend selector for the same reason:
+# `uv sync` removes packages that are not named by the selected extras. Without
+# this check, a local run with ARCHIVE_S3_BUCKET configured uninstalls boto3
+# before the command that needs to construct the S3 archive can import it.
+storage_wanted=0
+if [[ -f .env ]] && grep -Eq '^[[:space:]]*ARCHIVE_S3_BUCKET[[:space:]]*=[[:space:]]*[^[:space:]#]' .env; then
+    storage_wanted=1
+fi
+if [[ -n "${ARCHIVE_S3_BUCKET:-}" ]]; then
+    storage_wanted=1
+elif [[ -n "${ARCHIVE_S3_BUCKET+set}" ]]; then
+    storage_wanted=0
+fi
+
 sync_args=(--quiet)
 if (( ocr_wanted )); then
     sync_args+=(--extra ocr)
 fi
 if (( postgres_wanted )); then
     sync_args+=(--extra postgres)
+fi
+if (( storage_wanted )); then
+    sync_args+=(--extra storage)
 fi
 
 info "Syncing dependencies"
@@ -245,6 +262,9 @@ if (( ocr_wanted )); then
 fi
 if (( postgres_wanted )); then
     ok "DATABASE_URL is set: the warehouse is PostgreSQL, not data/warehouse.db"
+fi
+if (( storage_wanted )); then
+    ok "ARCHIVE_S3_BUCKET is set: the raw archive uses the S3 storage extra"
 fi
 
 # --- run -------------------------------------------------------------------------

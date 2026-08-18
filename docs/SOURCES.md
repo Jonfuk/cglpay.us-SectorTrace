@@ -372,7 +372,30 @@ invisible here.
 | Licence | OGL v3.0 — every row is derived from sources that are themselves OGL v3.0 (the universe invents no data of its own) |
 | Key | None |
 | Rate limit | None — no requests are made |
-| Notes | Reconstructs the sector population: the tracked providers, the companies/charities/CQC registrations collected about them, every distinct awardee in the notices, and every buyer no authority matched (captured as funders). `match_basis` keeps m04's discipline exactly — 'seed' (config or authoritative cross-reference), 'register' (source-published identifier), 'ppon' (the buyer platform's supplier registration id, never a legal-entity claim), 'name_only_unconfirmed' (captured from a name; never linked to a provider). The universe is a capture of who shows up in the corpus, never a complete list of the sector — the notices were matched by CPV prefix and keyword, so one-off awardees of in-scope lots appear. The 3,160 `unmatched_buyer_name` / `possible_group_company` review items are answered by `resolve-answered` once their rows exist; every closure is recorded in `review_resolutions` and reversible |
+| Notes | Reconstructs the sector population: the tracked providers, the companies/charities/CQC registrations collected about them, every distinct awardee in the notices, and every buyer no authority matched (captured as funders). `match_basis` keeps m04's discipline exactly — 'seed' (config or verified authoritative cross-reference), 'register' (source-published identifier), 'ppon' (the buyer platform's supplier registration id, never a legal-entity claim), 'name_only_unconfirmed' (captured from a name; never linked to a provider). The universe is a capture of who shows up in the corpus, never a complete list of the sector — the notices were matched by CPV prefix and keyword, so one-off awardees of in-scope lots appear. Capturing an `unmatched_buyer_name`, `possible_group_company`, or `unconfirmed_name_match` creates an unresolved lead; it does not answer the identity question, so the review item remains pending for a person. |
+
+## Module 24 — Council spend-transparency files (Phase 19, G5)
+
+| | |
+| --- | --- |
+| Source | Each council's own website — **deliberately not an API**: there is no central service for £500+ spend files, so the module discovers them on the authority's own domain (B4's full website coverage is the prerequisite) |
+| Endpoints | Likely transparency paths per authority (e.g. `/transparency`, `/open-data`, `/finance-and-governance`), then the data-file links those pages carry (CSV, XLSX, ODS) |
+| Licence | Varies by authority — same rule as Modules 9 and 10: most councils publish under OGL v3.0 and none of them is guaranteed to. Check the individual file before republishing it |
+| Key | None |
+| Rate limit | Default (2s/host), conditional requests, at most 3 files per authority |
+| Notes | Actual money flows: "council X paid provider Y £Z in [period]". Line-item quality varies council to council, so the NULL discipline does the work: `payee` and `amount_text` are verbatim, `amount` is parsed beside them (NULL where the council's formatting could not be read, never a zero), and an unreadable file is a `parse_failures` row plus a review item — never a silent skip. `provider_key` is set only by an exact-normalised payee match against the tracked providers' own name variants (m04's discipline); name reconciliation at scale is the universe work's (m23). No arithmetic across rows or sources: no totals, no share-of-spend, no comparison against contracts |
+
+## Module 25 — Skills for Care workforce intelligence (Phase 19, G2)
+
+| | |
+| --- | --- |
+| Source | Skills for Care ASC-WDS workforce estimates, published as Excel data downloads |
+| Endpoints | The Data downloads page (`.../workforceintelligence/About-our-data/Data-downloads.aspx`); five workbooks under `.../resources/Our-data/` |
+| Licence | OGL v3.0 for the ASC-WDS data per the data.gov.uk catalogue entry (verified 2026-08-16); the publisher's own pages carry a site-wide copyright line. Official statistics under the Code of Practice for Statistics |
+| Key | None |
+| Rate limit | Default (2s/host), conditional requests |
+| robots.txt | No directives for these paths (verified by request 2026-08-16) |
+| Notes | Adult social care pay and headcount benchmarks — the contextual comparator for the sector's workforce market, on the same side-by-side footing as Module 21 (ASHE). Three current-year workbooks (regional, local-area, ICB) share a data-sheet shape and are parsed: `fte_annual_pay`, `hourly_pay`, `turnover_rate` and `vacancy_rate` per (area, sector, service, job role), stored as the workbook published them (its `*` suppression marker is NULL, not a failure). The statistical appendix (report tables) and the trended workbook (the change-over-time series F-05 declined history for) are fetched and archived but their shapes are not parsed — recorded per file, never silently skipped. Figures are modelled estimates, rounded, for the whole adult social care workforce — a comparator, never an attribution to a tracked provider |
 
 ---
 

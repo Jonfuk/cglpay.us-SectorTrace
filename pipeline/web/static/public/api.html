@@ -304,7 +304,10 @@
       Returns <code>charity_wage_series</code>, <code>nhs_job_adverts</code>,
       <code>nhs_job_by_band</code>, <code>repeat_advertised_roles</code>,
       <code>workforce_census</code>, <code>census_verified_count</code>,
-      <code>census_total</code>, <code>caveats</code>.
+      <code>census_total</code>, <code>statutory_pay_rates</code>,
+      <code>living_wage_accreditations</code>, <code>gender_pay_gap_reports</code>,
+      <code>provider_published_pay</code>, <code>ons_ashe_observations</code>,
+      <code>skills_for_care_estimates</code>, <code>caveats</code>.
     </p>
     <p>
       The wage figure is wages and salaries divided by an average employee
@@ -312,6 +315,29 @@
       the caveat saying so travels in the payload.
     </p>
     <p><a href="/api/v1/pay"><code>/api/v1/pay</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="council_spend">
+    <h3><code>/api/v1/council_spend</code></h3>
+    <p>
+      Payment lines from council spend-transparency files. This is actual
+      published payment evidence, kept separate from procurement notices and
+      authority budgets. The response does not calculate a payment total.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>authority_ons_code</code></td><td>One authority from <code>/api/v1/authorities</code>.</td></tr>
+        <tr><td><code>provider_key</code></td><td>One tracked provider, linked only by exact normalised payee-name match.</td></tr>
+        <tr><td><code>limit</code></td><td>Maximum payment lines returned; defaults to 500.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>total</code> (the number of matching lines, not an amount),
+      <code>payments</code>, <code>files</code> (including unreadable files),
+      and <code>caveats</code>.
+    </p>
+    <p><a href="/api/v1/council_spend"><code>/api/v1/council_spend</code></a></p>
   </article>
 
   <article class="apiroute" data-route="geography">
@@ -435,6 +461,29 @@
       table is listed anywhere in the payload.
     </p>
     <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
+  </article>
+
+  <article class="apiroute" data-route="claims">
+    <h3><code>/api/v1/claims</code></h3>
+    <p>
+      The campaign's claims, each linked to the evidence that supports it
+      and approved by a named reviewer. Nothing in this response is
+      computed: the claim text is what a person wrote, the citations are
+      rows a person picked, and the caveats are lines a person wrote about
+      what may not be computed from it.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>claims</code>: an array of <code>id</code>,
+      <code>claim_text</code>, <code>caveats</code> (one line each),
+      <code>citations</code> (each with a <code>resolved</code> object of
+      <code>label</code>, <code>url</code>, <code>source_url</code> and
+      <code>retrieved_at</code> — or <code>null</code> when the row it named
+      is no longer in the warehouse), <code>published_by</code>,
+      <code>published_at</code> and <code>note</code>. Only published claims
+      are served; a claim is published only by a recorded decision.
+    </p>
+    <p><a href="/api/v1/claims"><code>/api/v1/claims</code></a></p>
   </article>
 
   <article class="apiroute" data-route="freshness">

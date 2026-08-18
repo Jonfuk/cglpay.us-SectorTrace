@@ -61,6 +61,12 @@ COVERAGE_COLUMNS: tuple[tuple[str, str, str, str], ...] = (
       "m10_committee_papers"),
     ("FOI", "foi_requests", "ons_code", "m15_foi"),
     ("FOI cands", "foi_request_candidates", "ons_code", "m15_foi"),
+    # The file-level row is the honest coverage signal for council spend. An
+    # unreadable file is still a council reached and a publication found; the
+    # parse status says why it produced no line-item rows. Counting only
+    # `council_spend` would turn that known parser gap into an apparent absence.
+    ("Spend files", "council_spend_files", "authority_ons_code",
+     "m24_council_spend"),
 )
 
 
@@ -328,6 +334,28 @@ def storage(settings) -> list[dict]:
                 entry["newest"] = datetime.fromtimestamp(
                     newest, tz=timezone.utc).isoformat(timespec="seconds")
         out.append(entry)
+    # The local row remains the recovery mirror. The extra row makes the
+    # operational distinction visible without exposing an object or URL.
+    remote = {"key": "raw_archive_remote", "path": settings.archive_backend,
+              "note": "Primary archive backend; objects remain private.",
+              "exists": False, "files": 0, "bytes": 0, "newest": None,
+              "backend": settings.archive_backend, "last_verification": None,
+              "mirror_lag": None}
+    try:
+        from pipeline.archive import get_archive
+        remote_inventory = get_archive(settings).inventory()
+        remote.update(exists=True, files=remote_inventory["files"],
+                      bytes=remote_inventory["bytes"])
+        local = out[0]
+        remote["mirror_lag"] = {"objects": remote["files"] - local["files"],
+                                "bytes": remote["bytes"] - local["bytes"]}
+        manifest = Path(settings.backup_dir) / "archive-manifest.json"
+        if manifest.is_file():
+            import json
+            remote["last_verification"] = json.loads(manifest.read_text(encoding="utf-8")).get("verified_at")
+    except Exception as exc:  # health must still show local storage if S3 is down
+        remote["error"] = f"{type(exc).__name__}: {exc}"
+    out.append(remote)
     return out
 
 

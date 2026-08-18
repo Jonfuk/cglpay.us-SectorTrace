@@ -68,6 +68,9 @@ class AuthorityWebsite:
 
 
 # Verified by request. Extend deliberately; see module docstring.
+# Phase 19 (B4) added the last verified base URLs (Broadland and South
+# Norfolk share a domain) and verified committee portals for eight more
+# authorities on 2026-08-16 — see the block at the end of this dict.
 AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E10000016": AuthorityWebsite(
         ons_code="E10000016",
@@ -160,7 +163,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.bcpcouncil.gov.uk",
         committee_url="https://democracy.bcpcouncil.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000143": AuthorityWebsite(
@@ -177,7 +180,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.brent.gov.uk",
         committee_url="https://democracy.brent.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000043": AuthorityWebsite(
@@ -186,7 +189,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.brighton-hove.gov.uk",
         committee_url="https://democracy.brighton-hove.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000023": AuthorityWebsite(
@@ -195,7 +198,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.bristol.gov.uk",
         committee_url="https://democracy.bristol.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000172": AuthorityWebsite(
@@ -249,7 +252,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.croydon.gov.uk",
         committee_url="https://democracy.croydon.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000015": AuthorityWebsite(
@@ -258,7 +261,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.derby.gov.uk",
         committee_url="https://www.derby.gov.uk/council-and-democracy",
         committee_system=None,
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000007": AuthorityWebsite(
@@ -267,7 +270,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.derbyshire.gov.uk",
         committee_url="https://democracy.derbyshire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000008": AuthorityWebsite(
@@ -276,7 +279,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.devon.gov.uk",
         committee_url="https://democracy.devon.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E08000027": AuthorityWebsite(
@@ -285,7 +288,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.dudley.gov.uk",
         committee_url="https://cmis.dudley.gov.uk/cmis5",
         committee_system=None,
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000040": AuthorityWebsite(
@@ -309,10 +312,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E07000061": AuthorityWebsite(
         ons_code="E07000061",
         name="Eastbourne",
-        base_url=None,
+        base_url="https://www.lewes-eastbourne.gov.uk",
         committee_url="https://democracy.lewes-eastbourne.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000208": AuthorityWebsite(
         ons_code="E07000208",
@@ -326,10 +330,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E08000037": AuthorityWebsite(
         ons_code="E08000037",
         name="Gateshead",
-        base_url=None,
+        base_url="https://www.gateshead.gov.uk",
         committee_url="https://democracy.gateshead.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000173": AuthorityWebsite(
         ons_code="E07000173",
@@ -355,7 +360,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.gloucestershire.gov.uk",
         committee_url="https://glostext.gloucestershire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000088": AuthorityWebsite(
@@ -379,18 +384,20 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E09000013": AuthorityWebsite(
         ons_code="E09000013",
         name="Hammersmith and Fulham",
-        base_url=None,
+        base_url="https://www.lbhf.gov.uk",
         committee_url="https://democracy.lbhf.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E10000014": AuthorityWebsite(
         ons_code="E10000014",
         name="Hampshire",
-        base_url=None,
+        base_url="https://www.hants.gov.uk",
         committee_url="https://democracy.hants.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000016": AuthorityWebsite(
         ons_code="E09000016",
@@ -398,7 +405,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.havering.gov.uk",
         committee_url="https://democracy.havering.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000019": AuthorityWebsite(
@@ -407,7 +414,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.herefordshire.gov.uk",
         committee_url="https://councillors.herefordshire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000037": AuthorityWebsite(
@@ -443,7 +450,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.islington.gov.uk",
         committee_url="https://democracy.islington.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000146": AuthorityWebsite(
@@ -461,7 +468,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.kingston.gov.uk",
         committee_url="https://kingston.moderngov.co.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000017": AuthorityWebsite(
@@ -470,16 +477,17 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.lancashire.gov.uk",
         committee_url="https://council.lancashire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000018": AuthorityWebsite(
         ons_code="E10000018",
         name="Leicestershire",
-        base_url=None,
+        base_url="https://www.leicestershire.gov.uk",
         committee_url="https://politics.leics.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000063": AuthorityWebsite(
         ons_code="E07000063",
@@ -492,10 +500,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E09000023": AuthorityWebsite(
         ons_code="E09000023",
         name="Lewisham",
-        base_url="https://www.lewisham.gov.uk",
+        base_url="https://lewisham.gov.uk",
         committee_url="https://councilmeetings.lewisham.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000194": AuthorityWebsite(
@@ -513,16 +521,17 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.luton.gov.uk",
         committee_url="https://democracy.luton.gov.uk/cmis5public",
         committee_system=None,
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000110": AuthorityWebsite(
         ons_code="E07000110",
         name="Maidstone",
-        base_url=None,
+        base_url="https://maidstone.gov.uk",
         committee_url="https://meetings.maidstone.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000074": AuthorityWebsite(
         ons_code="E07000074",
@@ -536,10 +545,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E08000003": AuthorityWebsite(
         ons_code="E08000003",
         name="Manchester",
-        base_url=None,
+        base_url="https://www.manchester.gov.uk",
         committee_url="https://democracy.manchester.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000035": AuthorityWebsite(
         ons_code="E06000035",
@@ -547,7 +557,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.medway.gov.uk",
         committee_url="https://democracy.medway.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000133": AuthorityWebsite(
@@ -565,7 +575,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.merton.gov.uk",
         committee_url="https://democracy.merton.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000042": AuthorityWebsite(
@@ -598,10 +608,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E06000013": AuthorityWebsite(
         ons_code="E06000013",
         name="North Lincolnshire",
-        base_url=None,
+        base_url="https://www.northlincs.gov.uk",
         committee_url="https://democracy.northlincs.gov.uk",
         committee_system=None,
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000022": AuthorityWebsite(
         ons_code="E08000022",
@@ -609,7 +620,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.northtyneside.gov.uk",
         committee_url="https://democracy.northtyneside.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000065": AuthorityWebsite(
@@ -618,7 +629,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.northyorks.gov.uk",
         committee_url="https://edemocracy.northyorks.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000018": AuthorityWebsite(
@@ -627,7 +638,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.nottinghamcity.gov.uk",
         committee_url="https://committee.nottinghamcity.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000178": AuthorityWebsite(
@@ -645,7 +656,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.oxfordshire.gov.uk",
         committee_url="https://mycouncil.oxfordshire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000031": AuthorityWebsite(
@@ -654,7 +665,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.peterborough.gov.uk",
         committee_url="https://democracy.peterborough.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000044": AuthorityWebsite(
@@ -663,7 +674,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.portsmouth.gov.uk",
         committee_url="https://democracy.portsmouth.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000038": AuthorityWebsite(
@@ -672,7 +683,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.reading.gov.uk",
         committee_url="https://democracy.reading.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000124": AuthorityWebsite(
@@ -690,7 +701,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.rochdale.gov.uk",
         committee_url="https://democracy.rochdale.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E08000018": AuthorityWebsite(
@@ -699,7 +710,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.rotherham.gov.uk",
         committee_url="https://moderngov.rotherham.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000212": AuthorityWebsite(
@@ -735,7 +746,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.sheffield.gov.uk",
         committee_url="https://democracy.sheffield.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000039": AuthorityWebsite(
@@ -744,7 +755,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.slough.gov.uk",
         committee_url="https://democracy.slough.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E08000029": AuthorityWebsite(
@@ -753,7 +764,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.solihull.gov.uk",
         committee_url="https://democracy.solihull.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000066": AuthorityWebsite(
@@ -762,15 +773,19 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.somerset.gov.uk",
         committee_url="https://democracy.somerset.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000149": AuthorityWebsite(
         ons_code="E07000149",
         name="South Norfolk",
-        base_url=None,
+        # The 2026-08-14 list candidate www.south-norfolk.gov.uk does not
+        # resolve; Phase 19 (B4) verified the shared Broadland/South Norfolk
+        # domain on 2026-08-16.
+        base_url="https://www.southnorfolkandbroadland.gov.uk",
         committee_url="https://democracy.southnorfolkandbroadland.gov.uk",
         committee_system="moderngov",
+        base_url_verified_on="2026-08-16",
         verified_on="2026-08-13",
     ),
     "E07000179": AuthorityWebsite(
@@ -788,7 +803,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.southend.gov.uk",
         committee_url="https://democracy.southend.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000213": AuthorityWebsite(
@@ -803,10 +818,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E07000198": AuthorityWebsite(
         ons_code="E07000198",
         name="Staffordshire Moorlands",
-        base_url=None,
+        base_url="https://www.staffsmoorlands.gov.uk",
         committee_url="https://democracy.staffsmoorlands.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000243": AuthorityWebsite(
         ons_code="E07000243",
@@ -823,7 +839,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.suffolk.gov.uk",
         committee_url="https://committeeminutes.suffolk.gov.uk",
         committee_system=None,
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000030": AuthorityWebsite(
@@ -832,7 +848,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.surreycc.gov.uk",
         committee_url="https://mycouncil.surreycc.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E09000029": AuthorityWebsite(
@@ -841,16 +857,17 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.sutton.gov.uk",
         committee_url="https://moderngov.sutton.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000045": AuthorityWebsite(
         ons_code="E07000045",
         name="Teignbridge",
-        base_url=None,
+        base_url="https://www.teignbridge.gov.uk",
         committee_url="https://democracy.teignbridge.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000020": AuthorityWebsite(
         ons_code="E06000020",
@@ -858,7 +875,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.telford.gov.uk",
         committee_url="https://democracy.telford.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000093": AuthorityWebsite(
@@ -885,7 +902,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.thurrock.gov.uk",
         committee_url="https://democracy.thurrock.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E09000030": AuthorityWebsite(
@@ -894,16 +911,17 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.towerhamlets.gov.uk",
         committee_url="https://democracy.towerhamlets.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000116": AuthorityWebsite(
         ons_code="E07000116",
         name="Tunbridge Wells",
-        base_url=None,
+        base_url="https://tunbridgewells.gov.uk",
         committee_url="https://democracy.tunbridgewells.gov.uk",
         committee_system="moderngov",
         verified_on="2026-08-13",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000180": AuthorityWebsite(
         ons_code="E07000180",
@@ -917,10 +935,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E08000030": AuthorityWebsite(
         ons_code="E08000030",
         name="Walsall",
-        base_url="https://www.walsall.gov.uk",
+        base_url="https://go.walsall.gov.uk",
         committee_url="https://cmispublic.walsall.gov.uk/cmis",
         committee_system=None,
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E10000031": AuthorityWebsite(
@@ -929,7 +947,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.warwickshire.gov.uk",
         committee_url="https://democracy.warwickshire.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E06000037": AuthorityWebsite(
@@ -964,7 +982,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.westminster.gov.uk",
         committee_url="https://committees.westminster.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E08000010": AuthorityWebsite(
@@ -973,7 +991,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.wigan.gov.uk",
         committee_url="https://democracy.wigan.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000094": AuthorityWebsite(
@@ -991,7 +1009,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.wirral.gov.uk",
         committee_url="https://democracy.wirral.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
     "E07000229": AuthorityWebsite(
@@ -1009,7 +1027,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         base_url="https://www.york.gov.uk",
         committee_url="https://democracy.york.gov.uk",
         committee_system="moderngov",
-        base_url_verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
         verified_on="2026-08-13",
     ),
 
@@ -1076,6 +1094,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000171": AuthorityWebsite(
         ons_code="E07000171",
@@ -1089,9 +1108,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E06000022",
         name="Bath and North East Somerset",
         base_url="https://www.bathnes.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://democracy.bathnes.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000055": AuthorityWebsite(
         ons_code="E06000055",
@@ -1100,6 +1120,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000004": AuthorityWebsite(
         ons_code="E09000004",
@@ -1108,6 +1129,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000025": AuthorityWebsite(
         ons_code="E08000025",
@@ -1116,6 +1138,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000009": AuthorityWebsite(
         ons_code="E06000009",
@@ -1124,6 +1147,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000033": AuthorityWebsite(
         ons_code="E07000033",
@@ -1140,6 +1164,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000036": AuthorityWebsite(
         ons_code="E06000036",
@@ -1148,6 +1173,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000032": AuthorityWebsite(
         ons_code="E08000032",
@@ -1156,6 +1182,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000067": AuthorityWebsite(
         ons_code="E07000067",
@@ -1180,6 +1207,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000234": AuthorityWebsite(
         ons_code="E07000234",
@@ -1204,6 +1232,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000117": AuthorityWebsite(
         ons_code="E07000117",
@@ -1217,17 +1246,19 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E08000002",
         name="Bury",
         base_url="https://www.bury.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://councildecisions.bury.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000033": AuthorityWebsite(
         ons_code="E08000033",
         name="Calderdale",
-        base_url="https://www.calderdale.gov.uk",
+        base_url="https://new.calderdale.gov.uk",
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E10000003": AuthorityWebsite(
         ons_code="E10000003",
@@ -1236,6 +1267,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000192": AuthorityWebsite(
         ons_code="E07000192",
@@ -1268,6 +1300,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000130": AuthorityWebsite(
         ons_code="E07000130",
@@ -1300,6 +1333,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000050": AuthorityWebsite(
         ons_code="E06000050",
@@ -1308,6 +1342,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000034": AuthorityWebsite(
         ons_code="E07000034",
@@ -1324,6 +1359,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000071": AuthorityWebsite(
         ons_code="E07000071",
@@ -1340,6 +1376,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000079": AuthorityWebsite(
         ons_code="E07000079",
@@ -1356,14 +1393,16 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000026": AuthorityWebsite(
         ons_code="E08000026",
         name="Coventry",
         base_url="https://www.coventry.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://edemocracy.coventry.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000063": AuthorityWebsite(
         ons_code="E06000063",
@@ -1372,6 +1411,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000096": AuthorityWebsite(
         ons_code="E07000096",
@@ -1404,6 +1444,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000059": AuthorityWebsite(
         ons_code="E06000059",
@@ -1412,14 +1453,16 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000108": AuthorityWebsite(
         ons_code="E07000108",
         name="Dover",
         base_url="https://www.dover.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.dover.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E09000009": AuthorityWebsite(
         ons_code="E09000009",
@@ -1428,6 +1471,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000009": AuthorityWebsite(
         ons_code="E07000009",
@@ -1452,6 +1496,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000193": AuthorityWebsite(
         ons_code="E07000193",
@@ -1476,6 +1521,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000207": AuthorityWebsite(
         ons_code="E07000207",
@@ -1508,6 +1554,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000041": AuthorityWebsite(
         ons_code="E07000041",
@@ -1564,6 +1611,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000012": AuthorityWebsite(
         ons_code="E09000012",
@@ -1572,6 +1620,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000131": AuthorityWebsite(
         ons_code="E07000131",
@@ -1584,10 +1633,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E09000014": AuthorityWebsite(
         ons_code="E09000014",
         name="Haringey",
-        base_url="https://www.haringey.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        base_url="https://haringey.gov.uk",
+        committee_url="https://www.minutes.haringey.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000073": AuthorityWebsite(
         ons_code="E07000073",
@@ -1604,6 +1654,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000089": AuthorityWebsite(
         ons_code="E07000089",
@@ -1620,6 +1671,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000062": AuthorityWebsite(
         ons_code="E07000062",
@@ -1644,6 +1696,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000098": AuthorityWebsite(
         ons_code="E07000098",
@@ -1676,6 +1729,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000011": AuthorityWebsite(
         ons_code="E07000011",
@@ -1689,9 +1743,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E06000053",
         name="Isles of Scilly",
         base_url="https://www.scilly.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="http://committees.scilly.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-16",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000020": AuthorityWebsite(
         ons_code="E09000020",
@@ -1700,6 +1755,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000010": AuthorityWebsite(
         ons_code="E06000010",
@@ -1708,6 +1764,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000011": AuthorityWebsite(
         ons_code="E08000011",
@@ -1716,6 +1773,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000022": AuthorityWebsite(
         ons_code="E09000022",
@@ -1724,6 +1782,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000121": AuthorityWebsite(
         ons_code="E07000121",
@@ -1740,6 +1799,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000016": AuthorityWebsite(
         ons_code="E06000016",
@@ -1748,6 +1808,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000138": AuthorityWebsite(
         ons_code="E07000138",
@@ -1764,6 +1825,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000235": AuthorityWebsite(
         ons_code="E07000235",
@@ -1804,6 +1866,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000210": AuthorityWebsite(
         ons_code="E07000210",
@@ -1816,10 +1879,11 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
     "E08000021": AuthorityWebsite(
         ons_code="E08000021",
         name="Newcastle upon Tyne",
-        base_url="https://www.newcastle.gov.uk",
+        base_url="https://new.newcastle.gov.uk",
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000195": AuthorityWebsite(
         ons_code="E07000195",
@@ -1836,6 +1900,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000043": AuthorityWebsite(
         ons_code="E07000043",
@@ -1852,6 +1917,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000139": AuthorityWebsite(
         ons_code="E07000139",
@@ -1876,14 +1942,16 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000024": AuthorityWebsite(
         ons_code="E06000024",
         name="North Somerset",
-        base_url="https://www.n-somerset.gov.uk",
+        base_url="https://n-somerset.gov.uk",
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000218": AuthorityWebsite(
         ons_code="E07000218",
@@ -1916,6 +1984,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000219": AuthorityWebsite(
         ons_code="E07000219",
@@ -1940,6 +2009,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000122": AuthorityWebsite(
         ons_code="E07000122",
@@ -1956,6 +2026,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000026": AuthorityWebsite(
         ons_code="E09000026",
@@ -1964,6 +2035,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000003": AuthorityWebsite(
         ons_code="E06000003",
@@ -1972,6 +2044,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000236": AuthorityWebsite(
         ons_code="E07000236",
@@ -1996,6 +2069,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000075": AuthorityWebsite(
         ons_code="E07000075",
@@ -2036,6 +2110,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000006": AuthorityWebsite(
         ons_code="E08000006",
@@ -2044,6 +2119,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000028": AuthorityWebsite(
         ons_code="E08000028",
@@ -2052,6 +2128,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000014": AuthorityWebsite(
         ons_code="E08000014",
@@ -2060,14 +2137,16 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000111": AuthorityWebsite(
         ons_code="E07000111",
         name="Sevenoaks",
         base_url="https://www.sevenoaks.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="http://cds.sevenoaks.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E06000051": AuthorityWebsite(
         ons_code="E06000051",
@@ -2076,6 +2155,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000012": AuthorityWebsite(
         ons_code="E07000012",
@@ -2100,6 +2180,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000044": AuthorityWebsite(
         ons_code="E07000044",
@@ -2113,9 +2194,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000141",
         name="South Kesteven",
         base_url="https://www.southkesteven.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.southkesteven.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E07000126": AuthorityWebsite(
         ons_code="E07000126",
@@ -2140,6 +2222,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000240": AuthorityWebsite(
         ons_code="E07000240",
@@ -2156,6 +2239,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000197": AuthorityWebsite(
         ons_code="E07000197",
@@ -2172,6 +2256,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000007": AuthorityWebsite(
         ons_code="E08000007",
@@ -2180,6 +2265,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000021": AuthorityWebsite(
         ons_code="E06000021",
@@ -2188,6 +2274,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000221": AuthorityWebsite(
         ons_code="E07000221",
@@ -2220,6 +2307,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000008": AuthorityWebsite(
         ons_code="E08000008",
@@ -2228,6 +2316,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000199": AuthorityWebsite(
         ons_code="E07000199",
@@ -2265,17 +2354,19 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000102",
         name="Three Rivers",
         base_url="https://www.threerivers.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://moderngov.threerivers.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E07000115": AuthorityWebsite(
         ons_code="E07000115",
         name="Tonbridge and Malling",
         base_url="https://www.tmbc.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://democracy.tmbc.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E06000027": AuthorityWebsite(
         ons_code="E06000027",
@@ -2284,6 +2375,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000046": AuthorityWebsite(
         ons_code="E07000046",
@@ -2300,6 +2392,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000036": AuthorityWebsite(
         ons_code="E08000036",
@@ -2308,6 +2401,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000031": AuthorityWebsite(
         ons_code="E09000031",
@@ -2316,6 +2410,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E09000032": AuthorityWebsite(
         ons_code="E09000032",
@@ -2324,6 +2419,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000007": AuthorityWebsite(
         ons_code="E06000007",
@@ -2332,6 +2428,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000222": AuthorityWebsite(
         ons_code="E07000222",
@@ -2388,6 +2485,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000181": AuthorityWebsite(
         ons_code="E07000181",
@@ -2401,9 +2499,10 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E07000245",
         name="West Suffolk",
         base_url="https://www.westsuffolk.gov.uk",
-        committee_url=None,
-        committee_system=None,
-        verified_on="2026-08-14",
+        committee_url="https://democracy.westsuffolk.gov.uk",
+        committee_system="moderngov",
+        base_url_verified_on="2026-08-14",
+        verified_on="2026-08-16",
     ),
     "E10000032": AuthorityWebsite(
         ons_code="E10000032",
@@ -2412,6 +2511,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000064": AuthorityWebsite(
         ons_code="E06000064",
@@ -2420,6 +2520,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E06000040": AuthorityWebsite(
         ons_code="E06000040",
@@ -2428,6 +2529,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E07000217": AuthorityWebsite(
         ons_code="E07000217",
@@ -2444,6 +2546,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E08000031": AuthorityWebsite(
         ons_code="E08000031",
@@ -2452,6 +2555,7 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+        base_url_verified_on="2026-08-17",
     ),
     "E10000034": AuthorityWebsite(
         ons_code="E10000034",
@@ -2476,6 +2580,138 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         committee_url=None,
         committee_system=None,
         verified_on="2026-08-14",
+    ),
+    "E09000007": AuthorityWebsite(
+        ons_code="E09000007",
+        name="Camden",
+        base_url="https://www.camden.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E09000010": AuthorityWebsite(
+        ons_code="E09000010",
+        name="Enfield",
+        base_url="https://www.enfield.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000006": AuthorityWebsite(
+        ons_code="E06000006",
+        name="Halton",
+        base_url="https://www3.halton.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000046": AuthorityWebsite(
+        ons_code="E06000046",
+        name="Isle of Wight",
+        base_url="https://www.iow.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E08000012": AuthorityWebsite(
+        ons_code="E08000012",
+        name="Liverpool",
+        base_url="https://www.liverpool.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000002": AuthorityWebsite(
+        ons_code="E06000002",
+        name="Middlesbrough",
+        base_url="https://www.middlesbrough.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E10000020": AuthorityWebsite(
+        ons_code="E10000020",
+        name="Norfolk",
+        base_url="https://www.norfolk.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000057": AuthorityWebsite(
+        ons_code="E06000057",
+        name="Northumberland",
+        base_url="https://www.northumberland.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E08000023": AuthorityWebsite(
+        ons_code="E08000023",
+        name="South Tyneside",
+        base_url="https://www.southtyneside.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000045": AuthorityWebsite(
+        ons_code="E06000045",
+        name="Southampton",
+        base_url="https://www.southampton.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E06000004": AuthorityWebsite(
+        ons_code="E06000004",
+        name="Stockton-on-Tees",
+        base_url="https://www.stockton.gov.uk",
+        committee_url="https://moderngov.stockton.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+    "E08000024": AuthorityWebsite(
+        ons_code="E08000024",
+        name="Sunderland",
+        base_url="https://www.sunderland.gov.uk",
+        committee_url=None,
+        committee_system=None,
+        verified_on="2026-08-17",
+        base_url_verified_on="2026-08-17",
+    ),
+
+    # --- Phase 19 (B4), verified 2026-08-16 ---
+    #
+    # B4's job is full registry coverage, and this pass did the two parts it
+    # can: re-fetched the 49 home pages the 2026-08-14 pass could not verify
+    # (two answered this time — Broadland and South Norfolk share a domain),
+    # and ran the same committee-system discovery m10 does at runtime — a
+    # committee-system link on the council's own home page, confirmed by
+    # probing the system's signature paths — for the 212 authorities with no
+    # committee URL, committing the answers so the next run of m10 does not
+    # re-discover them. 174 councils still publish no committee-system link
+    # on their home page; those stay `committee_url_unknown` in the queue,
+    # and the review UI remains the answer route (D-05).
+    "E07000144": AuthorityWebsite(
+        ons_code="E07000144",
+        name="Broadland",
+        # The 2026-08-14 candidate www.broadland.gov.uk does not resolve.
+        # Broadland and South Norfolk share a website and a democracy portal;
+        # both were verified by request on 2026-08-16.
+        base_url="https://www.southnorfolkandbroadland.gov.uk",
+        committee_url="https://democracy.southnorfolkandbroadland.gov.uk",
+        committee_system="moderngov",
+        verified_on="2026-08-16",
     ),
 }
 

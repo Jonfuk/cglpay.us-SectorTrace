@@ -87,6 +87,28 @@ def test_it_is_idempotent(queued):
         "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 1
 
 
+def test_it_counts_and_records_only_successful_conditional_updates(queued, monkeypatch):
+    """A stale/duplicate match must not create an audit row for an update that
+    did not actually move a pending item to answered."""
+    item_id = queued.execute(
+        "SELECT id FROM review_queue WHERE raw_value = '2026-0001'").fetchone()[0]
+    monkeypatch.setattr(review_sweep, "RULES", {
+        "duplicate_match": {
+            "module": "test",
+            "why": "exercise the conditional update",
+            "find": lambda conn: [(item_id, "first"), (item_id, "stale second")],
+        }
+    })
+
+    result = review_sweep.sweep(queued)
+
+    assert result["closed"] == {"duplicate_match": 1}
+    assert result["total"] == 1
+    assert queued.execute(
+        "SELECT COUNT(*) FROM review_resolutions WHERE rule = 'duplicate_match'"
+    ).fetchone()[0] == 1
+
+
 # --- what it refuses to touch --------------------------------------------------
 
 
@@ -235,3 +257,81 @@ def test_the_registry_rule_leaves_a_decided_item_alone(conn):
 
     assert review_sweep.sweep(conn, rule="committee_url_in_registry")["total"] == 0
     assert statuses(conn)[known] == "rejected"
+
+
+# --- the authority-website rule (Phase 19, B4) --------------------------------
+
+
+def test_a_base_url_anywhere_answers_its_item(conn):
+    """150 `authority_website_unknown` items sat pending after m15's mySociety
+    profiles gave every authority a home page and the registry gained the
+    last verified entries. The rule mirrors m09's own condition — would
+    website_for() return a base URL today? — so what m09 would not raise,
+    the sweep closes."""
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    known = next(code for code, entry in AUTHORITY_WEBSITES.items()
+                  if entry.base_url)
+    add_item(conn, known, item_type="authority_website_unknown")
+    add_item(conn, "E99999999", item_type="authority_website_unknown")
+    conn.commit()
+
+    result = review_sweep.sweep(conn, rule="authority_website_available")
+
+    assert result["closed"]["authority_website_available"] == 1
+    assert statuses(conn)[known] == "answered"
+    assert statuses(conn)["E99999999"] == "pending", (
+        "an authority with no base URL anywhere is still an open question")
+
+
+def test_the_website_rule_records_the_url_and_its_source(conn):
+    from pipeline.authority_websites import AUTHORITY_WEBSITES
+
+    known = next(code for code, entry in AUTHORITY_WEBSITES.items()
+                  if entry.base_url)
+    add_item(conn, known, item_type="authority_website_unknown")
+    conn.commit()
+
+    review_sweep.sweep(conn, rule="authority_website_available")
+
+    evidence = conn.execute(
+        "SELECT evidence FROM review_resolutions").fetchone()[0]
+    assert AUTHORITY_WEBSITES[known].base_url in evidence
+    assert "registry" in evidence
+
+
+def test_the_website_rule_is_a_single_condition_not_a_source_check(conn, settings, monkeypatch):
+    """The rule must not name one source (say, the registry) and leave the
+    mySociety answer behind. The item is answered by whatever website_for()
+    would answer with today — the module's own condition."""
+    from pipeline import config
+    from pipeline.authority_websites import website_for
+
+    known = "E99999001"
+    add_item(conn, known, item_type="authority_website_unknown")
+    conn.execute(
+        "INSERT INTO authorities (ons_code, name, type, active_from, "
+        "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
+        "http_status, source_system, payload_sha256) "
+        "VALUES (?, 'Testshire', 'utla', '2023-01-01', '2023', '2026', "
+        "'https://example.com/spine', '2026-01-01T00:00:00+00:00', 200, "
+        "'test', 'abc')", (known,))
+    conn.execute(
+        "INSERT INTO authority_foi_profiles (ons_code, authority_name, "
+        "home_page_url, source_url, retrieved_at, http_status, source_system, "
+        "payload_sha256) VALUES (?, 'Testshire', 'https://www.testshire.gov.uk', "
+        "'https://register.example', '2026-08-13T00:00:00Z', 200, 'm15', 'h')",
+        (known,))
+    conn.commit()
+
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+
+    assert website_for(known, conn) is not None
+    result = review_sweep.sweep(conn, rule="authority_website_available")
+
+    assert result["closed"]["authority_website_available"] == 1
+    assert statuses(conn)[known] == "answered"
+    evidence = conn.execute(
+        "SELECT evidence FROM review_resolutions").fetchone()[0]
+    assert "testshire.gov.uk" in evidence
+    assert "foi_profile" in evidence
