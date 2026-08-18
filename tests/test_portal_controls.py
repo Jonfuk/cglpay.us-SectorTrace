@@ -189,3 +189,13 @@ def test_workbench_selection_state_has_shareable_url_contracts():
     assert "params.getAll('ons_code')" in compare
     assert "params.getAll('provider_key')" in compare
     assert "#/providers/${encodeURIComponent(provider.provider_key)}" in providers
+
+
+def test_thin_evidence_is_metadata_driven_not_a_universal_threshold():
+    components = COMPONENTS.read_text(encoding="utf-8")
+    geography = (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
+    assert "Number.isFinite(Number(count))" in components
+    assert "Number.isFinite(Number(threshold))" in components
+    assert "data.thinEvidence && thinEvidenceControl" in geography
+    assert "data.thinEvidence.threshold" in geography
+    assert "Include low-evidence places" in geography
