@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline import authority_websites
+from pipeline import alaveteli, authority_websites
 from pipeline.modules import m15_foi as foi
 
 # --- GSS code extraction from mySociety's tags -----------------------------------
@@ -103,6 +103,66 @@ def test_web_unlocker_archives_the_target_bytes(monkeypatch, settings):
     assert result.archived_path is not None
     assert "foi_request_promotion" in str(result.archived_path)
     assert result.archived_path.is_file()
+
+
+def test_web_unlocker_retries_canonical_html_after_json_502(monkeypatch, settings):
+    settings.brightdata_api_key = "test-brightdata-key"
+    calls = []
+
+    class _Response:
+        def __init__(self, envelope):
+            self.envelope = envelope
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.envelope
+
+    def fake_post(url, **kwargs):
+        calls.append(kwargs["json"])
+        if len(calls) == 1:
+            return _Response({"status_code": 502, "headers": {}, "body": "upstream"})
+        return _Response({"status_code": 200,
+                          "headers": {"content-type": "text/html"},
+                          "body": "<html>request page</html>"})
+
+    monkeypatch.setattr(foi.httpx, "post", fake_post)
+    result = foi.fetch_with_web_unlocker(
+        "https://www.whatdotheyknow.com/request/example",
+        settings, "foi_request_promotion")
+
+    assert [call["url"] for call in calls] == [
+        "https://www.whatdotheyknow.com/request/example.json",
+        "https://www.whatdotheyknow.com/request/example",
+    ]
+    assert calls[1]["render"] is True
+    assert result.url == "https://www.whatdotheyknow.com/request/example"
+    assert result.status_code == 200
+    assert result.body == b"<html>request page</html>"
+
+
+def test_parse_info_request_html_keeps_only_incoming_correspondence():
+    outcome = alaveteli.parse_info_request_html(
+        """
+        <h1>FOI request title</h1>
+        <p>The request was <strong>successful</strong>.</p>
+        <div class="outgoing correspondence"><div class="correspondence_text">
+          The question must not be included.
+        </div></div>
+        <div id="incoming-1" class="incoming correspondence">
+          <div class="correspondence__header"><time datetime="2025-01-02T03:04:05Z">date</time></div>
+          <div class="correspondence_text"><p>Authority answer.</p><p>Second paragraph.</p></div>
+        </div>
+        """,
+        request_url="https://www.whatdotheyknow.com/request/example",
+    )
+
+    assert outcome.record["subject"] == "FOI request title"
+    assert outcome.record["status"] == "successful"
+    assert outcome.record["response_text"] == "Authority answer. Second paragraph."
+    assert outcome.record["response_count"] == 1
+    assert not any(f.field_name == "response_text" for f in outcome.failures)
 
 
 def test_web_unlocker_refuses_non_wdtk_url(settings):

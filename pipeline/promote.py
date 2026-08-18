@@ -240,17 +240,21 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
 
     foi_detail = None
     if kind == "foi_request" and settings.wdtk_web_unlocker_enabled:
-        # The unlocker fetches the JSON read shape. Parsing is still NULL-first:
-        # an unknown state or malformed event becomes a parse failure, never a
-        # guessed status or response text.
+        # Prefer the read API shape, but accept the canonical rendered HTML
+        # fallback when WDTK's JSON route is the part Cloudflare rejects.
+        # Parsing is still NULL-first: an unknown state or malformed event
+        # becomes a parse failure, never a guessed status or response text.
         from pipeline import alaveteli
+        detail_bytes = result.body
         try:
-            detail = json.loads(result.body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            db.record_parse_failure(conn, "m15_foi", "wdtk_detail",
-                                    result.body[:200].decode("utf-8", errors="replace"),
-                                    f"invalid JSON from Web Unlocker: {type(exc).__name__}",
-                                    result.url)
+            detail = json.loads(detail_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            outcome = alaveteli.parse_info_request_html(
+                detail_bytes.decode("utf-8", errors="replace"), request_url=url)
+            for failure in outcome.failures:
+                db.record_parse_failure(conn, "m15_foi", failure.field_name,
+                                        failure.raw_fragment, failure.reason, result.url)
+            foi_detail = outcome.record
         else:
             outcome = alaveteli.parse_info_request(detail)
             for failure in outcome.failures:

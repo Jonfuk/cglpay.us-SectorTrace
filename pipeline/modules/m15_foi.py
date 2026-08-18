@@ -233,22 +233,39 @@ def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResu
     if not is_wdtk_request_url(url):
         raise ValueError(f"m15 Web Unlocker refuses a non-WDTK request URL: {url}")
 
-    target_url = url if url.rstrip("/").endswith(".json") else url.rstrip("/") + ".json"
-    response = httpx.post(
-        BRIGHTDATA_REQUEST_API,
-        headers={"Authorization": f"Bearer {settings.require_brightdata_key()}",
-                 "Content-Type": "application/json"},
-        # Bright Data's direct API uses `raw` for the target body itself and
-        # `json` for the structured envelope containing status, headers, and
-        # body. The latter is what this adapter needs for provenance.
-        json={"zone": settings.brightdata_unlocker_zone, "url": target_url, "format": "json"},
-        timeout=60.0,
-    )
-    response.raise_for_status()
-    try:
-        envelope = response.json()
-    except ValueError as exc:
-        raise RuntimeError("Bright Data returned a non-JSON unlocker envelope") from exc
+    json_url = url if url.rstrip("/").endswith(".json") else url.rstrip("/") + ".json"
+    html_url = url.removesuffix(".json").rstrip("/")
+    headers = {"Authorization": f"Bearer {settings.require_brightdata_key()}",
+               "Content-Type": "application/json"}
+
+    def unlock(target_url: str, *, render: bool = False) -> dict:
+        response = httpx.post(
+            BRIGHTDATA_REQUEST_API,
+            headers=headers,
+            # `json` asks Bright Data for the structured envelope containing
+            # status, headers, and body. That envelope is needed to archive
+            # the exact bytes and record the target status.
+            json={"zone": settings.brightdata_unlocker_zone, "url": target_url,
+                  "format": "json", **({"render": True} if render else {})},
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        try:
+            envelope = response.json()
+        except ValueError as exc:
+            raise RuntimeError("Bright Data returned a non-JSON unlocker envelope") from exc
+        if not isinstance(envelope, dict):
+            raise RuntimeError("Bright Data returned an unusable unlocker response")
+        return envelope
+
+    target_url = json_url
+    envelope = unlock(target_url)
+    # WDTK's JSON route can be challenged independently of the canonical page.
+    # Retry the page a single time, with rendering enabled so this follows the
+    # same path as the browser that an operator used to verify the candidate.
+    if envelope.get("status_code") == 502 and html_url != json_url:
+        target_url = html_url
+        envelope = unlock(target_url, render=True)
 
     status_code = envelope.get("status_code")
     raw_body = envelope.get("body")
