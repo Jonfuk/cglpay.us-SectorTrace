@@ -6,13 +6,15 @@ stack and all three belong on anything built from this:
   1. WhatDoTheyKnow only holds requests routed through that platform. The UK
      FOI system is far larger and most requests never appear there.
 
-  2. This module gets *discovery* from WDTK, not full text. The search feed
+  2. This module gets *discovery* from WDTK, not full text during collection. The search feed
      returns a truncated, search-highlighted `snippet` per event and never a
      message body. Full text lives behind the JSON read API, which is
      blocked (see below). So this module can tell you a request exists, who
      it went to, and what state it reached — not what the authority actually
      said. The snippet is stored in its own column and never in
-     `foi_requests.response_text`.
+     `foi_requests.response_text`. An explicitly enabled m15-only Bright Data
+     Web Unlocker may retrieve one request detail page during human promotion;
+     it never auto-promotes or bulk-fetches.
 
   3. A term match is a candidate, not evidence about substance misuse.
      Nothing is promoted without a human confirming it.
@@ -41,15 +43,15 @@ own identifying User-Agent, one request each and no retries:
     403  /list/all.json?page=1           ditto
     403  /request/<slug>.json            ditto
 
-The 403s are a Cloudflare bot challenge and are respected rather than worked
-around — no user-agent spoofing, no fingerprint impersonation, no challenge
-solving. The published implementations that do get through those paths work
-by defeating the challenge, which is out of scope here. The 403 arrives on
-the first request from a cold client at zero rate, so it is not a volume
-control and no amount of backoff reaches it. Do not spend another afternoon
-on it; ask mySociety instead (docs/mysociety-access-request.md), and note
-that `pipeline/alaveteli.py` already parses the read-API shape for the day
-they say yes.
+The 403s are a Cloudflare bot challenge. Ordinary collection respects that
+boundary. If mySociety has authorised access, an operator may set
+`WDTK_WEB_UNLOCKER_ENABLED=true` with a Bright Data key; that exception is
+limited to one WDTK request URL at a time during human promotion, is recorded
+in `review_queue`, and is archived under the promotion source system. It is
+not available to the collector or any other module. Without that explicit
+setting, the 403 remains a refusal and the candidate stays unpromoted. Ask
+mySociety first (docs/mysociety-access-request.md); `pipeline/alaveteli.py`
+already parses the read-API shape.
 
 ON THE FEED AND ROBOTS.TXT. mySociety's robots.txt disallows `*/feed/*` and
 `*/search/*`, so `/feed/search/` is doubly disallowed, and this pipeline
@@ -65,6 +67,7 @@ either way.
 from __future__ import annotations
 
 import csv
+import hashlib
 import html as html_lib
 import io
 import json
@@ -72,10 +75,11 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import quote, urljoin, urlparse
 
+import httpx
 import structlog
 
 from pipeline import alaveteli, db
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed
+from pipeline.http import FetchResult, PipelineHTTPClient, RobotsDisallowed, _archive_raw
 from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
 
@@ -85,6 +89,7 @@ SOURCE_SYSTEM = "foi_disclosure"
 WDTK_AUTHORITIES_CSV = "https://www.whatdotheyknow.com/body/all-authorities.csv"
 WDTK_BODY_BASE = "https://www.whatdotheyknow.com/body/"
 WDTK_FEED_SEARCH = "https://www.whatdotheyknow.com/feed/search/{query}.json"
+BRIGHTDATA_REQUEST_API = "https://api.brightdata.com/request"
 
 # Pages per search term. Each page is 25 events, so 4 pages is up to 100 per
 # term. A cap rather than "until exhausted" because a broad term like
@@ -204,6 +209,62 @@ def feed_search_url(term: str) -> str:
     quote mark there produces a 404, not a bad search.
     """
     return WDTK_FEED_SEARCH.format(query=quote(f'"{term}"', safe=""))
+
+
+def is_wdtk_request_url(url: str) -> bool:
+    """Only the public request-detail route may use the unlocker.
+
+    Keeping this check here makes the m15 exception impossible to apply to a
+    council URL, the authority CSV, or the search feed by accident.
+    """
+    parsed = urlparse(url)
+    return (parsed.scheme == "https" and parsed.netloc.lower() == "www.whatdotheyknow.com"
+            and parsed.path.startswith("/request/") and len(parsed.path) > len("/request/"))
+
+
+def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResult:
+    """Fetch one WDTK request through Bright Data, then archive exact bytes.
+
+    This is intentionally not part of PipelineHTTPClient. Bright Data is an
+    explicit m15-only exception for a human promotion fetch, not a second
+    transport available to every collector. The original WDTK URL remains the
+    provenance URL; the Bright Data endpoint is only the transport.
+    """
+    if not is_wdtk_request_url(url):
+        raise ValueError(f"m15 Web Unlocker refuses a non-WDTK request URL: {url}")
+
+    target_url = url if url.rstrip("/").endswith(".json") else url.rstrip("/") + ".json"
+    response = httpx.post(
+        BRIGHTDATA_REQUEST_API,
+        headers={"Authorization": f"Bearer {settings.require_brightdata_key()}",
+                 "Content-Type": "application/json"},
+        json={"zone": settings.brightdata_unlocker_zone, "url": target_url, "format": "raw"},
+        timeout=60.0,
+    )
+    response.raise_for_status()
+    try:
+        envelope = response.json()
+    except ValueError as exc:
+        raise RuntimeError("Bright Data returned a non-JSON unlocker envelope") from exc
+
+    status_code = envelope.get("status_code")
+    raw_body = envelope.get("body")
+    if not isinstance(status_code, int) or not isinstance(raw_body, str):
+        raise RuntimeError("Bright Data returned an unusable unlocker response")
+    body = raw_body.encode("utf-8")
+    target_headers = httpx.Headers(envelope.get("headers") or {})
+    content_type = target_headers.get("content-type", "text/html; charset=utf-8")
+    sha256 = hashlib.sha256(body).hexdigest()
+    archived_path = (_archive_raw(settings.raw_archive_dir, source_system, sha256,
+                                  content_type, body) if body else None)
+    log.info("http.wdtk_web_unlocker", url=url, source_system=source_system,
+             target_status=status_code, payload_sha256=sha256)
+    return FetchResult(
+        url=target_url, status_code=status_code, body=body, headers=target_headers,
+        retrieved_at=datetime.now(timezone.utc), payload_sha256=sha256,
+        not_modified=False, archived_path=archived_path,
+        final_url=target_url,
+    )
 
 
 def _provenance(result) -> dict:

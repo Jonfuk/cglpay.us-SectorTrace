@@ -256,7 +256,7 @@ of PSCs is then a redaction, not a finding.
 | Licence | mySociety data under CC BY-SA; FOI responses generally OGL v3.0; council disclosure logs vary |
 | Key | None |
 | Rate limit | Default (2s/host), conditional requests |
-| Notes | **Publicly published FOI evidence, and discovery only — not full responses.** The feed returns a truncated search snippet per event and never a message body; full text needs `/request/<slug>.json`, which returns a Cloudflare 403 to automated clients and is not worked around. The feed is fetched under an explicit, logged exception to mySociety's robots.txt (`Settings.robots_exceptions`) — see `docs/mysociety-access-request.md`, which is the outstanding ask to put it on a permitted footing |
+| Notes | **Publicly published FOI evidence, with discovery first and human promotion required.** The feed returns a truncated search snippet per event and never a message body. With explicit permission, one `/request/<slug>.json` detail page may be retrieved during human promotion through the m15-only Bright Data Web Unlocker setting; it is disabled by default. The feed is fetched under an explicit, logged exception to mySociety's robots.txt (`Settings.robots_exceptions`) — see `docs/mysociety-access-request.md` |
 
 ## Module 16 — NHS Jobs advertised pay
 

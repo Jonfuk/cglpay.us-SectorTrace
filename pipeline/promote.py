@@ -147,10 +147,26 @@ def _fetch_document(url: str, spec: dict, settings: Settings,
     from pipeline.netguard import BlockedAddress
 
     try:
-        with PipelineHTTPClient(spec["source_system"], settings=settings,
-                                 conn=conn, guard_destination=True,
-                                 resolver=resolver) as client:
-            result = client.get(url)
+        # WDTK's request pages are the one m15-only exception: when explicitly
+        # enabled, a human promotion fetch may use Bright Data's Web Unlocker.
+        # The candidate URL is still restricted to WDTK by m15, and every
+        # other promotion continues through the normal guarded client.
+        if (spec["source_system"] == "foi_request_promotion"
+                and settings.wdtk_web_unlocker_enabled):
+            from pipeline.modules.m15_foi import fetch_with_web_unlocker, is_wdtk_request_url
+            if not is_wdtk_request_url(url):
+                raise PromotionError("m15 Web Unlocker is enabled but the candidate is not "
+                                     "a WhatDoTheyKnow request URL")
+            db.record_review_item(
+                conn, "m15_foi", "wdtk_web_unlocker_in_use", url,
+                json.dumps({"transport": "brightdata_web_unlocker",
+                            "note": "explicit m15-only transport used for human promotion"}))
+            result = fetch_with_web_unlocker(url, settings, spec["source_system"])
+        else:
+            with PipelineHTTPClient(spec["source_system"], settings=settings,
+                                    conn=conn, guard_destination=True,
+                                    resolver=resolver) as client:
+                result = client.get(url)
     except BlockedAddress as exc:
         raise PromotionError(str(exc)) from exc
     except RobotsDisallowed as exc:
@@ -205,6 +221,26 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
     # round trip, which is the mistake the run loop had to be fixed for.
     result = _fetch_document(url, spec, settings, conn, resolver)
 
+    foi_detail = None
+    if kind == "foi_request" and settings.wdtk_web_unlocker_enabled:
+        # The unlocker fetches the JSON read shape. Parsing is still NULL-first:
+        # an unknown state or malformed event becomes a parse failure, never a
+        # guessed status or response text.
+        from pipeline import alaveteli
+        try:
+            detail = json.loads(result.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            db.record_parse_failure(conn, "m15_foi", "wdtk_detail",
+                                    result.body[:200].decode("utf-8", errors="replace"),
+                                    f"invalid JSON from Web Unlocker: {type(exc).__name__}",
+                                    result.url)
+        else:
+            outcome = alaveteli.parse_info_request(detail)
+            for failure in outcome.failures:
+                db.record_parse_failure(conn, "m15_foi", failure.field_name,
+                                        failure.raw_fragment, failure.reason, result.url)
+            foi_detail = outcome.record
+
     target_key = f"{authority}|{url}"
     promoted_at = _now()
     try:
@@ -234,6 +270,10 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
             "payload_sha256": result.payload_sha256,
         }
         row.update(_target_fields(kind, found, fields))
+        if foi_detail:
+            for field in ("subject", "request_date", "status", "response_text"):
+                if foi_detail.get(field) is not None:
+                    row[field] = foi_detail[field]
         db.upsert(conn, spec["target_table"], row,
                    natural_key=[spec["authority_column"], spec["target_url_column"]])
 

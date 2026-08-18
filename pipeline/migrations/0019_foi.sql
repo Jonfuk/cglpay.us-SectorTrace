@@ -5,13 +5,10 @@
 --
 --   1. WhatDoTheyKnow only holds requests routed through that platform. The
 --      UK FOI system is far larger, and most requests never appear there.
---   2. This module cannot read WhatDoTheyKnow's request pages at all. They
---      sit behind a Cloudflare bot challenge that returns 403 to any
---      automated client, which is the site's access control speaking and is
---      not worked around here. Re-measured 2026-08-11: the JSON read API
---      (/body/<slug>.json, /list/all.json, /request/<slug>.json) is blocked
---      the same way and is not an alternative route. See the module
---      docstring in pipeline/modules/m15_foi.py for the full result table.
+--   2. WhatDoTheyKnow's request pages sit behind a Cloudflare bot challenge.
+--      The ordinary collector respects that boundary. An explicitly enabled,
+--      m15-only Web Unlocker may retrieve one detail page during human
+--      promotion, but it never auto-promotes or bulk-fetches.
 --
 -- What IS collected: the authority register mySociety publishes as a data
 -- file (permitted, and the route they offer), and FOI disclosure logs on

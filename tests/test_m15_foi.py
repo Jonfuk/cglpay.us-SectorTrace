@@ -63,6 +63,54 @@ def test_feed_search_url_encodes_path_unsafe_characters():
     assert "%2F" in url
 
 
+def test_web_unlocker_is_limited_to_wdtk_request_pages():
+    assert foi.is_wdtk_request_url("https://www.whatdotheyknow.com/request/example")
+    assert foi.is_wdtk_request_url("https://www.whatdotheyknow.com/request/example.json")
+    assert not foi.is_wdtk_request_url("https://www.whatdotheyknow.com/feed/search/x.json")
+    assert not foi.is_wdtk_request_url("https://council.gov.uk/request/example")
+    assert not foi.is_wdtk_request_url("http://www.whatdotheyknow.com/request/example")
+
+
+def test_web_unlocker_archives_the_target_bytes(monkeypatch, settings):
+    settings.brightdata_api_key = "test-brightdata-key"
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status_code": 200,
+                    "headers": {"content-type": "application/json"},
+                    "body": '{"info_request": {"url_title": "example"}}'}
+
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return _Response()
+
+    monkeypatch.setattr(foi.httpx, "post", fake_post)
+    result = foi.fetch_with_web_unlocker(
+        "https://www.whatdotheyknow.com/request/example.json",
+        settings, "foi_request_promotion")
+
+    assert seen["url"] == foi.BRIGHTDATA_REQUEST_API
+    assert seen["headers"]["Authorization"] == "Bearer test-brightdata-key"
+    assert seen["json"]["url"].endswith("/request/example.json")
+    assert result.status_code == 200
+    assert result.body.startswith(b'{"info_request"')
+    assert result.archived_path is not None
+    assert "foi_request_promotion" in str(result.archived_path)
+    assert result.archived_path.is_file()
+
+
+def test_web_unlocker_refuses_non_wdtk_url(settings):
+    settings.brightdata_api_key = "test-brightdata-key"
+    with pytest.raises(ValueError, match="non-WDTK"):
+        foi.fetch_with_web_unlocker("https://council.gov.uk/request/example",
+                                    settings, "foi_request_promotion")
+
+
 @pytest.mark.parametrize("term", [t for terms in foi.FOI_TOPICS.values() for t in terms])
 def test_every_configured_term_builds_a_usable_url(term):
     url = foi.feed_search_url(term)
