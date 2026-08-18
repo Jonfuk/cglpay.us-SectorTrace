@@ -90,6 +90,7 @@ WDTK_AUTHORITIES_CSV = "https://www.whatdotheyknow.com/body/all-authorities.csv"
 WDTK_BODY_BASE = "https://www.whatdotheyknow.com/body/"
 WDTK_FEED_SEARCH = "https://www.whatdotheyknow.com/feed/search/{query}.json"
 BRIGHTDATA_REQUEST_API = "https://api.brightdata.com/request"
+ZENROWS_REQUEST_API = "https://api.zenrows.com/v1/"
 
 # Pages per search term. Each page is 25 events, so 4 pages is up to 100 per
 # term. A cap rather than "until exhausted" because a broad term like
@@ -299,6 +300,49 @@ def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResu
         retrieved_at=datetime.now(timezone.utc), payload_sha256=sha256,
         not_modified=False, archived_path=archived_path,
         final_url=target_url,
+    )
+
+
+def fetch_with_zenrows(url: str, settings, source_system: str) -> FetchResult:
+    """Fetch one canonical WDTK page through ZenRows, then archive its body.
+
+    ZenRows returns HTTP 200 for a successful API operation and exposes the
+    target status in ``Zr-Status``. Only the target body and safe content type
+    are retained; response headers include a short-lived Cloudflare clearance
+    cookie and must not enter provenance or the archive.
+    """
+    if not is_wdtk_request_url(url):
+        raise ValueError(f"m15 ZenRows refuses a non-WDTK request URL: {url}")
+
+    target_url = url.removesuffix(".json").rstrip("/")
+    params = {
+        "url": target_url,
+        "apikey": settings.require_zenrows_key(),
+        "js_render": str(settings.zenrows_js_render).lower(),
+        "premium_proxy": str(settings.zenrows_premium_proxy).lower(),
+        "proxy_country": settings.zenrows_proxy_country,
+    }
+    response = httpx.get(ZENROWS_REQUEST_API, params=params, timeout=90.0)
+    response.raise_for_status()
+    target_status = response.headers.get("zr-status", "")
+    try:
+        status_code = int(target_status.split(" ", 1)[0])
+    except (ValueError, IndexError):
+        status_code = response.status_code
+    content_type = response.headers.get("zr-content-type", "text/html; charset=utf-8")
+    final_url = response.headers.get("zr-final-url", target_url)
+    body = response.content
+    sha256 = hashlib.sha256(body).hexdigest()
+    archived_path = (_archive_raw(settings.raw_archive_dir, source_system, sha256,
+                                  content_type, body) if body else None)
+    log.info("http.wdtk_zenrows", url=url, source_system=source_system,
+             target_status=status_code, final_url=final_url, payload_sha256=sha256)
+    return FetchResult(
+        url=final_url, status_code=status_code, body=body,
+        headers=httpx.Headers({"content-type": content_type}),
+        retrieved_at=datetime.now(timezone.utc), payload_sha256=sha256,
+        not_modified=False, archived_path=archived_path,
+        final_url=final_url,
     )
 
 

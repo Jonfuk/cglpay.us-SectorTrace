@@ -142,6 +142,46 @@ def test_web_unlocker_retries_canonical_html_after_json_502(monkeypatch, setting
     assert result.body == b"<html>request page</html>"
 
 
+def test_zenrows_archives_html_without_persisting_clearance_cookie(monkeypatch, settings):
+    settings.zenrows_api_key = "test-zenrows-key"
+    seen = {}
+
+    class _Response:
+        status_code = 200
+        content = b"<html><div id='incoming-1'>answer</div></html>"
+        headers = {
+            "Zr-Status": "200 OK",
+            "Zr-Content-Type": "text/html; charset=utf-8",
+            "Zr-Final-Url": "https://www.whatdotheyknow.com/request/example",
+            "Zr-Cookies": "cf_clearance=must-not-be-retained",
+        }
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **kwargs):
+        seen.update(url=url, **kwargs)
+        return _Response()
+
+    monkeypatch.setattr(foi.httpx, "get", fake_get)
+    result = foi.fetch_with_zenrows(
+        "https://www.whatdotheyknow.com/request/example",
+        settings, "foi_request_promotion")
+
+    assert seen["url"] == foi.ZENROWS_REQUEST_API
+    assert seen["params"] == {
+        "url": "https://www.whatdotheyknow.com/request/example",
+        "apikey": "test-zenrows-key",
+        "js_render": "true",
+        "premium_proxy": "true",
+        "proxy_country": "gb",
+    }
+    assert result.status_code == 200
+    assert result.url.endswith("/request/example")
+    assert result.headers.get("zr-cookies") is None
+    assert result.archived_path.is_file()
+
+
 def test_parse_info_request_html_keeps_only_incoming_correspondence():
     outcome = alaveteli.parse_info_request_html(
         """
