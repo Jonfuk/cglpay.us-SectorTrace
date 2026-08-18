@@ -11,7 +11,7 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
-          truncate, shareButton } from '/js/components.js';
+          truncate, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
 
 function takeaway(status, statusClass, text) {
   return el('div', { class: 'takeaway' },
@@ -51,6 +51,17 @@ export async function render(main) {
         el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
         el('button', { type: 'button', onclick: () => scrollToLayer('census') }, 'Workforce context'),
         el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'Pay evidence is a set of published signals rather than a payroll measure: provider pages, advertised roles, statutory floors, and benchmarks answer different questions.',
+        value: `${num(Object.values(data).filter(Array.isArray).reduce((n, rows) => n + rows.length, 0))} published rows`,
+        evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: 'None of these layers is payroll data, and the portal does not combine unlike sources into a pay score.',
+      });
+    })(),
     el('details', { class: 'read-first' },
       el('summary', { text: 'How to read pay evidence' }),
       el('p', { text: 'Charity accounts provide an indicative wage measure; NHS Jobs records advertised vacancies; provider pages record what an organisation published; statutory rates are legal hourly floors.' }),

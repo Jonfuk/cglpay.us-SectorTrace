@@ -65,6 +65,8 @@ PUBLIC_STATIC_PATHS = {
     "/fonts/manrope-700.woff2",
     "/fonts/space-grotesk-500.woff2",
     "/fonts/space-grotesk-700.woff2",
+    "/fonts/archivo-narrow-500.woff2",
+    "/fonts/archivo-narrow-700.woff2",
 }
 
 # The portal's read-only API, as route names under /api/v1/.

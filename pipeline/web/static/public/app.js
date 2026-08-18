@@ -267,6 +267,25 @@ async function render() {
     // the compare page is `#/compare?ons=...&ons=...`, a URL that is the whole
     // comparison. Pages that do not ask for params ignore them.
     disposeCurrent = await module.render(main, { path, params });
+    // A small, route-wide campaign cue keeps the familiar page-specific
+    // headings intact while making the shared lens visible on every public
+    // workbench and deep-detail route. It is presentation metadata only; all
+    // evidence remains owned by the page module below it.
+    const lensByRoute = {
+      '/pay': ['Workforce', 'workforce'], '/providers': ['Workforce · Service access', 'access'],
+      '/contracts': ['Public money', 'money'], '/geography': ['Service access · Public money', 'access'],
+      '/treatment': ['Service access', 'access'], '/pfd': ['Safety & legal', 'safety'],
+      '/claims': ['Safety & legal · Accountability', 'accountability'],
+      '/coverage': ['Accountability', 'accountability'], '/authorities': ['Service access · Accountability', 'access'],
+      '/compare': ['Accountability', 'accountability'], '/': ['Accountability', 'accountability'],
+    };
+    const lens = lensByRoute[base];
+    if (lens && !main.querySelector(':scope > .route-lens')) {
+      const cue = el('div', { class: `route-lens lens-${lens[1]}` },
+        el('span', { class: 'eyebrow', text: 'Campaign lens' }),
+        el('span', { text: lens[0] }));
+      main.prepend(cue);
+    }
   } catch (error) {
     replace(main, el('div', { class: 'section' },
       el('div', { class: 'chart-error' },

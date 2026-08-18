@@ -14,7 +14,8 @@
 import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          statCard, exportButton, registerLink, registerLinks, shareButton } from '/js/components.js';
+          statCard, exportButton, registerLink, registerLinks, shareButton,
+          findingBlock, evidenceMeta } from '/js/components.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
@@ -75,7 +76,7 @@ async function renderList(main) {
     p.cqc_locations || p.tribunal_count || p.contract_count || p.nhs_job_advert_count);
 
   if (named.length) {
-    charts.push(mountChart(holder, {
+    const providerChart = mountChart(holder, {
       legend: { top: 0 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'value', name: 'records' },
@@ -90,13 +91,21 @@ async function renderList(main) {
       height: 'tall',
       aria: 'Stacked bar chart of how many records of each type the warehouse '
         + 'holds for each provider.',
-    }));
+    });
+    charts.push(providerChart);
+    providerChart?.on('click', (params) => {
+      const provider = named[params.dataIndex];
+      if (provider?.provider_key) location.hash = `#/providers/${encodeURIComponent(provider.provider_key)}`;
+    });
   } else {
     replace(holder, noData('provider evidence', './start.sh run all'));
   }
 
   replace(page.querySelector('#table'), tableCard('All providers', [
-    { title: 'Provider', field: 'canonical_name' },
+    { title: 'Provider', field: 'canonical_name', formatter: (c) => el('a', {
+      href: `#/providers/${encodeURIComponent(c.getRow().getData().provider_key)}`,
+      text: c.getValue(),
+    }) },
     { title: 'Campaign subject', field: 'is_target', width: 140,
       formatter: (c) => (c.getValue() ? '★ yes' : '') },
     { title: 'Contracts', field: 'contract_count', width: 100 },
@@ -153,6 +162,16 @@ async function renderOne(main, key) {
           text: 'Explore the published provider evidence in SectorTrace.',
           label: 'Share this provider',
         }))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'This provider workbench brings together the published records held for one organisation; partial evidence describes coverage in the warehouse, not the provider itself.',
+        value: provider.canonical_name || key, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: 'Entity links and name matches are shown with their verification status; a missing record is not evidence that an event did not occur.',
+      });
+    })(),
     el('div', { id: 'inventory' }),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),

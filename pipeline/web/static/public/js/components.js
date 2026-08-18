@@ -358,6 +358,100 @@ export function shareButton({ title = 'SectorTrace', text = '',
   return button;
 }
 
+// Public campaign vocabulary. Keeping this in one place means route cards,
+// findings and workbench headers cannot drift into different labels.
+export const CAMPAIGN_LENSES = Object.freeze({
+  workforce: { label: 'Workforce', className: 'workforce', routes: ['#/pay', '#/providers'] },
+  money: { label: 'Public money', className: 'money', routes: ['#/contracts', '#/geography'] },
+  access: { label: 'Service access', className: 'access', routes: ['#/geography', '#/providers', '#/treatment', '#/coverage'] },
+  safety: { label: 'Safety & legal', className: 'safety', routes: ['#/pfd', '#/claims'] },
+  accountability: { label: 'Accountability', className: 'accountability', routes: ['#/coverage', '#/claims', '/api'] },
+});
+
+export function lensBadge(lens, { label = null } = {}) {
+  const item = CAMPAIGN_LENSES[lens] || { label: lens, className: 'default' };
+  if (!item.label) return null;
+  return el('span', { class: `lens-badge lens-${item.className}`, text: label || item.label });
+}
+
+// Timing is deliberately explicit. Callers must provide the kind; no route
+// can accidentally turn a warehouse retrieval timestamp into “Live”.
+export function timingBadge({ kind = null, date = null } = {}) {
+  const labels = {
+    current: 'Current extract', snapshot: 'Dated snapshot',
+    historical: 'Historical', live: 'Live',
+  };
+  if (!labels[kind]) return null;
+  const suffix = date ? ` · ${date}` : '';
+  return el('span', { class: `timing-badge timing-${kind}`, title: date || null,
+    text: `${labels[kind]}${suffix}` });
+}
+
+/** Extract only explicit row metadata. This deliberately does not manufacture
+ * a source or retrieval date from a module name or the browser clock. */
+export function evidenceMeta(payload) {
+  const rows = Object.values(payload || {}).flatMap((value) => Array.isArray(value) ? value : []);
+  const sources = [...new Set(rows.map((row) => row?.source_url).filter(Boolean))].slice(0, 4);
+  const retrievedAt = rows.map((row) => row?.retrieved_at).filter(Boolean).sort().pop() || null;
+  return { sources, retrievedAt };
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const area = el('textarea', { class: 'clipboard-fallback', text });
+  document.body.append(area); area.select();
+  document.execCommand('copy'); area.remove();
+}
+
+export function copyBriefingButton({ finding, value = null, evidenceStatus,
+                                     caveat: caveatText = null, sources = [],
+                                     retrievedAt = null, url = window.location.href,
+                                     label = 'Copy briefing bundle' } = {}) {
+  if (!finding || !evidenceStatus || (!sources.length && !retrievedAt)) return null;
+  const button = el('button', { class: 'btn ghost briefing-copy', type: 'button',
+    'aria-label': label, onclick: async () => {
+      const lines = [
+        'SectorTrace briefing', `Finding: ${finding}`,
+        value ? `Value: ${value}` : null, `Evidence: ${evidenceStatus}`,
+        caveatText ? `Caveat: ${caveatText}` : null,
+        sources.length ? `Source: ${sources.join('; ')}` : null,
+        retrievedAt ? `Retrieved: ${retrievedAt}` : null, `URL: ${url}`,
+      ].filter(Boolean);
+      const original = button.textContent;
+      try { await copyText(lines.join('\n')); button.textContent = 'Briefing copied'; }
+      catch { button.textContent = 'Copy unavailable'; }
+      setTimeout(() => { button.textContent = original; }, 1800);
+    } }, label);
+  return button;
+}
+
+export function findingBlock({ finding, value = null, evidenceStatus,
+                               timing = null, caveat: caveatText = null,
+                               sources = [], retrievedAt = null,
+                               url = window.location.href } = {}) {
+  const copy = copyBriefingButton({ finding, value, evidenceStatus,
+    caveat: caveatText, sources, retrievedAt, url });
+  if (!finding || !evidenceStatus || (!sources.length && !retrievedAt)) return null;
+  return el('aside', { class: 'finding-block', 'aria-label': 'What this shows' },
+    el('div', { class: 'finding-kicker' }, 'What this shows',
+      timingBadge(timing || {}), el('span', { class: 'badge good', text: evidenceStatus })),
+    el('p', { class: 'finding-text', text: finding }),
+    caveatText ? el('p', { class: 'finding-caveat' }, el('strong', { text: 'Caveat: ' }), caveatText) : null,
+    el('div', { class: 'finding-meta' },
+      sources.length ? el('span', { text: `Source: ${sources[0]}` }) : null,
+      retrievedAt ? el('span', { text: `Retrieved: ${retrievedAt}` }) : null,
+      copy));
+}
+
+export function thinEvidenceControl({ count, threshold, checked = true, onChange,
+                                      label = 'Include thin evidence' } = {}) {
+  if (!Number.isFinite(Number(count)) || !Number.isFinite(Number(threshold))) return null;
+  const input = el('input', { type: 'checkbox', checked, id: `thin-${++caveatSeq}` });
+  input.addEventListener('change', () => onChange?.(input.checked));
+  return el('label', { class: 'thin-evidence-control', title: `Thin evidence: fewer than ${threshold}` },
+    input, `${label} (${num(count)} below ${num(threshold)})`);
+}
+
 export function statCard({ value, label, sub, caveat: caveatText, plain = false,
                             unverified = false, status = null,
                             statusClass = 'neutral', action = null }) {

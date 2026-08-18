@@ -30,6 +30,7 @@ PORTAL = Path(__file__).resolve().parent.parent / "pipeline" / "web" / "static" 
 INDEX = PORTAL / "index.html"
 APP = PORTAL / "app.js"
 PAGES = sorted((PORTAL / "js" / "pages").glob("*.js"))
+COMPONENTS = PORTAL / "js" / "components.js"
 
 # A control the reader can set a value in. `<button>` is excluded: Reset is a
 # control that operates on the others rather than carrying a filter of its own.
@@ -148,3 +149,53 @@ def test_the_region_control_is_gone(index, app):
     file was written for and re-adding it would need a consumer, not a select."""
     assert "f-region" not in index
     assert "region" not in state_keys(app)
+
+
+def test_campaign_lens_menu_keeps_the_five_public_perspectives(index):
+    assert 'class="lens-menu"' in index
+    menu = index[index.index('class="lens-menu"'):]
+    menu = menu[:menu.index('</details>')]
+    for label in ("Workforce", "Public money", "Service access",
+                  "Safety &amp; legal", "Accountability"):
+        assert label in menu
+    assert 'aria-label="Explore by campaign lens"' in menu
+
+
+def test_evidence_components_keep_explicit_timing_and_briefing_contract():
+    source = COMPONENTS.read_text(encoding="utf-8")
+    for export in ("CAMPAIGN_LENSES", "timingBadge", "findingBlock",
+                   "copyBriefingButton", "thinEvidenceControl", "evidenceMeta"):
+        assert f"export {'const' if export == 'CAMPAIGN_LENSES' else 'function'} {export}" in source
+    for label in ("Current extract", "Dated snapshot", "Historical", "Live"):
+        assert label in source
+    assert "Copy briefing bundle" in source
+    assert "URL: ${url}" in source
+
+
+def test_public_campaign_assets_are_self_hosted():
+    css = (PORTAL / "styles.css").read_text(encoding="utf-8")
+    for filename in ("archivo-narrow-500.woff2", "archivo-narrow-700.woff2"):
+        assert f"/fonts/{filename}" in css
+        assert (PORTAL / "fonts" / filename).exists()
+
+
+def test_workbench_selection_state_has_shareable_url_contracts():
+    geography = (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
+    compare = (PORTAL / "js" / "pages" / "compare.js").read_text(encoding="utf-8")
+    providers = (PORTAL / "js" / "pages" / "providers.js").read_text(encoding="utf-8")
+    for key in ("metric", "year", "layers", "selected"):
+        assert f"params.get('{key}')" in geography
+        assert f"params.set('{key}'" in geography
+    assert "params.getAll('ons_code')" in compare
+    assert "params.getAll('provider_key')" in compare
+    assert "#/providers/${encodeURIComponent(provider.provider_key)}" in providers
+
+
+def test_thin_evidence_is_metadata_driven_not_a_universal_threshold():
+    components = COMPONENTS.read_text(encoding="utf-8")
+    geography = (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
+    assert "Number.isFinite(Number(count))" in components
+    assert "Number.isFinite(Number(threshold))" in components
+    assert "data.thinEvidence && thinEvidenceControl" in geography
+    assert "data.thinEvidence.threshold" in geography
+    assert "Include low-evidence places" in geography

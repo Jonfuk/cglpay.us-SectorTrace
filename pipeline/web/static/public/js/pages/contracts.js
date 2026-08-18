@@ -11,7 +11,7 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, pct, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          exportButton, shareButton } from '/js/components.js';
+          exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
 
 export async function render(main) {
   const charts = [];
@@ -42,6 +42,16 @@ export async function render(main) {
           text: 'Explore this filtered SectorTrace contracts evidence view with its source and caveat context.',
           label: 'Share filtered view',
         }))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'The contracts workbench locates published procurement activity; notice values are not a clean measure of sector spend and council payments are a separate evidence layer.',
+        value: `${num(data.total)} published notices`, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: data.caveats?.value_sum || 'Published values can include framework ceilings and should not be treated as sector spend.',
+      });
+    })(),
     el('details', { class: 'read-first' },
       el('summary', { text: 'How to read a notice' }),
       el('p', { text: 'A published notice is not a payment or a clean sector-spend total. Values can be ceilings, framework values or missing; buyer, provider and date context matters.' }),

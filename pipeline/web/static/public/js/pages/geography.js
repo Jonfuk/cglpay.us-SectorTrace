@@ -2,7 +2,7 @@
 'use strict';
 
 import { el, replace, fetchJSON, num, gbp, getState } from '/app.js';
-import { section, pinnedCaveat, errorCard, provenance, exportButton, shareButton, tableCard } from '/js/components.js';
+import { section, pinnedCaveat, errorCard, provenance, exportButton, shareButton, tableCard, findingBlock, evidenceMeta, thinEvidenceControl } from '/js/components.js';
 
 const METRICS = [['grant_drug_alcohol', 'Drug & alcohol ring-fenced grant'], ['grant_total', 'Public health grant (total)'], ['grant_per_head', 'Grant per head'], ['budget_public_health', 'Budgeted public health spend'], ['treatment_numbers', 'Numbers in treatment'], ['contract_value', 'Contract value awarded']];
 const MAP_LAYERS = new Set(['cqc_locations', 'contracts', 'treatment']);
@@ -78,7 +78,21 @@ export async function render(main) {
     let data, geo; try { [data, geo] = await Promise.all([fetchJSON('geography', { metric: state.metric, year: state.year }), boundaries()]); } catch (error) { replace(workspace, errorCard(error.message, load)); return; }
     const years = data.available_years || []; replace(yearSelect, years.map((year) => el('option', { value: year, text: year }))); state.year = data.year || state.year || years[0] || null; yearSelect.value = state.year || ''; writeRouteState(state);
     replace(exportHolder, exportButton('geography', { metric: state.metric, year: state.year })); const activeLayers = [...state.layers].map((key) => [key, layerPayload?.layers?.[key]]).filter(([, layer]) => layer);
-    replace(caveatHolder, [pinnedCaveat(data.caveat, 'Read this with the map'), ...activeLayers.map(([, layer]) => pinnedCaveat(layer.caveats.join(' '), `Read this with the ${layer.label} layer`))]);
+    const meta = evidenceMeta({ features: data.features || [], layers: activeLayers.map(([, layer]) => layer) });
+    const thin = data.thinEvidence && thinEvidenceControl({
+      count: data.thinEvidence.count, threshold: data.thinEvidence.threshold,
+      checked: data.thinEvidence.included !== false,
+      label: data.thinEvidence.label || 'Include low-evidence places',
+      onChange: (included) => { data.thinEvidence.included = included; load(); },
+    });
+    replace(caveatHolder, [findingBlock({
+      finding: 'The map coordinates one published measure with place selection; layers remain separate so a location, contract, or treatment value is not presented as the same kind of evidence.',
+      value: `${num((data.features || []).length)} authority values`,
+      evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+      timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+      sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+      caveat: data.caveat || 'No data is distinct from a low value; the selected measure determines what the map can show.',
+    }), thin, pinnedCaveat(data.caveat, 'Read this with the map'), ...activeLayers.map(([, layer]) => pinnedCaveat(layer.caveats.join(' '), `Read this with the ${layer.label} layer`))]);
     replace(provenanceHolder, provenance({ tables: tablesFor(state.metric), module: moduleFor(state.metric) }) || el('span', {})); drawList(listHolder, data, geo.features || []); await drawWorkspace(workspace, data, geo.features || [], activeLayers);
   }
   function select(code) { state.selected = code; writeRouteState(state); load(); }

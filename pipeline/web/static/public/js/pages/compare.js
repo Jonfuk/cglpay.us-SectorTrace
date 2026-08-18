@@ -18,7 +18,7 @@
 import { el, replace, fetchJSON, num, gbp } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, symbolFor, escapeHtml,
-          shareButton } from '/js/components.js';
+          shareButton, findingBlock } from '/js/components.js';
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
@@ -89,6 +89,17 @@ export async function render(main, { params = null } = {}) {
 
   replace(content, el('div', {}));
   const contentHolder = content.firstElementChild;
+  const seriesRows = Object.values(data.series || {});
+  const sources = [...new Set(seriesRows.flatMap((series) => series.provenance?.sources || []).filter(Boolean))];
+  const retrievedAt = seriesRows.map((series) => series.provenance?.retrieved_at).filter(Boolean).sort().pop() || null;
+  const comparisonFinding = findingBlock({
+    finding: 'Comparison keeps peers on shared axes within each evidence layer; it does not calculate a difference, ranking, or cross-layer score.',
+    value: `${state.ons.length + state.providers.length} selected entities`, evidenceStatus: sources.length || retrievedAt ? 'Published' : null,
+    timing: { kind: retrievedAt ? 'current' : 'snapshot', date: retrievedAt?.slice(0, 10) },
+    sources, retrievedAt: retrievedAt?.slice(0, 10),
+    caveat: data.caveats?.cross_layer || 'Choose peers explicitly and read each source-specific caveat before drawing a conclusion.',
+  });
+  if (comparisonFinding) contentHolder.append(comparisonFinding);
 
   if (data.series.grant) {
     renderYearsChart(contentHolder, 'Grant allocation',
