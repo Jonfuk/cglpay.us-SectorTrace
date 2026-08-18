@@ -345,6 +345,26 @@ def test_run_records_an_unreadable_workbook(httpx_mock, settings, conn):
     assert conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone()[0] == 1
 
 
+def test_run_resolves_relative_workbook_links(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    page = ('<a href="/Adult-Social-Care-Workforce-Data/workforceintelligence/'
+            'resources/Our-data/Current-year-data-download-regional-2024-25.xlsx">'
+            'Regional</a>')
+    httpx_mock.add_response(
+        url=re.compile(r".*About-our-data/Data-downloads\.aspx.*"),
+        text=page, status_code=200, is_reusable=True)
+    httpx_mock.add_response(
+        url=re.compile(r".*Current-year-data-download-regional-2024-25\.xlsx.*"),
+        content=b"not a zip file", status_code=200, is_reusable=True)
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None,
+                        dry_run=False, limit=None)
+    sfc.run(ctx)
+
+    row = conn.execute("SELECT * FROM skills_for_care_files").fetchone()
+    assert row["file_url"].startswith("https://www.skillsforcare.org.uk/")
+
+
 def test_run_page_unavailable_is_a_review_item(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock)
     # 404 rather than 500: the client retries a 5xx six times before raising,

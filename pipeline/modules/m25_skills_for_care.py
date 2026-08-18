@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from urllib.parse import urljoin
 
 import structlog
 
@@ -252,6 +253,7 @@ def run(ctx: ModuleContext) -> None:
             return
 
         for file_url, label in ctx.track(files, "workbooks"):
+            file_url = urljoin(page_result.url, file_url)
             result = client.get(file_url)
             if not result.ok:
                 db.record_review_item(
