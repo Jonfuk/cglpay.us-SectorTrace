@@ -387,6 +387,15 @@ export function timingBadge({ kind = null, date = null } = {}) {
     text: `${labels[kind]}${suffix}` });
 }
 
+/** Extract only explicit row metadata. This deliberately does not manufacture
+ * a source or retrieval date from a module name or the browser clock. */
+export function evidenceMeta(payload) {
+  const rows = Object.values(payload || {}).flatMap((value) => Array.isArray(value) ? value : []);
+  const sources = [...new Set(rows.map((row) => row?.source_url).filter(Boolean))].slice(0, 4);
+  const retrievedAt = rows.map((row) => row?.retrieved_at).filter(Boolean).sort().pop() || null;
+  return { sources, retrievedAt };
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const area = el('textarea', { class: 'clipboard-fallback', text });
