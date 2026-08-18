@@ -122,6 +122,8 @@ for _lib, _type in (
     ("d3.min.js", JS),
     ("tabulator.min.js", JS),
     ("tabulator_midnight.min.css", CSS),
+    ("leaflet.js", JS),
+    ("leaflet.css", CSS),
     ("fuse.min.js", JS),
     ("bootstrap.min.css", CSS),
     ("bootstrap.bundle.min.js", JS),
@@ -170,7 +172,7 @@ MAX_BODY_BYTES = 256 * 1024
 # Styles are a defacement vector, not an exfiltration one.
 _CSP_COMMON = (
     "default-src 'self'",
-    "img-src 'self' data:",
+    "img-src 'self' data: https://*.basemaps.cartocdn.com",
     "style-src 'self' 'unsafe-inline'",
     "connect-src 'self'",
     "object-src 'none'",

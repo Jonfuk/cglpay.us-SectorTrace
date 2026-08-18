@@ -22,7 +22,8 @@
 'use strict';
 
 import { el, replace, fetchJSON, ago, sourceLink } from '/app.js';
-import { section, pinnedCaveat, noData, errorCard, provenance } from '/js/components.js';
+import { section, pinnedCaveat, noData, errorCard, provenance,
+          shareButton } from '/js/components.js';
 
 export async function render(main) {
   let data;
@@ -42,7 +43,16 @@ export async function render(main) {
         'supports it and approved by a named reviewer. ',
         el('strong', { text: 'Nothing here is computed' }),
         ': a claim is a statement, and the linkage to its evidence is a ',
-        'human judgement recorded like every other decision in this warehouse.')),
+        'human judgement recorded like every other decision in this warehouse.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace evidence-backed claims',
+          text: 'Read campaign claims with their supporting evidence and caveats.',
+          label: 'Share claims',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'Use claims responsibly' }),
+      el('p', { text: 'A claim is a campaign statement reviewed by a named person. Read its caveat and cited evidence before repeating it.' })),
     el('div', { id: 'claims' }));
   replace(main, page);
 
@@ -70,7 +80,9 @@ function renderClaim(claim) {
   const caveats = (claim.caveats || []).filter(Boolean);
 
   const card = el('article', { class: 'claim' },
-    el('blockquote', { class: 'claim-text', text: claim.claim_text }),
+    el('div', { class: 'takeaway' },
+      el('span', { class: 'badge good', text: 'PUBLISHED' }),
+      el('blockquote', { class: 'claim-text', text: claim.claim_text })),
     caveats.length
       ? el('div', { class: 'claim-caveats' },
           caveats.map((line) => pinnedCaveat(line, 'You may not compute this from it')))
@@ -79,11 +91,16 @@ function renderClaim(claim) {
       el('span', { class: 'muted small',
         text: `Approved by ${claim.published_by || '—'} · `
               + `${claim.published_at ? ago(claim.published_at) : '—'}`
-              + (claim.note ? ` · ${claim.note}` : '') })));
+              + (claim.note ? ` · ${claim.note}` : '') }),
+      shareButton({
+        title: 'SectorTrace evidence-backed claim',
+        text: `${claim.claim_text}\nCaveat: ${caveats.join(' ')}`,
+        label: 'Copy claim with citation',
+      })));
 
   if (claim.citations && claim.citations.length) {
-    card.append(el('div', { class: 'claim-citations' },
-      el('h3', { text: 'Supporting evidence' }),
+    card.append(el('details', { class: 'context-note claim-citations' },
+      el('summary', { text: `Supporting evidence (${claim.citations.length})` }),
       el('ul', {}, ...claim.citations.map(renderCitation)),
       provenanceFromCitations(claim.citations)));
   }

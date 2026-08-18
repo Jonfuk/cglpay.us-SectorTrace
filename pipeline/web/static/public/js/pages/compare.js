@@ -17,7 +17,8 @@
 
 import { el, replace, fetchJSON, num, gbp } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenanceFromRows, provenance, symbolFor, escapeHtml } from '/js/components.js';
+          provenanceFromRows, provenance, symbolFor, escapeHtml,
+          shareButton } from '/js/components.js';
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
@@ -34,10 +35,19 @@ export async function render(main, { params = null } = {}) {
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('p', {}, el('a', { href: '#/authorities' }, '← Authority pages')),
-      el('h1', { text: 'Compare' }),
+      el('h1', { text: 'Compare evidence safely' }),
       el('p', { class: 'lede' },
-        'Two or more authorities or providers, each drawn on the shared axes ',
-        'of the figures the pipeline already publishes.')),
+        'Choose peers, choose a published evidence layer, then read the '
+        + 'source-specific chart. The portal does not calculate differences or rankings.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace comparison',
+          text: 'Compare published SectorTrace evidence with its caveats.',
+          label: 'Share comparison',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'How comparisons work' }),
+      el('p', { text: 'Each chart uses one source and one kind of measure. Shared axes let you inspect peers; they do not turn unlike measures into one score.' })),
     el('div', { id: 'compare-caveat' }),
     el('div', { id: 'compare-picker' }),
     content);
@@ -179,11 +189,18 @@ async function renderPicker(holder, chips, state, data) {
       }, '×')));
   }
 
-  replace(holder, section('Choose what to compare', null,
+  const selected = state.ons.length + state.providers.length;
+  replace(holder, section('Choose what to compare',
+    `${num(selected)} selected · choose at least two peers to draw a shared axis.`,
     el('div', { class: 'panel' },
       chips.children.length ? chips : el('p', { class: 'small muted',
         text: 'Nothing selected yet — the charts appear once there are two '
           + 'authorities or providers to draw.' }),
+      selected ? el('div', { class: 'section-links' },
+        el('button', {
+          type: 'button', text: 'Clear all selections',
+          onclick: () => { location.hash = '#/compare'; },
+        })) : null,
       el('div', { class: 'compare-pickers' },
         authorityPicker(state, authorities),
         providerPicker(state, providers)))));

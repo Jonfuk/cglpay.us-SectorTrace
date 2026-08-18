@@ -19,7 +19,7 @@
 
 import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenanceFromRows, tableCard, escapeHtml } from '/js/components.js';
+          provenanceFromRows, tableCard, escapeHtml, shareButton } from '/js/components.js';
 
 const TYPE_LABELS = {
   county: 'County council',
@@ -73,7 +73,16 @@ async function renderOne(main, code) {
       el('h1', { text: authority.name || code }),
       el('p', { class: 'lede' },
         `${type} · ${authority.region || 'region not recorded'} · `,
-        el('code', { text: authority.ons_code || code }))),
+        el('code', { text: authority.ons_code || code })),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: `SectorTrace — ${authority.name || code}`,
+          text: 'Explore published local-authority evidence in SectorTrace.',
+          label: 'Share this authority',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'How to read this authority workbench' }),
+      el('p', { text: 'Grant allocation, budgeted spend, treatment estimates and contracts come from different sources. They are shown side by side, never combined into a score.' })),
     el('div', { id: 'coverage' }),
     el('div', { id: 'grant-budget' }),
     el('div', { id: 'drilldown' }),
@@ -100,7 +109,7 @@ function renderCoverage(container, data) {
   const labels = data.coverage?.labels || Object.keys(cells);
 
   replace(container, section(
-    'What is held for this authority',
+    'Evidence inventory',
     'Which kinds of evidence the warehouse holds. Absence is absence of '
     + 'collection, not evidence of absence.',
     el('div', { class: 'panel' },

@@ -246,6 +246,15 @@ def test_the_map_toggles_are_built_from_the_payload(geographyjs):
     assert "pinnedCaveat" in geographyjs
 
 
+def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs):
+    """The three point layers are alternative maps, and a click still opens
+    the authority evidence page rather than a map-only dead end."""
+    assert "POSITRON_LAYERS" in geographyjs
+    assert "basemaps.cartocdn.com/light_all" in geographyjs
+    assert "drawLeafletPoints" in geographyjs
+    assert "location.hash = `#/authorities/${point.ons_code}`" in geographyjs
+
+
 def test_no_layer_caveat_text_is_hardcoded_in_the_map_page(geographyjs):
     """The layer caveats live in the payload, which reads them from the same
     source as the exports. A sentence written into the page would be a second

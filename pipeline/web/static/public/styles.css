@@ -181,6 +181,7 @@ main:focus { outline: none; }
 .section { margin-bottom: var(--space-12); }
 .section > header { margin-bottom: var(--space-4); }
 .section > header p { color: var(--text-secondary); max-width: 76ch; }
+.section-action { margin: 0 0 var(--space-4); }
 
 .panel {
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
@@ -338,6 +339,8 @@ main:focus { outline: none; }
   background: linear-gradient(100deg, var(--bg-surface) 20%, var(--bg-elevated) 40%, var(--bg-surface) 60%);
   background-size: 250% 100%; animation: shimmer 1.6s linear infinite;
 }
+.loading-state { display: grid; gap: var(--space-3); padding: var(--space-4) 0; }
+.loading-state p { margin: 0; }
 @keyframes shimmer { to { background-position: -250% 0; } }
 @media (prefers-reduced-motion: reduce) { .shimmer { animation: none; } }
 
@@ -379,8 +382,11 @@ main:focus { outline: none; }
 .maplayout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 @media (max-width: 1100px) { .maplayout { grid-template-columns: 1fr; } }
 .map { width: 100%; height: 620px; }
+.leaflet-map { width: 100%; height: 620px; border-radius: var(--radius-md); overflow: hidden; }
 .map path { stroke: var(--bg-base); stroke-width: 0.4; cursor: pointer; }
 .map path:hover { stroke: var(--text-primary); stroke-width: 1.2; }
+.map.cqc-location-map path { fill: var(--bg-elevated) !important; stroke: var(--border-accent); stroke-width: .7; }
+.map.cqc-location-map .overlay circle { r: 4.5; }
 .map path.nodata { fill: var(--bg-elevated); }
 .maptip {
   position: fixed; pointer-events: none; z-index: 60; max-width: 280px;

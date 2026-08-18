@@ -11,7 +11,7 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, pct, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          exportButton } from '/js/components.js';
+          exportButton, shareButton } from '/js/components.js';
 
 export async function render(main) {
   const charts = [];
@@ -29,13 +29,23 @@ export async function render(main) {
   const concentration = data.value_concentration || {};
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Contracts' }),
+      el('h1', { text: 'Where public money is going' }),
       el('p', { class: 'lede' },
-        `${num(data.total)} published notice${data.total === 1 ? '' : 's'}. `,
+        `${num(data.total)} published notice${data.total === 1 ? '' : 's'} matched by the current filters. `,
         data.total
           ? `The middle one is ${gbp(concentration.median_value_gbp, { compact: false })}; `
             + `the mean is ${gbp(concentration.mean_value_gbp)}.`
-          : 'Nothing matches these filters.')),
+          : 'Nothing matches these filters.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace contracts evidence',
+          text: 'Explore this filtered SectorTrace contracts evidence view with its source and caveat context.',
+          label: 'Share filtered view',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'How to read a notice' }),
+      el('p', { text: 'A published notice is not a payment or a clean sector-spend total. Values can be ceilings, framework values or missing; buyer, provider and date context matters.' }),
+      el('p', { text: 'The full filtered notice set is available as a download near the table. Council payment files are shown separately because they record a different kind of published evidence.' })),
     el('div', { id: 'shape' }),
     el('div', { id: 'corpus' }),
     el('div', { id: 'breakdown' }),
@@ -89,8 +99,11 @@ function renderShape(container, data, charts) {
   const matched = data.matched_to_provider || 0;
 
   replace(container, section(
-    'What this corpus is',
-    'Three properties to know before reading anything else on this page.',
+    'Money-flow snapshot',
+    'The core facts needed to interpret the published notices before exploring buyers, providers or patterns.',
+    el('div', { class: 'takeaway' },
+      el('span', { class: 'badge neutral', text: 'Published notice evidence' }),
+      el('p', { text: 'Notice count, published value and payment are different measures. This page shows the first two and keeps council payment evidence separate below.' })),
     el('div', { class: 'panel' },
       el('div', { class: 'grid cards' },
         fact(gbp(c.median_value_gbp, { compact: false }), 'median notice value',
@@ -230,9 +243,8 @@ function renderBreakdown(container, data, charts) {
   const provHolder = el('div', {});
 
   replace(container, section(
-    'Procedure and provider',
-    'How notices were awarded, and which of them name a provider this '
-    + 'pipeline tracks.',
+    'Patterns: procedure and provider',
+    'Secondary breakdowns for readers who want to explore how notices were awarded and which name a tracked provider.',
     el('div', { class: 'grid two' },
       el('div', { class: 'panel' },
         el('h3', { text: 'Procedure type' }), procHolder),
@@ -282,8 +294,11 @@ function renderBuyers(container, data, charts) {
   const holder = el('div', {});
 
   replace(container, section(
-    'Buyers',
-    'Authorities and bodies publishing the most notices in this corpus.',
+    'Buyer and provider context',
+    'Authorities and bodies publishing the most notices in this corpus, alongside the separately reported exact-match provider evidence.',
+    el('div', { class: 'takeaway' },
+      el('span', { class: 'badge neutral', text: 'Published notice value' }),
+      el('p', { text: 'Buyer size here reflects published notice values, which can include framework ceilings. It is not a measure of payments or budget.' })),
     el('div', { class: 'panel' }, holder)));
 
   if (!buyers.length) {
@@ -330,6 +345,10 @@ function renderNotices(container, data) {
         + 'it. Search a column, or narrow the filters, to reach the rest — or '
         + 'download the CSV, which carries every row these filters match.'
       : 'The full list behind the charts above, downloadable with its provenance.',
+    el('div', { class: 'section-action' },
+      exportButton('contracts', filterParams(), 'Download complete filtered set', {
+        total: data.total,
+      })),
     tableCard('Published notices', [
       { title: 'Published', field: 'date_published', width: 110,
         formatter: (c) => isoDate(c.getValue()) },

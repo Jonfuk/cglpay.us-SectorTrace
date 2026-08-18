@@ -55,6 +55,8 @@ PUBLIC_STATIC_PATHS = {
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
     "/vendor/tabulator_midnight.min.css",
+    "/vendor/leaflet.js",
+    "/vendor/leaflet.css",
     "/vendor/fuse.min.js",
     "/vendor/bootstrap.min.css",
     "/vendor/bootstrap.bundle.min.js",

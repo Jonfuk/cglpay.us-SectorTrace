@@ -14,7 +14,7 @@
 import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          statCard, exportButton, registerLink, registerLinks } from '/js/components.js';
+          statCard, exportButton, registerLink, registerLinks, shareButton } from '/js/components.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
@@ -35,26 +35,34 @@ async function renderList(main) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Providers' }),
+      el('h1', { text: 'Find provider evidence' }),
       el('p', { class: 'lede' },
-        `${num(providers.length)} organisations tracked across the sector. `,
-        'Counts come from different sources with different coverage, so they '
-        + 'compare like with like only within a column.')),
+        `Browse ${num(providers.length)} tracked organisations, then open a `
+        + 'provider workbench to see the published evidence held for it.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace provider directory',
+          text: 'Browse the SectorTrace provider evidence directory.',
+          label: 'Share this directory',
+        }))),
     el('div', { id: 'cards' }),
     el('div', { id: 'chart' }),
     el('div', { id: 'table' }));
   replace(main, page);
 
-  replace(page.querySelector('#cards'), el('div', { class: 'grid cards' },
-    providers.slice(0, 8).map((p) => el('a', {
+  replace(page.querySelector('#cards'), section(
+    'Provider directory',
+    'Open a provider to see what evidence is held. “Partial evidence” means '
+      + 'some sources have rows; it does not describe the provider itself.',
+    el('div', { class: 'grid cards' }, providers.slice(0, 8).map((p) => el('a', {
       href: `#/providers/${p.provider_key}`,
       style: 'text-decoration:none;color:inherit;',
     }, statCard({
       value: p.canonical_name,
       plain: true,
-      label: p.is_target ? '★ campaign subject' : 'provider',
-      sub: `${num(p.cqc_locations)} CQC locations · ${num(p.tribunal_count)} tribunal cases`,
-    })))));
+      label: providerStatus(p),
+      sub: `${num(p.cqc_locations)} CQC locations · ${num(p.contract_count)} contracts`,
+    }))))));
 
   const holder = el('div', {});
   replace(page.querySelector('#chart'), section(
@@ -138,7 +146,14 @@ async function renderOne(main, key) {
       // identifier, which is exactly what a register lookup takes.
       registerLinks((data.entity_edges || [])
         .filter((e) => e.source_id === key)
-        .map((e) => ({ scheme: e.target_type, identifier: e.target_id })))),
+        .map((e) => ({ scheme: e.target_type, identifier: e.target_id }))),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: `SectorTrace — ${provider.canonical_name || key}`,
+          text: 'Explore the published provider evidence in SectorTrace.',
+          label: 'Share this provider',
+        }))),
+    el('div', { id: 'inventory' }),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
     el('div', { id: 'cqc' }),
@@ -150,6 +165,7 @@ async function renderOne(main, key) {
     el('div', { id: 'tribunals' }));
   replace(main, page);
 
+  renderInventory(page.querySelector('#inventory'), data);
   renderTimeline(page.querySelector('#timeline'), data);
   renderGraph(page.querySelector('#graph'), data, charts, key);
   renderCqc(page.querySelector('#cqc'), data);
@@ -161,6 +177,31 @@ async function renderOne(main, key) {
   renderTribunals(page.querySelector('#tribunals'), data);
 
   return () => disposeCharts(charts);
+}
+
+function providerStatus(provider) {
+  const records = ['cqc_locations', 'tribunal_count', 'contract_count',
+    'nhs_job_advert_count'].reduce((sum, key) => sum + (provider[key] || 0), 0);
+  if (!records) return 'no current evidence';
+  return provider.is_target ? '★ campaign subject · partial evidence' : 'partial evidence';
+}
+
+function renderInventory(container, data) {
+  const items = [
+    ['CQC locations', (data.cqc_locations || []).length],
+    ['Contracts', (data.events || []).filter((e) => e.event_type === 'contract_award').length],
+    ['Safety/legal', (data.pfd_mentions || []).length + (data.tribunal_cases || []).length],
+    ['Financial evidence', (data.charity_finance || []).length],
+  ];
+  const cards = items.map(([label, count]) => statCard({
+    value: num(count),
+    label,
+    sub: count ? 'records held' : 'not collected or not matched',
+  }));
+  replace(container, section(
+    'Evidence inventory',
+    'Counts describe the records held for this provider, not its performance or scale.',
+    el('div', { class: 'grid cards' }, cards)));
 }
 
 function renderTimeline(container, data) {

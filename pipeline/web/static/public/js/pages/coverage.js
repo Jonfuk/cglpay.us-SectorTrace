@@ -7,7 +7,7 @@
 'use strict';
 
 import { el, replace, fetchJSON, ago } from '/app.js';
-import { section, pinnedCaveat, errorCard } from '/js/components.js';
+import { section, pinnedCaveat, errorCard, shareButton } from '/js/components.js';
 
 const SOURCE_LABELS = {
   'Contracts Finder': 'Contracts Finder',
@@ -37,8 +37,17 @@ const STATUS = [
 export async function render(main) {
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Coverage & limitations' }),
-      el('p', { class: 'lede', text: 'What SectorTrace searches, what the evidence can support, and how to read a missing or unverified record.' })),
+      el('h1', { text: 'Trust centre' }),
+      el('p', { class: 'lede', text: 'How to read SectorTrace evidence, its source coverage, and the difference between published, missing and unverified records.' }),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace coverage and limitations',
+          text: 'Read how SectorTrace evidence status and source coverage work.',
+          label: 'Share this guide',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'What this guide is for' }),
+      el('p', { text: 'It explains what the portal holds and how the pipeline labels evidence. It is not a scorecard of providers, authorities, or the sector.' })),
     el('div', { id: 'meaning' }),
     el('div', { id: 'boundaries' }),
     el('div', { id: 'freshness' }));
@@ -49,17 +58,19 @@ export async function render(main) {
       el('h3', { text: title }),
       el('p', { text: description })));
   replace(page.querySelector('#meaning'), section(
-    'How to read the evidence',
+    'Evidence-state glossary',
     'The status of a record says what has happened to it in the pipeline. It does not make unlike sources comparable.',
     el('div', { class: 'coverage-statuses' }, statusCards)));
 
   replace(page.querySelector('#boundaries'), section(
-    'What this portal does not calculate',
+    'Method and limits',
     'Evidence layers are kept separate so that a published number remains defensible in its own terms.',
-    pinnedCaveat(
-      'SectorTrace does not calculate cross-layer composite scores, claims per employee, treatment-to-workforce ratios, workforce census trends, annualised hourly pay, or percentages above the minimum wage. Missing values are never treated as zero.',
-      'Important limits'),
-    el('p', { class: 'muted', text: 'The organisation list is a capture of names found in the pipeline’s sources, not a census or a claimed measure of sector size.' })));
+    el('details', { class: 'context-note', open: true },
+      el('summary', { text: 'What this portal does not calculate' }),
+      pinnedCaveat(
+        'SectorTrace does not calculate cross-layer composite scores, claims per employee, treatment-to-workforce ratios, workforce census trends, annualised hourly pay, or percentages above the minimum wage. Missing values are never treated as zero.',
+        'Important limits'),
+      el('p', { class: 'muted', text: 'The organisation list is a capture of names found in the pipeline’s sources, not a census or a claimed measure of sector size.' }))));
 
   const freshness = page.querySelector('#freshness');
   replace(freshness, section('Sources and latest updates', 'The latest successful retrieval recorded for each public source layer.', el('p', { class: 'muted', text: 'Loading source updates…' })));
