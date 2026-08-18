@@ -258,16 +258,31 @@ def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResu
             raise RuntimeError("Bright Data returned an unusable unlocker response")
         return envelope
 
+    def status(envelope: dict) -> int | None:
+        value = envelope.get("status_code")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    attempts: list[dict] = []
     target_url = json_url
     envelope = unlock(target_url)
+    attempts.append({"url": target_url, "status": status(envelope), "render": False})
     # WDTK's JSON route can be challenged independently of the canonical page.
-    # Retry the page a single time, with rendering enabled so this follows the
-    # same path as the browser that an operator used to verify the candidate.
-    if envelope.get("status_code") == 502 and html_url != json_url:
+    # Try the server-rendered HTML first: it is the same document an operator
+    # sees in the browser and avoids paying for Bright Data rendering unless
+    # the ordinary HTML response is also challenged.
+    if status(envelope) == 502 and html_url != json_url:
         target_url = html_url
-        envelope = unlock(target_url, render=True)
+        envelope = unlock(target_url)
+        attempts.append({"url": target_url, "status": status(envelope), "render": False})
+        if status(envelope) == 502:
+            target_url = html_url
+            envelope = unlock(target_url, render=True)
+            attempts.append({"url": target_url, "status": status(envelope), "render": True})
 
-    status_code = envelope.get("status_code")
+    status_code = status(envelope)
     raw_body = envelope.get("body")
     if not isinstance(status_code, int) or not isinstance(raw_body, str):
         raise RuntimeError("Bright Data returned an unusable unlocker response")
@@ -278,7 +293,7 @@ def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResu
     archived_path = (_archive_raw(settings.raw_archive_dir, source_system, sha256,
                                   content_type, body) if body else None)
     log.info("http.wdtk_web_unlocker", url=url, source_system=source_system,
-             target_status=status_code, payload_sha256=sha256)
+             target_status=status_code, attempts=attempts, payload_sha256=sha256)
     return FetchResult(
         url=target_url, status_code=status_code, body=body, headers=target_headers,
         retrieved_at=datetime.now(timezone.utc), payload_sha256=sha256,
