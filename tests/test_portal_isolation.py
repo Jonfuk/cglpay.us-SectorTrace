@@ -55,11 +55,16 @@ PUBLIC_STATIC_PATHS = {
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
     "/vendor/tabulator_midnight.min.css",
-    "/vendor/leaflet.js",
-    "/vendor/leaflet.css",
+    "/vendor/maplibre-gl.js",
+    "/vendor/maplibre-gl.css",
     "/vendor/fuse.min.js",
     "/vendor/bootstrap.min.css",
     "/vendor/bootstrap.bundle.min.js",
+    "/fonts/manrope-400.woff2",
+    "/fonts/manrope-600.woff2",
+    "/fonts/manrope-700.woff2",
+    "/fonts/space-grotesk-500.woff2",
+    "/fonts/space-grotesk-700.woff2",
 }
 
 # The portal's read-only API, as route names under /api/v1/.

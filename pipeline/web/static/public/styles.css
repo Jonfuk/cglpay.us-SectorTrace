@@ -1,33 +1,32 @@
-/* SectorTrace public portal.
- *
- * Dark by design rather than by preference: this is read in long sessions
- * alongside source documents, and the charts carry the colour. One stylesheet,
- * no framework, no external fonts — the portal is served from the same machine
- * as the pipeline and must render with no internet at all, so the type stack
- * is what the reader's system already has.
- */
+/* SectorTrace public portal: a dense, modern research desk. */
+
+@font-face { font-family: 'Manrope'; src: url('/fonts/manrope-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Manrope'; src: url('/fonts/manrope-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Manrope'; src: url('/fonts/manrope-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
 
 :root {
   /* Backgrounds */
-  --bg-base:        #0d1117;
-  --bg-surface:     #161b22;
-  --bg-elevated:    #1c2128;
+  --bg-base:        #08111f;
+  --bg-surface:     #101d2e;
+  --bg-elevated:    #17283d;
 
   /* Accents */
-  --accent-teal:    #38bdf8;
-  --accent-amber:   #f59e0b;
-  --accent-green:   #34d399;
-  --accent-red:     #f87171;
+  --accent-teal:    #21d4d0;
+  --accent-amber:   #fbbf24;
+  --accent-green:   #4ade80;
+  --accent-red:     #fb7185;
   --accent-purple:  #a78bfa;
 
   /* Text */
-  --text-primary:   #e6edf3;
-  --text-secondary: #8b949e;
-  --text-muted:     #6e7681;
+  --text-primary:   #f4f8ff;
+  --text-secondary: #b2c0d3;
+  --text-muted:     #8293aa;
 
   /* Borders */
-  --border-subtle:  #21262d;
-  --border-accent:  #30363d;
+  --border-subtle:  #24364d;
+  --border-accent:  #38516f;
 
   /* Semantic */
   --caveat-bg:      rgba(245, 158, 11, 0.08);
@@ -48,25 +47,26 @@
   --glass-blur:   blur(12px);
   --glass-border: 1px solid rgba(48, 54, 61, 0.60);
 
-  --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --serif: "DM Serif Display", Georgia, "Times New Roman", serif;
+  --sans: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: "Space Grotesk", "Manrope", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
 
+html { background: var(--bg-base); overflow-x: clip; }
 body {
   margin: 0;
   background: var(--bg-base);
   color: var(--text-primary);
-  font: 15px/1.6 var(--sans);
+  font: 15px/1.65 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3 { line-height: 1.2; margin: 0 0 var(--space-3); }
-h1 { font-family: var(--serif); font-size: clamp(32px, 5vw, 56px); font-weight: 400; letter-spacing: -0.01em; }
-h2 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
-h3 { font-size: 16px; font-weight: 650; }
+h1 { font-family: var(--serif); font-size: clamp(32px, 5vw, 56px); font-weight: 700; letter-spacing: -0.045em; }
+h2 { font-family: var(--serif); font-size: 22px; font-weight: 700; letter-spacing: -0.03em; }
+h3 { font-size: 16px; font-weight: 700; }
 p { margin: 0 0 var(--space-3); }
 a { color: var(--accent-teal); text-decoration-color: rgba(56, 189, 248, 0.4); }
 a:hover { text-decoration-color: currentColor; }
@@ -88,7 +88,7 @@ a:hover { text-decoration-color: currentColor; }
 .topbar {
   display: flex; align-items: center; gap: var(--space-6);
   padding: var(--space-3) var(--space-6);
-  background: var(--glass-bg);
+  background: color-mix(in srgb, var(--bg-base) 88%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border-subtle);
@@ -98,9 +98,10 @@ a:hover { text-decoration-color: currentColor; }
 .brand { display: flex; align-items: center; gap: var(--space-2); text-decoration: none; color: inherit; }
 .brand-mark {
   width: 22px; height: 22px; border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent-teal), var(--accent-amber));
+  background: linear-gradient(135deg, var(--accent-teal), #4f8cff 52%, var(--accent-amber));
+  box-shadow: 0 0 20px rgba(33, 212, 208, .25);
 }
-.brand-text { font-size: 18px; letter-spacing: -0.02em; font-weight: 400; }
+.brand-text { font-family: var(--serif); font-size: 18px; letter-spacing: -0.035em; font-weight: 500; }
 .brand-text strong { font-weight: 750; }
 
 .mainnav { display: flex; gap: var(--space-1); flex-wrap: wrap; }
@@ -185,7 +186,7 @@ main:focus { outline: none; }
 
 .panel {
   background: var(--bg-surface); border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg); padding: var(--space-6);
+  border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: 0 18px 55px rgba(0, 0, 0, .12);
 }
 .grid { display: grid; gap: var(--space-4); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
@@ -255,8 +256,9 @@ main:focus { outline: none; }
   border: var(--glass-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
-  position: relative;
+  position: relative; overflow: hidden;
 }
+.statcard::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--accent-teal); opacity: .85; }
 .statcard .value {
   font-size: 30px; font-weight: 700; letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums; line-height: 1.15;
@@ -380,9 +382,19 @@ main:focus { outline: none; }
 /* --- map ----------------------------------------------------------------- */
 
 .maplayout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.maplayout > * { min-width: 0; }
 @media (max-width: 1100px) { .maplayout { grid-template-columns: 1fr; } }
 .map { width: 100%; height: 620px; }
-.leaflet-map { width: 100%; height: 620px; border-radius: var(--radius-md); overflow: hidden; }
+.map-workspace { min-width: 0; max-width: 100%; border: 1px solid var(--border-accent); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-base); box-shadow: 0 20px 55px rgba(0, 0, 0, .22); }
+.map-canvas { width: 100%; min-width: 0; height: 620px; }
+.map-preview { border-top: 1px solid var(--border-subtle); background: var(--bg-surface); padding: var(--space-4); }
+.map-preview h3 { margin-bottom: var(--space-1); }
+.map-preview-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
+.maplibregl-popup-content { font: 13px/1.45 var(--sans); color: #142033; padding: 12px 14px; border-radius: 8px; }
+.maplibregl-popup-content strong { display: block; font-family: var(--serif); font-size: 15px; margin-bottom: 3px; }
+.maplibregl-ctrl-group { border-radius: 8px; overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,.2); }
+.maplibregl-ctrl button:focus-visible { outline: 3px solid var(--accent-teal); outline-offset: -3px; }
+.map-cluster { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 999px; background: #102a43; color: white; border: 2px solid var(--accent-amber); font: 700 13px/1 var(--sans); box-shadow: 0 5px 15px rgba(8, 17, 31, .35); }
 .map path { stroke: var(--bg-base); stroke-width: 0.4; cursor: pointer; }
 .map path:hover { stroke: var(--text-primary); stroke-width: 1.2; }
 .map.cqc-location-map path { fill: var(--bg-elevated) !important; stroke: var(--border-accent); stroke-width: .7; }
@@ -530,14 +542,14 @@ main:focus { outline: none; }
 }
 
 html[data-bs-theme="light"] {
-  --bg-base: #f6f8fa; --bg-surface: #ffffff; --bg-elevated: #eef2f5;
-  --text-primary: #17212b; --text-secondary: #52606d; --text-muted: #687786;
-  --border-subtle: #d9e1e8; --border-accent: #b8c5d0;
+  --bg-base: #f4f7fb; --bg-surface: #ffffff; --bg-elevated: #e8eef7;
+  --text-primary: #132238; --text-secondary: #455a73; --text-muted: #5e7188;
+  --border-subtle: #d3dfed; --border-accent: #aebfd3;
   --glass-bg: rgba(255, 255, 255, .88); --glass-border: 1px solid rgba(184,197,208,.8);
   --caveat-bg: rgba(245,158,11,.10); --unverified-bg: repeating-linear-gradient(45deg, rgba(245,158,11,.10), rgba(245,158,11,.10) 4px, transparent 4px, transparent 12px);
 }
 
-html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
+html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .topbar { min-height: 64px; flex-wrap: nowrap; }
 .portal-nav { display: flex; flex: 1 1 auto; min-width: 0; }
 .portal-nav .offcanvas-body { display: flex; align-items: center; padding: 0; }
@@ -570,7 +582,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
 @media (max-width: 720px) {
   .topbar { min-height: 58px; padding: 8px 16px; }
   .menu-toggle { display: block; order: 4; }
-  .portal-nav { flex: 0 0 auto; }
+  .portal-nav { position: fixed; flex: 0 0 auto; max-width: 100vw; }
+  /* Bootstrap parks a closed offcanvas one viewport to the right. That
+     transformed box still increases document scrollWidth in Chromium, so
+     remove it from layout until Bootstrap marks it open. */
+  .portal-nav:not(.show) { display: none; }
   .portal-nav .offcanvas-body { display: block; padding: 16px; }
   .portal-nav .mainnav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
   .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
@@ -580,6 +596,7 @@ html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
   .findcouncil input { min-width: 0; width: min(35vw, 150px); }
   .theme-control { display: none; }
   .filterbar.offcanvas.is-mobile-filter { position: fixed; top: 0; right: 0; bottom: 0; visibility: hidden; transform: translateX(100%); width: min(92vw, 380px); height: 100%; flex-direction: column; }
+  .filterbar.offcanvas.is-mobile-filter:not(.show) { display: none; }
   .filterbar.offcanvas.is-mobile-filter.show { visibility: visible; transform: none; }
   .filterbar .offcanvas-header { display: flex; }
   .filterbar-body { display: flex; flex-direction: column; align-items: stretch; padding: 0 24px 24px; }
@@ -590,7 +607,7 @@ html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
   main { padding-top: 24px; }
 }
 
-.busybar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; overflow: hidden; }
+.busybar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 100; overflow: hidden; contain: paint; }
 .busybar-run { width: 40%; height: 100%; background: var(--accent-teal); animation: busyslide 1.1s ease-in-out infinite; }
 @keyframes busyslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 @media (prefers-reduced-motion: reduce) { .busybar-run { animation: none; width: 100%; opacity: 0.5; } }
@@ -604,7 +621,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(255,255,255,.90); }
   .explore-grid, .evidence-status-grid { grid-template-columns: 1fr; }
   .explore-card { min-height: 112px; }
   .chart { height: 300px; }
-  .map { height: 420px; }
+  .map, .map-canvas { height: 420px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 
 /* No JavaScript. The page is rendered entirely from /api/v1/, so without it

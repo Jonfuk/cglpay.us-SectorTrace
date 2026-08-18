@@ -1,655 +1,105 @@
-/* Geography — one metric at a time, across English local authorities.
- *
- * D3 draws the boundaries because the projection has to be right: these are
- * real administrative areas and every figure on the page is keyed to their ONS
- * codes. The geometry comes from the warehouse, where Module 0 already put it
- * with provenance, rather than from a separately-fetched boundary file that
- * could disagree with the codes everything else is joined on.
- *
- * Grant and budget are never shown together. They are different figures from
- * different documents, and the one thing this page must not do is let someone
- * read a gap between them as underspend.
- */
+/* Geography — a map workspace for one evidence question at a time. */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
-import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenance, escapeHtml, exportButton, shareButton, tableCard } from '/js/components.js';
+import { el, replace, fetchJSON, num, gbp, getState } from '/app.js';
+import { section, pinnedCaveat, errorCard, provenance, exportButton, shareButton, tableCard } from '/js/components.js';
 
-const METRICS = [
-  ['grant_drug_alcohol', 'Drug & alcohol ring-fenced grant'],
-  ['grant_total', 'Public health grant (total)'],
-  ['grant_per_head', 'Grant per head'],
-  ['budget_public_health', 'Budgeted public health spend'],
-  ['treatment_numbers', 'Numbers in treatment'],
-  ['contract_value', 'Contract value awarded'],
-];
-
-const POSITRON_LAYERS = new Set(['cqc_locations', 'contracts', 'treatment']);
-
+const METRICS = [['grant_drug_alcohol', 'Drug & alcohol ring-fenced grant'], ['grant_total', 'Public health grant (total)'], ['grant_per_head', 'Grant per head'], ['budget_public_health', 'Budgeted public health spend'], ['treatment_numbers', 'Numbers in treatment'], ['contract_value', 'Contract value awarded']];
+const MAP_LAYERS = new Set(['cqc_locations', 'contracts', 'treatment']);
+const ENGLAND_BOUNDS = [[-6.5, 49.8], [2.2, 56.1]];
 let boundaryCache = null;
 
-/* W-19: overlay layers, toggled per kind of evidence. The toggles are built
- * from /api/v1/layers, whose caveats come from the same source the export
- * layers use, so a layer that is drawn here carries the caveat discipline its
- * export carries — and a layer added to the payload gains a toggle here
- * without anyone hardcoding a caveat text. PFD reports are deliberately not
- * in the payload at all: they have no geometry, and coroner areas must not be
- * mapped as if they were authorities. */
-let layersPayload = null;
-let layerState = {};
-let mapContext = null;
-let rerenderMap = null;
+function routeState() {
+  const [, raw = ''] = (location.hash.slice(1) || '').split('?'); const params = new URLSearchParams(raw);
+  return { metric: params.get('metric') || 'grant_drug_alcohol', year: params.get('year') || null,
+    layers: new Set((params.get('layers') || '').split(',').filter((key) => MAP_LAYERS.has(key))), selected: params.get('selected') || null };
+}
+function writeRouteState(state) {
+  const [path] = (location.hash.slice(1) || '/geography').split('?'); const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(getState())) if (value) params.set(key, value);
+  params.set('metric', state.metric); if (state.year) params.set('year', state.year);
+  if (state.layers.size) params.set('layers', [...state.layers].sort().join(',')); if (state.selected) params.set('selected', state.selected);
+  history.replaceState(null, '', `#${path}?${params.toString()}`);
+}
+function isDark() { return document.documentElement.dataset.bsTheme !== 'light'; }
+function styleUrl() { return isDark() ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json' : 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'; }
+function format(value, unit) { if (value === null || value === undefined) return '—'; if (unit === 'gbp') return gbp(value, { compact: false }); if (unit === 'gbp_per_head') return `${gbp(value, { compact: false })} per head`; return num(Math.round(value)); }
+function tablesFor(metric) { if (metric.startsWith('grant')) return ['public_health_grants']; if (metric === 'budget_public_health') return ['la_revenue_budgets']; if (metric === 'treatment_numbers') return ['fingertips_la_values']; return ['contracts']; }
+function moduleFor(metric) { if (metric.startsWith('grant')) return 'm11_public_health_grant'; if (metric === 'budget_public_health') return 'm13_la_budgets'; if (metric === 'treatment_numbers') return 'm12_fingertips'; return 'm01_procurement'; }
+async function boundaries() { if (!boundaryCache) boundaryCache = fetchJSON('boundaries'); return boundaryCache; }
+function englandFeatures(features) { return (features || []).filter((feature) => feature?.properties?.ons_code); }
+async function ensureMapLibre() {
+  if (window.maplibregl) return true;
+  const existing = document.querySelector('script[src="/vendor/maplibre-gl.js"]');
+  await new Promise((resolve) => {
+    const done = () => resolve();
+    if (existing) {
+      existing.addEventListener('load', done, { once: true });
+      existing.addEventListener('error', done, { once: true });
+    } else {
+      const script = document.createElement('script');
+      script.src = '/vendor/maplibre-gl.js'; script.onload = done; script.onerror = done;
+      document.head.append(script);
+    }
+    window.setTimeout(done, 1600);
+  });
+  return Boolean(window.maplibregl);
+}
 
 export async function render(main) {
-  const charts = [];
-  const state = { metric: 'grant_drug_alcohol', year: null };
-
-  const page = el('div', {},
-    el('div', { class: 'hero' },
-      el('h1', { text: 'Compare local evidence' }),
-      el('p', { class: 'lede' },
-        'Explore one published metric at a time across local authorities. Allocations, budgets and treatment numbers remain separate measures.'),
-      el('div', { class: 'hero-actions' },
-        shareButton({
-          title: 'SectorTrace local evidence',
-          text: 'Explore this SectorTrace local evidence view with its metric and year context.',
-          label: 'Share this view',
-        }))),
-    el('details', { class: 'read-first' },
-      el('summary', { text: 'How this map works' }),
-      el('p', { text: 'Choose a question, then a year. The map is an entry point to an authority page; it is not a league table.' }),
-      el('p', { text: 'The visible caveat, legend and selected metric define what the values mean. No data is shown separately from a low value.' })),
-    el('div', { id: 'geo' }));
+  const state = routeState();
+  const page = el('div', { class: 'geography-page' },
+    el('div', { class: 'hero' }, el('p', { class: 'eyebrow', text: 'Local evidence workspace' }), el('h1', { text: 'Compare local evidence' }),
+      el('p', { class: 'lede', text: 'Explore published evidence across English local authorities. Measures stay separate, and every map view retains its source and caveat.' }),
+      el('div', { class: 'hero-actions' }, shareButton({ title: 'SectorTrace local evidence', label: 'Share this map view', text: 'A SectorTrace local evidence view with its selected measure, year and layers.' }))),
+    el('details', { class: 'read-first' }, el('summary', { text: 'How this workspace works' }), el('p', { text: 'Choose a published question and year, then add one map layer. Select a place from the map or table to preview its evidence and open its authority page or comparison workspace.' }), el('p', { text: 'No data is distinct from a low value. Contract notices, treatment data and regulated locations do not measure the same thing.' })),
+    el('div', { id: 'geo-workspace' }));
   replace(main, page);
-
-  const tabs = el('div', { class: 'metrictabs' });
-  const yearSelect = el('select', { 'aria-label': 'Financial year' });
-  const mapHolder = el('div', {});
-  const rankHolder = el('div', {});
-  const caveatHolder = el('div', {});
-  const layerHolder = el('div', {});
-  const provHolder = el('div', {});
-  const legend = el('div', { class: 'legend' });
-
-  replace(page.querySelector('#geo'), section(
-    'Choose a metric',
-    null,
-    el('div', { class: 'panel' },
-      tabs,
-      el('div', { class: 'toolbar', style: 'display:flex;gap:12px;align-items:center;margin-bottom:12px;' },
-        el('label', { class: 'small muted', text: 'Year' }), yearSelect,
-        el('span', { class: 'spacer' }),
-        el('span', { id: 'geo-export' })),
-      caveatHolder,
-      layerHolder,
-      el('div', { class: 'maplayout' },
-        el('div', {}, mapHolder, legend),
-        el('div', {}, rankHolder)),
-      provHolder)));
-
-  for (const [key, label] of METRICS) {
-    tabs.append(el('button', {
-      class: 'btn', type: 'button', 'aria-pressed': String(key === state.metric),
-      onclick: () => { state.metric = key; state.year = null; load(); },
-      dataset: { metric: key },
-    }, label));
+  const metricTabs = el('div', { class: 'metrictabs', role: 'group', 'aria-label': 'Evidence question' }); const yearSelect = el('select', { 'aria-label': 'Financial year' });
+  const layerControls = el('div', { class: 'layerpanel' }); const caveatHolder = el('div', {}); const workspace = el('div', {}); const listHolder = el('div', {}); const provenanceHolder = el('div', {}); const exportHolder = el('span', {});
+  replace(page.querySelector('#geo-workspace'), section('Choose a question', null, el('div', { class: 'panel' }, metricTabs, el('div', { class: 'toolbar workspace-toolbar' }, el('label', { class: 'small muted', text: 'Year' }), yearSelect, el('span', { class: 'spacer' }), exportHolder), caveatHolder, el('div', { class: 'maplayout' }, workspace, listHolder), layerControls, provenanceHolder)));
+  for (const [key, label] of METRICS) metricTabs.append(el('button', { class: 'btn', type: 'button', text: label, 'aria-pressed': String(key === state.metric), onclick: () => { state.metric = key; state.year = null; state.selected = null; writeRouteState(state); load(); }, dataset: { metric: key } }));
+  yearSelect.addEventListener('change', () => { state.year = yearSelect.value || null; state.selected = null; writeRouteState(state); load(); });
+  let layerPayload = null;
+  async function loadLayers() {
+    try { layerPayload = await fetchJSON('layers'); } catch (error) { replace(layerControls, el('p', { class: 'small muted', text: `Map layers unavailable: ${error.message}` })); return; }
+    const controls = [];
+    for (const [key, layer] of Object.entries(layerPayload.layers || {})) {
+      if (!MAP_LAYERS.has(key)) continue;
+      const check = el('input', { type: 'checkbox', checked: state.layers.has(key), dataset: { layer: key } });
+      check.addEventListener('change', () => { if (check.checked) state.layers.add(key); else state.layers.delete(key); state.selected = null; writeRouteState(state); load(); });
+      controls.push(el('label', { class: 'layer-toggle' }, check, el('span', { text: layer.label })));
+    }
+    replace(layerControls, el('div', { class: 'layer-controls' }, el('strong', { text: 'Map layers' }), el('p', { class: 'small muted', text: 'Layer selections synchronise with the map, list and shared URL.' }), ...controls));
   }
-
-  yearSelect.addEventListener('change', () => {
-    state.year = yearSelect.value || null;
-    load();
-  });
-
   async function load() {
-    for (const button of tabs.querySelectorAll('button')) {
-      button.setAttribute('aria-pressed', String(button.dataset.metric === state.metric));
-    }
-    replace(mapHolder, el('div', { class: 'shimmer' }));
-
-    let data;
-    try {
-      data = await fetchJSON('geography', { metric: state.metric, year: state.year });
-    } catch (error) {
-      replace(mapHolder, errorCard(error.message, load));
-      return;
-    }
-
-    const years = data.available_years || [];
-    replace(yearSelect, years.map((y) => el('option', { value: y, text: y })));
-    yearSelect.value = data.year || (years[0] || '');
-    state.year = yearSelect.value || null;
-
-    replace(caveatHolder, [
-      pinnedCaveat(data.caveat, 'Read this with the map'),
-      indicativeNote(data),
-    ].filter(Boolean));
-
-    replace(page.querySelector('#geo-export') || el('span', {}),
-      exportButton('geography', { metric: state.metric, year: state.year }));
-
-    replace(provHolder, provenance({
-      tables: tablesFor(state.metric),
-      module: moduleFor(state.metric),
-    }) || el('span', {}));
-
-    await drawMap(mapHolder, legend, data);
-    drawRanking(rankHolder, data, charts);
-    redrawOverlays();
+    for (const button of metricTabs.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.metric === state.metric));
+    replace(workspace, el('div', { class: 'shimmer', text: 'Loading local evidence map…' }));
+    let data, geo; try { [data, geo] = await Promise.all([fetchJSON('geography', { metric: state.metric, year: state.year }), boundaries()]); } catch (error) { replace(workspace, errorCard(error.message, load)); return; }
+    const years = data.available_years || []; replace(yearSelect, years.map((year) => el('option', { value: year, text: year }))); state.year = data.year || state.year || years[0] || null; yearSelect.value = state.year || ''; writeRouteState(state);
+    replace(exportHolder, exportButton('geography', { metric: state.metric, year: state.year })); const activeLayers = [...state.layers].map((key) => [key, layerPayload?.layers?.[key]]).filter(([, layer]) => layer);
+    replace(caveatHolder, [pinnedCaveat(data.caveat, 'Read this with the map'), ...activeLayers.map(([, layer]) => pinnedCaveat(layer.caveats.join(' '), `Read this with the ${layer.label} layer`))]);
+    replace(provenanceHolder, provenance({ tables: tablesFor(state.metric), module: moduleFor(state.metric) }) || el('span', {})); drawList(listHolder, data, geo.features || []); await drawWorkspace(workspace, data, geo.features || [], activeLayers);
   }
-
-  rerenderMap = load;
-  await load();
-  initLayers(layerHolder);
-  return () => disposeCharts(charts);
-}
-
-/* Later grant years are published as indicative and revised afterwards.
- * Reading a fall between a confirmed year and an indicative one as a cut is
- * the mistake this note exists to prevent. */
-function indicativeNote(data) {
-  const statuses = data.allocation_status || [];
-  const forYear = statuses.filter((s) => !data.year || s.financial_year === data.year);
-  if (!forYear.some((s) => s.allocation_status === 'indicative')) return null;
-  return pinnedCaveat(
-    `Allocations for ${data.year} are published as indicative and are revised `
-    + 'later. Do not compare an indicative year with a confirmed one.',
-    'Indicative allocation');
-}
-
-function tablesFor(metric) {
-  if (metric.startsWith('grant')) return ['public_health_grants'];
-  if (metric === 'budget_public_health') return ['la_revenue_budgets'];
-  if (metric === 'treatment_numbers') return ['fingertips_la_values'];
-  return ['contracts'];
-}
-
-function moduleFor(metric) {
-  if (metric.startsWith('grant')) return 'm11_public_health_grant';
-  if (metric === 'budget_public_health') return 'm13_la_budgets';
-  if (metric === 'treatment_numbers') return 'm12_fingertips';
-  return 'm01_procurement';
-}
-
-async function boundaries() {
-  if (boundaryCache) return boundaryCache;
-  boundaryCache = await fetchJSON('boundaries');
-  return boundaryCache;
-}
-
-async function drawMap(container, legend, data) {
-  const leafletKey = [...POSITRON_LAYERS].find((key) => layerState[key]);
-  const leafletLayer = layersPayload?.layers?.[leafletKey];
-  if (leafletLayer && window.L) {
-    await drawLeafletMap(container, legend, leafletKey, leafletLayer);
-    mapContext = null;
-    return;
+  function select(code) { state.selected = code; writeRouteState(state); load(); }
+  function drawList(holder, data, features) {
+    const values = new Map((data.features || []).map((row) => [row.ons_code, row])); const rows = englandFeatures(features).map((feature) => { const code = feature.properties.ons_code; const value = values.get(code); return { code, authority_name: value?.authority_name || feature.properties.name || code, region: value?.region || '—', value_display: format(value?.value, data.unit) }; }).sort((a, b) => a.authority_name.localeCompare(b.authority_name)); const selected = rows.find((row) => row.code === state.selected);
+    const chooser = el('select', { 'aria-label': 'Select an authority from the text alternative' }, el('option', { value: '', text: 'Select an authority…' }), rows.map((row) => el('option', { value: row.code, text: row.authority_name })));
+    chooser.value = state.selected || '';
+    chooser.addEventListener('change', () => { if (chooser.value) select(chooser.value); });
+    replace(holder, el('div', { class: 'map-list panel' }, el('h3', { text: selected ? selected.authority_name : 'Explore places' }), el('p', { class: 'small muted', text: selected ? `${selected.value_display} · ${selected.region}` : 'Select a map feature or choose a row below. This text alternative has the same selection actions as the map.' }), chooser, selected ? el('div', { class: 'map-preview-actions' }, el('a', { class: 'btn primary', href: `#/authorities/${selected.code}`, text: 'Open authority' }), el('a', { class: 'btn', href: `#/compare?ons_code=${encodeURIComponent(selected.code)}`, text: 'Compare' })) : null, tableCard('Authority values', [{ title: 'Authority', field: 'authority_name' }, { title: 'Region', field: 'region' }, { title: data.metric_label, field: 'value_display' }], rows, { height: 460, total: rows.length })));
   }
-  if (!window.d3) {
-    replace(container, errorCard('Mapping library did not load.'));
-    return;
+  async function drawWorkspace(holder, data, features, activeLayers) {
+    if (!await ensureMapLibre()) { replace(holder, errorCard('Map workspace did not load. Reload this page to retry the map library.')); return; }
+    const canvas = el('div', { class: 'map-canvas', role: 'region', 'aria-label': `Interactive map of English authorities showing ${data.metric_label}` }); const preview = el('div', { class: 'map-preview' }, el('strong', { text: 'Select a place' }), el('p', { class: 'small muted', text: 'Use the map or the adjacent table to inspect an authority.' })); replace(holder, el('div', { class: 'map-workspace' }, canvas, preview));
+    const map = new window.maplibregl.Map({ container: canvas, style: styleUrl(), bounds: ENGLAND_BOUNDS, fitBoundsOptions: { padding: 36 }, cooperativeGestures: true }); map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+    map.on('load', () => { const values = new Map((data.features || []).map((row) => [row.ons_code, row])); const authorityGeo = { type: 'FeatureCollection', features: englandFeatures(features).map((feature) => ({ ...feature, properties: { ...feature.properties, ...values.get(feature.properties.ons_code), ons_code: feature.properties.ons_code } })) }; map.addSource('authorities', { type: 'geojson', data: authorityGeo }); map.addLayer({ id: 'authority-fill', type: 'fill', source: 'authorities', paint: { 'fill-color': ['case', ['has', 'value'], '#21d4d0', '#4d627b'], 'fill-opacity': ['case', ['has', 'value'], .30, .13] } }); map.addLayer({ id: 'authority-line', type: 'line', source: 'authorities', paint: { 'line-color': isDark() ? '#b2c0d3' : '#4a637c', 'line-width': .7, 'line-opacity': .72 } }); map.on('click', 'authority-fill', (event) => select(event.features?.[0]?.properties?.ons_code)); map.on('mouseenter', 'authority-fill', () => { map.getCanvas().style.cursor = 'pointer'; }); map.on('mouseleave', 'authority-fill', () => { map.getCanvas().style.cursor = ''; }); for (const [key, layer] of activeLayers) addLayer(map, key, layer, authorityGeo); if (state.selected) updatePreview(preview, state.selected, values, data.unit); });
   }
-
-  let geo;
-  try {
-    geo = await boundaries();
-  } catch (error) {
-    replace(container, errorCard(error.message));
-    return;
+  function addLayer(map, key, layer, authorityGeo) {
+    const points = (layer.features || []).filter((row) => row.latitude != null && row.longitude != null && row.ons_code).map((row) => ({ type: 'Feature', properties: row, geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] } }));
+    if (key === 'treatment') { const values = new Map((layer.features || []).map((row) => [row.ons_code, row.value])); const geo = { ...authorityGeo, features: authorityGeo.features.map((feature) => ({ ...feature, properties: { ...feature.properties, treatment_value: values.get(feature.properties.ons_code) } })) }; map.addSource('treatment', { type: 'geojson', data: geo }); map.addLayer({ id: 'treatment-fill', type: 'fill', source: 'treatment', paint: { 'fill-color': ['case', ['has', 'treatment_value'], '#a78bfa', 'transparent'], 'fill-opacity': .36 } }); return; }
+    if (!points.length) return; map.addSource(`${key}-points`, { type: 'geojson', data: { type: 'FeatureCollection', features: points }, cluster: true, clusterRadius: 42, clusterMaxZoom: 10 }); map.addLayer({ id: `${key}-clusters`, type: 'circle', source: `${key}-points`, filter: ['has', 'point_count'], paint: { 'circle-color': key === 'contracts' ? '#21d4d0' : '#4f8cff', 'circle-radius': ['step', ['get', 'point_count'], 16, 10, 21, 50, 27], 'circle-stroke-width': 2, 'circle-stroke-color': '#fbbf24' } }); map.addLayer({ id: `${key}-count`, type: 'symbol', source: `${key}-points`, filter: ['has', 'point_count'], layout: { 'text-field': '{point_count_abbreviated}', 'text-size': 12 }, paint: { 'text-color': '#08111f' } }); map.addLayer({ id: `${key}-point`, type: 'circle', source: `${key}-points`, filter: ['!', ['has', 'point_count']], paint: { 'circle-color': key === 'contracts' ? '#21d4d0' : '#4f8cff', 'circle-radius': key === 'contracts' ? ['interpolate', ['linear'], ['coalesce', ['get', 'count'], 0], 0, 5, 50, 10, 200, 15] : 6, 'circle-stroke-width': 1.5, 'circle-stroke-color': '#f4f8ff' } }); map.on('click', `${key}-clusters`, (event) => { const feature = event.features?.[0]; map.getSource(`${key}-points`).getClusterExpansionZoom(feature.properties.cluster_id, (error, zoom) => { if (!error) map.easeTo({ center: feature.geometry.coordinates, zoom }); }); }); map.on('click', `${key}-point`, (event) => select(event.features?.[0]?.properties?.ons_code));
   }
-  if (!geo.features?.length) {
-    replace(container, noData('authority boundaries', './start.sh run m00_geography'));
-    return;
-  }
-
-  const values = new Map(
-    (data.features || []).map((f) => [f.ons_code, f.value]));
-  const names = new Map(
-    (data.features || []).map((f) => [f.ons_code, f.authority_name]));
-  const numbers = [...values.values()].filter((v) => v !== null && v !== undefined);
-  if (!numbers.length) {
-    replace(container, noData(`${data.metric_label} values`, null));
-    return;
-  }
-
-  const d3 = window.d3;
-  const width = container.clientWidth || 720;
-  const height = 620;
-
-  const svg = d3.create('svg')
-    .attr('class', 'map')
-    .attr('viewBox', `0 0 ${width} ${height}`)
-    .attr('role', 'img')
-    .attr('aria-label',
-      `Map of English local authorities coloured by ${data.metric_label}. `
-      + `Range ${format(data.min, data.unit)} to ${format(data.max, data.unit)}. `
-      + 'Click an area for its authority page.');
-
-  const collection = { type: 'FeatureCollection', features: geo.features };
-  const projection = d3.geoMercator().fitSize([width, height], collection);
-  const path = d3.geoPath(projection);
-
-  // Quantile rather than linear: grant allocations are heavily skewed by
-  // authority size, and a linear ramp renders as one bright city and 300
-  // indistinguishable areas.
-  const scale = d3.scaleQuantile()
-    .domain(numbers)
-    .range(d3.quantize(d3.interpolateYlOrRd, 7));
-
-  const tip = el('div', { class: 'maptip', hidden: true });
-  document.body.append(tip);
-
-  svg.append('g').selectAll('path')
-    .data(geo.features)
-    .join('path')
-    .attr('d', path)
-    .attr('class', (f) => (values.has(f.properties.ons_code) ? null : 'nodata'))
-    .attr('fill', (f) => {
-      const value = values.get(f.properties.ons_code);
-      return value === null || value === undefined ? '#1c2128' : scale(value);
-    })
-    .on('mousemove', (event, f) => {
-      const code = f.properties.ons_code;
-      const value = values.get(code);
-      tip.hidden = false;
-      tip.textContent = '';
-      tip.append(
-        el('strong', { text: names.get(code) || f.properties.name || code }),
-        el('div', { class: 'small muted', text: code }),
-        el('div', { text: value === undefined || value === null
-          ? 'no value for this metric' : format(value, data.unit) }),
-        el('div', { class: 'small muted', text: 'click for this authority' }));
-      tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 300)}px`;
-      tip.style.top = `${event.clientY + 14}px`;
-    })
-    .on('mouseleave', () => { tip.hidden = true; })
-    // W-14: the map is an entry point now. The click carries the ONS code
-    // through to the authority page — where the absence stories live too,
-    // which is why an area with no value for this metric is still clickable.
-    .on('click', (event, f) => {
-      location.hash = `#/authorities/${f.properties.ons_code}`;
-    });
-
-  replace(container, svg.node());
-
-  const stops = d3.quantize(d3.interpolateYlOrRd, 7);
-  replace(legend,
-    el('span', { class: 'small', text: format(data.min, data.unit) }),
-    el('div', {
-      class: 'legend-scale',
-      style: `background: linear-gradient(90deg, ${stops.join(', ')})`,
-    }),
-    el('span', { class: 'small', text: format(data.max, data.unit) }),
-    el('span', { class: 'small muted', text: `· ${num(data.features.length)} authorities` }));
-
-  // The context the overlay layers draw on: the same projection and path the
-  // choropleth used, so a contract point and a boundary edge cannot disagree
-  // about where an authority is.
-  mapContext = {
-    svg, projection, path, tip, features: geo.features, legend,
-    names: (f) => names.get(f.properties.ons_code) || f.properties.name,
-  };
-  redrawOverlays();
-  return mapContext;
-}
-
-function drawRanking(container, data, charts) {
-  const features = (data.features || [])
-    .filter((f) => f.value !== null && f.value !== undefined)
-    .slice(0, 20)
-    .reverse();
-
-  const holder = el('div', {});
-  replace(container, el('div', {},
-    el('h3', { text: `Explore values — ${data.metric_label}` }),
-    el('p', { class: 'small muted', text: 'A text table alternative to the map. Open an authority page to explore its evidence in context.' }),
-    holder));
-
-  if (!features.length) {
-    replace(holder, noData('values', null));
-    return;
-  }
-
-  charts.push(mountChart(holder, {
-    grid: { left: 8, right: 24, top: 8, bottom: 8, containLabel: true },
-    tooltip: {
-      trigger: 'axis', axisPointer: { type: 'shadow' },
-      formatter: (params) => {
-        const row = features[params[0].dataIndex];
-        return `<strong>${escapeHtml(row.authority_name)}</strong><br>`
-          + `${escapeHtml(row.region || '')}<br>${format(row.value, data.unit)}`;
-      },
-    },
-    xAxis: { type: 'value', axisLabel: { formatter: (v) => shortValue(v, data.unit) } },
-    yAxis: { type: 'category', data: features.map((f) => f.authority_name) },
-    series: [{ type: 'bar', data: features.map((f) => f.value) }],
-  }, {
-    height: 'tall',
-    aria: `Bar chart of the twenty authorities with the highest `
-      + `${data.metric_label}.`,
-  }));
-
-  container.append(tableCard('Visible authority values', [
-    { title: 'Authority', field: 'authority_name' },
-    { title: 'Region', field: 'region' },
-    { title: data.metric_label, field: 'value_display' },
-  ], features.slice().reverse().map((feature) => ({
-    authority_name: feature.authority_name,
-    region: feature.region || '—',
-    value_display: format(feature.value, data.unit),
-  })), { height: 320, total: features.length }));
-}
-
-// --- overlay layers (W-19) ----------------------------------------------------
-
-/* The toggle panel, built from the payload so a layer's label and caveats
- * live in one place: the same caveats the export layer carries, joined for
- * the screen. A checked layer draws its overlay on the current map and pins
- * its caveat beside the toggle; the overlay and the caveat are cleared
- * together, so a figure and the warning that governs it never separate. */
-async function initLayers(holder) {
-  let payload;
-  try {
-    payload = await fetchJSON('layers');
-  } catch (error) {
-    replace(holder, el('p', { class: 'small muted' },
-      'Overlay layers unavailable: ', error.message));
-    return;
-  }
-  layersPayload = payload;
-
-  const rows = [];
-  const inputs = new Map();
-  const caveats = new Map();
-  for (const [key, layer] of Object.entries(payload.layers || {})) {
-    const caveatBox = el('div', { class: 'layer-caveat' });
-    const input = el('input', { type: 'checkbox', dataset: { layer: key } });
-    input.addEventListener('change', (e) => {
-      layerState[key] = e.target.checked;
-      if (e.target.checked && POSITRON_LAYERS.has(key)) {
-        for (const [otherKey, otherInput] of inputs) {
-          if (otherKey === key || !POSITRON_LAYERS.has(otherKey)) continue;
-          otherInput.checked = false;
-          layerState[otherKey] = false;
-          replace(caveats.get(otherKey), el('span', {}));
-        }
-      }
-      replace(caveatBox, e.target.checked
-        ? pinnedCaveat(layer.caveats.join(' '),
-            `Read this with the ${layer.label} layer`)
-        : el('span', {}));
-      if (rerenderMap) rerenderMap();
-    });
-    inputs.set(key, input);
-    caveats.set(key, caveatBox);
-    rows.push(el('label', { class: 'layer-toggle' },
-      input,
-      el('span', { text: layer.label })),
-      caveatBox);
-  }
-  replace(holder, el('div', { class: 'layerpanel' }, rows));
-}
-
-/* The overlays are drawn after every map redraw — a metric switch replaces
- * the SVG, and the layers must come back with it. Layer state persists across
- * switches, which is the point: a reader comparing contracts against two
- * metrics changes the base, not the overlays. */
-function redrawOverlays() {
-  const ctx = mapContext;
-  if (!ctx || !layersPayload) return;
-  ctx.svg.selectAll('.overlay').remove();
-  ctx.legend.querySelectorAll('.layer-legend').forEach((n) => n.remove());
-  ctx.svg.classed('cqc-location-map', Boolean(layerState.cqc_locations));
-  if (layerState.cqc_locations) {
-    ctx.svg.attr('aria-label', 'Map of England showing CQC-registered locations. '
-      + 'Authority boundaries provide geographic context; CQC registration does not cover every service.');
-  }
-  for (const [key, on] of Object.entries(layerState)) {
-    if (!on) continue;
-    const layer = layersPayload.layers?.[key];
-    if (!layer) continue;
-    if (key === 'contracts') drawContractPoints(ctx, layer);
-    else if (key === 'cqc_locations') drawCqcPoints(ctx, layer);
-    else if (key === 'treatment') drawTreatmentFill(ctx, layer);
-    else if (key === 'coverage') drawCoverageOutline(ctx, layer);
-  }
-}
-
-function overlayTip(ctx, event, lines) {
-  const tip = ctx.tip;
-  tip.hidden = false;
-  tip.textContent = '';
-  for (const line of lines) tip.append(line);
-  tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 300)}px`;
-  tip.style.top = `${event.clientY + 14}px`;
-}
-
-/* Contracts: one point per commissioning authority, sized by notice count.
- * The payload aggregated the corpus — 98,636 points are a canvas no reader
- * can use — and the layer's caveats say so. The point sits at the authority's
- * own centroid, which is exactly what the caveat warns about. */
-function drawContractPoints(ctx, layer) {
-  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
-  const points = [];
-  for (const feature of ctx.features) {
-    const row = byCode.get(feature.properties.ons_code);
-    if (!row) continue;
-    points.push({ ...row, xy: ctx.path.centroid(feature) });
-  }
-  if (!points.length) return;
-
-  ctx.svg.append('g').attr('class', 'overlay')
-    .selectAll('circle')
-    .data(points)
-    .join('circle')
-    .attr('cx', (d) => d.xy[0])
-    .attr('cy', (d) => d.xy[1])
-    .attr('r', (d) => Math.max(3, Math.min(15, Math.sqrt(d.count) / 7)))
-    .attr('fill', 'rgba(45, 212, 191, 0.8)')
-    .attr('stroke', '#0d1117')
-    .attr('stroke-width', 0.6)
-    .on('mousemove', (event, d) => {
-      overlayTip(ctx, event, [
-        el('strong', { text: d.authority_name }),
-        el('div', { class: 'small muted', text: d.ons_code }),
-        el('div', { text: `${num(d.count)} notices · ${gbp(d.value_gbp)}` }),
-      ]);
-    })
-    .on('mouseleave', () => { ctx.tip.hidden = true; })
-    .on('click', (event, d) => { location.hash = `#/authorities/${d.ons_code}`; });
-
-  ctx.legend.append(el('span', {
-    class: 'small muted layer-legend',
-    text: `· ○ contracts, size by notice count (${num(points.length)} authorities)`,
-  }));
-}
-
-/* CQC: every regulated location with a published coordinate. The layer's
- * caveat is the whole point — most community provision is not CQC-registered,
- * so the pins are a map of regulated locations, not of services. */
-function drawCqcLeafletMap(container, legend, layer) {
-  const points = englandPoints(layer.features || []);
-  return drawLeafletPoints(container, legend, points, {
-    color: '#2563eb',
-    legend: `CQC-registered locations in England: ${num(points.length)}`,
-    radius: () => 5,
-    tooltip: (point) => point.location_name,
-  });
-}
-
-async function drawLeafletMap(container, legend, key, layer) {
-  if (key === 'cqc_locations') {
-    drawCqcLeafletMap(container, legend, layer);
-    return;
-  }
-  const geo = await boundaries();
-  const points = authorityPoints(layer.features || [], geo.features || []);
-  const isContracts = key === 'contracts';
-  drawLeafletPoints(container, legend, points, {
-    color: isContracts ? '#0f766e' : '#7c3aed',
-    legend: isContracts
-      ? `Commissioning authorities with contracts: ${num(points.length)}`
-      : `Authorities with treatment numbers: ${num(points.length)}`,
-    radius: isContracts
-      ? (point) => Math.max(5, Math.min(15, Math.sqrt(point.count) / 7))
-      : () => 6,
-    tooltip: isContracts
-      ? (point) => `${point.authority_name}: ${num(point.count)} notices`
-      : (point) => `${point.authority_name}: treatment numbers available`,
-  });
-}
-
-function drawLeafletPoints(container, legend, points, options) {
-  const holder = el('div', { class: 'leaflet-map' });
-  replace(container, holder);
-  const map = window.L.map(holder, { scrollWheelZoom: false });
-  map.fitBounds([[49.8, -6.5], [56.1, 2.2]]);
-  window.L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-    { subdomains: 'abcd', maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
-  ).addTo(map);
-  for (const point of points) {
-    window.L.circleMarker([point.latitude, point.longitude], {
-      radius: options.radius(point), color: '#0f172a', weight: 1,
-      fillColor: options.color, fillOpacity: 0.9,
-    }).bindTooltip(escapeHtml(options.tooltip(point)))
-      .on('click', () => { location.hash = `#/authorities/${point.ons_code}`; })
-      .addTo(map);
-  }
-  replace(legend, el('span', { class: 'small muted', text: options.legend }));
-}
-
-function englandPoints(features) {
-  return features.filter((point) => point.latitude != null
-    && point.longitude != null && point.latitude >= 49.8 && point.latitude <= 56.1
-    && point.longitude >= -6.5 && point.longitude <= 2.2 && point.ons_code);
-}
-
-function authorityPoints(rows, features) {
-  const boundariesByCode = new Map(features.map((feature) => [
-    feature.properties.ons_code, feature,
-  ]));
-  const seen = new Set();
-  return rows.filter((row) => {
-    if (!row.ons_code || seen.has(row.ons_code)) return false;
-    seen.add(row.ons_code);
-    return boundariesByCode.has(row.ons_code);
-  }).map((row) => {
-    const [longitude, latitude] = window.d3.geoCentroid(
-      boundariesByCode.get(row.ons_code));
-    return { ...row, latitude, longitude };
-  });
-}
-
-function drawCqcPoints(ctx, layer) {
-  const points = (layer.features || [])
-    .filter((f) => f.latitude !== null && f.longitude !== undefined
-      && f.latitude !== undefined && f.longitude !== null)
-    .map((f) => {
-      const xy = ctx.projection([f.longitude, f.latitude]);
-      return xy ? { ...f, xy } : null;
-    })
-    .filter(Boolean);
-  if (!points.length) return;
-
-  ctx.svg.append('g').attr('class', 'overlay')
-    .selectAll('circle')
-    .data(points)
-    .join('circle')
-    .attr('cx', (d) => d.xy[0])
-    .attr('cy', (d) => d.xy[1])
-    .attr('r', 4)
-    .attr('fill', 'rgba(96, 165, 250, 0.9)')
-    .attr('stroke', '#0d1117')
-    .attr('stroke-width', 0.6)
-    .on('mousemove', (event, d) => {
-      overlayTip(ctx, event, [
-        el('strong', { text: d.location_name }),
-        el('div', { class: 'small muted', text: d.region || 'region not recorded' }),
-        el('div', { text: `CQC rating: ${d.overall_rating || 'not rated'}` }),
-      ]);
-    })
-    .on('mouseleave', () => { ctx.tip.hidden = true; });
-
-  ctx.legend.append(el('span', {
-    class: 'small muted layer-legend',
-    text: `· ● CQC-registered locations (${num(points.length)})`,
-  }));
-}
-
-/* Treatment: the latest published rate per authority, as a translucent fill
- * over whatever metric the base map shows. The rate scale is quantile over
- * this layer's own values, never shared with the base metric's. */
-function drawTreatmentFill(ctx, layer) {
-  const values = (layer.features || [])
-    .map((f) => f.value).filter((v) => v !== null && v !== undefined);
-  if (!values.length) return;
-
-  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
-  const scale = window.d3.scaleQuantile()
-    .domain(values)
-    .range(window.d3.quantize(window.d3.interpolateYlGnBu, 6));
-
-  ctx.svg.append('g').attr('class', 'overlay')
-    .selectAll('path')
-    .data(ctx.features)
-    .join('path')
-    .attr('d', ctx.path)
-    .attr('fill', (f) => {
-      const row = byCode.get(f.properties.ons_code);
-      return row ? scale(row.value) : 'none';
-    })
-    .attr('opacity', 0.5)
-    .attr('pointer-events', 'none');
-
-  const period = [...new Set((layer.features || [])
-    .map((f) => f.time_period).filter(Boolean))].sort().pop();
-  ctx.legend.append(el('span', {
-    class: 'small muted layer-legend',
-    text: `· treatment rates, latest period (${period || 'period varies'})`,
-  }));
-}
-
-/* Coverage: how many evidence kinds the warehouse holds per authority, as an
- * outline. The layer's caveat is the standing one — absence is absence of
- * collection, not evidence of absence — and the outline intensity shows how
- * much the pipeline holds here without implying the authority is anything. */
-function drawCoverageOutline(ctx, layer) {
-  const byCode = new Map((layer.features || []).map((f) => [f.ons_code, f]));
-  const max = Math.max(1, ...(layer.features || []).map((f) => f.kinds_held));
-
-  ctx.svg.append('g').attr('class', 'overlay')
-    .selectAll('path')
-    .data(ctx.features)
-    .join('path')
-    .attr('d', ctx.path)
-    .attr('fill', 'none')
-    .attr('stroke', (f) => {
-      const row = byCode.get(f.properties.ons_code);
-      return row ? '#f59e0b' : 'none';
-    })
-    .attr('stroke-width', (f) => {
-      const row = byCode.get(f.properties.ons_code);
-      return row ? 0.8 + (row.kinds_held / max) * 2.4 : 0;
-    })
-    .attr('opacity', 0.9)
-    .attr('pointer-events', 'none');
-
-  ctx.legend.append(el('span', {
-    class: 'small muted layer-legend',
-    text: `· amber outline: evidence kinds held (of ${num(max)})`,
-  }));
-}
-
-function format(value, unit) {
-  if (value === null || value === undefined) return '—';
-  if (unit === 'gbp') return gbp(value, { compact: false });
-  if (unit === 'gbp_per_head') return `${gbp(value, { compact: false })} per head`;
-  return num(Math.round(value));
-}
-
-function shortValue(value, unit) {
-  if (unit === 'gbp' || unit === 'gbp_per_head') return gbp(value);
-  return num(value);
+  function updatePreview(preview, code, values, unit) { const row = values.get(code); const name = row?.authority_name || code; replace(preview, el('div', {}, el('h3', { text: name }), el('p', { class: 'small muted', text: `${format(row?.value, unit)} · ${row?.region || 'English local authority'}` }), el('div', { class: 'map-preview-actions' }, el('a', { class: 'btn primary', href: `#/authorities/${code}`, text: 'Open authority' }), el('a', { class: 'btn', href: `#/compare?ons_code=${encodeURIComponent(code)}`, text: 'Compare' })))); }
+  await loadLayers(); await load(); return () => {};
 }

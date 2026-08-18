@@ -426,7 +426,8 @@ export function mountChart(container, option, { height = null, aria = null,
   const wrap = el('div', { class: 'chartwrap' }, holder, save);
   replace(container, wrap);
 
-  const chart = window.echarts.init(holder, 'sectorTrace');
+  const chart = window.echarts.init(holder,
+    document.documentElement.dataset.bsTheme === 'light' ? 'sectorTraceLight' : 'sectorTrace');
   chart.setOption(option);
 
   const observer = new ResizeObserver(() => chart.resize());
