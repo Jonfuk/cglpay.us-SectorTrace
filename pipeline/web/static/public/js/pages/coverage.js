@@ -7,7 +7,7 @@
 'use strict';
 
 import { el, replace, fetchJSON, ago } from '/app.js';
-import { section, pinnedCaveat, errorCard, shareButton } from '/js/components.js';
+import { section, pinnedCaveat, errorCard, shareButton, timingBadge } from '/js/components.js';
 
 const SOURCE_LABELS = {
   'Contracts Finder': 'Contracts Finder',
@@ -79,6 +79,7 @@ export async function render(main) {
     const rows = data.tables || [];
     const freshnessCards = rows.map((row) => el('article', { class: 'freshness-item' },
       el('strong', { text: SOURCE_LABELS[row.label] || row.label }),
+      row.retrieved_at ? timingBadge({ kind: 'current', date: row.retrieved_at.slice(0, 10) }) : timingBadge({ kind: 'snapshot' }),
       el('span', { class: 'small', text: row.retrieved_at
         ? `Last retrieved ${ago(row.retrieved_at)}` : 'Not collected yet' })));
     replace(freshness, section(

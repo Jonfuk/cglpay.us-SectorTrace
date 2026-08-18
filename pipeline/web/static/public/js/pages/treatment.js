@@ -17,7 +17,7 @@
 import { el, replace, fetchJSON, num, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
-          exportButton, shareButton } from '/js/components.js';
+          exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
 
 const TOPICS = [
   ['numbers_in_treatment', 'Numbers in treatment'],
@@ -169,11 +169,20 @@ function indicatorGuide(data, state) {
   if (!indicator) return el('span', {});
   const selected = state.ons ? 'Selected authority and England are shown.'
     : 'The chart shows the authority median and England until an authority is selected.';
-  return el('div', { class: 'takeaway' },
-    el('span', { class: 'badge good', text: 'PUBLISHED' }),
-    el('p', {},
-      el('strong', { text: indicator.indicator_name }),
-      ` · ${indicator.unit || 'unit published with the indicator'}. ${selected}`));
+  const meta = evidenceMeta({ indicators: data.indicators });
+  return el('div', {},
+    el('div', { class: 'takeaway' },
+      el('span', { class: 'badge good', text: 'PUBLISHED' }),
+      el('p', {},
+        el('strong', { text: indicator.indicator_name }),
+        ` · ${indicator.unit || 'unit published with the indicator'}. ${selected}`)),
+    findingBlock({
+      finding: `${indicator.indicator_name} is shown as the source published it; the selected authority changes the comparison context, not the meaning of the measure.`,
+      value: indicator.unit || 'Published indicator', evidenceStatus: 'Published',
+      timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+      sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+      caveat: 'Demand, activity, outcomes, and prevalence are different measures and should not be subtracted or combined into unmet need.',
+    }));
 }
 
 // --- NDTMS ---------------------------------------------------------------
