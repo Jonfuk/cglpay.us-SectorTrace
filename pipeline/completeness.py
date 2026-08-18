@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pipeline import catalog, db
 from pipeline.web import health
 
-
 SOURCE_TABLES = tuple(dict.fromkeys(
     table for _label, table, _column, _module in health.COVERAGE_COLUMNS
 )) + (
@@ -73,7 +72,6 @@ def _provenance(conn) -> dict[str, int]:
 def baseline(conn, *, tier: str = "upper") -> dict:
     """Return a serialisable, read-only campaign baseline."""
     coverage = health.coverage(conn, tier=tier)
-    review = _review_state(conn)
     pending_modules = _pending_modules(conn)
     candidate_for = {
         "CDP docs": "CDP cands", "Papers": "Paper cands", "FOI": "FOI cands",
