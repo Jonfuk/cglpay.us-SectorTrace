@@ -217,7 +217,11 @@ def run(ctx: ModuleContext) -> None:
                 conn.commit()
 
         ctx.phase("matching catalogue organisations to authorities and providers")
-        org_result = client.get(ORGANIZATION_LIST)
+        # CKAN's default organization_list response is a list of names.  The
+        # organisation pass needs titles and slugs for exact matching, so ask
+        # explicitly for the full records rather than indexing strings as
+        # though they were dictionaries.
+        org_result = client.get(ORGANIZATION_LIST, params={"all_fields": "true"})
         if org_result.ok:
             payload = json.loads(org_result.body)
             if payload.get("success"):
