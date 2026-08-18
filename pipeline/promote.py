@@ -148,20 +148,29 @@ def _fetch_document(url: str, spec: dict, settings: Settings,
 
     try:
         # WDTK's request pages are the one m15-only exception: when explicitly
-        # enabled, a human promotion fetch may use Bright Data's Web Unlocker.
+        # enabled, a human promotion fetch may use one configured unlocker.
         # The candidate URL is still restricted to WDTK by m15, and every
         # other promotion continues through the normal guarded client.
         if (spec["source_system"] == "foi_request_promotion"
-                and settings.wdtk_web_unlocker_enabled):
-            from pipeline.modules.m15_foi import fetch_with_web_unlocker, is_wdtk_request_url
+                and (settings.wdtk_web_unlocker_enabled or settings.wdtk_zenrows_enabled)):
+            from pipeline.modules.m15_foi import (
+                fetch_with_web_unlocker,
+                fetch_with_zenrows,
+                is_wdtk_request_url,
+            )
             if not is_wdtk_request_url(url):
-                raise PromotionError("m15 Web Unlocker is enabled but the candidate is not "
+                raise PromotionError("m15 WDTK unlocker is enabled but the candidate is not "
                                      "a WhatDoTheyKnow request URL")
+            if settings.wdtk_zenrows_enabled:
+                transport = "zenrows"
+                result = fetch_with_zenrows(url, settings, spec["source_system"])
+            else:
+                transport = "brightdata_web_unlocker"
+                result = fetch_with_web_unlocker(url, settings, spec["source_system"])
             db.record_review_item(
                 conn, "m15_foi", "wdtk_web_unlocker_in_use", url,
-                json.dumps({"transport": "brightdata_web_unlocker",
+                json.dumps({"transport": transport,
                             "note": "explicit m15-only transport used for human promotion"}))
-            result = fetch_with_web_unlocker(url, settings, spec["source_system"])
         else:
             with PipelineHTTPClient(spec["source_system"], settings=settings,
                                     conn=conn, guard_destination=True,
@@ -239,7 +248,8 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
     result = _fetch_document(url, spec, settings, conn, resolver)
 
     foi_detail = None
-    if kind == "foi_request" and settings.wdtk_web_unlocker_enabled:
+    if kind == "foi_request" and (settings.wdtk_web_unlocker_enabled
+                                  or settings.wdtk_zenrows_enabled):
         # Prefer the read API shape, but accept the canonical rendered HTML
         # fallback when WDTK's JSON route is the part Cloudflare rejects.
         # Parsing is still NULL-first: an unknown state or malformed event

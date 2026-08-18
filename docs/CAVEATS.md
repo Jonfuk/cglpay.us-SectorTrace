@@ -322,10 +322,11 @@ anyone using it.
 - **A term match is a candidate, not evidence.** Nothing reaches
   `foi_requests` without a human confirming it, the same discipline as
   Modules 9 and 10.
-- **Web Unlocker is a narrow exception, not a collector transport.** It is
-  m15-only, disabled by default, limited to a WDTK request URL during one
-  human promotion, and recorded as `wdtk_web_unlocker_in_use`. It must not be
-  used without mySociety's permission.
+- **WDTK unlockers are narrow exceptions, not collector transports.** Bright
+  Data Web Unlocker and ZenRows are m15-only, disabled by default, limited to
+  a WDTK request URL during one human promotion, and recorded as
+  `wdtk_web_unlocker_in_use`. Enable exactly one provider and obtain the
+  provider's permission for WDTK before use.
 - **Coverage is unknowable.** WhatDoTheyKnow holds only requests routed
   through that platform; most UK FOI requests never appear there. The feed is
   additionally capped at 4 pages per search term. Never present a count from
