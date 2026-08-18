@@ -177,3 +177,15 @@ def test_public_campaign_assets_are_self_hosted():
     for filename in ("archivo-narrow-500.woff2", "archivo-narrow-700.woff2"):
         assert f"/fonts/{filename}" in css
         assert (PORTAL / "fonts" / filename).exists()
+
+
+def test_workbench_selection_state_has_shareable_url_contracts():
+    geography = (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
+    compare = (PORTAL / "js" / "pages" / "compare.js").read_text(encoding="utf-8")
+    providers = (PORTAL / "js" / "pages" / "providers.js").read_text(encoding="utf-8")
+    for key in ("metric", "year", "layers", "selected"):
+        assert f"params.get('{key}')" in geography
+        assert f"params.set('{key}'" in geography
+    assert "params.getAll('ons_code')" in compare
+    assert "params.getAll('provider_key')" in compare
+    assert "#/providers/${encodeURIComponent(provider.provider_key)}" in providers
