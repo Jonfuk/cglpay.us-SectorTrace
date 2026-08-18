@@ -360,7 +360,7 @@ export function shareButton({ title = 'SectorTrace', text = '',
 
 export function statCard({ value, label, sub, caveat: caveatText, plain = false,
                             unverified = false, status = null,
-                            statusClass = 'neutral' }) {
+                            statusClass = 'neutral', action = null }) {
   const note = caveat(caveatText);
   return el('div', { class: `statcard${unverified ? ' unverified' : ''}` },
     el('div', { class: `value${plain ? ' plain' : ''}`, text: value }),
@@ -368,6 +368,7 @@ export function statCard({ value, label, sub, caveat: caveatText, plain = false,
     sub ? el('div', { class: 'sub' }, sub) : null,
     status ? el('span', { class: `badge ${statusClass}`, text: status }) : null,
     unverified ? el('span', { class: 'badge unverified', text: 'Not yet human-verified' }) : null,
+    action ? el('div', { class: 'statcard-actions' }, action) : null,
     note ? note.body : null);
 }
 

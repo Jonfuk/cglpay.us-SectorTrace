@@ -20,12 +20,14 @@ what is actually in the tree.
 | `d3.min.js` | `d3` | 7.9.0 | 279,706 | https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js |
 | `tabulator.min.js` | `tabulator-tables` | 6.3.0 | 442,539 | https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/js/tabulator.min.js |
 | `tabulator_midnight.min.css` | `tabulator-tables` | 6.3.0 | 30,358 | https://cdn.jsdelivr.net/npm/tabulator-tables@6.3.0/dist/css/tabulator_midnight.min.css |
+| `leaflet.js` | `leaflet` | 1.9.4 | 147,552 | https://unpkg.com/leaflet@1.9.4/dist/leaflet.js |
+| `leaflet.css` | `leaflet` | 1.9.4 | 14,806 | https://unpkg.com/leaflet@1.9.4/dist/leaflet.css |
 | `fuse.min.js` | `fuse.js` | 7.0.0 | 23,850 | https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js |
 | `bootstrap.min.css` | `bootstrap` | 5.3.8 | 232,111 | https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css |
 | `bootstrap.bundle.min.js` | `bootstrap` | 5.3.8 | 80,496 | https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js |
 
-Globals exposed: `echarts`, `d3`, `Tabulator`, `Fuse`, and Bootstrap's `bootstrap` namespace.
+Globals exposed: `echarts`, `d3`, `Tabulator`, `L`, `Fuse`, and Bootstrap's `bootstrap` namespace.
 
-Licences: Bootstrap is MIT; ECharts is Apache-2.0; D3, Tabulator and Fuse.js are MIT.
+Licences: Bootstrap is MIT; ECharts is Apache-2.0; D3, Tabulator, Leaflet and Fuse.js are MIT.
 Each file carries its own copyright banner, which is why these are the
 unmodified minified builds rather than a re-bundle.

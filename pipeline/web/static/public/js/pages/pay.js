@@ -11,7 +11,18 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
-          truncate } from '/js/components.js';
+          truncate, shareButton } from '/js/components.js';
+
+function takeaway(status, statusClass, text) {
+  return el('div', { class: 'takeaway' },
+    el('span', { class: 'badge ' + statusClass, text: status }),
+    el('p', { text: text }));
+}
+
+function scrollToLayer(id) {
+  const target = document.getElementById(id);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 export async function render(main) {
   const charts = [];
@@ -25,23 +36,37 @@ export async function render(main) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Pay evidence' }),
+      el('h1', { text: 'Pay & benchmarks' }),
       el('p', { class: 'lede' },
-        'Published pay evidence and labour-market comparators, kept in their ',
-        'own layers. None is a payroll, and this portal does not turn unlike ',
-        'sources into a single pay figure.')),
+        'Explore published pay, advertised roles and workforce context. Each source layer answers a different question, so they are not combined into one pay score.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace pay evidence',
+          text: 'Explore this selected SectorTrace pay evidence view with its source and caveat context.',
+          label: 'Share selected view',
+        })),
+      el('nav', { class: 'section-links', 'aria-label': 'Pay evidence layers' },
+        el('button', { type: 'button', onclick: () => scrollToLayer('wage') }, 'Indicative wage'),
+        el('button', { type: 'button', onclick: () => scrollToLayer('adverts') }, 'Advertised roles'),
+        el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
+        el('button', { type: 'button', onclick: () => scrollToLayer('census') }, 'Workforce context'),
+        el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'How to read pay evidence' }),
+      el('p', { text: 'Charity accounts provide an indicative wage measure; NHS Jobs records advertised vacancies; provider pages record what an organisation published; statutory rates are legal hourly floors.' }),
+      el('p', { text: 'None is payroll data. Labour-market benchmarks provide context only, and the portal does not calculate gaps, ratios, or a combined trend from unlike sources.' })),
     el('div', { id: 'wage' }),
     el('div', { id: 'adverts' }),
     el('div', { id: 'published-pay' }),
-    el('div', { id: 'benchmarks' }),
-    el('div', { id: 'census' }));
+    el('div', { id: 'census' }),
+    el('div', { id: 'benchmarks' }));
   replace(main, page);
 
   renderWage(page.querySelector('#wage'), data, charts);
   renderAdverts(page.querySelector('#adverts'), data, charts);
   renderPublishedPay(page.querySelector('#published-pay'), data);
-  renderBenchmarks(page.querySelector('#benchmarks'), data);
   renderCensus(page.querySelector('#census'), data, charts);
+  renderBenchmarks(page.querySelector('#benchmarks'), data);
 
   return () => disposeCharts(charts);
 }
@@ -57,6 +82,11 @@ function renderPublishedPay(container, data) {
   replace(container, section(
     'Published pay and employment evidence',
     'Statutory hourly rates, provider-owned pages, Living Wage Foundation checks and gender pay gap filings. These are separate records, not a combined comparison.',
+    takeaway(published.length ? 'Published records' : 'No published rows',
+      published.length ? 'good' : 'neutral',
+      published.length
+        ? 'Provider-owned pages record what an organisation published. They are not payroll evidence.'
+        : 'No provider-published pay rows match the current filters; this does not establish that none exist.'),
     el('div', { class: 'grid two' },
       el('div', { class: 'panel' },
         el('h3', { text: 'Statutory minimum rates' }),
@@ -112,8 +142,10 @@ function renderBenchmarks(container, data) {
   const skills = data.skills_for_care_estimates || [];
 
   replace(container, section(
-    'Pay and workforce comparators',
-    'Published benchmarks for the labour market. They can be read beside compatible evidence, but this portal does not calculate gaps, ratios or trends from them.',
+    'Context only: external comparators',
+    'Published labour-market benchmarks that provide context beside compatible evidence. They are not direct sector pay measures and are not combined with the evidence above.',
+    takeaway((ashe.length || skills.length) ? 'Context only' : 'No comparator rows', 'neutral',
+      'These sources are not combined with provider, account or advert evidence, and the portal does not calculate gaps, ratios or trends from them.'),
     el('div', { class: 'grid two' },
       el('div', { class: 'panel' },
         el('h3', { text: 'ONS ASHE median hourly pay' }),
@@ -152,11 +184,19 @@ function renderWage(container, data, charts) {
     'Indicative wage per employee',
     'Wages and salaries from published charity accounts, over the average '
     + 'employee count in the same accounts.',
+    takeaway(rows.length ? 'Published accounts' : 'No account rows',
+      rows.length ? 'good' : 'neutral',
+      rows.length
+        ? 'This is an indicative account-based measure, not a salary, payslip or payroll average.'
+        : 'No charity-account rows match the current filters; missing rows are not estimated.'),
     el('div', { class: 'panel' },
       holder,
       // Pinned, not collapsible. This figure reads like a salary and is not
       // one, and the difference is the single most misquotable thing here.
       pinnedCaveat(data.caveats?.indicative_wage_note, 'This is not a salary'),
+      el('details', { class: 'context-note' },
+        el('summary', { text: 'What this does not show' }),
+        el('p', { text: 'It does not show an individual salary, a pay scale, or a direct provider comparison across different workforces and accounting periods.' })),
       provenanceFromRows(rows, { tables: ['charity_financials'], module: 'm03_charity_finance' }))));
 
   if (!rows.length) {
@@ -224,8 +264,16 @@ function renderAdverts(container, data, charts) {
     'Advertised pay (NHS Jobs)',
     'Salaries as advertised, not as paid. One advert is one vacancy the '
     + 'employer chose to publish on NHS Jobs.',
+    takeaway(adverts.length ? 'Advertised roles' : 'No advert rows',
+      adverts.length ? 'good' : 'neutral',
+      adverts.length
+        ? 'These figures describe NHS Jobs vacancies, not payroll pay or the whole recruitment market.'
+        : 'No NHS Jobs rows match the current filters; this does not establish that no roles were advertised elsewhere.'),
     el('div', { class: 'panel' },
       pinnedCaveat(data.caveats?.nhs_jobs_floor_note, 'These counts are a floor'),
+      el('details', { class: 'context-note' },
+        el('summary', { text: 'What this does not show' }),
+        el('p', { text: 'It does not show every vacancy, every employer, a completed appointment, or the pay received by the successful applicant.' })),
       el('div', { class: 'grid two' },
         el('div', {}, el('h3', { text: 'Advertised salary distribution' }), bandHolder),
         el('div', {}, el('h3', { text: 'Adverts over time' }), scatterHolder)),
@@ -326,6 +374,11 @@ function renderCensus(container, data, charts) {
     'Workforce census indicators',
     'Vacancy, turnover and headcount measures as published in the sector '
     + 'workforce census.',
+    takeaway(rows.length ? (data.census_verified_count ? 'Partly verified' : 'Unverified') : 'Not collected',
+      rows.length && data.census_verified_count ? 'unverified' : 'neutral',
+      rows.length
+        ? 'These are workforce measures, not pay measures. Their verification status is shown before the chart and in the table.'
+        : 'No workforce-census rows match the current filters; a blank is not zero.'),
     el('div', { class: 'panel' },
       pinnedCaveat(data.caveats?.census_comparability_note, 'Not comparable between years'),
       // Pinned until nothing below is unverified, not until something is

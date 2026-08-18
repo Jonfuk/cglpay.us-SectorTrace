@@ -18,7 +18,7 @@
 
 import { el, replace, fetchJSON, num, sourceLink } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenanceFromRows, tableCard } from '/js/components.js';
+          disposeCharts, provenanceFromRows, tableCard, shareButton } from '/js/components.js';
 
 export async function render(main) {
   const charts = [];
@@ -33,23 +33,33 @@ export async function render(main) {
   const totals = data.totals || {};
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Coroners’ reports' }),
+      el('h1', { text: 'Safety & legal evidence' }),
       el('p', { class: 'lede' },
         `${num(totals.reports)} reports from coroners, read from judiciary.uk. `,
         'A report is the coroner\'s own words about how a death could have ',
-        'been avoided — read the report, not just the numbers here.')),
+        'been avoided — read the report, not just the numbers here.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace safety and legal evidence',
+          text: 'Explore source-linked coroners’ reports in SectorTrace.',
+          label: 'Share this view',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'Read reports responsibly' }),
+      el('p', { text: 'A provider mention is not a finding of fault, causation, prevalence, or responsibility. “Sent to” and “named in” are different facts.' }),
+      el('p', { text: 'Some publications are metadata stubs, so an absent concern is a source limitation rather than evidence of absence.' })),
+    el('div', { id: 'recent' }),
     el('div', { id: 'year' }),
     el('div', { id: 'area' }),
     el('div', { id: 'terms' }),
-    el('div', { id: 'mentions' }),
-    el('div', { id: 'recent' }));
+    el('div', { id: 'mentions' }));
   replace(main, page);
 
+  renderRecent(page.querySelector('#recent'), data);
   renderYears(page.querySelector('#year'), data, charts);
   renderAreas(page.querySelector('#area'), data, charts);
   renderTerms(page.querySelector('#terms'), data, charts);
   renderMentions(page.querySelector('#mentions'), data);
-  renderRecent(page.querySelector('#recent'), data);
 
   return () => disposeCharts(charts);
 }
@@ -136,7 +146,7 @@ function renderTerms(container, data, charts) {
   const holder = el('div', {});
 
   replace(container, section(
-    'Terms in the matters of concern',
+    'Concern themes',
     'Words that appear in the published concerns, by total occurrences '
     + 'across the corpus.',
     el('div', { class: 'panel' },

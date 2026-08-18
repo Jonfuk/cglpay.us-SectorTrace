@@ -14,7 +14,7 @@
 
 import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenance, escapeHtml, exportButton } from '/js/components.js';
+          provenance, escapeHtml, exportButton, shareButton, tableCard } from '/js/components.js';
 
 const METRICS = [
   ['grant_drug_alcohol', 'Drug & alcohol ring-fenced grant'],
@@ -24,6 +24,8 @@ const METRICS = [
   ['treatment_numbers', 'Numbers in treatment'],
   ['contract_value', 'Contract value awarded'],
 ];
+
+const POSITRON_LAYERS = new Set(['cqc_locations', 'contracts', 'treatment']);
 
 let boundaryCache = null;
 
@@ -37,6 +39,7 @@ let boundaryCache = null;
 let layersPayload = null;
 let layerState = {};
 let mapContext = null;
+let rerenderMap = null;
 
 export async function render(main) {
   const charts = [];
@@ -44,10 +47,19 @@ export async function render(main) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Geography' }),
+      el('h1', { text: 'Compare local evidence' }),
       el('p', { class: 'lede' },
-        'Allocations, budgets and treatment numbers by local authority. ',
-        'One metric at a time, because these are not comparable with each other.')),
+        'Explore one published metric at a time across local authorities. Allocations, budgets and treatment numbers remain separate measures.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace local evidence',
+          text: 'Explore this SectorTrace local evidence view with its metric and year context.',
+          label: 'Share this view',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'How this map works' }),
+      el('p', { text: 'Choose a question, then a year. The map is an entry point to an authority page; it is not a league table.' }),
+      el('p', { text: 'The visible caveat, legend and selected metric define what the values mean. No data is shown separately from a low value.' })),
     el('div', { id: 'geo' }));
   replace(main, page);
 
@@ -126,6 +138,7 @@ export async function render(main) {
     redrawOverlays();
   }
 
+  rerenderMap = load;
   await load();
   initLayers(layerHolder);
   return () => disposeCharts(charts);
@@ -165,6 +178,13 @@ async function boundaries() {
 }
 
 async function drawMap(container, legend, data) {
+  const leafletKey = [...POSITRON_LAYERS].find((key) => layerState[key]);
+  const leafletLayer = layersPayload?.layers?.[leafletKey];
+  if (leafletLayer && window.L) {
+    await drawLeafletMap(container, legend, leafletKey, leafletLayer);
+    mapContext = null;
+    return;
+  }
   if (!window.d3) {
     replace(container, errorCard('Mapping library did not load.'));
     return;
@@ -281,7 +301,8 @@ function drawRanking(container, data, charts) {
 
   const holder = el('div', {});
   replace(container, el('div', {},
-    el('h3', { text: `Highest 20 — ${data.metric_label}` }),
+    el('h3', { text: `Explore values — ${data.metric_label}` }),
+    el('p', { class: 'small muted', text: 'A text table alternative to the map. Open an authority page to explore its evidence in context.' }),
     holder));
 
   if (!features.length) {
@@ -307,6 +328,16 @@ function drawRanking(container, data, charts) {
     aria: `Bar chart of the twenty authorities with the highest `
       + `${data.metric_label}.`,
   }));
+
+  container.append(tableCard('Visible authority values', [
+    { title: 'Authority', field: 'authority_name' },
+    { title: 'Region', field: 'region' },
+    { title: data.metric_label, field: 'value_display' },
+  ], features.slice().reverse().map((feature) => ({
+    authority_name: feature.authority_name,
+    region: feature.region || '—',
+    value_display: format(feature.value, data.unit),
+  })), { height: 320, total: features.length }));
 }
 
 // --- overlay layers (W-19) ----------------------------------------------------
@@ -328,17 +359,29 @@ async function initLayers(holder) {
   layersPayload = payload;
 
   const rows = [];
+  const inputs = new Map();
+  const caveats = new Map();
   for (const [key, layer] of Object.entries(payload.layers || {})) {
     const caveatBox = el('div', { class: 'layer-caveat' });
     const input = el('input', { type: 'checkbox', dataset: { layer: key } });
     input.addEventListener('change', (e) => {
       layerState[key] = e.target.checked;
+      if (e.target.checked && POSITRON_LAYERS.has(key)) {
+        for (const [otherKey, otherInput] of inputs) {
+          if (otherKey === key || !POSITRON_LAYERS.has(otherKey)) continue;
+          otherInput.checked = false;
+          layerState[otherKey] = false;
+          replace(caveats.get(otherKey), el('span', {}));
+        }
+      }
       replace(caveatBox, e.target.checked
         ? pinnedCaveat(layer.caveats.join(' '),
             `Read this with the ${layer.label} layer`)
         : el('span', {}));
-      redrawOverlays();
+      if (rerenderMap) rerenderMap();
     });
+    inputs.set(key, input);
+    caveats.set(key, caveatBox);
     rows.push(el('label', { class: 'layer-toggle' },
       input,
       el('span', { text: layer.label })),
@@ -356,6 +399,11 @@ function redrawOverlays() {
   if (!ctx || !layersPayload) return;
   ctx.svg.selectAll('.overlay').remove();
   ctx.legend.querySelectorAll('.layer-legend').forEach((n) => n.remove());
+  ctx.svg.classed('cqc-location-map', Boolean(layerState.cqc_locations));
+  if (layerState.cqc_locations) {
+    ctx.svg.attr('aria-label', 'Map of England showing CQC-registered locations. '
+      + 'Authority boundaries provide geographic context; CQC registration does not cover every service.');
+  }
   for (const [key, on] of Object.entries(layerState)) {
     if (!on) continue;
     const layer = layersPayload.layers?.[key];
@@ -419,6 +467,81 @@ function drawContractPoints(ctx, layer) {
 /* CQC: every regulated location with a published coordinate. The layer's
  * caveat is the whole point — most community provision is not CQC-registered,
  * so the pins are a map of regulated locations, not of services. */
+function drawCqcLeafletMap(container, legend, layer) {
+  const points = englandPoints(layer.features || []);
+  return drawLeafletPoints(container, legend, points, {
+    color: '#2563eb',
+    legend: `CQC-registered locations in England: ${num(points.length)}`,
+    radius: () => 5,
+    tooltip: (point) => point.location_name,
+  });
+}
+
+async function drawLeafletMap(container, legend, key, layer) {
+  if (key === 'cqc_locations') {
+    drawCqcLeafletMap(container, legend, layer);
+    return;
+  }
+  const geo = await boundaries();
+  const points = authorityPoints(layer.features || [], geo.features || []);
+  const isContracts = key === 'contracts';
+  drawLeafletPoints(container, legend, points, {
+    color: isContracts ? '#0f766e' : '#7c3aed',
+    legend: isContracts
+      ? `Commissioning authorities with contracts: ${num(points.length)}`
+      : `Authorities with treatment numbers: ${num(points.length)}`,
+    radius: isContracts
+      ? (point) => Math.max(5, Math.min(15, Math.sqrt(point.count) / 7))
+      : () => 6,
+    tooltip: isContracts
+      ? (point) => `${point.authority_name}: ${num(point.count)} notices`
+      : (point) => `${point.authority_name}: treatment numbers available`,
+  });
+}
+
+function drawLeafletPoints(container, legend, points, options) {
+  const holder = el('div', { class: 'leaflet-map' });
+  replace(container, holder);
+  const map = window.L.map(holder, { scrollWheelZoom: false });
+  map.fitBounds([[49.8, -6.5], [56.1, 2.2]]);
+  window.L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+    { subdomains: 'abcd', maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO' },
+  ).addTo(map);
+  for (const point of points) {
+    window.L.circleMarker([point.latitude, point.longitude], {
+      radius: options.radius(point), color: '#0f172a', weight: 1,
+      fillColor: options.color, fillOpacity: 0.9,
+    }).bindTooltip(escapeHtml(options.tooltip(point)))
+      .on('click', () => { location.hash = `#/authorities/${point.ons_code}`; })
+      .addTo(map);
+  }
+  replace(legend, el('span', { class: 'small muted', text: options.legend }));
+}
+
+function englandPoints(features) {
+  return features.filter((point) => point.latitude != null
+    && point.longitude != null && point.latitude >= 49.8 && point.latitude <= 56.1
+    && point.longitude >= -6.5 && point.longitude <= 2.2 && point.ons_code);
+}
+
+function authorityPoints(rows, features) {
+  const boundariesByCode = new Map(features.map((feature) => [
+    feature.properties.ons_code, feature,
+  ]));
+  const seen = new Set();
+  return rows.filter((row) => {
+    if (!row.ons_code || seen.has(row.ons_code)) return false;
+    seen.add(row.ons_code);
+    return boundariesByCode.has(row.ons_code);
+  }).map((row) => {
+    const [longitude, latitude] = window.d3.geoCentroid(
+      boundariesByCode.get(row.ons_code));
+    return { ...row, latitude, longitude };
+  });
+}
+
 function drawCqcPoints(ctx, layer) {
   const points = (layer.features || [])
     .filter((f) => f.latitude !== null && f.longitude !== undefined

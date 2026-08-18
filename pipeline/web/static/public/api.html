@@ -64,6 +64,29 @@
 </div>
 
 <section class="apisection">
+  <h2>Choose a route by task</h2>
+  <ul>
+    <li><strong>Browse the portal.</strong> Start with
+      <a href="/api/v1/summary"><code>summary</code></a>,
+      <a href="/api/v1/providers"><code>providers</code></a>, or
+      <a href="/api/v1/authorities"><code>authorities</code></a>.</li>
+    <li><strong>Compare or map places.</strong> Use
+      <a href="#route-compare"><code>compare</code></a>,
+      <a href="#route-geography"><code>geography</code></a>, and
+      <a href="#route-layers"><code>layers</code></a>.</li>
+    <li><strong>Explore a subject.</strong> Go to
+      <a href="#route-contracts"><code>contracts</code></a>,
+      <a href="#route-pay"><code>pay</code></a>,
+      <a href="#route-fingertips"><code>fingertips</code></a>, or
+      <a href="#route-pfd"><code>pfd</code></a>.</li>
+    <li><strong>Download complete data.</strong> Use the
+      <a href="#route-export"><code>export</code></a> route; page-facing
+      responses may contain a window of rows, while exports carry the full
+      filtered set and provenance.</li>
+  </ul>
+</section>
+
+<section class="apisection">
   <h2>How it behaves</h2>
   <ul>
     <li><strong>Read-only.</strong> <code>GET</code> and <code>HEAD</code>
@@ -186,7 +209,7 @@
     <p><code>/api/v1/authorities/E08000025</code></p>
   </article>
 
-  <article class="apiroute" data-route="compare">
+  <article class="apiroute" id="route-compare" data-route="compare">
     <h3><code>/api/v1/compare</code></h3>
     <p>
       The existing series for two or more authorities or providers, drawn on
@@ -223,7 +246,7 @@
     </p>
   </article>
 
-  <article class="apiroute" data-route="layers">
+  <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>
       The geography map's overlay layers: contracts aggregated to one point
@@ -243,7 +266,7 @@
     <p><a href="/api/v1/layers"><code>/api/v1/layers</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="contracts">
+  <article class="apiroute" id="route-contracts" data-route="contracts">
     <h3><code>/api/v1/contracts</code></h3>
     <p>
       Contract notices, with aggregates computed over the whole filtered corpus
@@ -285,7 +308,7 @@
     <p><a href="/api/v1/contracts?psr_only=1&amp;year_from=2025"><code>/api/v1/contracts?psr_only=1&amp;year_from=2025</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="pay">
+  <article class="apiroute" id="route-pay" data-route="pay">
     <h3><code>/api/v1/pay</code></h3>
     <p>
       The pay evidence, and the most caveat-heavy payload here: indicative wage
@@ -340,7 +363,7 @@
     <p><a href="/api/v1/council_spend"><code>/api/v1/council_spend</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="geography">
+  <article class="apiroute" id="route-geography" data-route="geography">
     <h3><code>/api/v1/geography</code></h3>
     <p>
       One value per authority for a chosen metric — the choropleth's data,
@@ -387,7 +410,7 @@
     <p><a href="/api/v1/boundaries"><code>/api/v1/boundaries</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="fingertips">
+  <article class="apiroute" id="route-fingertips" data-route="fingertips">
     <h3><code>/api/v1/fingertips</code></h3>
     <p>
       Treatment demand indicators from OHID Fingertips: the indicator
@@ -441,7 +464,7 @@
     <p><a href="/api/v1/ndtms"><code>/api/v1/ndtms</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="pfd">
+  <article class="apiroute" id="route-pfd" data-route="pfd">
     <h3><code>/api/v1/pfd</code></h3>
     <p>
       Coroners' Prevention of Future Deaths reports: reports by year (with
@@ -503,7 +526,7 @@
     <p><a href="/api/v1/freshness"><code>/api/v1/freshness</code></a></p>
   </article>
 
-  <article class="apiroute" data-route="export">
+  <article class="apiroute" id="route-export" data-route="export">
     <h3><code>/api/v1/export</code></h3>
     <p>
       The same figures as a file, with the provenance written <em>into</em> it.

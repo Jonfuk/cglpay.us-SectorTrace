@@ -17,7 +17,7 @@
 import { el, replace, fetchJSON, num, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
-          exportButton } from '/js/components.js';
+          exportButton, shareButton } from '/js/components.js';
 
 const TOPICS = [
   ['numbers_in_treatment', 'Numbers in treatment'],
@@ -34,10 +34,20 @@ export async function render(main) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Treatment data' }),
+      el('h1', { text: 'Understand treatment data' }),
       el('p', { class: 'lede' },
-        'Indicators published by OHID through Fingertips, by local authority ',
-        'and against the England figure.')),
+        'Explore published treatment indicators by local authority and against '
+        + 'the England figure. Demand, activity and outcomes remain separate measures.'),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace treatment data',
+          text: 'Explore published treatment indicators in SectorTrace.',
+          label: 'Share this view',
+        }))),
+    el('details', { class: 'read-first' },
+      el('summary', { text: 'What treatment data can answer' }),
+      el('p', { text: 'The figures show published indicators and estimates. They cannot show unmet need by subtracting one measure from another.' }),
+      el('p', { text: 'A blank, suppressed value, or missing confidence interval is not zero and is shown separately from a published value.' })),
     el('div', { id: 'ft' }),
     el('div', { id: 'ndtms' }));
   replace(main, page);
@@ -52,10 +62,11 @@ export async function render(main) {
   const tableHolder = el('div', {});
   const provHolder = el('div', {});
   const exportHolder = el('span', {});
+  const guideHolder = el('div', {});
 
   replace(page.querySelector('#ft'), section(
-    'Indicators',
-    null,
+    'Choose an indicator and authority',
+    'Start with national context, then select an authority for its local series.',
     el('div', { class: 'panel' },
       tabs,
       el('div', { style: 'display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;' },
@@ -68,6 +79,7 @@ export async function render(main) {
         + 'one from the other, and that calculation is left as a downstream '
         + 'decision made explicitly, not implied by a chart.',
         'What must not be computed here'),
+      guideHolder,
       chartHolder,
       tableHolder,
       provHolder)));
@@ -135,6 +147,7 @@ export async function render(main) {
       tables: ['fingertips_indicators', 'fingertips_la_values'],
       module: 'm12_fingertips',
     }) || el('span', {}));
+    replace(guideHolder, indicatorGuide(data, state));
 
     if (!data.indicators?.length) {
       replace(chartHolder, noData(`${state.topic} indicators`,
@@ -149,6 +162,18 @@ export async function render(main) {
   await load();
   await loadNdtms(page.querySelector('#ndtms'), state, charts);
   return () => disposeCharts(charts);
+}
+
+function indicatorGuide(data, state) {
+  const indicator = data.indicators?.[0];
+  if (!indicator) return el('span', {});
+  const selected = state.ons ? 'Selected authority and England are shown.'
+    : 'The chart shows the authority median and England until an authority is selected.';
+  return el('div', { class: 'takeaway' },
+    el('span', { class: 'badge good', text: 'PUBLISHED' }),
+    el('p', {},
+      el('strong', { text: indicator.indicator_name }),
+      ` · ${indicator.unit || 'unit published with the indicator'}. ${selected}`));
 }
 
 // --- NDTMS ---------------------------------------------------------------

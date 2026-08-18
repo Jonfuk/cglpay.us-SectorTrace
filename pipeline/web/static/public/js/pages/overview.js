@@ -20,8 +20,8 @@
 'use strict';
 
 import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
-import { statCard, section, caveat, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenance, truncate, escapeHtml, shareButton } from '/js/components.js';
+import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
+          disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard } from '/js/components.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -78,15 +78,23 @@ function renderCards(container, summary) {
   const workforce = summary.workforce || {};
   const concentrated = contracts.value_is_concentrated;
 
-  const cards = [
-    statCard({
+  const snapshotCard = (config) => statCard({
+    ...config,
+    action: shareButton({
+      title: `SectorTrace: ${config.label}`,
+      text: `${config.value} ${config.label}. Evidence status: ${config.status || 'not stated'}.`,
+      label: `Share ${config.label}`,
+    }),
+  });
+  const coverage = [
+    snapshotCard({
       value: num(summary.authorities?.total),
       label: 'local authorities tracked',
       sub: `${num(summary.authorities?.with_contracts)} appear as a contract buyer`,
       status: summary.authorities?.total ? 'Tracked' : 'Not collected',
       statusClass: summary.authorities?.total ? 'good' : 'neutral',
     }),
-    statCard({
+    snapshotCard({
       value: num(contracts.total_notices),
       label: 'procurement notices indexed',
       sub: 'award and contract notices matching the sector keyword set',
@@ -94,7 +102,7 @@ function renderCards(container, summary) {
       status: contracts.total_notices ? 'Indexed' : 'Not collected',
       statusClass: contracts.total_notices ? 'good' : 'neutral',
     }),
-    statCard({
+    snapshotCard({
       value: num(summary.providers?.total),
       label: 'providers tracked',
       sub: summary.providers?.target ? `Campaign subject: ${summary.providers.target}` : null,
@@ -103,9 +111,18 @@ function renderCards(container, summary) {
     }),
   ];
 
+  const evidenceQuality = [snapshotCard({
+    value: num(summary.funnel?.evidence_rows),
+    label: 'human-verified evidence rows',
+    sub: 'documents promoted into the evidence base after review',
+    caveat: summary.funnel?.caveat,
+    status: summary.funnel?.evidence_rows ? 'Human-verified' : 'Not collected',
+    statusClass: summary.funnel?.evidence_rows ? 'good' : 'neutral',
+  })];
+
   // The value card, shaped by what the corpus actually supports.
   if (concentrated) {
-    cards.push(statCard({
+    evidenceQuality.push(snapshotCard({
       value: 'not a total',
       plain: true,
       label: 'contract value',
@@ -115,7 +132,7 @@ function renderCards(container, summary) {
       statusClass: 'neutral',
     }));
   } else {
-    cards.push(statCard({
+    evidenceQuality.push(snapshotCard({
       value: gbp(contracts.total_value_gbp),
       label: 'total contract value',
       caveat: contracts.caveat,
@@ -125,20 +142,21 @@ function renderCards(container, summary) {
   }
 
   // Workforce: shown, but never as a clean headline while unverified.
+  const sectorContext = [];
   const metrics = workforce.metrics || [];
   const pick = (name) => metrics.find((m) => m.metric === name);
   for (const [metric, label] of [['vacancy_rate', 'vacancy rate'],
     ['turnover_rate', 'turnover rate']]) {
     const row = pick(metric);
     if (!row) {
-      cards.push(statCard({
+      sectorContext.push(snapshotCard({
         value: '—', plain: true, label: `sector ${label}`,
         sub: 'not collected yet — run m06_workforce_census',
         status: 'Not collected', statusClass: 'neutral',
       }));
       continue;
     }
-    cards.push(statCard({
+    sectorContext.push(snapshotCard({
       value: `${row.value}${row.unit === 'percent' ? '%' : ''}`,
       plain: !row.verified,
       label: `sector ${label} (${workforce.latest_census_year})`,
@@ -150,10 +168,17 @@ function renderCards(container, summary) {
     }));
   }
 
+  const band = (title, description, cards) => el('section', { class: 'snapshot-band' },
+    el('header', {}, el('h3', { text: title }), el('p', { text: description })),
+    el('div', { class: 'grid cards' }, cards));
+
   replace(container, section(
     'Current snapshot',
     'A quick view of the evidence held today. These figures describe coverage and publication state; they are not a composite score.',
-    el('div', { class: 'grid cards' }, cards)));
+    el('div', { class: 'snapshot-bands' },
+      band('Coverage', 'What the portal currently tracks across places, notices, and providers.', coverage),
+      band('Evidence quality', 'What has been reviewed and which headline values need careful interpretation.', evidenceQuality),
+      band('Sector context', 'Published workforce context, kept separate from the coverage counts above.', sectorContext))));
 }
 
 function renderExplore(container) {
@@ -166,14 +191,20 @@ function renderExplore(container) {
     ['#/pfd', 'Safety & legal', 'Explore coroners’ reports, concerns, and provider mentions responsibly.'],
     ['#/claims', 'Evidence-backed claims', 'Find campaign-ready claims with the evidence behind them.'],
   ];
+  const routeCards = [];
+  for (const route of routes) {
+    const href = route[0];
+    const title = route[1];
+    const description = route[2];
+    routeCards.push(el('a', { class: 'explore-card', href },
+      el('span', { class: 'explore-card-title', text: title }),
+      el('span', { class: 'explore-card-description', text: description }),
+      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: 'Open route' })));
+  }
   replace(container, section(
     'Explore the evidence',
     'Choose a question to move from the snapshot into the evidence layer that can answer it.',
-    el('div', { class: 'grid explore-grid' }, routes.map(([href, title, description]) =>
-      el('a', { class: 'explore-card', href },
-        el('span', { class: 'explore-card-title', text: title }),
-        el('span', { class: 'explore-card-description', text: description }),
-        el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: '→' }))))));
+    el('div', { class: 'grid explore-grid' }, routeCards)));
 }
 
 function statusKey() {
@@ -209,8 +240,10 @@ function renderSourcesPanel(summary) {
   return el('div', { class: 'panel status-panel' },
     el('h3', { text: 'Sources and latest updates' }),
     el('p', { class: 'small muted', text: 'Each source system, and when the pipeline last fetched from it.' }),
-    el('div', { class: 'sourcestrip' }, chips.length ? chips
-      : el('span', { class: 'muted', text: 'Nothing collected yet.' })),
+    el('details', { class: 'source-details' },
+      el('summary', { text: chips.length ? `View ${num(chips.length)} source updates` : 'View source updates' }),
+      el('div', { class: 'sourcestrip' }, chips.length ? chips
+        : el('span', { class: 'muted', text: 'Nothing collected yet.' }))),
     el('p', { class: 'small muted status-footnote' },
       `Fingertips: ${num(summary.fingertips?.indicators_collected)} indicators, `
       + `latest period ${summary.fingertips?.latest_period || '—'}.`));
@@ -303,23 +336,37 @@ async function renderTopContracts(container, charts) {
 
   const concentration = data.value_concentration || {};
   const largest = (concentration.largest || []).slice(0, 10).reverse();
+  const tableRows = (concentration.largest || []).slice(0, 10);
 
   const holder = el('div', {});
-  const note = caveat(data.caveats?.value_sum);
+  const valueCaveat = data.caveats?.value_sum
+    || 'Published notice values can include framework ceilings and are not a measure of sector spend.';
 
   replace(container, section(
     'The largest notices in the corpus',
     'Ten highest published values. Read the caveat before treating any of '
     + 'these as sector spend.',
+    pinnedCaveat(valueCaveat, 'Important limitation'),
     el('div', { class: 'panel' },
       el('p', { class: 'small muted' },
         `Median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
         `mean ${gbp(concentration.mean_value_gbp)} · `,
         `${num(concentration.notices_over_1bn)} notices above £1bn carry `,
-        `${pct(concentration.share_over_1bn)} of the total`,
-        note ? note.button : null),
-      note ? note.body : null,
+        `${pct(concentration.share_over_1bn)} of the total`),
       holder,
+      el('details', { class: 'chart-data' },
+        el('summary', { text: `View data (${num(tableRows.length)} notices)` }),
+        tableCard('Largest published notices', [
+          { title: 'Buyer', field: 'buyer_name' },
+          { title: 'Notice', field: 'title' },
+          { title: 'Published value', field: 'value_display', width: 150 },
+          { title: 'Notice ID', field: 'notice_id', width: 150 },
+        ], tableRows.map((notice) => ({
+          buyer_name: notice.buyer_name || 'Not published',
+          title: notice.title || 'Untitled notice',
+          value_display: gbp(notice.value_core, { compact: false }),
+          notice_id: notice.notice_id || '—',
+        })), { height: 360, total: tableRows.length })),
       provenance({
         sources: (data.notices || []).map((n) => n.source_url),
         retrievedAt: (data.notices || []).map((n) => n.retrieved_at).sort().pop(),

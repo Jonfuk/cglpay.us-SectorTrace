@@ -257,7 +257,9 @@ async function render() {
   }
 
   const main = $('#main');
-  replace(main, el('div', { class: 'shimmer' }));
+  replace(main, el('div', { class: 'loading-state', role: 'status' },
+    el('div', { class: 'shimmer', 'aria-hidden': 'true' }),
+    el('p', { class: 'small muted', text: 'Loading published evidence…' })));
 
   try {
     const module = await load();

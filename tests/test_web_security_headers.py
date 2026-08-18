@@ -143,7 +143,7 @@ def test_nothing_may_be_loaded_from_anywhere_else(client):
     assert found["base-uri"] == "'none'"
     assert found["form-action"] == "'none'"
     # The favicon is a data: URI in the page's own <head>.
-    assert found["img-src"] == "'self' data:"
+    assert found["img-src"] == "'self' data: https://*.basemaps.cartocdn.com"
 
 
 def test_the_referrer_stays_here(client):
