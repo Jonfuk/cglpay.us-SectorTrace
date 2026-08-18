@@ -97,6 +97,7 @@ def test_web_unlocker_archives_the_target_bytes(monkeypatch, settings):
     assert seen["url"] == foi.BRIGHTDATA_REQUEST_API
     assert seen["headers"]["Authorization"] == "Bearer test-brightdata-key"
     assert seen["json"]["url"].endswith("/request/example.json")
+    assert seen["json"]["format"] == "json"
     assert result.status_code == 200
     assert result.body.startswith(b'{"info_request"')
     assert result.archived_path is not None
