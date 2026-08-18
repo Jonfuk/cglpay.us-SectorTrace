@@ -4,5 +4,5 @@ dockerfilePath = "Dockerfile.worker"
 buildCommand = "uv sync --extra postgres --extra storage"
 
 [deploy]
-startCommand = "sh -c 'for module in m00_geography m05_cqc m12_fingertips m15_foi m17_statutory_pay_rates m18_living_wage m19_data_gov_uk m21_ons_ashe m22_provider_pay_pages m25_skills_for_care; do echo ===$module===; python -m pipeline run $module || exit 1; done'"
+startCommand = "sh -c 'set -x; trap \"rc=$?; echo WORKER_EXIT=$rc\" EXIT; for module in m00_geography m05_cqc m12_fingertips m15_foi m17_statutory_pay_rates m18_living_wage m19_data_gov_uk m21_ons_ashe m22_provider_pay_pages m25_skills_for_care; do echo ===$module===; python -u -m pipeline run $module || exit 1; done'"
 restartPolicyType = "NEVER"
