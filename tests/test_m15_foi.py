@@ -173,8 +173,7 @@ def test_zenrows_archives_html_without_persisting_clearance_cookie(monkeypatch, 
         "url": "https://www.whatdotheyknow.com/request/example",
         "apikey": "test-zenrows-key",
         "js_render": "true",
-        "premium_proxy": "true",
-        "proxy_country": "gb",
+        "premium_proxy": "false",
     }
     assert result.status_code == 200
     assert result.url.endswith("/request/example")

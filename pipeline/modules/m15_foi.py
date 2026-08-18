@@ -320,8 +320,9 @@ def fetch_with_zenrows(url: str, settings, source_system: str) -> FetchResult:
         "apikey": settings.require_zenrows_key(),
         "js_render": str(settings.zenrows_js_render).lower(),
         "premium_proxy": str(settings.zenrows_premium_proxy).lower(),
-        "proxy_country": settings.zenrows_proxy_country,
     }
+    if settings.zenrows_premium_proxy:
+        params["proxy_country"] = settings.zenrows_proxy_country
     response = httpx.get(ZENROWS_REQUEST_API, params=params, timeout=90.0)
     response.raise_for_status()
     target_status = response.headers.get("zr-status", "")
