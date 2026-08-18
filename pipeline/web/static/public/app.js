@@ -468,14 +468,15 @@ function initMobileNavigation() {
 // --- boot --------------------------------------------------------------------
 
 function boot() {
-  registerTheme();
   initPortalTheme();
+  registerTheme();
   readStateFromUrl();
   initFilterBar();
   initFindCouncil();
   initMobileNavigation();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
+  window.addEventListener('portalthemechange', render);
   render();
 }
 

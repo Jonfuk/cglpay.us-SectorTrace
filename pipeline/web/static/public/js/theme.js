@@ -7,8 +7,8 @@
 'use strict';
 
 export const PALETTE = [
-  '#38bdf8', '#f59e0b', '#34d399', '#f87171',
-  '#a78bfa', '#fb923c', '#e879f9',
+  '#21d4d0', '#fbbf24', '#4ade80', '#fb7185',
+  '#a78bfa', '#4f8cff', '#f472b6',
 ];
 
 // Paired with the palette by index. Colour is never the only difference
@@ -28,12 +28,12 @@ const AXIS = {
 export const THEME = {
   color: PALETTE,
   backgroundColor: 'transparent',
-  textStyle: { fontFamily: 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
-  title: { textStyle: { color: '#e6edf3' }, subtextStyle: { color: '#8b949e' } },
-  legend: { textStyle: { color: '#94a3b8' }, inactiveColor: '#484f58' },
+  textStyle: { fontFamily: 'Manrope, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
+  title: { textStyle: { color: '#f4f8ff' }, subtextStyle: { color: '#b2c0d3' } },
+  legend: { textStyle: { color: '#b2c0d3' }, inactiveColor: '#52657d' },
   tooltip: {
-    backgroundColor: 'rgba(13, 17, 23, 0.92)',
-    borderColor: '#38bdf8',
+    backgroundColor: 'rgba(8, 17, 31, 0.94)',
+    borderColor: '#21d4d0',
     borderWidth: 1,
     textStyle: { color: '#e6edf3' },
     extraCssText: 'backdrop-filter: blur(6px); box-shadow: 0 8px 28px rgba(0,0,0,0.6);',
@@ -45,12 +45,12 @@ export const THEME = {
   logAxis: AXIS,
   line: { symbolSize: 7, lineStyle: { width: 2 } },
   bar: { itemStyle: { borderRadius: [3, 3, 0, 0] } },
-  pie: { itemStyle: { borderColor: '#0d1117', borderWidth: 2 } },
-  visualMap: { textStyle: { color: '#8b949e' } },
+  pie: { itemStyle: { borderColor: '#08111f', borderWidth: 2 } },
+  visualMap: { textStyle: { color: '#b2c0d3' } },
   dataZoom: {
     borderColor: '#21262d',
     textStyle: { color: '#8b949e' },
-    handleStyle: { color: '#38bdf8' },
+    handleStyle: { color: '#21d4d0' },
   },
 };
 
@@ -59,6 +59,14 @@ let registered = false;
 export function registerTheme() {
   if (registered || !window.echarts) return;
   window.echarts.registerTheme('sectorTrace', THEME);
+  window.echarts.registerTheme('sectorTraceLight', {
+    ...THEME,
+    title: { textStyle: { color: '#132238' }, subtextStyle: { color: '#455a73' } },
+    legend: { textStyle: { color: '#455a73' }, inactiveColor: '#93a3b8' },
+    tooltip: { ...THEME.tooltip, backgroundColor: 'rgba(255,255,255,.97)', textStyle: { color: '#132238' } },
+    categoryAxis: { ...AXIS, axisLine: { lineStyle: { color: '#c4d0dd' } }, axisTick: { lineStyle: { color: '#c4d0dd' } }, axisLabel: { color: '#455a73' }, splitLine: { lineStyle: { color: '#dce5ef' } } },
+    valueAxis: { ...AXIS, axisLine: { lineStyle: { color: '#c4d0dd' } }, axisTick: { lineStyle: { color: '#c4d0dd' } }, axisLabel: { color: '#455a73' }, splitLine: { lineStyle: { color: '#dce5ef' } } },
+  });
   registered = true;
 }
 
@@ -73,6 +81,7 @@ export function applyPortalTheme(choice = 'system') {
   root.dataset.portalTheme = theme;
   const select = document.querySelector('#theme-select');
   if (select) select.value = theme;
+  window.dispatchEvent(new CustomEvent('portalthemechange'));
 }
 
 export function initPortalTheme() {

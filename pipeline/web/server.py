@@ -65,6 +65,7 @@ PUBLIC_DIR = STATIC_DIR / "public"
 HTML = "text/html; charset=utf-8"
 JS = "text/javascript; charset=utf-8"
 CSS = "text/css; charset=utf-8"
+FONT = "font/woff2"
 
 # Two front ends on one server, each served by exact name from a whitelist.
 #
@@ -122,17 +123,21 @@ for _lib, _type in (
     ("d3.min.js", JS),
     ("tabulator.min.js", JS),
     ("tabulator_midnight.min.css", CSS),
-    ("leaflet.js", JS),
-    ("leaflet.css", CSS),
+    ("maplibre-gl.js", JS),
+    ("maplibre-gl.css", CSS),
     ("fuse.min.js", JS),
     ("bootstrap.min.css", CSS),
     ("bootstrap.bundle.min.js", JS),
 ):
     STATIC_FILES[f"/vendor/{_lib}"] = (f"vendor/{_lib}", _type, PUBLIC_DIR)
 
+for _font in ("manrope-400.woff2", "manrope-600.woff2", "manrope-700.woff2",
+              "space-grotesk-500.woff2", "space-grotesk-700.woff2"):
+    STATIC_FILES[f"/fonts/{_font}"] = (f"fonts/{_font}", FONT, PUBLIC_DIR)
+
 # Assets that are large and change only when a source publisher releases new
 # ones. These get a cache lifetime; everything else stays no-store.
-CACHEABLE_PREFIXES = ("/vendor/",)
+CACHEABLE_PREFIXES = ("/vendor/", "/fonts/")
 ASSET_MAX_AGE = 86_400
 
 # Portal answers change only when a module runs, which is hours apart at best.
@@ -172,9 +177,10 @@ MAX_BODY_BYTES = 256 * 1024
 # Styles are a defacement vector, not an exfiltration one.
 _CSP_COMMON = (
     "default-src 'self'",
-    "img-src 'self' data: https://*.basemaps.cartocdn.com",
+    "img-src 'self' data: https://*.basemaps.cartocdn.com https://tiles.basemaps.cartocdn.com",
     "style-src 'self' 'unsafe-inline'",
-    "connect-src 'self'",
+    "connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.basemaps.cartocdn.com",
+    "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
