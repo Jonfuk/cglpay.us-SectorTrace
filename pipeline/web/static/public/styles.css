@@ -189,6 +189,12 @@ main:focus { outline: none; }
 .grid { display: grid; gap: var(--space-4); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
 .grid.cards { grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+.snapshot-bands { display: grid; gap: var(--space-6); }
+.snapshot-band { border-top: 1px solid var(--border-subtle); padding-top: var(--space-4); }
+.snapshot-band:first-child { border-top: 0; padding-top: 0; }
+.snapshot-band > header { margin-bottom: var(--space-3); }
+.snapshot-band h3 { font-size: 15px; margin: 0; }
+.snapshot-band header p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: 13px; max-width: 68ch; }
 
 /* --- hero ---------------------------------------------------------------- */
 
@@ -227,6 +233,10 @@ main:focus { outline: none; }
 .status-panel { height: 100%; }
 .status-panel h3 { margin-bottom: var(--space-2); }
 .status-footnote { margin-top: var(--space-4); }
+.source-details { margin-top: var(--space-3); }
+.source-details summary, .chart-data summary { cursor: pointer; color: var(--accent-teal); font-size: 13px; font-weight: 650; }
+.chart-data { margin-top: var(--space-5); }
+.chart-data .tablecard { margin-top: var(--space-3); }
 
 .statcard {
   background: var(--glass-bg);
@@ -248,6 +258,8 @@ main:focus { outline: none; }
 .statcard .sub { font-size: 12px; color: var(--text-muted); margin-top: var(--space-1); }
 .statcard > .badge { margin-top: var(--space-3); }
 .statcard.unverified { background-image: var(--unverified-bg); }
+.statcard-actions { margin-top: var(--space-3); }
+.statcard-actions .share-button { min-width: 0; padding: 4px 8px; font-size: 12px; }
 
 /* --- caveats ------------------------------------------------------------- */
 
