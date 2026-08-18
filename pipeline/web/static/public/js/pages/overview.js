@@ -166,14 +166,20 @@ function renderExplore(container) {
     ['#/pfd', 'Safety & legal', 'Explore coroners’ reports, concerns, and provider mentions responsibly.'],
     ['#/claims', 'Evidence-backed claims', 'Find campaign-ready claims with the evidence behind them.'],
   ];
+  const routeCards = [];
+  for (const route of routes) {
+    const href = route[0];
+    const title = route[1];
+    const description = route[2];
+    routeCards.push(el('a', { class: 'explore-card', href },
+      el('span', { class: 'explore-card-title', text: title }),
+      el('span', { class: 'explore-card-description', text: description }),
+      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: 'Open route' })));
+  }
   replace(container, section(
     'Explore the evidence',
     'Choose a question to move from the snapshot into the evidence layer that can answer it.',
-    el('div', { class: 'grid explore-grid' }, routes.map(([href, title, description]) =>
-      el('a', { class: 'explore-card', href },
-        el('span', { class: 'explore-card-title', text: title }),
-        el('span', { class: 'explore-card-description', text: description }),
-        el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: '→' }))))));
+    el('div', { class: 'grid explore-grid' }, routeCards)));
 }
 
 function statusKey() {
