@@ -132,7 +132,8 @@ for _lib, _type in (
     STATIC_FILES[f"/vendor/{_lib}"] = (f"vendor/{_lib}", _type, PUBLIC_DIR)
 
 for _font in ("manrope-400.woff2", "manrope-600.woff2", "manrope-700.woff2",
-              "space-grotesk-500.woff2", "space-grotesk-700.woff2"):
+              "space-grotesk-500.woff2", "space-grotesk-700.woff2",
+              "archivo-narrow-500.woff2", "archivo-narrow-700.woff2"):
     STATIC_FILES[f"/fonts/{_font}"] = (f"fonts/{_font}", FONT, PUBLIC_DIR)
 
 # Assets that are large and change only when a source publisher releases new

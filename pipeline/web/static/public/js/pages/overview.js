@@ -21,7 +21,8 @@
 
 import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard } from '/js/components.js';
+          disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard,
+          lensBadge, timingBadge, findingBlock } from '/js/components.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -42,6 +43,7 @@ export async function render(main) {
   const snapshot = el('div', {});
   const page = el('div', {},
     el('div', { class: 'hero' },
+      el('div', { class: 'hero-kicker' }, lensBadge('accountability'), ' · England-wide evidence desk'),
       el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
       el('p', { class: 'lede' },
         'Explore published evidence about pay, commissioning, providers, treatment activity ',
@@ -58,12 +60,14 @@ export async function render(main) {
         el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
         el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
     el('div', { id: 'snapshot' }),
+    el('div', { id: 'briefing-strip' }),
     el('div', { id: 'explore' }),
     el('div', { id: 'evidence-status' }),
     el('div', { id: 'contracts-chart' }));
   replace(main, page);
 
   renderCards(snapshot, summary);
+  renderBriefingStrip(page.querySelector('#briefing-strip'), summary);
   renderExplore(page.querySelector('#explore'));
   renderEvidenceStatus(page.querySelector('#evidence-status'), summary);
   // Freshness is seconds of table scans, so renderEvidenceStatus fetches it
@@ -71,6 +75,34 @@ export async function render(main) {
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
   return () => disposeCharts(charts);
+}
+
+function renderBriefingStrip(container, summary) {
+  const sources = summary.pipeline?.sources || [];
+  const retrieved = sources.map((s) => s.last_retrieved).filter(Boolean).sort().pop() || null;
+  const signalCount = [summary.contracts?.total_notices, summary.providers?.total,
+    summary.funnel?.evidence_rows].filter((value) => Number(value) > 0).length;
+  replace(container, el('section', { class: 'evidence-strip', 'aria-label': 'Evidence briefing' },
+    el('div', { class: 'evidence-strip-head' },
+      el('div', {}, el('span', { class: 'eyebrow' }, 'Evidence briefing'),
+        el('h2', { text: 'The campaign view, at a glance' })),
+      timingBadge({ kind: retrieved ? 'current' : 'snapshot', date: retrieved ? retrieved.slice(0, 10) : null })),
+    el('div', { class: 'evidence-strip-grid' },
+      el('div', {}, el('strong', { text: num(summary.funnel?.evidence_rows) }), el('span', { text: ' verified evidence rows' })),
+      el('div', {}, el('strong', { text: num(summary.contracts?.total_notices) }), el('span', { text: ' procurement notices indexed' })),
+      el('div', {}, el('strong', { text: num(summary.providers?.total) }), el('span', { text: ' providers tracked' })),
+      el('div', {}, el('strong', { text: num(signalCount) }), el('span', { text: ' active evidence signals' }))),
+    el('p', { class: 'small muted', text: retrieved
+      ? `Scope: England-wide public evidence. Latest source retrieval: ${retrieved.slice(0, 10)}.`
+      : 'Scope: England-wide public evidence. Retrieval timing is not available in this extract.' }),
+    findingBlock({
+      finding: signalCount ? 'The portal has a usable evidence base across coverage, procurement, and provider layers; each layer still needs to be read with its own caveats.' : null,
+      value: `${num(summary.funnel?.evidence_rows)} verified rows`, evidenceStatus: signalCount ? 'Supported' : null,
+      timing: { kind: retrieved ? 'current' : 'snapshot', date: retrieved ? retrieved.slice(0, 10) : null },
+      caveat: 'Coverage counts describe what is held and reviewed, not the quality or outcome of a service.',
+      sources: sources.map((s) => SOURCE_LABELS[s.source_system] || s.source_system).filter(Boolean),
+      retrievedAt: retrieved ? retrieved.slice(0, 10) : null,
+    })));
 }
 
 function renderCards(container, summary) {
@@ -347,6 +379,13 @@ async function renderTopContracts(container, charts) {
     'Ten highest published values. Read the caveat before treating any of '
     + 'these as sector spend.',
     pinnedCaveat(valueCaveat, 'Important limitation'),
+    findingBlock({
+      finding: 'The largest published notices are useful for locating procurement activity, but their headline values should not be read as sector spend.',
+      value: `Median notice ${gbp(concentration.median_value_gbp, { compact: false })}`,
+      evidenceStatus: 'Published', timing: { kind: 'current', date: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10) },
+      caveat: valueCaveat, sources: ['Contracts Finder'],
+      retrievedAt: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10),
+    }),
     el('div', { class: 'panel' },
       el('p', { class: 'small muted' },
         `Median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
