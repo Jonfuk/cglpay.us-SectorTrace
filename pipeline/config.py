@@ -194,7 +194,7 @@ class Settings(BaseSettings):
     wdtk_zenrows_enabled: bool = False
     zenrows_api_key: str | None = None
     zenrows_js_render: bool = True
-    zenrows_premium_proxy: bool = True
+    zenrows_premium_proxy: bool = False
     zenrows_proxy_country: str = "gb"
 
     google_service_account_json: Path | None = None
