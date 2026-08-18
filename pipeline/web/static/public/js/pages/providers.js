@@ -75,7 +75,7 @@ async function renderList(main) {
     p.cqc_locations || p.tribunal_count || p.contract_count || p.nhs_job_advert_count);
 
   if (named.length) {
-    charts.push(mountChart(holder, {
+    const providerChart = mountChart(holder, {
       legend: { top: 0 },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'value', name: 'records' },
@@ -90,13 +90,21 @@ async function renderList(main) {
       height: 'tall',
       aria: 'Stacked bar chart of how many records of each type the warehouse '
         + 'holds for each provider.',
-    }));
+    });
+    charts.push(providerChart);
+    providerChart?.on('click', (params) => {
+      const provider = named[params.dataIndex];
+      if (provider?.provider_key) location.hash = `#/providers/${encodeURIComponent(provider.provider_key)}`;
+    });
   } else {
     replace(holder, noData('provider evidence', './start.sh run all'));
   }
 
   replace(page.querySelector('#table'), tableCard('All providers', [
-    { title: 'Provider', field: 'canonical_name' },
+    { title: 'Provider', field: 'canonical_name', formatter: (c) => el('a', {
+      href: `#/providers/${encodeURIComponent(c.getRow().getData().provider_key)}`,
+      text: c.getValue(),
+    }) },
     { title: 'Campaign subject', field: 'is_target', width: 140,
       formatter: (c) => (c.getValue() ? '★ yes' : '') },
     { title: 'Contracts', field: 'contract_count', width: 100 },
