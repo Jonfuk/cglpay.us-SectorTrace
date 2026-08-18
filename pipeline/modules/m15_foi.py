@@ -238,7 +238,10 @@ def fetch_with_web_unlocker(url: str, settings, source_system: str) -> FetchResu
         BRIGHTDATA_REQUEST_API,
         headers={"Authorization": f"Bearer {settings.require_brightdata_key()}",
                  "Content-Type": "application/json"},
-        json={"zone": settings.brightdata_unlocker_zone, "url": target_url, "format": "raw"},
+        # Bright Data's direct API uses `raw` for the target body itself and
+        # `json` for the structured envelope containing status, headers, and
+        # body. The latter is what this adapter needs for provenance.
+        json={"zone": settings.brightdata_unlocker_zone, "url": target_url, "format": "json"},
         timeout=60.0,
     )
     response.raise_for_status()
