@@ -21,7 +21,7 @@
 
 import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, caveat, pinnedCaveat, noData, errorCard, mountChart,
-          disposeCharts, provenance, truncate, escapeHtml } from '/js/components.js';
+          disposeCharts, provenance, truncate, escapeHtml, shareButton } from '/js/components.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -39,7 +39,7 @@ export async function render(main) {
     return () => {};
   }
 
-  const cards = el('div', { class: 'grid cards' });
+  const snapshot = el('div', {});
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
@@ -47,20 +47,27 @@ export async function render(main) {
         'Explore published evidence about pay, commissioning, providers, treatment activity ',
         'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
         'missing values are never guessed.'),
-      cards),
-    el('div', { id: 'sources' }),
-    el('div', { id: 'funnel' }),
-    el('div', { id: 'freshness' }),
+      el('div', { class: 'hero-actions' },
+        shareButton({
+          title: 'SectorTrace overview',
+          text: 'Explore the latest SectorTrace evidence snapshot.',
+        }),
+        el('a', { class: 'btn ghost', href: '#/coverage' }, 'How evidence is handled')),
+      el('details', { class: 'read-first' },
+        el('summary', { text: 'Read this first' }),
+        el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
+        el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
+    el('div', { id: 'snapshot' }),
+    el('div', { id: 'explore' }),
+    el('div', { id: 'evidence-status' }),
     el('div', { id: 'contracts-chart' }));
   replace(main, page);
 
-  renderCards(cards, summary);
-  renderSources(page.querySelector('#sources'), summary);
-  renderFunnel(page.querySelector('#funnel'), summary.funnel);
-  // Freshness is seconds of table scans, so it is fetched lazily after first
-  // paint and rendered in place when it arrives; the rest of the page does
-  // not wait for it. See the comment on the route in server.py.
-  renderFreshness(page.querySelector('#freshness'));
+  renderCards(snapshot, summary);
+  renderExplore(page.querySelector('#explore'));
+  renderEvidenceStatus(page.querySelector('#evidence-status'), summary);
+  // Freshness is seconds of table scans, so renderEvidenceStatus fetches it
+  // lazily after first paint and fills the third status panel in place.
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
   return () => disposeCharts(charts);
@@ -76,17 +83,23 @@ function renderCards(container, summary) {
       value: num(summary.authorities?.total),
       label: 'local authorities tracked',
       sub: `${num(summary.authorities?.with_contracts)} appear as a contract buyer`,
+      status: summary.authorities?.total ? 'Tracked' : 'Not collected',
+      statusClass: summary.authorities?.total ? 'good' : 'neutral',
     }),
     statCard({
       value: num(contracts.total_notices),
       label: 'procurement notices indexed',
       sub: 'award and contract notices matching the sector keyword set',
       caveat: contracts.caveat,
+      status: contracts.total_notices ? 'Indexed' : 'Not collected',
+      statusClass: contracts.total_notices ? 'good' : 'neutral',
     }),
     statCard({
       value: num(summary.providers?.total),
       label: 'providers tracked',
       sub: summary.providers?.target ? `Campaign subject: ${summary.providers.target}` : null,
+      status: summary.providers?.total ? 'Tracked' : 'Not collected',
+      statusClass: summary.providers?.total ? 'good' : 'neutral',
     }),
   ];
 
@@ -98,12 +111,16 @@ function renderCards(container, summary) {
       label: 'contract value',
       sub: 'dominated by framework ceilings — see Contracts',
       caveat: contracts.sum_caveat,
+      status: 'Caveated',
+      statusClass: 'neutral',
     }));
   } else {
     cards.push(statCard({
       value: gbp(contracts.total_value_gbp),
       label: 'total contract value',
       caveat: contracts.caveat,
+      status: contracts.total_value_gbp == null ? 'Missing' : 'Published',
+      statusClass: contracts.total_value_gbp == null ? 'neutral' : 'good',
     }));
   }
 
@@ -117,6 +134,7 @@ function renderCards(container, summary) {
       cards.push(statCard({
         value: '—', plain: true, label: `sector ${label}`,
         sub: 'not collected yet — run m06_workforce_census',
+        status: 'Not collected', statusClass: 'neutral',
       }));
       continue;
     }
@@ -127,34 +145,84 @@ function renderCards(container, summary) {
       sub: row.workforce_segment ? `segment: ${row.workforce_segment}` : null,
       unverified: !row.verified,
       caveat: workforce.caveat,
+      status: row.verified ? 'Human-verified' : 'Unverified',
+      statusClass: row.verified ? 'good' : 'unverified',
     }));
   }
 
-  replace(container, cards);
+  replace(container, section(
+    'Current snapshot',
+    'A quick view of the evidence held today. These figures describe coverage and publication state; they are not a composite score.',
+    el('div', { class: 'grid cards' }, cards)));
 }
 
-function renderSources(container, summary) {
+function renderExplore(container) {
+  const routes = [
+    ['#/pay', 'Pay & benchmarks', 'Follow the workforce story from published pay to labour-market context.'],
+    ['#/contracts', 'Funding & contracts', 'See buyers, providers, notice values, and procurement patterns.'],
+    ['#/geography', 'Places', 'Choose a metric, explore local evidence, and open an authority page.'],
+    ['#/providers', 'Providers', 'Browse provider evidence across pay, contracts, claims, and safety.'],
+    ['#/treatment', 'Treatment data', 'Understand demand and activity figures with their uncertainty and limits.'],
+    ['#/pfd', 'Safety & legal', 'Explore coroners’ reports, concerns, and provider mentions responsibly.'],
+    ['#/claims', 'Evidence-backed claims', 'Find campaign-ready claims with the evidence behind them.'],
+  ];
+  replace(container, section(
+    'Explore the evidence',
+    'Choose a question to move from the snapshot into the evidence layer that can answer it.',
+    el('div', { class: 'grid explore-grid' }, routes.map(([href, title, description]) =>
+      el('a', { class: 'explore-card', href },
+        el('span', { class: 'explore-card-title', text: title }),
+        el('span', { class: 'explore-card-description', text: description }),
+        el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: '→' }))))));
+}
+
+function statusKey() {
+  return el('div', { class: 'status-key', 'aria-label': 'Evidence status key' },
+    el('span', { class: 'small muted', text: 'Status key' }),
+    el('span', { class: 'badge good', text: 'Published / indexed' }),
+    el('span', { class: 'badge unverified', text: 'Unverified' }),
+    el('span', { class: 'badge neutral', text: 'Not collected / missing' }));
+}
+
+function renderEvidenceStatus(container, summary) {
+  const freshness = el('div', { class: 'panel status-panel', id: 'freshness-panel' },
+    el('h3', { text: 'Freshness' }),
+    el('p', { class: 'small muted', text: 'Loading source updates…' }));
+  replace(container, section(
+    'Evidence status',
+    'Where the evidence comes from, how much has been verified, and when each source layer was last written.',
+    statusKey(),
+    el('div', { class: 'grid evidence-status-grid' },
+      renderSourcesPanel(summary),
+      renderFunnelPanel(summary.funnel),
+      freshness)));
+  renderFreshnessPanel(freshness);
+}
+
+function renderSourcesPanel(summary) {
   const sources = summary.pipeline?.sources || [];
   const chips = sources.map((s) => el('div', { class: 'sourcechip' },
     el('span', { class: `dot ${s.last_retrieved ? 'green' : ''}` }),
     el('span', { text: SOURCE_LABELS[s.source_system] || s.source_system }),
     el('span', { class: 'muted small', text: ago(s.last_retrieved) })));
 
-  replace(container, section(
-    'Sources and latest updates',
-    'Each source system, and when the pipeline last fetched from it.',
+  return el('div', { class: 'panel status-panel' },
+    el('h3', { text: 'Sources and latest updates' }),
+    el('p', { class: 'small muted', text: 'Each source system, and when the pipeline last fetched from it.' }),
     el('div', { class: 'sourcestrip' }, chips.length ? chips
       : el('span', { class: 'muted', text: 'Nothing collected yet.' })),
-    el('p', { class: 'small muted' },
+    el('p', { class: 'small muted status-footnote' },
       `Fingertips: ${num(summary.fingertips?.indicators_collected)} indicators, `
-      + `latest period ${summary.fingertips?.latest_period || '—'}.`)));
+      + `latest period ${summary.fingertips?.latest_period || '—'}.`));
 }
 
 /* W-26: the verification funnel. Drawn as bars with the count as a label so
  * that a zero is visibly a zero -- an empty chart reads as "no data", which
  * is exactly the wrong reading for the campaign's standing argument. */
-function renderFunnel(container, funnel) {
-  if (!funnel) return;
+function renderFunnelPanel(funnel) {
+  if (!funnel) return el('div', { class: 'panel status-panel' },
+    el('h3', { text: 'Verification progress' }),
+    el('p', { class: 'small muted', text: 'No verification summary is available.' }));
   const stages = [
     ['discovered', 'discovered', 'candidates found by the modules'],
     ['undecided', 'undecided', 'waiting for a human decision'],
@@ -174,28 +242,27 @@ function renderFunnel(container, funnel) {
       el('div', { class: 'small muted', text: sub }));
   });
 
-  replace(container, section(
-    'From candidate to evidence',
-    'How much of what the modules found has been verified by a person. '
+  return el('div', { class: 'panel status-panel' },
+    el('h3', { text: 'From candidate to evidence' }),
+    el('p', { class: 'small muted' }, 'How much of what the modules found has been verified by a person. '
     + 'Rejected candidates are the difference between discovered and the '
-    + 'rest of the funnel.',
-    el('div', { class: 'panel' },
-      funnel.caveat ? pinnedCaveat(funnel.caveat, 'A zero here means') : null,
-      el('div', { class: 'flowrows' }, rows))));
+    + 'rest of the funnel.'),
+    funnel.caveat ? pinnedCaveat(funnel.caveat, 'A zero here means') : null,
+    el('div', { class: 'flowrows' }, rows));
 }
 
 /* W-26: how fresh each source table is, per the rows' own retrieval stamps.
  * The payload is fetched lazily (it is seconds of scans) and the bars use
  * the same ago() helper as the sources strip. "Never" is drawn as a full
  * muted track, never as a zero. */
-async function renderFreshness(container) {
+async function renderFreshnessPanel(container) {
   let data;
   try {
     data = await fetchJSON('freshness');
   } catch (error) {
-    replace(container, section('How fresh the evidence is',
-      'Days since each source table was last written by a pipeline run.',
-      el('p', { class: 'small muted', text: `Could not load: ${error.message}` })));
+    replace(container,
+      el('h3', { text: 'Freshness' }),
+      el('p', { class: 'small muted', text: `Could not load: ${error.message}` }));
     return;
   }
 
@@ -218,13 +285,11 @@ async function renderFreshness(container) {
         ? el('div', { class: 'flowbar-fill never', style: 'width: 100%' })
         : el('div', { class: 'flowbar-fill', style: `width: ${Math.round(t.days / maxDays * 100)}%` }))));
 
-  replace(container, section(
-    'How fresh the evidence is',
-    'Days since each source table was last written. A table that has never '
-    + 'been collected is drawn as \'never\', not as zero.',
-    el('div', { class: 'panel' },
-      data.caveat ? pinnedCaveat(data.caveat, 'Read before comparing tables') : null,
-      el('div', { class: 'flowrows' }, bars))));
+  replace(container,
+    el('h3', { text: 'Freshness' }),
+    el('p', { class: 'small muted' }, 'Days since each source table was last written. A table that has never been collected is drawn as “never”, not as zero.'),
+    data.caveat ? pinnedCaveat(data.caveat, 'Read before comparing tables') : null,
+    el('div', { class: 'flowrows' }, bars));
 }
 
 async function renderTopContracts(container, charts) {
