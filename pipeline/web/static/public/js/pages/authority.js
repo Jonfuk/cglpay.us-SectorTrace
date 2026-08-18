@@ -19,7 +19,8 @@
 
 import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenanceFromRows, tableCard, escapeHtml, shareButton } from '/js/components.js';
+          provenanceFromRows, tableCard, escapeHtml, shareButton,
+          findingBlock, evidenceMeta } from '/js/components.js';
 
 const TYPE_LABELS = {
   county: 'County council',
@@ -83,6 +84,16 @@ async function renderOne(main, code) {
     el('details', { class: 'read-first' },
       el('summary', { text: 'How to read this authority workbench' }),
       el('p', { text: 'Grant allocation, budgeted spend, treatment estimates and contracts come from different sources. They are shown side by side, never combined into a score.' })),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'This authority page keeps grants, budgets, treatment estimates, and contracts as separate evidence layers so the reader can inspect the local picture without a composite score.',
+        value: authority.name || code, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: 'A grant allocation and budgeted spend come from different documents and are never combined or differenced here.',
+      });
+    })(),
     el('div', { id: 'coverage' }),
     el('div', { id: 'grant-budget' }),
     el('div', { id: 'drilldown' }),

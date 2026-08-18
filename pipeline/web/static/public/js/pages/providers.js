@@ -14,7 +14,8 @@
 import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          statCard, exportButton, registerLink, registerLinks, shareButton } from '/js/components.js';
+          statCard, exportButton, registerLink, registerLinks, shareButton,
+          findingBlock, evidenceMeta } from '/js/components.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
@@ -161,6 +162,16 @@ async function renderOne(main, key) {
           text: 'Explore the published provider evidence in SectorTrace.',
           label: 'Share this provider',
         }))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return findingBlock({
+        finding: 'This provider workbench brings together the published records held for one organisation; partial evidence describes coverage in the warehouse, not the provider itself.',
+        value: provider.canonical_name || key, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
+        timing: { kind: meta.retrievedAt ? 'current' : 'snapshot', date: meta.retrievedAt?.slice(0, 10) },
+        sources: meta.sources, retrievedAt: meta.retrievedAt?.slice(0, 10),
+        caveat: 'Entity links and name matches are shown with their verification status; a missing record is not evidence that an event did not occur.',
+      });
+    })(),
     el('div', { id: 'inventory' }),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
