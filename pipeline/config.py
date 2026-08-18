@@ -184,6 +184,14 @@ class Settings(BaseSettings):
     companies_house_api_key: str | None = None
     cqc_subscription_key: str | None = None
 
+    # Deliberately opt-in. This is used only by m15 when a person promotes a
+    # WhatDoTheyKnow request candidate; no other module may route traffic
+    # through Bright Data, and the ordinary CSV/feed/disclosure-log fetches
+    # remain on PipelineHTTPClient.
+    wdtk_web_unlocker_enabled: bool = False
+    brightdata_api_key: str | None = None
+    brightdata_unlocker_zone: str = "web_unlocker1"
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes
@@ -362,6 +370,14 @@ class Settings(BaseSettings):
                 "subscription key and set it before running m05_cqc."
             )
         return self.cqc_subscription_key
+
+    def require_brightdata_key(self) -> str:
+        if not self.brightdata_api_key:
+            raise RuntimeError(
+                "BRIGHTDATA_API_KEY is not set in .env. Set it before enabling "
+                "WDTK_WEB_UNLOCKER_ENABLED for m15."
+            )
+        return self.brightdata_api_key
 
     def require_google_service_account(self) -> Path:
         """Path to the service-account JSON file. This must be a *path*, not
