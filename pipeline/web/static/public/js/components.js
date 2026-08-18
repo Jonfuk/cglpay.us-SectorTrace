@@ -326,13 +326,47 @@ export function exportButton(endpoint, params = {}, label = 'Download CSV',
   }, label);
 }
 
+/** A share action that degrades to copying the current URL. The URL is the
+ *   evidence state for the portal, so sharing it preserves the route and any
+ *   filters without inventing a second representation of the page. */
+export function shareButton({ title = 'SectorTrace', text = '',
+                              url = window.location.href,
+                              label = 'Share overview' } = {}) {
+  const button = el('button', {
+    class: 'btn ghost share-button', type: 'button',
+    'aria-label': label,
+    onclick: async () => {
+      const original = button.textContent;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title, text, url });
+          button.textContent = 'Shared';
+        } else if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(`${text}\n${url}`.trim());
+          button.textContent = 'Link copied';
+        } else {
+          button.textContent = 'Copy unavailable';
+        }
+      } catch (error) {
+        // Closing the native share sheet is not a failure worth surfacing.
+        if (error?.name === 'AbortError') return;
+        button.textContent = 'Share failed';
+      }
+      setTimeout(() => { button.textContent = original; }, 1600);
+    },
+  }, label);
+  return button;
+}
+
 export function statCard({ value, label, sub, caveat: caveatText, plain = false,
-                            unverified = false }) {
+                            unverified = false, status = null,
+                            statusClass = 'neutral' }) {
   const note = caveat(caveatText);
   return el('div', { class: `statcard${unverified ? ' unverified' : ''}` },
     el('div', { class: `value${plain ? ' plain' : ''}`, text: value }),
     el('div', { class: 'label' }, label, note ? note.button : null),
     sub ? el('div', { class: 'sub' }, sub) : null,
+    status ? el('span', { class: `badge ${statusClass}`, text: status }) : null,
     unverified ? el('span', { class: 'badge unverified', text: 'Not yet human-verified' }) : null,
     note ? note.body : null);
 }
