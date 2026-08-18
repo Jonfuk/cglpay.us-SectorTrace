@@ -122,7 +122,7 @@ def test_web_unlocker_retries_canonical_html_after_json_502(monkeypatch, setting
     def fake_post(url, **kwargs):
         calls.append(kwargs["json"])
         if len(calls) == 1:
-            return _Response({"status_code": 502, "headers": {}, "body": "upstream"})
+            return _Response({"status_code": "502", "headers": {}, "body": "upstream"})
         return _Response({"status_code": 200,
                           "headers": {"content-type": "text/html"},
                           "body": "<html>request page</html>"})
@@ -136,7 +136,7 @@ def test_web_unlocker_retries_canonical_html_after_json_502(monkeypatch, setting
         "https://www.whatdotheyknow.com/request/example.json",
         "https://www.whatdotheyknow.com/request/example",
     ]
-    assert calls[1]["render"] is True
+    assert "render" not in calls[1]
     assert result.url == "https://www.whatdotheyknow.com/request/example"
     assert result.status_code == 200
     assert result.body == b"<html>request page</html>"
