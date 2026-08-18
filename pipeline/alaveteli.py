@@ -11,12 +11,10 @@ Two shapes live here, and they are reached very differently.
 
   * The **read API** shape (`parse_info_request`, `parse_authority`,
     `extract_response_texts`) — `/request/<slug>.json` and `/body/<slug>.json`,
-    which as of 2026-08-11 answer this pipeline with a Cloudflare 403. Nothing
-    is wired to it. It stays written and fixture-tested because it is the half
-    of the problem that is not gated: if mySociety grant access or supply a
-    bulk extract, full response text becomes parseable immediately rather than
-    being built under time pressure against live data. See
-    `modules/m15_foi.py` for the measurements.
+    which as of 2026-08-11 answer this pipeline with a Cloudflare 403. The
+    human-promotion path also accepts the canonical rendered request HTML when
+    the JSON route returns 502; it uses `parse_info_request_html` and keeps
+    outgoing correspondence out of the response field.
 
 Callers get a `ParseOutcome` rather than a bare dict, because this pipeline's
 rule is that an unparseable field becomes NULL and is logged — never
@@ -33,6 +31,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Any
 
 # Alaveteli's `described_state` vocabulary. These ten are *observed* values,
@@ -375,4 +374,105 @@ def parse_info_request(raw: Any, *, base_url: str = "https://www.whatdotheyknow.
         "last_updated": _iso_datetime(info.get("updated_at"), "updated_at", failures),
         "response_text": "\n\n---\n\n".join(responses) if responses else None,
         "response_count": len(responses) if has_events else None,
+    }, failures)
+
+
+class _WdtkHtmlParser(HTMLParser):
+    """Extract the stable, semantic parts of a rendered WDTK request page.
+
+    This deliberately reads only ``incoming`` correspondence blocks. The
+    page repeats the requester's outgoing message below each response, and
+    including it would put the question into ``response_text``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title: list[str] = []
+        self._in_title = False
+        self._incoming_depth = 0
+        self._body_depth = 0
+        self._body: list[list[str]] = []
+        self._current: list[str] | None = None
+        self._times: list[str] = []
+        self._strong: list[str] = []
+        self._in_strong = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr = dict(attrs)
+        classes = set((attr.get("class") or "").split())
+        if tag == "h1":
+            self._in_title = True
+        if tag == "time" and attr.get("datetime"):
+            self._times.append(attr["datetime"])
+        if tag == "strong":
+            self._in_strong = True
+        if tag == "div" and attr.get("id", "").startswith("incoming-"):
+            self._incoming_depth = 1
+            self._current = []
+        elif self._incoming_depth:
+            self._incoming_depth += tag == "div"
+        if self._incoming_depth and "correspondence_text" in classes:
+            self._body_depth = 1
+        elif self._body_depth:
+            self._body_depth += tag == "div"
+        if self._body_depth and tag in {"p", "br", "li"} and self._current is not None:
+            self._current.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "h1":
+            self._in_title = False
+        if tag == "strong":
+            self._in_strong = False
+        if self._body_depth and tag == "div":
+            self._body_depth -= 1
+        if self._incoming_depth and tag == "div":
+            self._incoming_depth -= 1
+            if self._incoming_depth == 0 and self._current is not None:
+                self._body.append(self._current)
+                self._current = None
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title.append(data)
+        if self._in_strong:
+            self._strong.append(data)
+        if self._body_depth and self._current is not None:
+            self._current.append(data)
+
+
+def parse_info_request_html(html: str, *, base_url: str = "https://www.whatdotheyknow.com",
+                            request_url: str | None = None) -> ParseOutcome:
+    """Parse the canonical rendered WDTK page used when its JSON route fails."""
+    parser = _WdtkHtmlParser()
+    try:
+        parser.feed(html)
+    except Exception as exc:  # HTMLParser is permissive, but keep NULL-first semantics.
+        return ParseOutcome(None, [ParseFailure("wdtk_html", html[:200],
+                                                f"malformed HTML: {type(exc).__name__}")])
+
+    def clean(text: str) -> str | None:
+        value = re.sub(r"\s+", " ", text).strip()
+        return value or None
+
+    responses = [clean("".join(parts)) for parts in parser._body]
+    responses = [response for response in responses if response]
+    title = clean("".join(parser.title))
+    status = None
+    status_text = clean(" ".join(parser._strong)) or ""
+    for candidate in KNOWN_DESCRIBED_STATES:
+        if re.search(rf"\b{re.escape(candidate.replace('_', ' '))}\b", status_text,
+                     re.IGNORECASE):
+            status = candidate
+            break
+    failures: list[ParseFailure] = []
+    if not parser._body:
+        failures.append(ParseFailure("response_text", "", "no incoming correspondence blocks"))
+    return ParseOutcome({
+        "request_url": request_url,
+        "subject": title,
+        "request_date": parser._times[0] if parser._times else None,
+        "status": status,
+        "disclosed": (status in DISCLOSING_STATES) if status else None,
+        "response_text": "\n\n---\n\n".join(responses) if responses else None,
+        "response_count": len(responses),
     }, failures)
