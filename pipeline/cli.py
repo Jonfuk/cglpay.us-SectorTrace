@@ -135,6 +135,27 @@ def graph_analyze(
             conn.close()
 
 
+@graph_app.command("backfill")
+def graph_backfill() -> None:
+    """Seed the graph registry from existing evidence without fetching or guessing."""
+    conn = None
+    try:
+        from pipeline.graph.backfill import seed_existing_evidence
+
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        result = seed_existing_evidence(conn)
+        typer.echo("graph backfill: {entities} entity writes, {evidence} evidence writes, "
+                    "{relationships} relationships, {queued} queued changes".format(**result))
+    except Exception as exc:
+        typer.echo(f"graph backfill failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.command("list-modules")
 def list_modules() -> None:
     """List every module currently registered with the CLI."""
