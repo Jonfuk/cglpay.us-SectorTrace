@@ -1,0 +1,31 @@
+# Local document-analysis worker for Unraid/Docker hosts.  This is deliberately
+# separate from the Railway image, which serves persisted results and does not
+# need heavyweight parser or OCR system dependencies.
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ghostscript \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install the lockfile-resolved Python environment before application source so
+# normal code changes retain Docker's dependency-layer cache.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project \
+    --extra postgres --extra storage --extra documents
+
+COPY pipeline ./pipeline
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# `docker run … documents status` is therefore equivalent to
+# `uv run pipeline documents status` in a checkout.
+ENTRYPOINT ["pipeline"]
+CMD ["--help"]
