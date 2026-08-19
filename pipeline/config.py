@@ -102,6 +102,20 @@ class Settings(BaseSettings):
     # `uv sync --extra ocr` at some point.
     ocr_enabled: bool = False
 
+    # Document analysis is a separate downstream workflow.  Collection must
+    # remain able to succeed when parsing dependencies are deliberately not
+    # installed, so this setting is never consulted by collectors.
+    document_analysis_enabled: bool = True
+    document_parser: str = "docling"
+    document_worker_concurrency: int = 2
+    document_ocr_enabled: bool = False
+    document_ocr_language: str = "eng"
+    document_max_file_size_mb: int = 100
+    document_max_pages: int = 500
+    document_min_text_chars_per_page: int = 40
+    document_max_zero_text_page_ratio: float = 0.60
+    document_parse_timeout_seconds: int = 900
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
     # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
@@ -155,6 +169,10 @@ class Settings(BaseSettings):
     graph_max_edges: int = 50_000
 
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
+    # Derived files are never placed below RAW_ARCHIVE_DIR.  Keeping a
+    # separate root makes it mechanically difficult for an OCR or parser run
+    # to replace the immutable retrieved bytes.
+    derived_archive_dir: Path = REPO_ROOT / "data" / "derived"
     archive_s3_bucket: str | None = None
     archive_s3_endpoint: str | None = None
     archive_s3_region: str | None = None
