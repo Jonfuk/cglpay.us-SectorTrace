@@ -33,7 +33,10 @@ The same build through the wrapper is:
 ```
 
 Rebuild after pulling a new application commit or lockfile. No secrets are
-copied into the image.
+copied into the image. The worker uses Debian Trixie so its Ghostscript is
+newer than 10.02.0; OCRmyPDF rejects the 10.0.0–10.02.0 releases because of
+known PDF-corruption regressions. Rebuilding replaces the previous image; it
+does not alter Unraid's host packages or the database.
 
 ## Configuration and storage
 
@@ -81,6 +84,8 @@ docker run --rm --entrypoint /bin/sh sectortrace-document-worker:latest \
 ```
 
 The wrapper equivalent is `./deploy/unraid-document-worker.sh verify`.
+Confirm that `gs --version` reports **10.02.1 or newer** before resuming an
+OCR batch.
 
 ## Run a batch
 

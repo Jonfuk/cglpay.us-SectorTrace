@@ -1,7 +1,10 @@
 # Local document-analysis worker for Unraid/Docker hosts.  This is deliberately
 # separate from the Railway image, which serves persisted results and does not
 # need heavyweight parser or OCR system dependencies.
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+# Bookworm's Ghostscript is 10.0.0, a release that OCRmyPDF rejects for
+# --skip-text/--redo-ocr due to PDF-corruption regressions.  Trixie supplies
+# Ghostscript 10.05.x while retaining the same Python 3.12 worker runtime.
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
