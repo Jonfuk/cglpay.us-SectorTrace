@@ -97,8 +97,8 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 51 = 50 + 0051 (entity-name lookup correction).
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 51
+        # through. 52 = 51 + 0052 (raw archive extraction ledger).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 52
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

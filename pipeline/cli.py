@@ -1216,6 +1216,36 @@ def archive_migrate(
     typer.echo("run archive-verify for complete byte-count and SHA-256 verification")
 
 
+@app.command("archive-process")
+def archive_process(
+    source_system: str | None = typer.Option(None, "--source-system", help="Process one archive source directory."),
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Process at most this many objects."),
+    force: bool = typer.Option(False, "--force", help="Re-run objects already processed by this extractor version."),
+    extractor_version: str = typer.Option("1", "--extractor-version", help="Version recorded for derived output."),
+) -> None:
+    """Extract deterministic text/metadata from raw objects; never create claims."""
+    from pipeline.archive import get_archive
+    from pipeline.archive_process import process_archive
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        result = process_archive(
+            conn, settings, get_archive(settings), source_system=source_system,
+            limit=limit, force=force, extractor_version=extractor_version,
+        )
+    except Exception as exc:
+        typer.echo(f"archive process failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+    typer.echo(
+        "archive process {run_id}: {objects} objects, {processed} processed, "
+        "{skipped} skipped, {failed} failed".format(**result)
+    )
+
+
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
