@@ -20,6 +20,119 @@ from pipeline.registry import (
 )
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
+graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
+app.add_typer(graph_app, name="graph")
+
+
+def _graph_projector():
+    """Open the authoritative warehouse and the optional graph projection."""
+    from pipeline.graph.projector import GraphProjector
+    from pipeline.graph.store import GraphStore
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, db.migrations_dir_for(settings))
+    store = GraphStore(settings)
+    store.connect()
+    return conn, store, GraphProjector(conn, store, settings.graph_batch_size)
+
+
+@graph_app.command("rebuild")
+def graph_rebuild(
+    clear: bool = typer.Option(False, "--clear", help="Remove only SectorTrace-managed Neo4j data first."),
+) -> None:
+    """Replay the warehouse into Neo4j. No ingestion module writes Neo4j directly."""
+    conn = store = None
+    try:
+        conn, store, projector = _graph_projector()
+        result = projector.rebuild(clear=clear)
+        typer.echo("graph rebuild {run_id}: {entities} entities, {relationships} relationships, "
+                    "{claims} claims, {evidence} evidence records".format(**result))
+    except Exception as exc:
+        typer.echo(f"graph rebuild failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if store:
+            store.close()
+        if conn:
+            conn.close()
+
+
+@graph_app.command("sync")
+def graph_sync(limit: int = typer.Option(500, min=1, help="Maximum queued changes to process.")) -> None:
+    """Process a retryable batch from the relational graph-projection queue."""
+    conn = store = None
+    try:
+        conn, store, projector = _graph_projector()
+        result = projector.sync_delta(limit=limit)
+        typer.echo("graph sync: {processed} processed, {failed} failed".format(**result))
+        if result["failed"]:
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo(f"graph sync failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if store:
+            store.close()
+        if conn:
+            conn.close()
+
+
+@graph_app.command("status")
+def graph_status() -> None:
+    """Show the number of unprojected relational changes."""
+    conn = None
+    try:
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        from pipeline.graph.projector import GraphProjector
+        # Status is a warehouse query: it does not need Neo4j to be available.
+        projector = GraphProjector(conn, None, settings.graph_batch_size)
+        typer.echo(f"graph projection queue: {projector.status()['pending']} pending")
+    except Exception as exc:
+        typer.echo(f"graph status failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
+@graph_app.command("analyze")
+def graph_analyze(
+    as_of: str = typer.Option(None, help="Only relationships valid on this ISO date."),
+) -> None:
+    """Calculate bounded, neutral NetworkX metrics from warehouse relationships."""
+    conn = None
+    try:
+        from pipeline.analytics.graph_builder import build_commissioner_provider_graph
+        from pipeline.analytics.networks import (
+            commissioner_provider_metrics,
+            persist_metrics,
+            provider_network_metrics,
+        )
+
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        snapshot = build_commissioner_provider_graph(
+            conn, as_of=as_of, max_nodes=settings.graph_max_nodes,
+            max_edges=settings.graph_max_edges)
+        stamp = f"commissioner-provider:{as_of or 'current'}"
+        stored = persist_metrics(
+            conn, commissioner_provider_metrics(snapshot) + provider_network_metrics(snapshot),
+            analysis_name="commissioner_provider_network", graph_snapshot=stamp,
+            parameters=snapshot.parameters)
+        typer.echo(f"graph analysis: {snapshot.graph.number_of_nodes()} nodes, "
+                    f"{snapshot.relationship_count} evidence relationships, {stored} metrics")
+    except Exception as exc:
+        typer.echo(f"graph analysis failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.command("list-modules")

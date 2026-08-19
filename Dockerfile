@@ -6,13 +6,13 @@ WORKDIR /app
 # time; PostgreSQL is therefore a deployment dependency even though SQLite is
 # still the default for a local checkout.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --extra postgres --extra storage
+RUN uv sync --frozen --no-dev --no-install-project --extra postgres --extra storage --extra graph
 
 COPY pipeline ./pipeline
 COPY deploy ./deploy
 COPY railway.toml ./railway.toml
 
-RUN uv sync --frozen --no-dev --extra postgres --extra storage
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

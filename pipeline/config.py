@@ -140,6 +140,20 @@ class Settings(BaseSettings):
     # the session setting; that is a working configuration and a weaker one,
     # and `pipeline.web.queries` says so where it happens.
     database_ro_url: str | None = None
+
+    # Neo4j is a disposable projection of the authoritative warehouse.  It is
+    # deliberately disabled by default so an unavailable graph service cannot
+    # interrupt collection or ordinary local development.
+    neo4j_enabled: bool = False
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str | None = None
+    neo4j_database: str = "neo4j"
+    neo4j_verify_connectivity: bool = True
+    graph_batch_size: int = 500
+    graph_max_nodes: int = 10_000
+    graph_max_edges: int = 50_000
+
     raw_archive_dir: Path = REPO_ROOT / "data" / "raw"
     archive_s3_bucket: str | None = None
     archive_s3_endpoint: str | None = None
@@ -258,6 +272,19 @@ class Settings(BaseSettings):
                 "does not select the backend by itself. Set DATABASE_URL too, "
                 "or unset this one."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _neo4j_configuration(self) -> Settings:
+        """Reject an enabled graph that cannot be connected securely.
+
+        The password is intentionally optional while graph support is off,
+        preserving the existing no-Neo4j startup path.
+        """
+        if self.neo4j_enabled and not (self.neo4j_password or "").strip():
+            raise ValueError("NEO4J_PASSWORD must be set when NEO4J_ENABLED=true.")
+        if self.graph_batch_size < 1 or self.graph_max_nodes < 1 or self.graph_max_edges < 1:
+            raise ValueError("Graph batch and safety limits must be positive integers.")
         return self
 
     @model_validator(mode="after")
