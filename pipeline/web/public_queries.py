@@ -1904,7 +1904,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     # with no documented host (the CQC half of W-15), so the page shows the
     # dates and does not build a link it cannot verify.
     cqc_inspections = _rows(conn, """
-        SELECT l.location_name, r.report_date, r.first_visit_date, r.report_uri,
+        SELECT l.location_id, l.location_name, r.report_date, r.first_visit_date, r.report_uri,
                r.source_url, r.retrieved_at
         FROM cqc_location_reports r
         JOIN cqc_locations l ON l.location_id = r.location_id

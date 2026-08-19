@@ -307,6 +307,13 @@ main:focus { outline: none; }
 .statcard.unverified { background-image: var(--unverified-bg); }
 .statcard-actions { margin-top: var(--space-3); }
 .statcard-actions .share-button { min-width: 0; padding: 4px 8px; font-size: 12px; }
+.evidence-summary-card { cursor: pointer; transition: transform .15s ease, border-color .15s ease; }
+.evidence-summary-card:hover, .evidence-summary-card:focus-visible { transform: translateY(-2px); border-color: var(--accent-amber); }
+.evidence-modal { width: min(960px, calc(100vw - 32px)); max-width: none; max-height: min(780px, calc(100vh - 32px)); padding: var(--space-6); color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-accent); border-radius: var(--radius-lg); box-shadow: 0 24px 80px rgba(0,0,0,.5); }
+.evidence-modal::backdrop { background: rgba(3, 8, 16, .72); backdrop-filter: blur(3px); }
+.evidence-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.evidence-modal-head h2 { margin-top: 4px; }
+.evidence-modal .tablecard { margin-top: var(--space-3); }
 
 /* --- caveats ------------------------------------------------------------- */
 
@@ -558,6 +565,9 @@ main:focus { outline: none; }
   border-top: 1px solid var(--border-subtle); padding: var(--space-8) var(--space-6);
   color: var(--text-secondary); font-size: 13px; max-width: 1440px; margin: 0 auto;
 }
+.sitefoot-nav { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-6); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-subtle); }
+.sitefoot-nav a { color: var(--text-primary); text-decoration: none; font-weight: 600; }
+.sitefoot-nav a:hover { color: var(--accent-teal); }
 
 /* Bootstrap is the layout foundation; these tokens keep its components in
  * the portal's evidence palette. The application rules below remain the

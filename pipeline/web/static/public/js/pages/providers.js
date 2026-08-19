@@ -212,24 +212,49 @@ function renderInventory(container, data) {
     ['Safety/legal', (data.pfd_mentions || []).length + (data.tribunal_cases || []).length],
     ['Financial evidence', (data.charity_finance || []).length],
   ];
-  const cards = items.map(([label, count]) => statCard({
-    value: num(count),
-    label,
-    sub: count ? 'records held' : 'not collected or not matched',
-  }));
+  const rowsFor = {
+    'CQC locations': (data.cqc_locations || []).map((row) => ({ location: row.location_name, rating: row.overall_rating || 'Not rated', inspected: row.overall_rating_date || 'Not inspected', source: row.source_url || '—' })),
+    Contracts: (data.events || []).filter((row) => row.event_type === 'contract_award').map((row) => ({ date: row.date, evidence: row.label, detail: row.value_summary || '—', source: row.notice_link || row.source_url || '—' })),
+    'Safety/legal': [...(data.pfd_mentions || []).map((row) => ({ date: row.report_date, evidence: 'Coroners’ report mention', detail: row.mention_type || '—', source: row.report_url || '—' })), ...(data.tribunal_cases || []).map((row) => ({ date: row.decision_date, evidence: 'Employment tribunal case', detail: row.outcome || '—', source: row.source_url || '—' }))],
+    'Financial evidence': (data.charity_finance || []).map((row) => ({ date: row.financial_year_end, evidence: 'Filed accounts', detail: row.total_income == null ? 'Income not published' : `Income £${Number(row.total_income).toLocaleString('en-GB')}`, source: row.source_url || '—' })),
+  };
+  const columnsFor = {
+    'CQC locations': [{ title: 'Location', field: 'location' }, { title: 'Rating', field: 'rating' }, { title: 'Inspected', field: 'inspected' }, { title: 'Source', field: 'source' }],
+    Contracts: [{ title: 'Date', field: 'date' }, { title: 'Evidence', field: 'evidence' }, { title: 'Detail', field: 'detail' }, { title: 'Source', field: 'source' }],
+    'Safety/legal': [{ title: 'Date', field: 'date' }, { title: 'Evidence', field: 'evidence' }, { title: 'Detail', field: 'detail' }, { title: 'Source', field: 'source' }],
+    'Financial evidence': [{ title: 'Year end', field: 'date' }, { title: 'Evidence', field: 'evidence' }, { title: 'Detail', field: 'detail' }, { title: 'Source', field: 'source' }],
+  };
+  const cards = items.map(([label, count]) => {
+    const card = statCard({ value: num(count), label, sub: count ? 'records held · click to inspect' : 'not collected or not matched' });
+    if (!count) return card;
+    card.classList.add('evidence-summary-card'); card.tabIndex = 0; card.setAttribute('role', 'button');
+    const open = () => openEvidenceModal(label, rowsFor[label] || [], columnsFor[label] || []);
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+    return card;
+  });
   replace(container, section(
     'Evidence inventory',
     'Counts describe the records held for this provider, not its performance or scale.',
     el('div', { class: 'grid cards' }, cards)));
 }
 
+function openEvidenceModal(title, rows, columns) {
+  const dialog = el('dialog', { class: 'evidence-modal', 'aria-labelledby': 'evidence-modal-title' },
+    el('div', { class: 'evidence-modal-head' }, el('div', {}, el('span', { class: 'eyebrow', text: 'Provider evidence' }), el('h2', { id: 'evidence-modal-title', text: title })), el('button', { class: 'btn ghost', type: 'button', 'aria-label': 'Close evidence table', onclick: () => dialog.close() }, 'Close')),
+    el('p', { class: 'small muted', text: `${num(rows.length)} records, newest first.` }),
+    tableCard(`${title} — newest first`, columns, rows.slice().sort((a, b) => String(b.date || b.inspected || '').localeCompare(String(a.date || a.inspected || ''))), { height: 520 }));
+  document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove(), { once: true }); dialog.showModal();
+}
+
 function renderTimeline(container, data) {
   const events = data.events || [];
   const list = el('ul', { class: 'timeline' });
-
-  for (const event of events.slice().reverse()) {
+  const ordered = events.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  let visible = 15;
+  const draw = () => replace(list, ordered.slice(0, visible).map((event) => {
     const note = event.caveat ? caveat(event.caveat) : null;
-    list.append(el('li', { class: event.event_type },
+    return el('li', { class: event.event_type },
       el('div', { class: 'when', text: isoDate(event.date) }),
       el('div', { class: 'what' }, event.label || event.event_type,
         note ? note.button : null),
@@ -243,15 +268,19 @@ function renderTimeline(container, data) {
             event.notice_link_basis === 'constructed' ? 'notice ↗ (built from id)' : 'notice ↗'))
         : (event.source_url
           ? el('div', { class: 'small' }, sourceLink(event.source_url, 'source ↗')) : null),
-      note ? note.body : null));
-  }
+      note ? note.body : null);
+  }));
+  draw();
+  const more = el('button', { class: 'btn ghost', type: 'button', text: 'Load more evidence' });
+  more.addEventListener('click', () => { visible += 15; draw(); if (visible >= ordered.length) more.hidden = true; });
+  more.hidden = ordered.length <= 15;
 
   replace(container, section(
     'Evidence timeline',
     `${num(events.length)} dated records, newest first. Each carries the `
     + 'document it came from.',
     el('div', { class: 'panel' },
-      events.length ? list : noData('dated evidence', './start.sh run all'))));
+      events.length ? [list, more] : noData('dated evidence', './start.sh run all'))));
 }
 
 function renderGraph(container, data, charts, key) {
@@ -342,10 +371,9 @@ function renderCqc(container, data) {
     return 'neutral';
   };
 
-  // No "verify at source" link per location, deliberately. The CQC public API
-  // publishes no profile URL -- 520 archived payloads contain no cqc.org.uk
-  // address at all -- and the conventional shape could not be verified without
-  // working around a bot block. A link that 404s is worse than a name.
+  const inspections = data.cqc_inspections || [];
+  const latestReport = new Map();
+  for (const report of inspections) if (!latestReport.has(report.location_id)) latestReport.set(report.location_id, report);
   replace(container, section(
     'CQC registrations',
     `${num(locations.length)} registered locations.`,
@@ -353,18 +381,27 @@ function renderCqc(container, data) {
       pinnedCaveat(data.caveats?.cqc_coverage, 'This is not a service map'),
       locations.length
         ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;' },
-          locations.map((l) => el('span', {
-            class: `badge ${ratingClass(l.overall_rating)}`,
-            title: `${l.location_name} — ${l.overall_rating || 'not rated'}`,
-          }, `${truncate(l.location_name, 34)} · ${l.overall_rating || 'not rated'}`)))
+          locations.map((l) => {
+            const report = latestReport.get(l.location_id);
+            return el(report ? 'a' : 'span', {
+              class: `badge ${ratingClass(l.overall_rating)}`,
+              title: `${l.location_name} — ${l.overall_rating || 'not rated'}`,
+              href: report ? cqcReportHref(report) : null,
+              target: report ? '_blank' : null, rel: report ? 'noopener noreferrer' : null,
+            }, `${truncate(l.location_name, 34)} · ${l.overall_rating || 'not rated'}`);
+          }))
         : noData('CQC locations', './start.sh run m05_cqc'))));
 }
 
+function cqcReportHref(report) {
+  const uri = String(report.report_uri || '');
+  if (/^https?:\/\//i.test(uri)) return uri.replace('api.service.cqc.org.uk', 'www.cqc.org.uk');
+  if (uri.startsWith('/')) return `https://www.cqc.org.uk${uri}`;
+  return report.location_id ? `https://www.cqc.org.uk/location/${encodeURIComponent(report.location_id)}` : 'https://www.cqc.org.uk';
+}
+
 /* W-24: inspection history from cqc_location_reports. A report date is when
- * an inspection report was published, not when a rating changed — the
- * caveat is pinned beside the chart. The report_uri is deliberately not
- * linked: it is a relative address with no documented host (W-15's open
- * half), and a link that 404s is worse than a name. */
+ * an inspection report was published, not when a rating changed. */
 function renderCqcReports(container, data, charts) {
   const inspections = data.cqc_inspections || [];
   const holder = el('div', {});
