@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import io
+
 from pipeline.documents import repository
-from pipeline.documents.models import EvidenceReference, ParsedDocument, ParsedElement
+from pipeline.documents.artifacts import DerivedArtifactStore
+from pipeline.documents.inspect import ocr_required
+from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
+from pipeline.documents.quality import assess
 
 
 def reference() -> EvidenceReference:
@@ -55,3 +60,45 @@ def test_same_parser_configuration_is_idempotent(conn, settings):
     second = repository.persist_parse(conn, document_id, parsed, "config", None, "GOOD", {}, [], settings)
     assert first == second
     assert conn.execute("SELECT COUNT(*) FROM document_versions").fetchone()[0] == 1
+
+
+def test_ocr_routing_uses_the_configured_transparent_thresholds(settings):
+    low_text = Inspection("application/pdf", 100, "NORMAL", page_count=2,
+                          embedded_text_chars=20, pages_with_zero_text=1)
+    born_digital = Inspection("application/pdf", 100, "NORMAL", page_count=2,
+                              embedded_text_chars=400, pages_with_zero_text=0)
+    assert ocr_required(low_text, settings)
+    assert not ocr_required(born_digital, settings)
+
+
+def test_quality_marks_empty_parse_as_failed():
+    status, metrics, warnings = assess(ParsedDocument("fixture", "1", []), pages_total=2)
+    assert status == "FAILED"
+    assert metrics["pages_total"] == 2
+    assert warnings == ["parser produced no text elements"]
+
+
+def test_derived_files_are_content_addressed_and_outside_raw_archive(settings):
+    path, digest = DerivedArtifactStore(settings).put("fixture", "ocr_pdf", ".pdf", b"derived pdf")
+    assert path == f"data/derived/fixture/ocr_pdf/{digest}.pdf"
+    assert str(settings.raw_archive_dir) not in path
+    assert (settings.derived_archive_dir / "fixture" / "ocr_pdf" / f"{digest}.pdf").read_bytes() == b"derived pdf"
+
+
+def test_derived_s3_storage_verifies_the_uploaded_hash(settings):
+    class FakeS3:
+        objects = {}
+
+        def put_object(self, Bucket, Key, Body):
+            self.objects[(Bucket, Key)] = Body
+
+        def get_object(self, Bucket, Key):
+            return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
+    configured = settings.model_copy(update={
+        "derived_archive_s3_bucket": "derived", "derived_archive_s3_endpoint": "https://s3.example",
+        "derived_archive_s3_region": "eu-west-2", "derived_archive_s3_url_style": "path",
+        "derived_archive_s3_access_key": "key", "derived_archive_s3_secret": "secret",
+    })
+    path, digest = DerivedArtifactStore(configured, FakeS3()).put("fixture", "ocr_pdf", ".pdf", b"derived")
+    assert path == f"s3://derived/fixture/ocr_pdf/{digest}.pdf"
