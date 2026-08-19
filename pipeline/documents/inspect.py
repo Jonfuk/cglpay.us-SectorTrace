@@ -11,6 +11,19 @@ class InspectionUnavailable(RuntimeError):
     """PyMuPDF is not installed with the optional documents dependencies."""
 
 
+def load_pymupdf():
+    """Use PyMuPDF's supported import name, retaining old pinned environments."""
+    try:
+        import pymupdf
+    except ImportError:
+        try:
+            import fitz as pymupdf
+        except ImportError as exc:  # pragma: no cover - install-specific
+            raise InspectionUnavailable(
+                "PDF inspection needs `uv sync --extra documents` (PyMuPDF).") from exc
+    return pymupdf
+
+
 def inspect_bytes(body: bytes, filename: str | None = None,
                   mime_type: str | None = None) -> Inspection:
     """Inspect a supported document without interpreting it as evidence text."""
@@ -18,13 +31,9 @@ def inspect_bytes(body: bytes, filename: str | None = None,
             or "application/octet-stream").split(";", 1)[0].lower()
     if mime != "application/pdf" and not body.startswith(b"%PDF-"):
         return Inspection(mime_type=mime, file_size=len(body), status="UNSUPPORTED")
+    pymupdf = load_pymupdf()
     try:
-        import fitz
-    except ImportError as exc:  # pragma: no cover - install-specific
-        raise InspectionUnavailable(
-            "PDF inspection needs `uv sync --extra documents` (PyMuPDF).") from exc
-    try:
-        with fitz.open(stream=body, filetype="pdf") as pdf:
+        with pymupdf.open(stream=body, filetype="pdf") as pdf:
             page_text = tuple(len(page.get_text("text").strip()) for page in pdf)
             image_count = sum(len(page.get_images(full=True)) for page in pdf)
             metadata = {str(key): str(value) for key, value in (pdf.metadata or {}).items()

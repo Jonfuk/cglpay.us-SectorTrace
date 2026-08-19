@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Protocol
 
+from pipeline.documents.inspect import InspectionUnavailable, load_pymupdf
 from pipeline.documents.models import ParsedDocument, ParsedElement
 
 
@@ -44,12 +45,12 @@ class PyMuPDFParser:
 
     def __init__(self) -> None:
         try:
-            import fitz
-        except ImportError as exc:  # pragma: no cover - install-specific
+            pymupdf = load_pymupdf()
+        except InspectionUnavailable as exc:  # pragma: no cover - install-specific
             raise ParserUnavailable(
                 "PyMuPDF parsing needs `uv sync --extra documents`.") from exc
-        self._fitz = fitz
-        self.version = getattr(fitz, "VersionBind", "unknown")
+        self._pymupdf = pymupdf
+        self.version = getattr(pymupdf, "VersionBind", "unknown")
 
     def supports(self, mime_type: str) -> bool:
         return mime_type == "application/pdf"
@@ -57,7 +58,7 @@ class PyMuPDFParser:
     def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
         if not self.supports(mime_type):
             raise ValueError(f"{self.name} does not support {mime_type}")
-        with self._fitz.open(stream=body, filetype="pdf") as pdf:
+        with self._pymupdf.open(stream=body, filetype="pdf") as pdf:
             elements = _elements_from_pages([page.get_text("text") for page in pdf])
         return ParsedDocument(self.name, self.version, elements)
 
