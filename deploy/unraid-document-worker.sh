@@ -41,7 +41,7 @@ require_env_file() {
 
 worker_args() {
   require_env_file
-  printf '%s\n' --rm --user "$worker_user" --env-file "$env_file"
+  printf '%s\n' --rm --user "$worker_user" --env-file "$env_file" -e UV_CACHE_DIR=/tmp/uv-cache
   if [[ -d "$data_dir" ]]; then
     printf '%s\n' -v "$data_dir:/app/data"
   fi
@@ -89,7 +89,16 @@ case "${1:-}" in
     mapfile -t args < <(worker_args)
     docker run --rm --name sectortrace-document-batch "${args[@]}" \
       -v "$batch_script:/work/batch.sh:ro" \
-      --entrypoint /bin/bash "$image" /work/batch.sh
+      --entrypoint /bin/bash "$image" -c '
+        # The host script may begin with `git pull` and `uv sync`. The image
+        # is rebuilt to update code/dependencies, so those host-only setup
+        # commands are removed in a temporary copy rather than run here.
+        sed -E \
+          -e "/^[[:space:]]*git[[:space:]]+pull([[:space:]]|$)/d" \
+          -e "/^[[:space:]]*uv[[:space:]]+sync([[:space:]]|$)/d" \
+          /work/batch.sh > /tmp/sectortrace-batch.sh
+        exec /bin/bash /tmp/sectortrace-batch.sh
+      '
     ;;
   *)
     usage >&2

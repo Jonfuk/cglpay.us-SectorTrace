@@ -22,8 +22,11 @@ COPY pipeline ./pipeline
 RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents
 
 ENV PATH="/app/.venv/bin:$PATH" \
+    UV_CACHE_DIR="/tmp/uv-cache" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
+
+RUN mkdir -p "$UV_CACHE_DIR" && chown 99:100 "$UV_CACHE_DIR"
 
 # `docker run … documents status` is therefore equivalent to
 # `uv run pipeline documents status` in a checkout.

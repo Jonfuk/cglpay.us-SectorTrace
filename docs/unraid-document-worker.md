@@ -114,8 +114,15 @@ docker run --rm --name sectortrace-document-batch --user 99:100 \
 With the wrapper:
 
 ```bash
-./deploy/unraid-document-worker.sh batch /path/to/batch.container.sh
+./deploy/unraid-document-worker.sh batch /path/to/batch.sh
 ```
+
+The wrapper accepts the existing host `batch.sh`: it makes an in-container
+temporary copy that omits only leading `git pull` and `uv sync` commands. The
+container image itself is the immutable code/dependency environment, so update
+it with `git pull` followed by `./deploy/unraid-document-worker.sh build`
+before starting a batch. It also sets a writable `UV_CACHE_DIR` for Unraid's
+normal `99:100` container user.
 
 Add the `data` volume above to that command if the raw or derived archive is
 filesystem-backed. The worker writes only PostgreSQL and the configured
