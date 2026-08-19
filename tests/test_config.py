@@ -65,6 +65,16 @@ def test_require_google_service_account_returns_existing_path(tmp_path):
     assert settings.require_google_service_account() == cred
 
 
+def test_neo4j_can_remain_disabled_without_a_password():
+    settings = Settings(contact_email="ops@example.com", _env_file=None)
+    assert settings.neo4j_enabled is False
+
+
+def test_neo4j_requires_a_password_only_when_enabled():
+    with pytest.raises(ValidationError, match="NEO4J_PASSWORD"):
+        Settings(contact_email="ops@example.com", neo4j_enabled=True, _env_file=None)
+
+
 def test_the_test_settings_never_write_into_the_repo(settings):
     """Every writable path the fixture hands out points into tmp.
 
