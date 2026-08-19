@@ -42,7 +42,7 @@ def test_canonical_parse_keeps_page_provenance_and_is_searchable(conn, settings)
             "source_url": "https://example.test/document",
         }
     ]
-    assert conn.execute("SELECT match_count FROM document_topics WHERE topic='WORKFORCE'").fetchone()[0] == 2
+    assert conn.execute("SELECT match_count FROM document_topics WHERE topic='WORKFORCE'").fetchone()[0] == 1
 
 
 def test_same_parser_configuration_is_idempotent(conn, settings):

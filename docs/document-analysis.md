@@ -1,0 +1,107 @@
+# Structured document analysis
+
+The document-analysis layer turns an already archived, already provenanced
+file into parser-neutral, page-aware records.  It does not collect documents,
+create claims, promote evidence, call an AI service, or require Neo4j.
+
+```mermaid
+flowchart TD
+    A[Immutable raw archive] --> B[PyMuPDF inspector]
+    B --> C{OCR required?}
+    C -- no --> E[Docling parser]
+    C -- yes --> D[OCRmyPDF derived PDF]
+    D --> E
+    E --> F[Canonical document records]
+    F --> G[SQLite or PostgreSQL]
+    G --> H[Provenanced text search]
+    G -. future projection .-> I[Neo4j Evidence Graph]
+    I -. future .-> J[AI / GraphRAG]
+```
+
+## Evidence and provenance
+
+The raw archive is authoritative and immutable.  A document is registered
+only with the provenance already captured at retrieval: source system, URL,
+retrieval time, HTTP status, payload SHA-256, and raw-object path.  The
+registration creates or updates a graph-ready `evidence_records` row; it does
+not alter a module-specific evidence table.
+
+An OCR PDF, parser JSON-equivalent structure, and extracted elements are
+derived interpretations.  `derived_artifacts` preserves the input evidence
+ID, output SHA-256, tool/version, and parameters.  The lineage is:
+
+```text
+document element -> document version -> derived artifact (when OCR is used)
+-> evidence record -> immutable raw-object path + payload SHA-256
+```
+
+## Storage
+
+By default derived files live under `data/derived/`, never `data/raw/`.
+Set the complete `DERIVED_ARCHIVE_S3_*` group to store derived files in a
+separate S3-compatible bucket.  PostgreSQL/SQLite store normalized metadata,
+elements, tables, links, processing state, and quality—rather than binary
+PDFs or repeated parser-native payloads.
+
+## Parsers and OCR
+
+Install local heavy tooling with:
+
+```powershell
+uv sync --extra documents
+```
+
+`PyMuPDF` supplies fast PDF inspection: page counts, text density, zero-text
+pages, image counts, metadata, and encryption status.  Configurable,
+deterministic text-density rules decide whether OCR is warranted.  OCRmyPDF
+runs only when `DOCUMENT_OCR_ENABLED=true`; a failure is recorded as
+retryable and does not invalidate the raw source.
+
+`Docling` is the preferred parser.  `PyMuPDF` is a lightweight PDF fallback
+when Docling is not installed.  Parser name, installed version, canonical
+schema version, and configuration hash identify each non-destructive
+`document_versions` record, so parser upgrades can be selectively rerun.
+Docling and OCR are excluded from the Railway image: serving published state
+does not need model downloads, Tesseract, or Ghostscript.
+
+## Operations
+
+Register a file only after its normal collection flow has supplied provenance:
+
+```powershell
+pipeline documents register --source-system committee_papers --payload-sha256 <sha> `
+  --raw-object-path data/raw/committee_papers/<sha>.pdf --retrieved-at <ISO-8601> `
+  --source-url <URL> --http-status 200
+pipeline documents inspect data/raw/committee_papers/<sha>.pdf
+pipeline documents process --source-system committee_papers --limit 25
+pipeline documents status
+pipeline documents search recruitment
+pipeline documents validate
+```
+
+`reprocess` accepts a parser version, quality status, source system, or
+document ID.  `benchmark` accepts a CSV with an `evidence_id` column and uses
+a bounded default of 25 records.  Neither command enumerates or processes the
+full archive without an explicit selection and limit.
+
+## Quality and limits
+
+The quality status is an auditable heuristic, not a claim about source truth.
+It records page coverage, characters, replacement-character ratio, duplicate
+line ratio, heading/table counts, and empty-element ratio as `GOOD`,
+`ACCEPTABLE`, `SUSPECT`, or `FAILED`.  Topic matches are deterministic finding
+aids only; their presence is not evidence of a fact.
+
+Current first-use limitation: existing module tables are not bulk-registered
+automatically, because many do not share one provenance natural key.  This is
+intentional: the registration command refuses to invent source URL or
+retrieval context.  Integrating a collector should call `DocumentService`
+after a successful archival write, while keeping parsing out of the HTTP
+transaction.
+
+The first rich-parser release targets PDFs.  Structured machine-readable
+formats remain better served by the existing archive extraction ledger and
+their native ingestion modules; DOCX/HTML parser adapters are prepared but
+not included in the initial batch workflow.  Parser timeouts are configured
+for worker orchestration; the synchronous CLI records a failed retryable run
+if an adapter raises.

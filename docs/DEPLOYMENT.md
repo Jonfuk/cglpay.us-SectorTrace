@@ -1,5 +1,11 @@
 # Running against the LAN PostgreSQL warehouse
 
+> Document analysis is intentionally local-heavy.  The Railway Docker image
+> installs PostgreSQL and storage support only; it serves persisted canonical
+> document records and does not install Docling, OCRmyPDF, Tesseract, or
+> Ghostscript.  See [document-analysis.md](document-analysis.md) for local
+> setup and the separate derived-artifact storage policy.
+
 Phase 5 of the PostgreSQL port ([issue #21](https://github.com/Jonfuk/cglpay.us-SectorTrace/issues/21)).
 Phases 1–3 gave the two backends one interface, moved the rows across and
 measured both; Phase 4 optimised the PostgreSQL path. This is the part that is

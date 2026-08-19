@@ -24,9 +24,19 @@ class DocumentService:
 
     def process(self, reference: EvidenceReference, title: str | None = None,
                 force: bool = False, parser_name: str | None = None) -> dict:
+        if not self.settings.document_analysis_enabled:
+            raise RuntimeError("Document analysis is disabled; set DOCUMENT_ANALYSIS_ENABLED=true.")
         self.register(reference)
         body = get_archive(self.settings).read(reference.raw_object_path)
         inspection = inspect_bytes(body, source_filename(reference.raw_object_path), reference.mime_type)
+        if len(body) > self.settings.document_max_file_size_mb * 1024 * 1024:
+            error = f"file exceeds DOCUMENT_MAX_FILE_SIZE_MB ({self.settings.document_max_file_size_mb})"
+            repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, "OCR_NOT_REQUIRED", error)
+            return {"status": "SKIPPED_LIMIT", "evidence_id": reference.evidence_id, "error": error}
+        if inspection.page_count and inspection.page_count > self.settings.document_max_pages:
+            error = f"document exceeds DOCUMENT_MAX_PAGES ({self.settings.document_max_pages})"
+            repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, "OCR_NOT_REQUIRED", error)
+            return {"status": "SKIPPED_LIMIT", "evidence_id": reference.evidence_id, "error": error}
         needs_ocr = ocr_required(inspection, self.settings)
         ocr_status = "OCR_REQUIRED" if needs_ocr else "OCR_NOT_REQUIRED"
         repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, ocr_status)
@@ -39,7 +49,7 @@ class DocumentService:
         if needs_ocr and self.settings.document_ocr_enabled:
             try:
                 ocr_body, tool_version = ocr.create_searchable_pdf(body, self.settings.document_ocr_language)
-                storage_path, artifact_hash = DerivedArtifactStore(self.settings.derived_archive_dir).put(
+                storage_path, artifact_hash = DerivedArtifactStore(self.settings).put(
                     reference.source_system, "ocr_pdf", ".pdf", ocr_body)
                 source_artifact_id = repository.add_artifact(
                     self.conn, reference, "OCR_PDF", storage_path, artifact_hash, "ocrmypdf", tool_version,
@@ -75,6 +85,8 @@ class DocumentService:
             quality_status, metrics, warnings = assess(parsed, inspection.page_count)
             version_id = repository.persist_parse(self.conn, document_id, parsed, config_hash, source_artifact_id,
                                                   quality_status, metrics, warnings, self.settings)
+            self.conn.execute("UPDATE document_processing_states SET ocr_status=? WHERE evidence_id=?",
+                              (ocr_status, reference.evidence_id))
             self.conn.execute(
                 "UPDATE document_parse_runs SET completed_at=?, status='SUCCESS', elapsed_ms=?, warning_count=? "
                 "WHERE document_parse_run_id=?",

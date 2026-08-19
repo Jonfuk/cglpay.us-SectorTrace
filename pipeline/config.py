@@ -173,6 +173,15 @@ class Settings(BaseSettings):
     # separate root makes it mechanically difficult for an OCR or parser run
     # to replace the immutable retrieved bytes.
     derived_archive_dir: Path = REPO_ROOT / "data" / "derived"
+    # Derived artifacts may use their own S3-compatible bucket.  They are not
+    # allowed to share RAW_ARCHIVE_DIR paths, even when the same provider is
+    # used, because an OCR output must never be addressable as retrieved bytes.
+    derived_archive_s3_bucket: str | None = None
+    derived_archive_s3_endpoint: str | None = None
+    derived_archive_s3_region: str | None = None
+    derived_archive_s3_url_style: str | None = None
+    derived_archive_s3_access_key: str | None = None
+    derived_archive_s3_secret: str | None = None
     archive_s3_bucket: str | None = None
     archive_s3_endpoint: str | None = None
     archive_s3_region: str | None = None
@@ -315,6 +324,14 @@ class Settings(BaseSettings):
                              "and SECRET must be set together")
         if self.archive_s3_url_style and self.archive_s3_url_style not in {"virtual", "path"}:
             raise ValueError("ARCHIVE_S3_URL_STYLE must be 'virtual' or 'path'")
+        derived = (self.derived_archive_s3_bucket, self.derived_archive_s3_endpoint,
+                   self.derived_archive_s3_region, self.derived_archive_s3_url_style,
+                   self.derived_archive_s3_access_key, self.derived_archive_s3_secret)
+        if any(derived) and not all(derived):
+            raise ValueError("DERIVED_ARCHIVE_S3_BUCKET, ENDPOINT, REGION, URL_STYLE, ACCESS_KEY, "
+                             "and SECRET must be set together")
+        if self.derived_archive_s3_url_style and self.derived_archive_s3_url_style not in {"virtual", "path"}:
+            raise ValueError("DERIVED_ARCHIVE_S3_URL_STYLE must be 'virtual' or 'path'")
         return self
 
     @model_validator(mode="after")
