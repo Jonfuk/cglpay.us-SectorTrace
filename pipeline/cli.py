@@ -100,6 +100,41 @@ def graph_status() -> None:
             conn.close()
 
 
+@graph_app.command("analyze")
+def graph_analyze(
+    as_of: str = typer.Option(None, help="Only relationships valid on this ISO date."),
+) -> None:
+    """Calculate bounded, neutral NetworkX metrics from warehouse relationships."""
+    conn = None
+    try:
+        from pipeline.analytics.graph_builder import build_commissioner_provider_graph
+        from pipeline.analytics.networks import (
+            commissioner_provider_metrics,
+            persist_metrics,
+            provider_network_metrics,
+        )
+
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        snapshot = build_commissioner_provider_graph(
+            conn, as_of=as_of, max_nodes=settings.graph_max_nodes,
+            max_edges=settings.graph_max_edges)
+        stamp = f"commissioner-provider:{as_of or 'current'}"
+        stored = persist_metrics(
+            conn, commissioner_provider_metrics(snapshot) + provider_network_metrics(snapshot),
+            analysis_name="commissioner_provider_network", graph_snapshot=stamp,
+            parameters=snapshot.parameters)
+        typer.echo(f"graph analysis: {snapshot.graph.number_of_nodes()} nodes, "
+                    f"{snapshot.relationship_count} evidence relationships, {stored} metrics")
+    except Exception as exc:
+        typer.echo(f"graph analysis failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.command("list-modules")
 def list_modules() -> None:
     """List every module currently registered with the CLI."""
