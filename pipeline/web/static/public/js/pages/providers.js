@@ -395,9 +395,25 @@ function renderCqc(container, data) {
 
 function cqcReportHref(report) {
   const uri = String(report.report_uri || '');
-  if (/^https?:\/\//i.test(uri)) return uri.replace('api.service.cqc.org.uk', 'www.cqc.org.uk');
-  if (uri.startsWith('/')) return `https://www.cqc.org.uk${uri}`;
-  return report.location_id ? `https://www.cqc.org.uk/location/${encodeURIComponent(report.location_id)}` : 'https://www.cqc.org.uk';
+  const apiRoot = 'https://api.cqc.org.uk/public/v1';
+  const reportPath = (path) => path.startsWith('/public/v1/')
+    ? path
+    : `/public/v1${path.startsWith('/') ? path : `/${path}`}`;
+
+  if (/^https?:\/\//i.test(uri)) {
+    try {
+      const parsed = new URL(uri);
+      return `${apiRoot}${parsed.pathname.startsWith('/public/v1/')
+        ? parsed.pathname.slice('/public/v1'.length)
+        : reportPath(parsed.pathname).slice('/public/v1'.length)}${parsed.search}${parsed.hash}`;
+    } catch (_) {
+      // Fall through to the documented report-path handling below.
+    }
+  }
+  if (uri) return `${apiRoot}${reportPath(uri).slice('/public/v1'.length)}`;
+  return report.location_id
+    ? `${apiRoot}/locations/${encodeURIComponent(report.location_id)}`
+    : `${apiRoot}/reports`;
 }
 
 /* W-24: inspection history from cqc_location_reports. A report date is when
