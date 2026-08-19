@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, urlparse
 
 import structlog
 
-from pipeline import census_verify, db, promote
+from pipeline import census_verify, db, promote, provider_research
 from pipeline import claims as claims_core
 from pipeline.claims import ClaimError
 from pipeline.config import Settings, get_settings
@@ -949,6 +949,33 @@ class Handler(BaseHTTPRequestHandler):
                 limit=_int(params, "limit", 100),
                 offset=_int(params, "offset", 0))
 
+        if path == "/api/admin/provider-research/runs":
+            return {"runs": provider_research.runs(
+                conn, limit=_int(params, "limit", 50))}
+
+        if path == "/api/admin/provider-research/coverage":
+            return provider_research.coverage(
+                conn, provider_key=_str(params, "provider_key") or None)
+
+        if path == "/api/admin/provider-research/items":
+            return {"items": provider_research.items(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                state=_str(params, "state") or None,
+                category=_str(params, "category") or None,
+                limit=_int(params, "limit", 100),
+                offset=_int(params, "offset", 0))}
+
+        match = re.fullmatch(r"/api/admin/provider-research/items/(\d+)", path)
+        if match:
+            found = conn.execute(
+                "SELECT * FROM provider_research_items WHERE id = ?",
+                (int(match.group(1)),),
+            ).fetchone()
+            if found is None:
+                raise ApiError(f"No provider research item {match.group(1)}.", status=404)
+            return {"item": dict(found)}
+
         if path == "/api/admin/candidates":
             kind = _str(params, "kind") or "cdp_document"
             try:
@@ -1198,6 +1225,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/candidates/promote": self._promote,
             "/api/admin/candidates/reject": self._reject_candidates,
             "/api/admin/candidates/reset": self._reset_candidate,
+            "/api/admin/provider-research/promote": self._promote_provider_research,
             "/api/admin/census/verify": self._verify_census,
             "/api/admin/census/reject": self._reject_census,
             "/api/admin/census/reset": self._reset_census,
@@ -1437,6 +1465,24 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
         return {"reset": body.get("url")}
+
+    def _promote_provider_research(self, body: dict) -> Any:
+        """Publish one fully reviewed cross-cutting research finding."""
+        try:
+            item_id = int(body.get("item_id") or 0)
+        except (TypeError, ValueError):
+            raise ApiError("item_id must be a whole number.", status=400) from None
+        conn = db.get_connection(self.settings)
+        try:
+            result = provider_research.promote(
+                conn, item_id, str(body.get("promoted_by", "")))
+        except provider_research.ResearchError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.provider_research_promoted", item_id=item_id,
+                  by=result["promoted_by"])
+        return result
 
     def _export_job(self, body: dict) -> Any:
         job = admin.start_export(self.jobs, self.settings, body)

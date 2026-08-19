@@ -282,7 +282,7 @@ the parser understands) and `committee_system_unsupported`.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then bundle
-./start.sh export sheets     # ten CSV tabs
+./start.sh export sheets     # eleven CSV tabs, including reviewed provider research
 ./start.sh export geojson    # four Leaflet layers
 ./start.sh export echarts    # dashboard series
 ./start.sh export docs       # regenerate DATA_DICTIONARY.md

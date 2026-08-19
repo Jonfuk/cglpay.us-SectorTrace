@@ -17,11 +17,13 @@ import { initExports } from './exports.js';
 import { initHealth } from './health.js';
 import { initPalette } from './palette.js';
 import { initPipeline } from './pipeline.js';
+import { initProviderResearch } from './provider-research.js';
 import { initTheme } from './theme.js';
 
 initTheme();
 initPalette();
 initPipeline();
+initProviderResearch();
 initHealth();
 initExports();
 initCandidates();

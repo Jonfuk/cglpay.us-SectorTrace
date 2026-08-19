@@ -1,4 +1,4 @@
-"""Export schema: the ten Google Sheets tabs, defined in one place.
+"""Export schema: the eleven Google Sheets tabs, defined in one place.
 
 The brief asked for the original nine-tab structure; this schema was designed
 rather than supplied, on instruction. Two decisions worth stating:
@@ -19,7 +19,7 @@ restricted_ or personal-data column — tests assert both.
 The Sheets target is intentionally a readable campaign bundle, not a dump of
 every table. Modules m07, m09, m10, m12–m22, m24 and m25 remain available from
 the GeoJSON, ECharts, JSON and CSV export targets and the public API; they are
-explicitly outside the ten-tab Sheets contract until a tab can carry their
+explicitly outside the eleven-tab Sheets contract until a tab can carry their
 source-specific caveats without becoming an unreadable bulk extract.
 """
 from __future__ import annotations
@@ -277,6 +277,30 @@ TABS: list[TabSpec] = [
                    source_system
               FROM sector_universe
              ORDER BY COALESCE(notices_count, 0) DESC, canonical_name
+        """,
+    ),
+    TabSpec(
+        name="11_Provider_Research",
+        description="Reviewed cross-cutting findings from the provider research workflow, with citations and evidence status.",
+        columns=["provider_key", "entity_type", "entity_identifier", "category",
+                  "fact_type", "question", "raw_finding", "interpretation",
+                  "source_url", "publisher", "published_date", "accessed_at",
+                  "citation", "licence", "identity_match_basis", "time_period",
+                  "confidence", "destination", "promoted_by", "promoted_at"],
+        caveats=[
+            "This tab contains only findings that passed separate identity and evidence review and were promoted into the research evidence layer.",
+            "The findings describe evidence held by the project, not everything true about a provider. Read each source citation, time period, identity basis and licence limitation.",
+            "Facts that belong to an existing source-specific module remain in that module; this tab is for cross-cutting research findings and coverage observations.",
+        ],
+        sql="""
+            SELECT provider_key, entity_type, entity_identifier, category,
+                   fact_type, question, raw_finding, interpretation,
+                   source_url, publisher, published_date, accessed_at,
+                   citation, licence, identity_match_basis, time_period,
+                   confidence, destination, promoted_by, promoted_at
+              FROM provider_research_evidence
+             WHERE superseded_at IS NULL
+             ORDER BY provider_key, category, promoted_at DESC
         """,
     ),
 ]
