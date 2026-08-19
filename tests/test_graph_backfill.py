@@ -47,6 +47,22 @@ def test_backfill_seeds_evidence_backed_commissioning_graph_and_queue(tmp_path):
     conn.close()
 
 
+def test_backfill_keeps_historical_authorities_that_share_a_display_name(tmp_path):
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('E00000002', 'Example Council', 'unitary', '2024-01-01', '2024', '2024', "
+        "'https://example.test/authority-new', 'now', 200, 'ons', 'authority-hash-new')")
+    conn.commit()
+    seed_existing_evidence(conn)
+    rows = conn.execute(
+        "SELECT entity_id FROM entities WHERE entity_type = 'LOCAL_AUTHORITY' "
+        "ORDER BY entity_id").fetchall()
+    assert [row[0] for row in rows] == ["authority:E00000001", "authority:E00000002"]
+    conn.close()
+
+
 def test_empty_provider_analysis_is_a_valid_zero_result(tmp_path):
     conn = _conn(tmp_path)
     snapshot = build_commissioner_provider_graph(conn)
