@@ -21,7 +21,252 @@ from pipeline.registry import (
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
+documents_app = typer.Typer(help="Inspect, parse, validate, and search archived documents.")
 app.add_typer(graph_app, name="graph")
+app.add_typer(documents_app, name="documents")
+
+
+def _document_connection():
+    """Open the warehouse with its matching migration dialect applied."""
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    db.apply_migrations(conn, db.migrations_dir_for(settings))
+    return conn, settings
+
+
+def _document_reference(row):
+    from pipeline.documents.models import EvidenceReference
+
+    return EvidenceReference(
+        evidence_id=row["evidence_id"], source_system=row["source_system"],
+        source_url=row["source_url"], retrieved_at=row["retrieved_at"],
+        http_status=row["http_status"], payload_sha256=row["payload_sha256"],
+        raw_object_path=row["raw_object_path"], mime_type=row["mime_type"],
+        content_length=row["content_length"],
+    )
+
+
+@documents_app.command("inspect")
+def documents_inspect(
+    raw_object_path: str = typer.Argument(..., help="Immutable data/raw/... object to inspect"),
+    mime_type: str = typer.Option(None, help="Override the detected MIME type"),
+) -> None:
+    """Report deterministic PDF inspection metrics without parsing or writing."""
+    from pipeline.archive import get_archive
+    from pipeline.documents.inspect import inspect_bytes, source_filename
+
+    settings = get_settings()
+    report = inspect_bytes(get_archive(settings).read(raw_object_path), source_filename(raw_object_path), mime_type)
+    typer.echo(__import__("json").dumps(report.__dict__, default=list, indent=2, sort_keys=True))
+
+
+@documents_app.command("register")
+def documents_register(
+    source_system: str = typer.Option(..., help="Owning source-system/module name"),
+    payload_sha256: str = typer.Option(..., help="SHA-256 recorded for the raw bytes"),
+    raw_object_path: str = typer.Option(..., help="Immutable data/raw/... path"),
+    retrieved_at: str = typer.Option(..., help="ISO retrieval timestamp"),
+    source_url: str = typer.Option(None, help="Original publisher URL"),
+    http_status: int = typer.Option(None, help="HTTP status recorded at retrieval"),
+    mime_type: str = typer.Option(None),
+    source_table: str = typer.Option(None, help="Existing module table, if applicable"),
+    source_key: str = typer.Option(None, help="Existing module natural key, if applicable"),
+) -> None:
+    """Register an already-provenanced raw object without re-fetching it."""
+    from pipeline.documents import repository
+    from pipeline.documents.models import EvidenceReference
+    from pipeline.documents.service import DocumentService
+
+    conn, settings = _document_connection()
+    try:
+        evidence_id = repository.stable_id("evidence", f"{source_system}|{source_url}|{payload_sha256}")
+        DocumentService(conn, settings).register(EvidenceReference(
+            evidence_id=evidence_id, source_system=source_system, source_url=source_url,
+            retrieved_at=retrieved_at, http_status=http_status, payload_sha256=payload_sha256,
+            raw_object_path=raw_object_path, mime_type=mime_type, source_table=source_table,
+            source_key=source_key))
+        conn.commit()
+        typer.echo(evidence_id)
+    finally:
+        conn.close()
+
+
+def _document_candidates(conn, evidence_id, source_system, quality, parser_version, limit):
+    sql = "SELECT e.* FROM evidence_records e LEFT JOIN document_processing_states s ON s.evidence_id=e.evidence_id"
+    terms, values = [], []
+    if evidence_id:
+        terms.append("e.evidence_id=?")
+        values.append(evidence_id)
+    if source_system:
+        terms.append("e.source_system=?")
+        values.append(source_system)
+    if quality:
+        terms.append("s.quality_status=?")
+        values.append(quality)
+    if parser_version:
+        sql += " LEFT JOIN document_records d ON d.evidence_id=e.evidence_id LEFT JOIN document_versions dv ON dv.document_id=d.document_id"
+        terms.append("dv.parser_version=?")
+        values.append(parser_version)
+    if terms:
+        sql += " WHERE " + " AND ".join(terms)
+    sql += " ORDER BY e.created_at LIMIT ?"
+    return conn.execute(sql, (*values, limit)).fetchall()
+
+
+@documents_app.command("process")
+def documents_process(
+    evidence_id: str = typer.Option(None),
+    source_system: str = typer.Option(None),
+    limit: int = typer.Option(25, min=1),
+    parser: str = typer.Option(None, help="docling or pymupdf"),
+    force: bool = typer.Option(False, "--force", help="Create a new parse run even if configuration matches"),
+) -> None:
+    """Parse registered raw objects; collection and raw archive are untouched."""
+    from pipeline.documents.service import DocumentService
+
+    conn, settings = _document_connection()
+    try:
+        results = []
+        for row in _document_candidates(conn, evidence_id, source_system, None, None, limit):
+            try:
+                result = DocumentService(conn, settings).process(
+                    _document_reference(row), force=force, parser_name=parser)
+                conn.commit()
+            except Exception as exc:
+                conn.commit()  # Preserve the retryable failure state.
+                result = {"status": "FAILED", "evidence_id": row["evidence_id"], "error": str(exc)}
+            results.append(result)
+        typer.echo(__import__("json").dumps(results, indent=2, sort_keys=True))
+        if any(row["status"] in {"FAILED", "OCR_FAILED"} for row in results):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@documents_app.command("reprocess")
+def documents_reprocess(
+    parser_version: str = typer.Option(None, help="Only versions matching this parser version"),
+    quality: str = typer.Option(None, help="Only documents with this quality status"),
+    source_system: str = typer.Option(None),
+    document_id: str = typer.Option(None),
+    limit: int = typer.Option(25, min=1),
+    parser: str = typer.Option(None),
+) -> None:
+    """Selectively re-run existing registered evidence without destructive replacement."""
+    conn, settings = _document_connection()
+    try:
+        evidence_id = None
+        if document_id:
+            row = conn.execute("SELECT evidence_id FROM document_records WHERE document_id=?", (document_id,)).fetchone()
+            if row is None:
+                raise typer.BadParameter(f"unknown document_id {document_id!r}")
+            evidence_id = row["evidence_id"]
+        rows = _document_candidates(conn, evidence_id, source_system, quality, parser_version, limit)
+    finally:
+        conn.close()
+    # Reuse the same operation so error handling and one-transaction-per-file
+    # discipline cannot drift between initial and selective processing.
+    for row in rows:
+        documents_process(evidence_id=row["evidence_id"], limit=1, parser=parser, force=True)
+
+
+@documents_app.command("status")
+def documents_status() -> None:
+    """Summarise registered evidence and each processing stage."""
+    conn, _ = _document_connection()
+    try:
+        rows = conn.execute(
+            "SELECT parse_status, ocr_status, quality_status, COUNT(*) AS count "
+            "FROM document_processing_states GROUP BY parse_status, ocr_status, quality_status").fetchall()
+        typer.echo(__import__("json").dumps([dict(row) for row in rows], indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@documents_app.command("stats")
+def documents_stats() -> None:
+    """Return compact corpus, parser, OCR, and quality counts."""
+    conn, _ = _document_connection()
+    try:
+        result = {
+            "registered_evidence": conn.execute("SELECT COUNT(*) FROM document_processing_states").fetchone()[0],
+            "documents": conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0],
+            "active_versions": conn.execute("SELECT COUNT(*) FROM document_versions WHERE is_active=1").fetchone()[0],
+            "parse_runs": conn.execute("SELECT COUNT(*) FROM document_parse_runs").fetchone()[0],
+            "derived_artifacts": conn.execute("SELECT COUNT(*) FROM derived_artifacts").fetchone()[0],
+        }
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@documents_app.command("search")
+def documents_search(query: str = typer.Argument(...), limit: int = typer.Option(25, min=1)) -> None:
+    """Search active parsed elements and return source/page provenance."""
+    from pipeline.documents.repository import search
+
+    conn, settings = _document_connection()
+    try:
+        typer.echo(__import__("json").dumps(search(conn, settings, query, limit), indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@documents_app.command("validate")
+def documents_validate() -> None:
+    """Check canonical document integrity and fail non-zero on a broken lineage."""
+    conn, _ = _document_connection()
+    try:
+        checks = {
+            "documents_without_evidence": "SELECT COUNT(*) FROM document_records d LEFT JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE e.evidence_id IS NULL",
+            "elements_without_versions": "SELECT COUNT(*) FROM document_elements e LEFT JOIN document_versions v ON v.document_version_id=e.document_version_id WHERE v.document_version_id IS NULL",
+            "duplicate_active_versions": "SELECT COUNT(*) FROM (SELECT document_id FROM document_versions WHERE is_active=1 GROUP BY document_id HAVING COUNT(*) > 1)",
+            "broken_artifact_lineage": "SELECT COUNT(*) FROM derived_artifacts a LEFT JOIN evidence_records e ON e.evidence_id=a.evidence_id WHERE e.evidence_id IS NULL",
+        }
+        result = {name: conn.execute(sql).fetchone()[0] for name, sql in checks.items()}
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if any(result.values()):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@documents_app.command("benchmark")
+def documents_benchmark(
+    manifest: str = typer.Option(..., help="CSV containing an evidence_id column"),
+    parsers: str = typer.Option("pymupdf,docling", help="Comma-separated parser names"),
+    limit: int = typer.Option(25, min=1),
+) -> None:
+    """Run a selected representative corpus, never the archive by default."""
+    import csv
+    from pathlib import Path
+
+    conn, settings = _document_connection()
+    try:
+        with Path(manifest).open(newline="", encoding="utf-8") as handle:
+            evidence_ids = [row["evidence_id"] for row in csv.DictReader(handle) if row.get("evidence_id")][:limit]
+        selected = [name.strip() for name in parsers.split(",") if name.strip()]
+        rows = []
+        from pipeline.documents.service import DocumentService
+        for evidence_id in evidence_ids:
+            record = conn.execute("SELECT * FROM evidence_records WHERE evidence_id=?", (evidence_id,)).fetchone()
+            if record is None:
+                rows.append({"evidence_id": evidence_id, "status": "MISSING"})
+                continue
+            for parser in selected:
+                try:
+                    result = DocumentService(conn, settings).process(
+                        _document_reference(record), parser_name=parser, force=True)
+                    conn.commit()
+                except Exception as exc:
+                    conn.commit()
+                    result = {"status": "FAILED", "error": str(exc)}
+                rows.append({"evidence_id": evidence_id, "parser": parser, **result})
+        typer.echo(__import__("json").dumps(rows, indent=2, sort_keys=True))
+        if any(row.get("status") == "FAILED" for row in rows):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
 
 
 def _graph_projector():

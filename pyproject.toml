@@ -109,6 +109,15 @@ storage = [
     "boto3>=1.34",
 ]
 
+# Heavy, local-only document-analysis tooling.  Railway deliberately does not
+# install this extra: publication reads the already-persisted canonical model
+# and must not download parser models or require OCR system binaries at start.
+documents = [
+    "PyMuPDF>=1.24,<2",
+    "docling>=2.70,<3",
+    "ocrmypdf>=16,<17",
+]
+
 # The graph driver is opt-in for the same reason PostgreSQL is: a normal
 # SQLite-only collection run must remain runnable without a graph service.
 graph = [
