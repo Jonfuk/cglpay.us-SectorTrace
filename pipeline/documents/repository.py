@@ -152,6 +152,13 @@ def mark_attempt(conn, evidence_id: str, inspection_status: str, ocr_status: str
         (inspection_status, ocr_status, "FAILED" if error else "RUNNING", error, now, evidence_id))
 
 
+def mark_unchanged(conn, evidence_id: str, ocr_status: str) -> None:
+    """Restore the completed state when an existing active version is reused."""
+    conn.execute(
+        "UPDATE document_processing_states SET parse_status='SUCCESS', ocr_status=?, last_error=NULL "
+        "WHERE evidence_id=?", (ocr_status, evidence_id))
+
+
 def search(conn, settings, query: str, limit: int = 25) -> list[dict]:
     if settings.database_backend == "sqlite":
         rows = conn.execute(

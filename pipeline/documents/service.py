@@ -82,6 +82,7 @@ class DocumentService:
                   "max_zero_text_page_ratio": self.settings.document_max_zero_text_page_ratio}
         config_hash = hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
         if not force and repository.version_exists(self.conn, document_id, parser.name, parser.version, config_hash):
+            repository.mark_unchanged(self.conn, reference.evidence_id, ocr_status)
             return {"status": "UNCHANGED", "document_id": document_id, "evidence_id": reference.evidence_id}
         run_id = repository.stable_id("document-parse-run", f"{document_id}|{time.time_ns()}")
         started = repository.utcnow()

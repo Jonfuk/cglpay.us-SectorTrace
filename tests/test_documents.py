@@ -154,3 +154,16 @@ def test_html_fallback_strips_markup_and_ignores_script_content():
         ("HEADING", "Committee report"),
         ("PARAGRAPH", "Published finding."),
     ]
+
+
+def test_unchanged_version_restores_completed_processing_state(conn):
+    reference = EvidenceReference(
+        "evidence-unchanged", "fixture", "https://example.test/document", "2026-08-19T00:00:00+00:00",
+        200, "a" * 64, "data/raw/fixture/" + "a" * 64 + ".pdf")
+    repository.upsert_evidence(conn, reference)
+    repository.mark_attempt(conn, reference.evidence_id, "NORMAL", "OCR_NOT_REQUIRED")
+    repository.mark_unchanged(conn, reference.evidence_id, "OCR_NOT_REQUIRED")
+    row = conn.execute(
+        "SELECT parse_status, ocr_status, last_error FROM document_processing_states WHERE evidence_id=?",
+        (reference.evidence_id,)).fetchone()
+    assert tuple(row) == ("SUCCESS", "OCR_NOT_REQUIRED", None)
