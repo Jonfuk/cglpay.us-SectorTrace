@@ -24,6 +24,7 @@ RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents
 ENV PATH="/app/.venv/bin:$PATH" \
     UV_CACHE_DIR="/tmp/uv-cache" \
     UV_NO_SYNC=1 \
+    LOGS_DIR="/tmp/sectortrace-logs" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

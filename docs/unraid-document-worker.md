@@ -125,6 +125,9 @@ before starting a batch. It also sets a writable `UV_CACHE_DIR` for Unraid's
 normal `99:100` container user. The copy changes `uv run pipeline` and
 `uv run python` to the already-installed `pipeline` and `python` executables,
 so an active batch never tries to synchronise or install packages at runtime.
+The worker sends operational log files to its writable `/tmp/sectortrace-logs`
+directory by default; batch state and parsed content remain durable in
+PostgreSQL and the configured archives.
 
 Add the `data` volume above to that command if the raw or derived archive is
 filesystem-backed. The worker writes only PostgreSQL and the configured

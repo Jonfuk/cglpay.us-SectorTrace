@@ -41,7 +41,8 @@ require_env_file() {
 
 worker_args() {
   require_env_file
-  printf '%s\n' --rm --user "$worker_user" --env-file "$env_file" -e UV_CACHE_DIR=/tmp/uv-cache
+  printf '%s\n' --rm --user "$worker_user" --env-file "$env_file" \
+    -e UV_CACHE_DIR=/tmp/uv-cache -e LOGS_DIR=/tmp/sectortrace-logs
   if [[ -d "$data_dir" ]]; then
     printf '%s\n' -v "$data_dir:/app/data"
   fi
