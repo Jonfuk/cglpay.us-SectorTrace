@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Protocol
 
@@ -61,6 +62,70 @@ class PyMuPDFParser:
         return ParsedDocument(self.name, self.version, elements)
 
 
+class _HTMLTextCollector(HTMLParser):
+    """Collect readable HTML blocks without treating markup as source text."""
+
+    _BLOCKS = {"article", "blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "p", "td", "th"}
+    _IGNORED = {"script", "style", "template"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[tuple[str | None, str]] = []
+        self._tag: str | None = None
+        self._parts: list[str] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        del attrs
+        if tag in self._IGNORED:
+            self._ignored_depth += 1
+        if self._ignored_depth == 0 and tag in self._BLOCKS:
+            self._flush()
+            self._tag = tag
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._IGNORED and self._ignored_depth:
+            self._ignored_depth -= 1
+        if self._ignored_depth == 0 and tag in self._BLOCKS:
+            self._flush()
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth == 0:
+            self._parts.append(data)
+
+    def close(self) -> None:
+        super().close()
+        self._flush()
+
+    def _flush(self) -> None:
+        text = " ".join("".join(self._parts).split())
+        if text:
+            self.blocks.append((self._tag, text))
+        self._tag, self._parts = None, []
+
+
+class HTMLParserAdapter:
+    """Deterministic stdlib fallback for archived HTML documents."""
+    name = "html"
+    version = "stdlib-html-parser-1"
+
+    def supports(self, mime_type: str) -> bool:
+        return mime_type == "text/html"
+
+    def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
+        if not self.supports(mime_type):
+            raise ValueError(f"{self.name} does not support {mime_type}")
+        collector = _HTMLTextCollector()
+        collector.feed(body.decode("utf-8", errors="replace"))
+        collector.close()
+        elements = []
+        for sequence, (tag, text) in enumerate(collector.blocks, start=1):
+            level = int(tag[1]) if tag and tag.startswith("h") and tag[1:].isdigit() else None
+            elements.append(ParsedElement(
+                "HEADING" if level else "PARAGRAPH", sequence, text=text, heading_level=level))
+        return ParsedDocument(self.name, self.version, elements)
+
+
 class DoclingParser:
     """Docling adapter. Its native document remains an input, never our schema."""
     name = "docling"
@@ -104,4 +169,6 @@ def get_parser(name: str) -> DocumentParser:
         return DoclingParser()
     if name == "pymupdf":
         return PyMuPDFParser()
-    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf")
+    if name == "html":
+        return HTMLParserAdapter()
+    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, html")

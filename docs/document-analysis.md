@@ -92,7 +92,8 @@ archive object:
 
 ```powershell
 pipeline documents register-existing --source committee_papers --limit 25
-pipeline documents process --source-system council_committee_systems --parser pymupdf --limit 25
+# Copy the value reported in source_systems, e.g. committee_paper_promotion.
+pipeline documents process --source-system <reported-source-system> --parser pymupdf --limit 25
 ```
 
 ## Quality and limits
@@ -107,14 +108,16 @@ The bridge deliberately excludes candidate tables and legacy rows without
 complete document provenance. It refuses to invent a source URL or retrieval
 context. Its `source_systems` result gives the exact value to pass to
 `documents process`; the supported sources currently use
-`council_committee_systems`, `authority_websites_cdp`, and
-`provider_annual_reports`. Integrating a collector should call
+the source-system labels are retained from the rows already in your database.
+For a mixed PDF/HTML legacy batch, the processor automatically selects the
+deterministic HTML fallback when PyMuPDF does not support the archived MIME
+type. Integrating a collector should call
 `DocumentService` after a successful archival write, while keeping parsing out
 of the HTTP transaction.
 
-The first rich-parser release targets PDFs.  Structured machine-readable
-formats remain better served by the existing archive extraction ledger and
-their native ingestion modules; DOCX/HTML parser adapters are prepared but
-not included in the initial batch workflow.  Parser timeouts are configured
+The first rich-parser release targets PDFs and archived HTML. Structured
+machine-readable formats remain better served by the existing archive
+extraction ledger and their native ingestion modules; DOCX is prepared but
+not included in the initial batch workflow. Parser timeouts are configured
 for worker orchestration; the synchronous CLI records a failed retryable run
 if an adapter raises.

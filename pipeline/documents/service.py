@@ -11,7 +11,12 @@ from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.classify import classify
 from pipeline.documents.inspect import inspect_bytes, ocr_required, source_filename
 from pipeline.documents.models import EvidenceReference
-from pipeline.documents.parsers import ParserUnavailable, PyMuPDFParser, get_parser
+from pipeline.documents.parsers import (
+    HTMLParserAdapter,
+    ParserUnavailable,
+    PyMuPDFParser,
+    get_parser,
+)
 from pipeline.documents.quality import assess
 
 
@@ -66,6 +71,11 @@ class DocumentService:
             if selected != "docling":
                 raise
             parser = PyMuPDFParser()
+        if not parser.supports(inspection.mime_type):
+            if inspection.mime_type == "text/html":
+                parser = HTMLParserAdapter()
+            else:
+                raise ValueError(f"{parser.name} does not support {inspection.mime_type}")
         config = {"parser": parser.name, "parser_version": parser.version,
                   "schema_version": "1", "ocr": ocr_status,
                   "min_text_chars_per_page": self.settings.document_min_text_chars_per_page,

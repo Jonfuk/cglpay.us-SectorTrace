@@ -9,6 +9,7 @@ from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
 from pipeline.documents.inspect import ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
+from pipeline.documents.parsers import HTMLParserAdapter
 from pipeline.documents.quality import assess
 
 
@@ -143,3 +144,13 @@ def test_legacy_bridge_requires_a_real_archived_document(conn, settings):
     row = conn.execute("SELECT source_table, source_key FROM evidence_records").fetchone()
     assert row["source_table"] == "committee_papers"
     assert row["source_key"] == "E06000001|https://example.test/paper.pdf"
+
+
+def test_html_fallback_strips_markup_and_ignores_script_content():
+    parsed = HTMLParserAdapter().parse(
+        b"<html><body><h2>Committee report</h2><p>Published finding.</p>"
+        b"<script>not evidence</script></body></html>", "text/html")
+    assert [(element.element_type, element.text) for element in parsed.elements] == [
+        ("HEADING", "Committee report"),
+        ("PARAGRAPH", "Published finding."),
+    ]
