@@ -96,6 +96,12 @@ pipeline documents register-existing --source committee_papers --limit 25
 pipeline documents process --source-system <reported-source-system> --parser pymupdf --limit 25
 ```
 
+Both commands are resume-safe: registration excludes evidence already bridged
+from that legacy table, and ordinary processing selects pending or failed
+items before completed versions. Repeat this bounded pair until registration
+reports `candidates: 0`; use `--force` or `reprocess` only for a deliberate
+new parse run.
+
 ## Quality and limits
 
 The quality status is an auditable heuristic, not a claim about source truth.

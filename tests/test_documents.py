@@ -4,6 +4,7 @@ import hashlib
 import io
 
 from pipeline.archive import FilesystemArchive
+from pipeline.cli import _document_candidates
 from pipeline.documents import repository
 from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
@@ -144,6 +145,13 @@ def test_legacy_bridge_requires_a_real_archived_document(conn, settings):
     row = conn.execute("SELECT source_table, source_key FROM evidence_records").fetchone()
     assert row["source_table"] == "committee_papers"
     assert row["source_key"] == "E06000001|https://example.test/paper.pdf"
+    assert register_existing(conn, settings, "committee_papers", 25) == {
+        "source": "committee_papers",
+        "candidates": 0,
+        "registered": 0,
+        "missing_raw": 0,
+        "source_systems": [],
+    }
 
 
 def test_html_fallback_strips_markup_and_ignores_script_content():
@@ -167,3 +175,12 @@ def test_unchanged_version_restores_completed_processing_state(conn):
         "SELECT parse_status, ocr_status, last_error FROM document_processing_states WHERE evidence_id=?",
         (reference.evidence_id,)).fetchone()
     assert tuple(row) == ("SUCCESS", "OCR_NOT_REQUIRED", None)
+
+
+def test_default_batch_selection_skips_successful_documents(conn):
+    source = reference()
+    repository.upsert_evidence(conn, source)
+    assert len(_document_candidates(conn, None, "fixture", None, None, 25, pending_only=True)) == 1
+    conn.execute("UPDATE document_processing_states SET parse_status='SUCCESS' WHERE evidence_id=?",
+                 (source.evidence_id,))
+    assert _document_candidates(conn, None, "fixture", None, None, 25, pending_only=True) == []

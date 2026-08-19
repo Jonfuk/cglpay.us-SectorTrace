@@ -110,7 +110,7 @@ def documents_register_existing(
         conn.close()
 
 
-def _document_candidates(conn, evidence_id, source_system, quality, parser_version, limit):
+def _document_candidates(conn, evidence_id, source_system, quality, parser_version, limit, pending_only=False):
     sql = "SELECT e.* FROM evidence_records e LEFT JOIN document_processing_states s ON s.evidence_id=e.evidence_id"
     terms, values = [], []
     if evidence_id:
@@ -126,6 +126,8 @@ def _document_candidates(conn, evidence_id, source_system, quality, parser_versi
         sql += " LEFT JOIN document_records d ON d.evidence_id=e.evidence_id LEFT JOIN document_versions dv ON dv.document_id=d.document_id"
         terms.append("dv.parser_version=?")
         values.append(parser_version)
+    if pending_only:
+        terms.append("COALESCE(s.parse_status, 'PENDING') != 'SUCCESS'")
     if terms:
         sql += " WHERE " + " AND ".join(terms)
     sql += " ORDER BY e.created_at LIMIT ?"
@@ -146,7 +148,8 @@ def documents_process(
     conn, settings = _document_connection()
     try:
         results = []
-        for row in _document_candidates(conn, evidence_id, source_system, None, None, limit):
+        pending_only = evidence_id is None and not force
+        for row in _document_candidates(conn, evidence_id, source_system, None, None, limit, pending_only):
             try:
                 result = DocumentService(conn, settings).process(
                     _document_reference(row), force=force, parser_name=parser)

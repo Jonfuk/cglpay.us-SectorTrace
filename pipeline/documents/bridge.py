@@ -24,21 +24,27 @@ LEGACY_SOURCES = {
         "SELECT source_system, document_url AS source_url, retrieved_at, http_status, payload_sha256, "
         "archived_path AS raw_object_path, report_title AS title, 'committee_papers' AS source_table, "
         "authority_ons_code || '|' || document_url AS source_key "
-        "FROM committee_papers WHERE archived_path IS NOT NULL ORDER BY retrieved_at DESC",
+        "FROM committee_papers WHERE archived_path IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM evidence_records e WHERE e.source_table='committee_papers' "
+        "AND e.source_key=(authority_ons_code || '|' || document_url)) ORDER BY retrieved_at DESC",
     ),
     "cdp_documents": LegacySource(
         "cdp_documents",
         "SELECT source_system, document_url AS source_url, retrieved_at, http_status, payload_sha256, "
         "archived_path AS raw_object_path, title, 'cdp_documents' AS source_table, "
         "authority_ons_code || '|' || document_url AS source_key "
-        "FROM cdp_documents WHERE archived_path IS NOT NULL ORDER BY retrieved_at DESC",
+        "FROM cdp_documents WHERE archived_path IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM evidence_records e WHERE e.source_table='cdp_documents' "
+        "AND e.source_key=(authority_ons_code || '|' || document_url)) ORDER BY retrieved_at DESC",
     ),
     "annual_reports": LegacySource(
         "annual_reports",
         "SELECT source_system, document_url AS source_url, retrieved_at, http_status, payload_sha256, "
         "archived_path AS raw_object_path, NULL AS title, 'provider_annual_reports' AS source_table, "
         "provider_key || '|' || financial_year_end AS source_key "
-        "FROM provider_annual_reports WHERE archived_path IS NOT NULL ORDER BY retrieved_at DESC",
+        "FROM provider_annual_reports WHERE archived_path IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM evidence_records e WHERE e.source_table='provider_annual_reports' "
+        "AND e.source_key=(provider_key || '|' || financial_year_end)) ORDER BY retrieved_at DESC",
     ),
 }
 
