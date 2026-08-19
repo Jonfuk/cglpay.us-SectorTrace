@@ -96,6 +96,8 @@ case "${1:-}" in
         sed -E \
           -e "/^[[:space:]]*git[[:space:]]+pull([[:space:]]|$)/d" \
           -e "/^[[:space:]]*uv[[:space:]]+sync([[:space:]]|$)/d" \
+          -e "s/uv[[:space:]]+run[[:space:]]+pipeline([[:space:]]|$)/pipeline\\1/g" \
+          -e "s/uv[[:space:]]+run[[:space:]]+python([[:space:]]|$)/python\\1/g" \
           /work/batch.sh > /tmp/sectortrace-batch.sh
         exec /bin/bash /tmp/sectortrace-batch.sh
       '
