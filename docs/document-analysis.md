@@ -84,6 +84,17 @@ document ID.  `benchmark` accepts a CSV with an `evidence_id` column and uses
 a bounded default of 25 records.  Neither command enumerates or processes the
 full archive without an explicit selection and limit.
 
+For existing promoted documents, use the bounded registration bridge before
+processing. It supports `committee_papers`, `cdp_documents`, and
+`annual_reports`, and registers a row only when its legacy table has a direct
+document URL, retrieval provenance, SHA-256, and a still-verifiable raw
+archive object:
+
+```powershell
+pipeline documents register-existing --source committee_papers --limit 25
+pipeline documents process --source-system council_committee_systems --parser pymupdf --limit 25
+```
+
 ## Quality and limits
 
 The quality status is an auditable heuristic, not a claim about source truth.
@@ -92,12 +103,14 @@ line ratio, heading/table counts, and empty-element ratio as `GOOD`,
 `ACCEPTABLE`, `SUSPECT`, or `FAILED`.  Topic matches are deterministic finding
 aids only; their presence is not evidence of a fact.
 
-Current first-use limitation: existing module tables are not bulk-registered
-automatically, because many do not share one provenance natural key.  This is
-intentional: the registration command refuses to invent source URL or
-retrieval context.  Integrating a collector should call `DocumentService`
-after a successful archival write, while keeping parsing out of the HTTP
-transaction.
+The bridge deliberately excludes candidate tables and legacy rows without
+complete document provenance. It refuses to invent a source URL or retrieval
+context. Its `source_systems` result gives the exact value to pass to
+`documents process`; the supported sources currently use
+`council_committee_systems`, `authority_websites_cdp`, and
+`provider_annual_reports`. Integrating a collector should call
+`DocumentService` after a successful archival write, while keeping parsing out
+of the HTTP transaction.
 
 The first rich-parser release targets PDFs.  Structured machine-readable
 formats remain better served by the existing archive extraction ledger and

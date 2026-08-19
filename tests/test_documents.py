@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import io
 
+from pipeline.archive import FilesystemArchive
 from pipeline.documents import repository
 from pipeline.documents.artifacts import DerivedArtifactStore
+from pipeline.documents.bridge import register_existing
 from pipeline.documents.inspect import ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
 from pipeline.documents.quality import assess
@@ -102,3 +105,41 @@ def test_derived_s3_storage_verifies_the_uploaded_hash(settings):
     })
     path, digest = DerivedArtifactStore(configured, FakeS3()).put("fixture", "ocr_pdf", ".pdf", b"derived")
     assert path == f"s3://derived/fixture/ocr_pdf/{digest}.pdf"
+
+
+def test_legacy_bridge_requires_a_real_archived_document(conn, settings):
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    body = b"%PDF-legacy"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_path = archive.put("committee_papers", digest, "application/pdf", body)
+    conn.execute(
+        "INSERT INTO evidence_promotions (candidate_table, candidate_url, target_table, target_key, promoted_by, "
+        "promoted_at, candidate_context_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("committee_paper_candidates", "https://example.test/paper.pdf", "committee_papers",
+         "E06000001|https://example.test/paper.pdf", "test", "2026-08-19T00:00:00+00:00", "{}"),
+    )
+    conn.execute(
+        "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("E06000001", "Fixture Council", "unitary", "2020-01-01", "2020", "2020",
+         "https://example.test/authority", "2026-08-19T00:00:00+00:00", 200, "fixture", digest),
+    )
+    conn.execute(
+        "INSERT INTO committee_papers (authority_ons_code, document_url, report_title, archived_path, source_url, "
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("E06000001", "https://example.test/paper.pdf", "Agenda report", raw_path,
+         "https://example.test/paper.pdf", "2026-08-19T00:00:00+00:00", 200,
+         "committee_papers", digest),
+    )
+    result = register_existing(conn, settings, "committee_papers", 25)
+    assert result == {
+        "source": "committee_papers",
+        "candidates": 1,
+        "registered": 1,
+        "missing_raw": 0,
+        "source_systems": ["committee_papers"],
+    }
+    row = conn.execute("SELECT source_table, source_key FROM evidence_records").fetchone()
+    assert row["source_table"] == "committee_papers"
+    assert row["source_key"] == "E06000001|https://example.test/paper.pdf"

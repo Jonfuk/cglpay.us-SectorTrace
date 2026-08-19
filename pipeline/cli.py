@@ -42,7 +42,7 @@ def _document_reference(row):
         source_url=row["source_url"], retrieved_at=row["retrieved_at"],
         http_status=row["http_status"], payload_sha256=row["payload_sha256"],
         raw_object_path=row["raw_object_path"], mime_type=row["mime_type"],
-        content_length=row["content_length"],
+        content_length=row["content_length"], source_table=row["source_table"], source_key=row["source_key"],
     )
 
 
@@ -87,6 +87,25 @@ def documents_register(
             source_key=source_key))
         conn.commit()
         typer.echo(evidence_id)
+    finally:
+        conn.close()
+
+
+@documents_app.command("register-existing")
+def documents_register_existing(
+    source: str = typer.Option(..., help="committee_papers | cdp_documents | annual_reports"),
+    limit: int = typer.Option(25, min=1, help="Maximum provenance-complete legacy rows to register"),
+) -> None:
+    """Bridge a bounded legacy document table into canonical processing states."""
+    from pipeline.documents.bridge import register_existing
+
+    conn, settings = _document_connection()
+    try:
+        result = register_existing(conn, settings, source, limit)
+        conn.commit()
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from None
     finally:
         conn.close()
 

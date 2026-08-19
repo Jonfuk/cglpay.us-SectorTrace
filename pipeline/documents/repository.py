@@ -25,15 +25,16 @@ def _json(value) -> str:
 def upsert_evidence(conn, reference: EvidenceReference) -> None:
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
-        "payload_sha256, raw_object_path, mime_type, content_length, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(evidence_id) DO UPDATE SET source_url=excluded.source_url, "
         "retrieved_at=excluded.retrieved_at, http_status=excluded.http_status, "
         "raw_object_path=excluded.raw_object_path, mime_type=excluded.mime_type, "
-        "content_length=excluded.content_length",
+        "content_length=excluded.content_length, source_table=COALESCE(excluded.source_table, evidence_records.source_table), "
+        "source_key=COALESCE(excluded.source_key, evidence_records.source_key)",
         (reference.evidence_id, reference.source_system, reference.source_url, reference.retrieved_at,
          reference.http_status, reference.payload_sha256, reference.raw_object_path, reference.mime_type,
-         reference.content_length, utcnow()),
+         reference.content_length, reference.source_table, reference.source_key, utcnow()),
     )
     conn.execute(
         "INSERT INTO document_processing_states (evidence_id) VALUES (?) "
