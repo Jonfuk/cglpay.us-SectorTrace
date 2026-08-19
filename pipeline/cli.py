@@ -702,6 +702,95 @@ def coverage_report(
         typer.echo(payload, nl=False)
 
 
+@app.command("research-ingest")
+def research_ingest(
+    manifest: str = typer.Argument(..., help="JSON research manifest"),
+    bundle_dir: str = typer.Option(
+        None, "--bundle-dir", help="Directory containing source files named by the manifest"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate the manifest and source bundle without writing"),
+) -> None:
+    """Validate and ingest a provider-research candidate bundle.
+
+    Ingestion writes only the research-run, candidate and review layers. It
+    never writes an existing source-specific evidence table.
+    """
+    from pathlib import Path
+
+    from pipeline import provider_research
+
+    configure_logging("provider_research")
+    settings = get_settings()
+    path = Path(manifest)
+    bundle = Path(bundle_dir) if bundle_dir else None
+    try:
+        normalized = provider_research.validate_manifest_file(path, bundle_dir=bundle)
+        if dry_run:
+            typer.echo(f"valid: {len(normalized['items']):,} item(s), "
+                       f"{normalized['source_count']:,} source file(s); nothing written")
+            return
+        result = provider_research.ingest_manifest(
+            path, settings=settings, bundle_dir=bundle)
+    except provider_research.ResearchError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"run {result['run_id']}: ingested {result['items']:,} item(s), "
+               f"{result.get('sources', 0):,} source file(s)")
+    if result.get("duplicate"):
+        ui.warn("manifest already ingested; no rows were changed")
+
+
+@app.command("research-coverage")
+def research_coverage(
+    provider_key: str = typer.Option(None, "--provider-key"),
+    output: str = typer.Option(None, help="Write JSON to this path instead of stdout"),
+) -> None:
+    """Print the 13-provider research coverage matrix and worklist."""
+    import json
+    from pathlib import Path
+
+    from pipeline import provider_research
+    from pipeline.web.queries import readonly_connection
+
+    configure_logging("provider_research_coverage")
+    settings = get_settings()
+    conn = readonly_connection(settings)
+    try:
+        report = provider_research.coverage(conn, provider_key=provider_key)
+    finally:
+        conn.close()
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if output:
+        Path(output).write_text(payload, encoding="utf-8")
+        typer.echo(f"provider research coverage written to {output}")
+    else:
+        typer.echo(payload, nl=False)
+
+
+@app.command("research-promote")
+def research_promote(
+    item_id: int = typer.Argument(..., help="Reviewed provider research item id"),
+    promoted_by: str = typer.Option(..., "--promoted-by", help="Accountable reviewer"),
+) -> None:
+    """Promote one twice-reviewed cross-cutting research finding."""
+    from pipeline import provider_research
+
+    configure_logging("provider_research")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        result = provider_research.promote(conn, item_id, promoted_by)
+        conn.commit()
+    except provider_research.ResearchError as exc:
+        conn.rollback()
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+    typer.echo(f"promoted research item {item_id}: {result['source_url']}")
+
+
 def _report_verification(report: dict) -> None:
     depth = "every value" if report["checks"].get("rows") else "counts and aggregates"
     if report["ok"]:

@@ -181,6 +181,7 @@ async function renderOne(main, key) {
     el('div', { id: 'disclosure' }),
     el('div', { id: 'filings' }),
     el('div', { id: 'pfd' }),
+    el('div', { id: 'research' }),
     el('div', { id: 'tribunals' }));
   replace(main, page);
 
@@ -193,6 +194,7 @@ async function renderOne(main, key) {
   renderDisclosure(page.querySelector('#disclosure'), data, charts);
   renderFilings(page.querySelector('#filings'), data);
   renderPfd(page.querySelector('#pfd'), data);
+  renderResearch(page.querySelector('#research'), data);
   renderTribunals(page.querySelector('#tribunals'), data);
 
   return () => disposeCharts(charts);
@@ -237,6 +239,44 @@ function renderInventory(container, data) {
     'Evidence inventory',
     'Counts describe the records held for this provider, not its performance or scale.',
     el('div', { class: 'grid cards' }, cards)));
+}
+
+function renderResearch(container, data) {
+  const rows = data.research_evidence || [];
+  const coverage = data.research_coverage || [];
+  const caveatText = data.caveats?.provider_research ||
+    'Research findings describe the evidence held by the project, not everything true about a provider.';
+  const cards = rows.map((row) => el('article', { class: 'panel' },
+    el('div', { class: 'eyebrow', text: `${row.category || 'Research'} · ${row.fact_type || 'finding'}` }),
+    el('h3', { text: row.question || 'Provider research finding' }),
+    row.raw_finding ? el('p', { text: row.raw_finding }) : null,
+    row.interpretation ? el('p', { class: 'muted', text: row.interpretation }) : null,
+    el('div', { class: 'small muted' },
+      row.time_period ? `Period: ${row.time_period} · ` : '',
+      row.identity_match_basis ? `Identity basis: ${row.identity_match_basis} · ` : '',
+      row.promoted_at ? `Promoted: ${isoDate(row.promoted_at)}` : ''),
+    el('div', { class: 'small' },
+      row.source_url ? sourceLink(row.source_url, 'source ↗') : null,
+      row.citation ? ` · ${row.citation}` : null)));
+  const statusLabels = {
+    no_evidence: 'No evidence currently held',
+    source_inaccessible: 'Source inaccessible',
+    not_applicable: 'Not applicable',
+    existing_project_evidence: 'Already covered by project',
+  };
+  const coverageCards = coverage.map((row) => el('article', { class: 'panel' },
+    el('div', { class: 'eyebrow', text: `${row.category || 'Research'} · ${statusLabels[row.evidence_status] || row.evidence_status}` }),
+    el('h3', { text: row.question || 'Coverage outcome' }),
+    row.time_period ? el('div', { class: 'small muted', text: `Period: ${row.time_period}` }) : null,
+    row.source_url ? el('div', { class: 'small' }, sourceLink(row.source_url, 'source ↗'), row.citation ? ` · ${row.citation}` : null) : null,
+    el('p', { class: 'muted', text: row.evidence_status === 'no_evidence'
+      ? 'This means no reliable public evidence is currently held after the recorded search; it is not a claim that the provider lacks the underlying activity.'
+      : caveatText })));
+  replace(container, section(
+    'Provider research evidence',
+    `${num(rows.length)} reviewed cross-cutting findings. ${caveatText}`,
+    rows.length ? el('div', { class: 'stack' }, cards) : noData('reviewed provider research', 'the research ingestion workflow')),
+  coverage.length ? section('Research coverage outcomes', 'Reviewed gaps and controlled outcomes remain distinct from negative claims.', el('div', { class: 'stack' }, coverageCards)) : null);
 }
 
 function openEvidenceModal(title, rows, columns) {

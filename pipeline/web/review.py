@@ -146,6 +146,13 @@ def _apply(conn: sqlite3.Connection, ids: list[int], decision: str,
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (item_id, decision, row["status"], note, decided_by, now, row["context_json"]),
         )
+        # Provider research uses the same review queue as every other
+        # candidate, but has two independent gates. Keep the generic review
+        # API as the one write path and mirror the decision into the research
+        # item while this transaction is still atomic.
+        from pipeline import provider_research
+
+        provider_research.apply_review_decision(conn, item_id, decision)
         updated.append(item_id)
 
     return {

@@ -57,6 +57,12 @@ CAVEATS = {
         "known provider name. Providers advertising solely on their own sites "
         "are invisible here. Every count is a floor, not a total."
     ),
+    "provider_research": (
+        "These are publicly sourced provider findings selected through the "
+        "research workflow. They describe the evidence held by the project, "
+        "not everything true about a provider; identity, date, licence and "
+        "source citation must be read with each finding."
+    ),
     "census_comparability": (
         "Provider participation varies between census rounds. These figures "
         "must not be used to infer overall workforce size, or change over "
@@ -511,7 +517,7 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
     """
     _public(["providers", "supplier_aliases", "contracts", "tribunal_cases",
               "cqc_locations", "nhs_job_adverts", "provider_identifiers",
-              "charity_financials"])
+              "charity_financials", "provider_research_evidence"])
 
     return _rows(conn, """
         SELECT p.provider_key,
@@ -554,6 +560,10 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
                (SELECT MIN(pi.identifier) FROM provider_identifiers pi
                  WHERE pi.provider_key = p.provider_key
                    AND pi.scheme = 'charity_number') AS charity_number
+               ,(SELECT COUNT(*) FROM provider_research_evidence r
+                  WHERE r.provider_key = p.provider_key) AS research_evidence_count
+               ,(SELECT COUNT(DISTINCT r.category) FROM provider_research_evidence r
+                  WHERE r.provider_key = p.provider_key) AS research_category_count
         FROM providers p
         ORDER BY p.is_target DESC, contract_value_gbp DESC, p.canonical_name
     """)
@@ -1779,7 +1789,8 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
               "cqc_locations", "v_entity_edges", "cqc_location_reports",
               "provider_report_disclosure", "provider_annual_reports",
               "v_provider_disclosure_gaps", "company_filings",
-              "pfd_provider_mentions", "pfd_reports"])
+              "pfd_provider_mentions", "pfd_reports",
+              "provider_research_evidence"])
 
     provider = _one(conn, "SELECT * FROM providers WHERE provider_key = ?",
                      (provider_key,))
@@ -1963,6 +1974,33 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         WHERE m.provider_key = ?
         ORDER BY r.report_ref DESC""", (provider_key,))
 
+    research_evidence = _rows(conn, """
+        SELECT category, fact_type, question, raw_finding, interpretation,
+               entity_type, entity_identifier, source_url, publisher,
+               published_date, accessed_at, citation, licence,
+               identity_match_basis, time_period, confidence, destination,
+               content_sha256, source_archive_path, promoted_by, promoted_at
+        FROM provider_research_evidence
+        WHERE provider_key = ? AND superseded_at IS NULL
+        ORDER BY COALESCE(published_date, promoted_at) DESC, id DESC""",
+        (provider_key,))
+    research_categories = _rows(conn, """
+        SELECT category, COUNT(*) AS evidence_count,
+               MAX(promoted_at) AS latest_promoted_at
+        FROM provider_research_evidence
+        WHERE provider_key = ? AND superseded_at IS NULL
+        GROUP BY category ORDER BY category""", (provider_key,))
+    research_coverage = _rows(conn, """
+        SELECT category, evidence_status, question, time_period,
+               source_url, citation, updated_at
+        FROM provider_research_items
+        WHERE provider_key = ? AND state = 'approved'
+          AND evidence_status IN (
+              'no_evidence', 'source_inaccessible', 'not_applicable',
+              'existing_project_evidence'
+          )
+        ORDER BY category, updated_at DESC, id DESC""", (provider_key,))
+
     return {
         "provider": provider,
         "events": events,
@@ -1983,6 +2021,9 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         },
         "filings": filings,
         "pfd_mentions": pfd_mentions,
+        "research_evidence": research_evidence,
+        "research_categories": research_categories,
+        "research_coverage": research_coverage,
         "caveats": {
             "cqc_coverage": CAVEATS["cqc_coverage"],
             "tribunal_component": CAVEATS["tribunal_component"],
@@ -1990,6 +2031,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
             "charity_share": CAVEATS["charity_share"],
             "filing_records": CAVEATS["filing_records"],
             "pfd_mentions": CAVEATS["pfd_mentions"],
+            "provider_research": CAVEATS["provider_research"],
         },
     }
 

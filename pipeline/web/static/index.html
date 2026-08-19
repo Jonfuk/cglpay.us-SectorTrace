@@ -43,6 +43,7 @@
     <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
     <button class="tab" data-tab="health" role="tab">Health</button>
     <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
+    <button class="tab" data-tab="provider-research" role="tab">Provider research <span class="pill" id="provider-research-pill" hidden></span></button>
     <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
     <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
@@ -333,6 +334,21 @@
       </p>
       <div id="promotion-history"></div>
     </div>
+  </section>
+
+  <!-- Provider research -------------------------------------------------------->
+  <!-- Rendered by /admin/js/provider-research.js. -->
+  <section id="tab-provider-research" class="tabpanel">
+    <p class="muted small">
+      Research manifests are candidates until identity and evidence review both
+      pass. This screen shows the coverage matrix, the ranked worklist, and the
+      separate promotion step for cross-cutting findings. Existing source
+      modules remain the canonical home for facts they already model.
+    </p>
+    <div id="provider-research-status" class="muted small"></div>
+    <div id="provider-research-coverage" class="grid cards"></div>
+    <div id="provider-research-matrix"></div>
+    <div id="provider-research-items"></div>
   </section>
 
   <!-- Workforce census verification --------------------------------------------->

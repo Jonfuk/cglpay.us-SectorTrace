@@ -6,7 +6,7 @@
 ./start.sh export docs
 ```
 
-Generated 2026-08-15 03:51 UTC.
+Generated 2026-08-19 13:31 UTC.
 
 `restricted` columns hold personal data. They are excluded from every export by default and `pipeline.exports.guard_columns()` raises if one is referenced.
 
@@ -280,6 +280,53 @@ Feeds Sheets tab(s): 05_Charity_Finance.
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `claim_citations`
+
+*table* — 0 rows.
+
+The linkage. What a claim rests on: evidence rows, named by their own table and natural key.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `claim_id` | INTEGER | NOT NULL | exportable |
+| `evidence_table` | TEXT | NOT NULL | exportable |
+| `evidence_key` | TEXT | NOT NULL | exportable |
+| `cited_by` | TEXT | NOT NULL | exportable |
+| `cited_at` | TEXT | NOT NULL | exportable |
+| `note` | TEXT | nullable | exportable |
+
+## `claim_verifications`
+
+*table* — 0 rows.
+
+The decision history. One row per decision, whoever made it, when, and on what note. `decide()` writes the row first and then moves the claim's status, the same ordering promote() and census_verify() use: the audit trail is not something the caller is trusted to remember afterwards. Deliberately no FOREIGN KEY to claims, the same choice 0033 makes for census_verifications: the load order for a PostgreSQL migration has to be able to write this table before the claims it vouches for, and an FK would make that ordering impossible. The claims trigger below is what holds the two tables together instead.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `claim_id` | INTEGER | NOT NULL | exportable |
+| `decision` | TEXT | NOT NULL | exportable |
+| `decided_by` | TEXT | NOT NULL | exportable |
+| `decided_at` | TEXT | NOT NULL | exportable |
+| `note` | TEXT | nullable | exportable |
+
+## `claims`
+
+*table* — 0 rows.
+
+The claims-to-evidence index (Workstream C, Phase 17). The difference between a data portal and an evidence portfolio: claims as rows, each linked to the verified evidence rows supporting it, with the caveats that travel with it, the reviewer and the date. Nothing in the registry is computed -- a claim is a statement linked to rows, and the linkage is a human judgement recorded like every other decision in this warehouse. Three tables, and the third is why the first two work:   * `claims` -- the statement itself, who wrote it, its status. The status     is the lifecycle a reviewer moves it through: 'draft' (written, not yet     decided), 'published' (a human said this claim can be made), 'rejected'     (a human said it cannot), 'retracted' (it was published and withdrawn).   * `claim_citations` -- the linkage: which evidence rows support the     claim. A citation names a table and a row in it by the row's own     natural key, in the same "<authority>|<url>" shape migration 0030     uses. The linkage is a judgement -- who cited it and when are columns     here, never defaulted.   * `claim_verifications` -- the reviewer and the decision history. This     is the guarantee the plan demands: "a claim without a recorded     reviewer and decision history is not a claim", the same standard 0030     sets for promotion. Nothing reaches 'published' (or 'rejected', or     'retracted') without a row here naming who decided it. Why this is not a review_queue item: review items are questions about the pipeline's own gaps -- "this buyer name is unmatched" -- and deciding one records a status, nothing more. A claim is a statement about the world that the campaign will quote, and publishing it is an act with the same threshold as promotion, recorded the same way: a named person, a date, a note. Same reason it is not an evidence_promotions row: promotion creates an evidence row by fetching a document; a claim creates nothing, it packages rows that already exist. Like 0033, the guarantee is structural rather than conventional: the triggers at the bottom refuse a claim that is decided -- or born decided -- without a claim_verifications row behind it.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `claim_text` | TEXT | NOT NULL | exportable |
+| `status` | TEXT | NOT NULL | exportable |
+| `caveats` | TEXT | NOT NULL | exportable |
+| `created_by` | TEXT | NOT NULL | exportable |
+| `created_at` | TEXT | NOT NULL | exportable |
+| `note` | TEXT | nullable | exportable |
+
 ## `committee_paper_candidates`
 
 *table* — 1,194 rows.
@@ -489,6 +536,47 @@ Feeds Sheets tab(s): 03_Contracts.
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 | `notice_web_url` | TEXT | nullable | exportable |
 
+## `council_spend`
+
+*table* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `authority_ons_code` | TEXT | NOT NULL | exportable |
+| `file_url` | TEXT | NOT NULL | exportable |
+| `row_index` | INTEGER | NOT NULL | exportable |
+| `period` | TEXT | nullable | exportable |
+| `payee` | TEXT | NOT NULL | exportable |
+| `amount` | REAL | nullable | exportable |
+| `amount_text` | TEXT | nullable | exportable |
+| `description` | TEXT | nullable | exportable |
+| `provider_key` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `council_spend_files`
+
+*table* — 0 rows.
+
+Phase 19 (G5): council spend-transparency files. The strongest procurement evidence the corpus could hold: "council X paid provider Y £Z in [period]" is actual money, not a notice. Councils publish £500+ spend as files on their own sites (the Local Government Transparency Code); there is no central API, so m24 discovers the file on the authority's own domain, fetches it through the pipeline client (archived, with provenance), and parses line items. Line-item quality varies council to council, and this schema is written for that: `payee` and `amount_text` are verbatim (a value is kept exactly as the council published it), and `amount` is the same figure parsed as a number — NULL where the council's formatting could not be read, never a guess and never a zero. `period` is the period label the council's own file used for the row, NULL where the file carries none; it is not inferred from anything. `council_spend_files` is the file-level record: one row per spend file fetched, whether it parsed and how many line items it yielded. A file that could not be parsed is recorded here with parse_status 'unreadable' plus a `parse_failures` row and a review item — a council whose spend file this pipeline cannot read must not look like a council that published nothing. `provider_key` is set only by an exact-normalised match of the payee against the tracked providers' own name variants (m04's discipline, matching m16/m20). A payee that matches no provider keeps its verbatim name and a NULL key — the universe work (m23) owns name reconciliation at scale, and a near-miss is never stored as a match. There is deliberately NO arithmetic across rows or sources: no monthly totals, no share-of-spend, no comparison against contracts. The rows are what the council published, one line per payment.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `authority_ons_code` | TEXT | NOT NULL | exportable |
+| `file_url` | TEXT | NOT NULL | exportable |
+| `discovered_from` | TEXT | nullable | exportable |
+| `file_format` | TEXT | nullable | exportable |
+| `parse_status` | TEXT | NOT NULL | exportable |
+| `row_count` | INTEGER | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
 ## `cqc_location_reports`
 
 *table* — 580 rows.
@@ -671,6 +759,14 @@ Who turned a candidate into evidence, and on what. Three modules discover candid
 | `http_status` | INTEGER | nullable | exportable |
 | `payload_sha256` | TEXT | nullable | exportable |
 | `archived_path` | TEXT | nullable | exportable |
+| `actor_type` | TEXT | NOT NULL | exportable |
+| `actor_id` | TEXT | nullable | exportable |
+| `model_id` | TEXT | nullable | exportable |
+| `policy_version` | TEXT | nullable | exportable |
+| `evidence_manifest_sha256` | TEXT | nullable | exportable |
+| `independent_review_count` | INTEGER | NOT NULL | exportable |
+| `confidence` | REAL | nullable | exportable |
+| `qa_status` | TEXT | NOT NULL | exportable |
 
 ## `fingertips_indicators`
 
@@ -1289,6 +1385,106 @@ One row per (report, topic, page) where the topic's terms appear. The passage is
 | `source_system` | TEXT | NOT NULL | exportable |
 | `payload_sha256` | TEXT | NOT NULL | exportable |
 
+## `provider_research_evidence`
+
+*table* — 0 rows.
+
+Feeds Sheets tab(s): 11_Provider_Research.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `source_item_id` | INTEGER | NOT NULL | exportable |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `entity_type` | TEXT | nullable | exportable |
+| `entity_identifier` | TEXT | nullable | exportable |
+| `category` | TEXT | NOT NULL | exportable |
+| `fact_type` | TEXT | NOT NULL | exportable |
+| `question` | TEXT | NOT NULL | exportable |
+| `raw_finding` | TEXT | nullable | exportable |
+| `interpretation` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `publisher` | TEXT | nullable | exportable |
+| `published_date` | TEXT | nullable | exportable |
+| `accessed_at` | TEXT | NOT NULL | exportable |
+| `citation` | TEXT | NOT NULL | exportable |
+| `licence` | TEXT | nullable | exportable |
+| `identity_match_basis` | TEXT | NOT NULL | exportable |
+| `time_period` | TEXT | nullable | exportable |
+| `confidence` | REAL | nullable | exportable |
+| `destination` | TEXT | NOT NULL | exportable |
+| `content_sha256` | TEXT | NOT NULL | exportable |
+| `source_archive_path` | TEXT | NOT NULL | exportable |
+| `promoted_by` | TEXT | NOT NULL | exportable |
+| `promoted_at` | TEXT | NOT NULL | exportable |
+| `superseded_at` | TEXT | nullable | exportable |
+
+## `provider_research_items`
+
+*table* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `id` | INTEGER | nullable | exportable |
+| `run_id` | TEXT | NOT NULL | exportable |
+| `candidate_key` | TEXT | NOT NULL | exportable |
+| `provider_key` | TEXT | NOT NULL | exportable |
+| `entity_type` | TEXT | nullable | exportable |
+| `entity_identifier` | TEXT | nullable | exportable |
+| `category` | TEXT | NOT NULL | exportable |
+| `fact_type` | TEXT | NOT NULL | exportable |
+| `question` | TEXT | NOT NULL | exportable |
+| `raw_finding` | TEXT | nullable | exportable |
+| `interpretation` | TEXT | nullable | exportable |
+| `source_url` | TEXT | nullable | exportable |
+| `publisher` | TEXT | nullable | exportable |
+| `published_date` | TEXT | nullable | exportable |
+| `accessed_at` | TEXT | NOT NULL | exportable |
+| `citation` | TEXT | nullable | exportable |
+| `licence` | TEXT | nullable | exportable |
+| `identity_match_basis` | TEXT | NOT NULL | exportable |
+| `time_period` | TEXT | nullable | exportable |
+| `confidence` | REAL | nullable | exportable |
+| `evidence_status` | TEXT | NOT NULL | exportable |
+| `destination` | TEXT | NOT NULL | exportable |
+| `content_sha256` | TEXT | nullable | exportable |
+| `source_archive_path` | TEXT | nullable | exportable |
+| `priority_score` | REAL | nullable | exportable |
+| `priority_factors_json` | TEXT | nullable | exportable |
+| `identity_review_state` | TEXT | NOT NULL | exportable |
+| `evidence_review_state` | TEXT | NOT NULL | exportable |
+| `state` | TEXT | NOT NULL | exportable |
+| `identity_review_item_id` | INTEGER | nullable | exportable |
+| `evidence_review_item_id` | INTEGER | nullable | exportable |
+| `supersedes_item_id` | INTEGER | nullable | exportable |
+| `created_at` | TEXT | NOT NULL | exportable |
+| `updated_at` | TEXT | NOT NULL | exportable |
+| `stable_candidate_key` | TEXT | nullable | exportable |
+
+## `provider_research_runs`
+
+*table* — 0 rows.
+
+Provider Research-to-Warehouse pipeline. Research output is a candidate layer. It may describe a finding, a gap, a blocked source, or an existing project record, but it is never trusted by the portal or exports until the identity and evidence decisions have both been recorded. Existing source-specific modules remain the canonical home for facts they already model; provider_research_evidence is for the cross-cutting facts and coverage observations that have no such home.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `run_id` | TEXT | nullable | exportable |
+| `prompt_version` | TEXT | NOT NULL | exportable |
+| `actor_type` | TEXT | NOT NULL | exportable |
+| `actor_id` | TEXT | nullable | exportable |
+| `model_id` | TEXT | nullable | exportable |
+| `started_at` | TEXT | NOT NULL | exportable |
+| `completed_at` | TEXT | nullable | exportable |
+| `manifest_sha256` | TEXT | NOT NULL | exportable |
+| `manifest_archive_path` | TEXT | NOT NULL | exportable |
+| `source_bundle_archive_prefix` | TEXT | nullable | exportable |
+| `status` | TEXT | NOT NULL | exportable |
+| `item_count` | INTEGER | NOT NULL | exportable |
+| `source_count` | INTEGER | NOT NULL | exportable |
+| `validation_errors` | TEXT | nullable | exportable |
+| `created_at` | TEXT | NOT NULL | exportable |
+
 ## `providers`
 
 *table* — 13 rows.
@@ -1538,7 +1734,7 @@ Items the pipeline answered for itself, and what answered them. `review_queue` h
 
 ## `schema_migrations`
 
-*table* — 48 rows.
+*table* — 56 rows.
 
 Core infrastructure tables shared by every module. Applied automatically by pipeline.db.apply_migrations before any module runs.
 
@@ -1546,6 +1742,79 @@ Core infrastructure tables shared by every module. Applied automatically by pipe
 | --- | --- | --- | --- |
 | `filename` | TEXT | nullable | exportable |
 | `applied_at` | TEXT | NOT NULL | exportable |
+
+## `sector_universe`
+
+*table* — 0 rows.
+
+Phase 18 (F1): the sector universe — the population workstream's table. The thesis the phase delivers on: the pipeline tracks 13 providers and 347 authorities, but the denominator — how many organisations make up the sector — was unknown. Every coverage statement ("we track N of the sector's ~M providers") needs a universe to be measured against, and none existed. The universe is the upstream condition for the coverage matrix (W-12) meaning anything beyond the 347, for the claims index's sector-level claims, and for any sentence of the form "we track N of the sector's ~M". WHY A NEW TABLE RATHER THAN AN EXTENSION OF `providers`. `providers` is REFERENCE/CONFIG: seeded deterministically from pipeline/providers.py on every run, carries no provenance columns, and is the human-curated list of the campaign's tracked entities. The universe is the opposite shape: it is EVIDENCE-DERIVED, reconstructed from sources the pipeline already reads (the awardees in the contracts, the charity register, Companies House, CQC registrations), it numbers in the tens of thousands rather than thirteen, and its rows must keep the match-basis discipline m04 set or it becomes a larger and less verifiable version of the problem it was built to solve. Bolting that onto `providers` would have made the config table unbounded and the universe table restricted to what config can hold. Organisations are not personal data, so the `restricted_` discipline does not reach this table. match_basis is m04's vocabulary extended to three new capture kinds:   'seed'                    asserted in this project's config (the tracked                             providers) or carried over from a company row                             whose own match_basis was 'seed' — an                             identifier from an authoritative                             cross-reference.   'register'                identified by an identifier the source itself                             published (a charity number, a CQC provider                             id). The row is a real registered entity; the                             link to a tracked provider is still made only                             through provider_identifiers.   'ppon'                    identified only by the supplier's GB-PPON                             registration id on the notices. The id is                             self-declared by the buyer's platform, so it                             identifies the supplier's registration, never                             the legal entity, and never sets provider_key.   'name_only_unconfirmed'   captured from a name alone — an awardee or                             buyer name, or a company search result. NOT                             linked to any provider, and NOT asserted to be                             the same legal entity as anything. m04's rule                             verbatim: sharing a name is not sharing an                             identity. provider_key is set only where an identifier in provider_identifiers matches one of the row's identifiers. provider_identifiers only ever holds identifiers from authoritative cross-references (config, the charity register, CQC), so a name-only row — which has no identifiers — can never acquire one. That is the whole safety argument of the universe, and it is the same argument m04 makes for companies. A 'name_only_unconfirmed' row may still carry a company_number: the possible_group_company review items hold the number their search returned, and recording it is capturing the identifier, not asserting the link. match_basis says how the row ENTERED the universe, not the provenance of every identifier it carries. provenance columns are representative: a row derived from many notices carries the source_url/retrieved_at/hash of one of them (the newest), because the row is an aggregate over evidence that keeps its own provenance in its own table. Rows derived from review items carry NULL — the item itself is the record of where the candidate came from.
+
+Feeds Sheets tab(s): 10_Sector_Universe.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `entity_key` | TEXT | nullable | exportable |
+| `canonical_name` | TEXT | NOT NULL | exportable |
+| `normalised_name` | TEXT | nullable | exportable |
+| `entity_type` | TEXT | NOT NULL | exportable |
+| `company_number` | TEXT | nullable | exportable |
+| `charity_number` | TEXT | nullable | exportable |
+| `cqc_provider_id` | TEXT | nullable | exportable |
+| `ppon` | TEXT | nullable | exportable |
+| `provider_key` | TEXT | nullable | exportable |
+| `match_basis` | TEXT | NOT NULL | exportable |
+| `first_seen` | TEXT | nullable | exportable |
+| `last_seen` | TEXT | nullable | exportable |
+| `notices_count` | INTEGER | nullable | exportable |
+| `source_system` | TEXT | nullable | exportable |
+| `source_url` | TEXT | nullable | exportable |
+| `retrieved_at` | TEXT | nullable | exportable |
+| `payload_sha256` | TEXT | nullable | exportable |
+
+## `skills_for_care_estimates`
+
+*table* — 0 rows.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `file_url` | TEXT | NOT NULL | exportable |
+| `year` | TEXT | nullable | exportable |
+| `area_code` | TEXT | nullable | exportable |
+| `area_level` | TEXT | nullable | exportable |
+| `region` | TEXT | nullable | exportable |
+| `area` | TEXT | nullable | exportable |
+| `sector` | TEXT | nullable | exportable |
+| `service` | TEXT | nullable | exportable |
+| `job_role_group` | TEXT | nullable | exportable |
+| `job_role` | TEXT | nullable | exportable |
+| `fte_annual_pay` | REAL | nullable | exportable |
+| `hourly_pay` | REAL | nullable | exportable |
+| `turnover_rate` | REAL | nullable | exportable |
+| `vacancy_rate` | REAL | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `skills_for_care_files`
+
+*table* — 0 rows.
+
+Phase 19 (G2): Skills for Care workforce intelligence. Adult social care pay and headcount benchmarks, from the ASC-WDS workforce estimates the publisher releases as Excel data downloads on its Data downloads page (five files, updated annually in October). The sector this corpus tracks sits between health and social care, and its workforce market is largely the care workforce — so Skills for Care's pay and turnover figures are the contextual comparators the campaign's claims need. `skills_for_care_files` is one row per downloaded workbook: which file, when it was fetched, whether its data sheet parsed and how many estimate rows it yielded. A workbook whose shape this module does not (yet) read is recorded here with parse_status 'unreadable' plus a `parse_failures` row and a review item — never silently skipped, and never read as "Skills for Care published nothing". `skills_for_care_estimates` is one row per (workbook, area, sector, service, job role) carrying the comparator columns the claim needs — pay and turnover — as published: `fte_annual_pay`, `hourly_pay`, `turnover_rate` and `vacancy_rate` are the workbook's own figures, parsed but never derived, NULL where the cell could not be read. The other ~300 columns the data sheets carry (demographics, qualifications, nationality) are deliberately not copied into the warehouse: they are not the claim's material, and the workbook itself is archived in full with its provenance, which is where anything not parsed still lives. Two caveats the module docstring and SOURCES.md carry: these are *estimates* (modelled from the ASC-WDS collection, rounded), and they are the whole adult social care workforce — a pay figure here is a comparator for the sector's labour market, not an attribution to any provider this pipeline tracks. The F-05 gate applies: the trended workbook is stored as one file, but no change-over-time arithmetic is performed anywhere (that would be the history F-05 declined).
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `file_url` | TEXT | nullable | exportable |
+| `link_label` | TEXT | nullable | exportable |
+| `file_format` | TEXT | nullable | exportable |
+| `parse_status` | TEXT | NOT NULL | exportable |
+| `row_count` | INTEGER | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
 
 ## `statutory_pay_rates`
 
@@ -1772,8 +2041,8 @@ Module 6: National Drug and Alcohol Treatment and Recovery Services Workforce Ce
 | `source_type` |  | nullable | exportable |
 | `source_id` | TEXT | nullable | exportable |
 | `relationship` |  | nullable | exportable |
-| `target_type` |  | nullable | exportable |
-| `target_id` | TEXT | nullable | exportable |
+| `target_type` | TEXT | nullable | exportable |
+| `target_id` | BLOB | nullable | exportable |
 | `target_label` | TEXT | nullable | exportable |
 | `basis` | TEXT | nullable | exportable |
 | `source_url` | TEXT | nullable | exportable |

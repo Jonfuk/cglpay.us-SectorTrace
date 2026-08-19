@@ -1,4 +1,4 @@
-"""Google Sheets export — ten tabs, defined in exports/schema.py.
+"""Google Sheets export — eleven tabs, defined in exports/schema.py.
 
 Always writes CSV to exports/output/sheets/ so the export is reproducible and
 diffable without credentials. If GOOGLE_SERVICE_ACCOUNT_JSON and
@@ -35,6 +35,7 @@ TAB_TABLES: dict[str, list[str]] = {
     "08_PFD_Reports": ["pfd_reports", "pfd_concern_terms", "pfd_provider_mentions"],
     "09_Workforce_Census": ["workforce_census_metrics"],
     "10_Sector_Universe": ["sector_universe"],
+    "11_Provider_Research": ["provider_research_evidence"],
 }
 
 
