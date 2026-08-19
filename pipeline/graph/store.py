@@ -59,7 +59,12 @@ class GraphStore:
             self._driver = None
 
     def healthcheck(self) -> None:
-        self._require_driver().verify_connectivity(database=self.settings.neo4j_database)
+        # The driver's database keyword on verify_connectivity() is currently
+        # a preview API. A trivial query checks the configured database just as
+        # thoroughly without surfacing that warning to every graph command.
+        driver = self._require_driver()
+        with driver.session(database=self.settings.neo4j_database) as session:
+            session.run("RETURN 1").consume()
 
     def ensure_schema(self) -> None:
         statements = (

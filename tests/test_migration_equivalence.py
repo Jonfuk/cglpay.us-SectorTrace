@@ -97,8 +97,9 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 51 adds the parser-neutral document analysis layer.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 51
+        # through. 53 adds parser-neutral document analysis after the raw
+        # archive extraction ledger in 0052.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 53
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

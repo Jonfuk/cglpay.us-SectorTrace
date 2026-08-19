@@ -55,6 +55,7 @@ and `NEO4J_PASSWORD` in `.env`, then run:
 
 ```powershell
 uv run pipeline graph status
+uv run pipeline graph backfill
 uv run pipeline graph rebuild --clear
 uv run pipeline graph sync
 uv run pipeline graph analyze
@@ -64,6 +65,13 @@ uv run pipeline graph analyze
 failure. `sync` consumes only unprocessed queue rows; failures keep their error
 and attempt count for retry. If Neo4j is lost, recreate it and run
 `rebuild --clear`; no raw archive or warehouse data needs alteration.
+
+On an existing SectorTrace warehouse, run `graph backfill` once before the
+first rebuild. It makes stable entities from the existing authority and
+provider registries, imports only deterministic supplier-alias contract awards
+into the commissioner/provider graph, and queues the resulting changes. It
+does not treat unmatched supplier names as provider identities. Re-running it
+is idempotent and replaces only equivalent pending queue entries.
 
 ## NetworkX analytics
 

@@ -42,6 +42,8 @@ def provider_network_metrics(snapshot: GraphSnapshot) -> list[dict[str, Any]]:
     bipartite = snapshot.graph
     providers = [node for node, attrs in bipartite.nodes(data=True)
                  if attrs["entity_type"] == "PROVIDER"]
+    if not providers:
+        return []
     projected = nx.bipartite.weighted_projected_graph(bipartite, providers)
     components = list(nx.connected_components(projected))
     component_index = {node: number for number, members in enumerate(components, 1) for node in members}

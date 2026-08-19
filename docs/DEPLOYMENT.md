@@ -247,6 +247,29 @@ selects the filesystem or S3-compatible backend. Migrate it separately with
 `archive-migrate`, verify it with `archive-verify`, and retain the local
 filesystem as a recovery mirror with `archive-mirror`/`archive-reconcile`.
 
+Raw-object processing is a separate, manual step. It verifies each
+content-addressed object again, writes only derived text under the gitignored
+`data/text/archive/` directory, and records parser metadata in the warehouse.
+It does not create graph claims or promote evidence:
+
+```bash
+# Check the immutable archive first
+uv run pipeline archive-verify
+
+# Process every object once; repeat runs skip the same extractor version
+uv run pipeline archive-process
+
+# Safer first pass: one source and a bounded sample
+uv run pipeline archive-process --source-system council_committee_systems --limit 25
+
+# Re-run a parser version deliberately, after reviewing its output
+uv run pipeline archive-process --force --extractor-version 2
+```
+
+Use `archive_extractions` and `archive_extraction_runs` when inspecting what
+was processed. Claims remain a later, reviewed stage; an empty `graph_claims`
+table is therefore expected after this command.
+
 Database mirroring is likewise explicit rather than bidirectional replication:
 
 ```bash

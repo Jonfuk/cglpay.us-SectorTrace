@@ -380,6 +380,27 @@ def graph_analyze(
             conn.close()
 
 
+@graph_app.command("backfill")
+def graph_backfill() -> None:
+    """Seed the graph registry from existing evidence without fetching or guessing."""
+    conn = None
+    try:
+        from pipeline.graph.backfill import seed_existing_evidence
+
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        result = seed_existing_evidence(conn)
+        typer.echo("graph backfill: {entities} entity writes, {evidence} evidence writes, "
+                    "{relationships} relationships, {queued} queued changes".format(**result))
+    except Exception as exc:
+        typer.echo(f"graph backfill failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.command("list-modules")
 def list_modules() -> None:
     """List every module currently registered with the CLI."""
@@ -1438,6 +1459,36 @@ def archive_migrate(
         __import__("json").dumps(manifest, indent=2), encoding="utf-8")
     typer.echo(f"uploaded: {uploaded:,}; inventoried: {manifest['files']:,} objects")
     typer.echo("run archive-verify for complete byte-count and SHA-256 verification")
+
+
+@app.command("archive-process")
+def archive_process(
+    source_system: str | None = typer.Option(None, "--source-system", help="Process one archive source directory."),
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Process at most this many objects."),
+    force: bool = typer.Option(False, "--force", help="Re-run objects already processed by this extractor version."),
+    extractor_version: str = typer.Option("1", "--extractor-version", help="Version recorded for derived output."),
+) -> None:
+    """Extract deterministic text/metadata from raw objects; never create claims."""
+    from pipeline.archive import get_archive
+    from pipeline.archive_process import process_archive
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        result = process_archive(
+            conn, settings, get_archive(settings), source_system=source_system,
+            limit=limit, force=force, extractor_version=extractor_version,
+        )
+    except Exception as exc:
+        typer.echo(f"archive process failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+    typer.echo(
+        "archive process {run_id}: {objects} objects, {processed} processed, "
+        "{skipped} skipped, {failed} failed".format(**result)
+    )
 
 
 @app.command("archive-verify")
