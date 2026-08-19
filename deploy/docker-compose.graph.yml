@@ -1,0 +1,18 @@
+# Local-only graph stack. PostgreSQL remains canonical; Neo4j is a disposable projection.
+services:
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
