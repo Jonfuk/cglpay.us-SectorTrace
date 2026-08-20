@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 from pathlib import Path
 
 from pipeline.documents.models import Inspection
@@ -9,6 +10,22 @@ from pipeline.documents.models import Inspection
 
 class InspectionUnavailable(RuntimeError):
     """PyMuPDF is not installed with the optional documents dependencies."""
+
+
+_HTML_PREFIX = re.compile(
+    rb"^(?:\xef\xbb\xbf|\s)*(?:<!doctype\s+html\b|<html(?:\s|>)|<head(?:\s|>)|"
+    rb"<body(?:\s|>)|<title(?:\s|>))",
+    re.IGNORECASE,
+)
+
+
+def _sniff_mime(body: bytes, mime: str) -> str:
+    """Recover common document types when an archive was stored as binary."""
+    if body.startswith(b"%PDF-"):
+        return "application/pdf"
+    if mime in {"application/octet-stream", "binary/octet-stream"} and _HTML_PREFIX.match(body[:4096]):
+        return "text/html"
+    return mime
 
 
 def load_pymupdf():
@@ -29,6 +46,7 @@ def inspect_bytes(body: bytes, filename: str | None = None,
     """Inspect a supported document without interpreting it as evidence text."""
     mime = (mime_type or mimetypes.guess_type(filename or "")[0]
             or "application/octet-stream").split(";", 1)[0].lower()
+    mime = _sniff_mime(body, mime)
     if mime != "application/pdf" and not body.startswith(b"%PDF-"):
         return Inspection(mime_type=mime, file_size=len(body), status="UNSUPPORTED")
     pymupdf = load_pymupdf()

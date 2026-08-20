@@ -8,7 +8,7 @@ from pipeline.cli import _document_candidates
 from pipeline.documents import repository
 from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
-from pipeline.documents.inspect import ocr_required
+from pipeline.documents.inspect import inspect_bytes, ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
 from pipeline.documents.parsers import HTMLParserAdapter
 from pipeline.documents.quality import assess
@@ -177,6 +177,16 @@ def test_html_fallback_strips_markup_and_ignores_script_content():
         ("HEADING", "Committee report"),
         ("PARAGRAPH", "Published finding."),
     ]
+
+
+def test_inspection_recovers_html_from_generic_archive_mime():
+    inspection = inspect_bytes(
+        b"\xef\xbb\xbf<!doctype html><html><body>Report</body></html>",
+        "a" * 64 + ".bin",
+        "application/octet-stream",
+    )
+    assert inspection.mime_type == "text/html"
+    assert inspection.status == "UNSUPPORTED"
 
 
 def test_unchanged_version_restores_completed_processing_state(conn):
