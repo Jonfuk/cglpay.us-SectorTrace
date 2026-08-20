@@ -224,6 +224,20 @@ elif [[ -n "${ARCHIVE_S3_BUCKET+set}" ]]; then
     storage_wanted=0
 fi
 
+# Neo4j is a derived projection, but its driver is still an optional package.
+# Select it from the same setting that enables graph commands so `start.sh
+# graph rebuild` cannot uninstall the driver immediately before importing it.
+graph_wanted=0
+if [[ -f .env ]] && grep -Eiq '^[[:space:]]*NEO4J_ENABLED[[:space:]]*=[[:space:]]*(1|true|yes|on)[[:space:]]*$' .env; then
+    graph_wanted=1
+fi
+if [[ -n "${NEO4J_ENABLED:-}" ]]; then
+    case "$(printf '%s' "$NEO4J_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) graph_wanted=1 ;;
+        *)             graph_wanted=0 ;;
+    esac
+fi
+
 sync_args=(--quiet)
 if (( ocr_wanted )); then
     sync_args+=(--extra ocr)
@@ -233,6 +247,9 @@ if (( postgres_wanted )); then
 fi
 if (( storage_wanted )); then
     sync_args+=(--extra storage)
+fi
+if (( graph_wanted )); then
+    sync_args+=(--extra graph)
 fi
 
 info "Syncing dependencies"
@@ -251,6 +268,12 @@ fi
 if (( postgres_wanted )); then
     extras="${extras} postgres"
 fi
+if (( storage_wanted )); then
+    extras="${extras} storage"
+fi
+if (( graph_wanted )); then
+    extras="${extras} graph"
+fi
 if [[ -n "$extras" ]]; then
     ok "dependencies in sync (including the${extras} extra(s))"
 else
@@ -265,6 +288,9 @@ if (( postgres_wanted )); then
 fi
 if (( storage_wanted )); then
     ok "ARCHIVE_S3_BUCKET is set: the raw archive uses the S3 storage extra"
+fi
+if (( graph_wanted )); then
+    ok "NEO4J_ENABLED is set: graph commands include the Neo4j driver"
 fi
 
 # --- run -------------------------------------------------------------------------
