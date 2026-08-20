@@ -139,7 +139,11 @@ graph = [
 # run module-level code in a build that has no database and no network.
 docs = [
     "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
+    # A hard fork of mkdocs-material (squidfunk's history is in it; MIT),
+    # carrying the theme name `materialx` and Pagefind in place of lunr.
+    # It cannot be installed beside mkdocs-material -- both own the
+    # `material` package -- so this replaces it rather than adding to it.
+    "mkdocs-materialx>=10.2",
     "mkdocstrings[python]>=0.26",
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",

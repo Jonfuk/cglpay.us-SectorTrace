@@ -37,7 +37,7 @@ validation:
     unrecognized_links: warn
 
 theme:
-  name: material
+  name: materialx
   language: en
   # No CDN and no remote fonts. The same rule the two front ends follow:
   # this has to render with the network cable unplugged.
