@@ -112,7 +112,10 @@ def documents_register_existing(
 
 def _document_candidates(conn, evidence_id, source_system, quality, parser_version, limit, pending_only=False):
     sql = "SELECT e.* FROM evidence_records e LEFT JOIN document_processing_states s ON s.evidence_id=e.evidence_id"
-    terms, values = [], []
+    # Evidence is graph-ready before it is document-ready. A document run must
+    # only select rows with an immutable raw archive path; otherwise generic
+    # evidence (for example, a contract notice) would be retried as a document.
+    terms, values = ["e.raw_object_path IS NOT NULL"], []
     if evidence_id:
         terms.append("e.evidence_id=?")
         values.append(evidence_id)
@@ -198,8 +201,10 @@ def documents_status() -> None:
     conn, _ = _document_connection()
     try:
         rows = conn.execute(
-            "SELECT parse_status, ocr_status, quality_status, COUNT(*) AS count "
-            "FROM document_processing_states GROUP BY parse_status, ocr_status, quality_status").fetchall()
+            "SELECT s.parse_status, s.ocr_status, s.quality_status, COUNT(*) AS count "
+            "FROM document_processing_states s JOIN evidence_records e ON e.evidence_id=s.evidence_id "
+            "WHERE e.raw_object_path IS NOT NULL "
+            "GROUP BY s.parse_status, s.ocr_status, s.quality_status").fetchall()
         typer.echo(__import__("json").dumps([dict(row) for row in rows], indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -211,7 +216,10 @@ def documents_stats() -> None:
     conn, _ = _document_connection()
     try:
         result = {
-            "registered_evidence": conn.execute("SELECT COUNT(*) FROM document_processing_states").fetchone()[0],
+            "registered_evidence": conn.execute(
+                "SELECT COUNT(*) FROM document_processing_states s "
+                "JOIN evidence_records e ON e.evidence_id=s.evidence_id "
+                "WHERE e.raw_object_path IS NOT NULL").fetchone()[0],
             "documents": conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0],
             "active_versions": conn.execute("SELECT COUNT(*) FROM document_versions WHERE is_active=1").fetchone()[0],
             "parse_runs": conn.execute("SELECT COUNT(*) FROM document_parse_runs").fetchone()[0],

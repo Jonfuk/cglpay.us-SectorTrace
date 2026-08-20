@@ -61,8 +61,37 @@ print(len(rows), statuses.count("SUCCESS"), statuses.count("UNCHANGED"),
   [[ "$processed" -gt 0 ]]
 }
 
-echo "Draining any already registered documents before registering more."
-while process_documents "Outstanding work"; do :; done
+pending_document_source_systems() {
+  # Do not drain every evidence row in the warehouse: evidence is graph-ready
+  # more broadly than it is document-ready. Only the three bridge tables below
+  # have the verified raw-document provenance this batch is allowed to process.
+  uv run python -c '
+from pipeline import db
+from pipeline.config import get_settings
+
+settings = get_settings()
+conn = db.get_connection(settings)
+try:
+    rows = conn.execute(
+        "SELECT DISTINCT e.source_system "
+        "FROM evidence_records e "
+        "LEFT JOIN document_processing_states s ON s.evidence_id=e.evidence_id "
+        "WHERE e.source_table IN (?, ?, ?) "
+        "AND COALESCE(s.parse_status, '\''PENDING'\'') != '\''SUCCESS'\'' "
+        "ORDER BY e.source_system",
+        ("committee_papers", "cdp_documents", "provider_annual_reports"),
+    ).fetchall()
+    for row in rows:
+        print(row[0])
+finally:
+    conn.close()
+'
+}
+
+echo "Draining already registered legacy documents before registering more."
+while IFS= read -r source_system; do
+  while process_documents "Outstanding document work ($source_system)" --source-system "$source_system"; do :; done
+done < <(pending_document_source_systems)
 
 for source in "${sources[@]}"; do
   echo
@@ -96,7 +125,10 @@ print(data["candidates"], data["registered"], data["missing_raw"],
     IFS=',' read -r -a systems <<< "$source_systems"
     for source_system in "${systems[@]}"; do
       [[ "$source_system" != "-" ]] || { echo "Registration returned no source system." >&2; exit 1; }
-      process_documents "$source batch $batch ($source_system)" --source-system "$source_system" || true
+      if ! process_documents "$source batch $batch ($source_system)" --source-system "$source_system"; then
+        echo "Registration reported documents for $source_system but none were processable." >&2
+        exit 1
+      fi
     done
   done
 done

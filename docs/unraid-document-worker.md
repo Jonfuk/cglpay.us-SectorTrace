@@ -168,8 +168,10 @@ batch script instead of a committee-paper-only copy:
 It processes `committee_papers`, `cdp_documents`, and `annual_reports` in
 turn, dynamically using the source-system value returned by registration. It
 is resumable and stops a source with unrecoverable raw objects rather than
-silently skipping them. Set `DOCUMENT_BATCH_SIZE` or `DOCUMENT_PARSER` in the
-environment to override its defaults of `25` and `pymupdf`.
+silently skipping them. Its initial catch-up pass is deliberately limited to
+those three document tables, never unrelated graph evidence. Set
+`DOCUMENT_BATCH_SIZE` or `DOCUMENT_PARSER` in the environment to override its
+defaults of `25` and `pymupdf`.
 
 The wrapper accepts the existing host `batch.sh`: it makes an in-container
 temporary copy that omits host `git pull` and `uv sync` commands. The container

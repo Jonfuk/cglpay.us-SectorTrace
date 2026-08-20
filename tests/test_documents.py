@@ -76,6 +76,21 @@ def test_ocr_routing_uses_the_configured_transparent_thresholds(settings):
     assert not ocr_required(born_digital, settings)
 
 
+def test_document_candidates_exclude_evidence_without_a_raw_archive_path(conn):
+    source = reference()
+    repository.upsert_evidence(conn, source)
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, "
+        "payload_sha256, raw_object_path, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)",
+        ("evidence-not-a-document", "find_a_tender", "https://example.test/notice",
+         "2026-08-20T00:00:00+00:00", "b" * 64, repository.utcnow()),
+    )
+
+    rows = _document_candidates(conn, None, None, None, None, 25, pending_only=True)
+
+    assert [row["evidence_id"] for row in rows] == [source.evidence_id]
+
+
 def test_quality_marks_empty_parse_as_failed():
     status, metrics, warnings = assess(ParsedDocument("fixture", "1", []), pages_total=2)
     assert status == "FAILED"
