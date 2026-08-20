@@ -50,7 +50,9 @@ def _conn(tmp_path: Path):
 
 def test_rebuild_projects_only_relational_records(tmp_path):
     conn = _conn(tmp_path)
-    conn.execute("INSERT INTO entities VALUES (?, ?, ?, ?, ?, ?, ?)",
+    conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
+                 "canonical_name_normalized, status, created_at, updated_at) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                  ("provider-1", "PROVIDER", "Example Provider", "example provider", "active", "now", "now"))
     conn.commit()
     store = RecordingStore()
@@ -65,7 +67,9 @@ def test_rebuild_projects_only_relational_records(tmp_path):
 
 def test_delta_sync_is_retryable_and_marks_a_success(tmp_path):
     conn = _conn(tmp_path)
-    conn.execute("INSERT INTO entities VALUES (?, ?, ?, ?, ?, ?, ?)",
+    conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
+                 "canonical_name_normalized, status, created_at, updated_at) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                  ("provider-1", "PROVIDER", "Example Provider", "example provider", "active", "now", "now"))
     conn.execute("INSERT INTO graph_projection_queue (object_type, object_id, operation, created_at) "
                  "VALUES ('entity', 'provider-1', 'UPSERT_ENTITY', 'now')")

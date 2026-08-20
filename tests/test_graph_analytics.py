@@ -26,14 +26,19 @@ def _conn(tmp_path: Path):
         ("provider-1", "PROVIDER", "Provider 1"),
         ("provider-2", "PROVIDER", "Provider 2"),
     ]:
-        conn.execute("INSERT INTO entities VALUES (?, ?, ?, ?, ?, ?, ?)",
+        conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
+                     "canonical_name_normalized, status, created_at, updated_at) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (entity_id, entity_type, name, name.lower(), "active", "now", "now"))
     for number, authority, provider in [
         (1, "council-a", "provider-1"), (2, "council-b", "provider-1"),
         (3, "council-c", "provider-2"),
     ]:
         conn.execute(
-            "INSERT INTO entity_relationships VALUES (?, ?, 'COMMISSIONS', ?, 'COMMISSIONS', "
+            "INSERT INTO entity_relationships (relationship_id, subject_entity_id, predicate, "
+            "object_entity_id, relationship_type, evidence_id, claim_id, valid_from, valid_to, "
+            "confidence, derivation_type, derivation_version, created_at, updated_at) "
+            "VALUES (?, ?, 'COMMISSIONS', ?, 'COMMISSIONS', "
             "NULL, NULL, NULL, NULL, 1.0, 'SOURCE_FACT', '1', 'now', 'now')",
             (f"relationship-{number}", authority, provider))
     conn.commit()

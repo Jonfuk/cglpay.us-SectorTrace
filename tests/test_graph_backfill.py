@@ -14,13 +14,15 @@ def _conn(tmp_path: Path):
                         migrations_dir=Path("pipeline/migrations"), _env_file=None)
     conn = db.get_connection(settings)
     db.apply_migrations(conn, settings.migrations_dir)
-    conn.execute("INSERT INTO providers VALUES ('example-provider', 'Example Provider', 0, NULL)")
+    conn.execute("INSERT INTO providers (provider_key, canonical_name, is_target, notes) "
+                 "VALUES ('example-provider', 'Example Provider', 0, NULL)")
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES ('E00000001', 'Example Council', 'unitary', '2020-01-01', '2020', '2020', "
         "'https://example.test/authority', 'now', 200, 'ons', 'authority-hash')")
-    conn.execute("INSERT INTO supplier_aliases VALUES ('Example Provider Ltd', 'example-provider', 'Example Provider')")
+    conn.execute("INSERT INTO supplier_aliases (alias_raw, supplier_key, canonical_name) "
+                 "VALUES ('Example Provider Ltd', 'example-provider', 'Example Provider')")
     conn.execute(
         "INSERT INTO contracts (notice_id, supplier_id, ocid, buyer_ons_code, supplier_name_raw, date_start, "
         "date_end, source_url, retrieved_at, http_status, source_system, payload_sha256) "
