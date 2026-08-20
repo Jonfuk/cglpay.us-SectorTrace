@@ -155,12 +155,13 @@ of PSCs is then a redaction, not a finding.
 
 | | |
 | --- | --- |
-| Source | CQC public API |
+| Source | CQC public API, plus the bulk care-directory CSV (`pipeline/cqc_bulk.py`, shared with Module 26) for provider discovery |
 | Endpoint | `https://api.service.cqc.org.uk/public/v1` |
 | Licence | OGL v3.0 |
-| Key | **`CQC_SUBSCRIPTION_KEY`** — free registration. Sent as `Ocp-Apim-Subscription-Key` |
+| Key | **`CQC_SUBSCRIPTION_KEY`** — free registration. Sent as `Ocp-Apim-Subscription-Key`. Not sent to the bulk-export host, which needs no key |
 | Rate limit | Default |
 | Personal data | Registered managers are named inside each location's regulated activities. Stored only in `restricted_cqc_location_contacts` |
+| Notes | Provider discovery reads the bulk CSV rather than paging the API's ~64k-row `/providers` index; falls back to that paging if the bulk export is unreachable or reshaped. Resumes at provider granularity: `module_cursors` records which tracked providers this pass has fully walked, so an interrupted run picks up past them rather than re-walking the target provider from the start — cleared once the pass reaches the end of the matched list, so the next invocation still does the full refresh this module always promises (`supports_since=False`). See the module docstring. |
 
 ## Module 6 — Workforce census
 

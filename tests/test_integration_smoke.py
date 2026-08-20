@@ -147,8 +147,12 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
         signal=(("cqc_locations", "location_name"), ("cqc_locations", "postal_code"),
                 ("cqc_providers", "provider_name")),
         requires_key="cqc_subscription_key",
-        note="Slow regardless of --limit: the CQC API has no name filter, so "
-              "the full provider index is paged before anything is filtered.",
+        note="Provider discovery is now one bulk-CSV download rather than "
+              "the CQC API's ~64k-row /providers index paged in full (see "
+              "pipeline/cqc_bulk.py) -- fast regardless of --limit. What "
+              "--limit still bounds is how many *matched* providers get "
+              "walked; each one's own locations are still fetched one at a "
+              "time from the live API, so this is not instant either way.",
     ),
     Smoke(
         module="m06_workforce_census",

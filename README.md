@@ -112,14 +112,19 @@ idempotent**: every write is a natural-key upsert, so running a module twice
 produces the same warehouse as running it once, and an interrupted run is
 safe to repeat.
 
-**Re-runs are cheap, but only `m01_procurement` truly resumes.** It is the one
-module that records a cursor (`module_cursors`), because Find a Tender is
-paged and picking the page back up is the difference between minutes and
-hours. The other twenty-five restart from the beginning — what makes that
-acceptable rather than wasteful is the conditional-request cache: a document
-that has not changed answers `304` and is read from the raw archive instead of
-downloaded again. The requests are still made, at the same one per two seconds
-per host, so a re-run costs time even when it costs no bandwidth.
+**Re-runs are cheap, but only two modules truly resume.** Both record a
+cursor (`module_cursors`). `m01_procurement` picks back up mid-page, because
+Find a Tender is paged and re-fetching from page one is the difference
+between minutes and hours. `m05_cqc` resumes at provider granularity: it has
+no natural "page" to resume mid-way through, so what it records instead is
+which tracked providers this pass has already walked in full, and skips them
+on the next invocation of the same pass — a run interrupted after finishing
+the target provider does not re-walk it from scratch. The other twenty-five
+restart from the beginning — what makes that acceptable rather than wasteful
+is the conditional-request cache: a document that has not changed answers
+`304` and is read from the raw archive instead of downloaded again. The
+requests are still made, at the same one per two seconds per host, so a
+re-run costs time even when it costs no bandwidth.
 
 Modules join on two stable entities: **authorities** (ONS code, from `m00`)
 and **providers** (from `pipeline/providers.py`). Everything else hangs off

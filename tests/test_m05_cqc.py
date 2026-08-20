@@ -1,20 +1,45 @@
 from __future__ import annotations
 
+import json
 import re
 
 import httpx
 import pytest
 
-from pipeline import providers
+from pipeline import cqc_bulk, db, providers
 from pipeline.modules import m05_cqc as cqc
 from pipeline.registry import ModuleContext
 
 API = "https://api.service.cqc.org.uk/public/v1"
+BULK_LANDING = cqc_bulk.LANDING_PAGE
+BULK_CSV_URL = "https://www.cqc.org.uk/system/files/2026-08/19_August_2026_CQC_directory.csv"
+BULK_LANDING_HTML = f'<html><body><a href="{BULK_CSV_URL}">CQC care directory - csv</a></body></html>'
 
 
 def _allow_all_robots(httpx_mock) -> None:
     httpx_mock.add_response(url="https://api.service.cqc.org.uk/robots.txt",
                              status_code=200, text="", is_reusable=True)
+    httpx_mock.add_response(url="https://www.cqc.org.uk/robots.txt",
+                             status_code=200, text="", is_reusable=True)
+
+
+def _bulk_csv_body(rows: list[list[str]]) -> bytes:
+    """rows: [name, provider_name, location_id, provider_id]. The columns
+    m05_cqc's discovery actually reads; the rest of the real file's columns
+    are irrelevant to it and left out here.
+    """
+    header = ["Name", "Provider name", "CQC Location ID (for office use only)",
+              "CQC Provider ID (for office use only)"]
+    lines = ["CQC Locations data", "", "produced on 19 August 2026", "", ",".join(header)]
+    for name, provider_name, location_id, provider_id in rows:
+        lines.append(",".join(
+            f'"{c}"' if "," in c else c for c in (name, provider_name, location_id, provider_id)))
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
+def _mock_bulk_discovery(httpx_mock, rows: list[list[str]]) -> None:
+    httpx_mock.add_response(url=BULK_LANDING, text=BULK_LANDING_HTML)
+    httpx_mock.add_response(url=BULK_CSV_URL, content=_bulk_csv_body(rows))
 
 
 def _seed_authority(conn, ons_code: str, name: str) -> None:
@@ -234,13 +259,11 @@ def test_run_end_to_end(httpx_mock, settings, conn):
     providers.seed_providers(conn)
     _seed_authority(conn, "E08000034", "Kirklees")
 
-    httpx_mock.add_response(
-        url=re.compile(rf"{re.escape(API)}/providers\?.*"),
-        json={"totalPages": 1, "providers": [
-            {"providerId": "1-125892604", "providerName": "Change, Grow, Live"},
-            {"providerId": "1-999", "providerName": "At Home With You Limited"},
-            {"providerId": "1-888", "providerName": "Artemis Cystitis Limited"},
-        ]})
+    _mock_bulk_discovery(httpx_mock, [
+        ["CHART Kirklees", "Change, Grow, Live", "1-10559211016", "1-125892604"],
+        ["Some Service", "At Home With You Limited", "1-999a", "1-999"],
+        ["Other Service", "Artemis Cystitis Limited", "1-888a", "1-888"],
+    ])
     httpx_mock.add_response(
         url=f"{API}/providers/1-125892604",
         json={"name": "Change, Grow, Live", "companiesHouseNumber": "03861209",
@@ -278,11 +301,9 @@ def test_a_location_that_keeps_failing_does_not_abort_the_run(httpx_mock, settin
     providers.seed_providers(conn)
     _seed_authority(conn, "E08000034", "Kirklees")
 
-    httpx_mock.add_response(
-        url=re.compile(rf"{re.escape(API)}/providers\?.*"),
-        json={"totalPages": 1, "providers": [
-            {"providerId": "1-125892604", "providerName": "Change, Grow, Live"},
-        ]})
+    _mock_bulk_discovery(httpx_mock, [
+        ["CHART Kirklees", "Change, Grow, Live", "1-10559211016", "1-125892604"],
+    ])
     httpx_mock.add_response(
         url=f"{API}/providers/1-125892604",
         json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
@@ -308,3 +329,121 @@ def test_a_location_that_keeps_failing_does_not_abort_the_run(httpx_mock, settin
     ).fetchone()["c"] == 1
     # the location fetched *after* the flaky one still made it in
     assert conn.execute("SELECT COUNT(*) c FROM cqc_locations").fetchone()["c"] == 1
+
+
+def test_falls_back_to_the_paginated_index_when_the_bulk_export_is_unreachable(httpx_mock, settings, conn):
+    """The bulk export is a website, not the syndication API -- a different
+    host, a different failure mode. If it is down or reshaped, discovery
+    must still work, just slower."""
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    _seed_authority(conn, "E08000034", "Kirklees")
+
+    httpx_mock.add_response(url=BULK_LANDING, status_code=404)
+    httpx_mock.add_response(
+        url=re.compile(rf"{re.escape(API)}/providers\?.*"),
+        json={"totalPages": 1, "providers": [
+            {"providerId": "1-125892604", "providerName": "Change, Grow, Live"},
+        ]})
+    httpx_mock.add_response(
+        url=f"{API}/providers/1-125892604",
+        json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
+              "locationIds": ["1-10559211016"]})
+    httpx_mock.add_response(url=f"{API}/locations/1-10559211016", json=_location_payload())
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    cqc.run(ctx)
+
+    assert conn.execute("SELECT COUNT(*) c FROM cqc_locations").fetchone()["c"] == 1
+    # the bulk failure is itself on record, not silently swallowed
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='cqc_bulk_export_fetch_failed'"
+    ).fetchone()["c"] == 1
+
+
+# --- resume cursor ------------------------------------------------------------
+
+def test_run_skips_a_provider_already_completed_in_an_interrupted_pass(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    _seed_authority(conn, "E08000034", "Kirklees")
+
+    db.set_cursor(conn, "m05_cqc", json.dumps(["1-turning"]))
+    conn.commit()
+
+    _mock_bulk_discovery(httpx_mock, [
+        ["CHART Kirklees", "Change, Grow, Live", "1-10559211016", "1-125892604"],
+        ["Turning Point Service", "Turning Point", "1-tp-loc", "1-turning"],
+    ])
+    httpx_mock.add_response(
+        url=f"{API}/providers/1-125892604",
+        json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
+              "locationIds": ["1-10559211016"]})
+    httpx_mock.add_response(url=f"{API}/locations/1-10559211016", json=_location_payload())
+    # deliberately no mock for {API}/providers/1-turning -- if the run tries
+    # to fetch it despite the cursor, httpx_mock raises and the test fails.
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    cqc.run(ctx)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM cqc_providers WHERE provider_id='1-125892604'"
+    ).fetchone()["c"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM cqc_providers WHERE provider_id='1-turning'"
+    ).fetchone()["c"] == 0
+
+
+def test_run_clears_the_cursor_once_the_pass_completes(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    _seed_authority(conn, "E08000034", "Kirklees")
+
+    db.set_cursor(conn, "m05_cqc", json.dumps(["1-turning"]))
+    conn.commit()
+
+    _mock_bulk_discovery(httpx_mock, [
+        ["CHART Kirklees", "Change, Grow, Live", "1-10559211016", "1-125892604"],
+    ])
+    httpx_mock.add_response(
+        url=f"{API}/providers/1-125892604",
+        json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
+              "locationIds": ["1-10559211016"]})
+    httpx_mock.add_response(url=f"{API}/locations/1-10559211016", json=_location_payload())
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    cqc.run(ctx)
+
+    # a full pass ran to completion, however many invocations it took -- the
+    # next one must start fresh (supports_since=False), not find everyone
+    # still marked done from a pass that finished runs ago
+    assert not db.get_cursor(conn, "m05_cqc")
+
+
+def test_a_limited_run_neither_reads_nor_writes_the_cursor(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    _seed_authority(conn, "E08000034", "Kirklees")
+
+    db.set_cursor(conn, "m05_cqc", json.dumps(["1-125892604"]))
+    conn.commit()
+
+    _mock_bulk_discovery(httpx_mock, [
+        ["CHART Kirklees", "Change, Grow, Live", "1-10559211016", "1-125892604"],
+    ])
+    httpx_mock.add_response(
+        url=f"{API}/providers/1-125892604",
+        json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
+              "locationIds": ["1-10559211016"]})
+    httpx_mock.add_response(url=f"{API}/locations/1-10559211016", json=_location_payload())
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=1)
+    cqc.run(ctx)
+
+    # ignored the cursor's claim that CGL was already done -- --limit runs
+    # (smoke tests, spot checks) must not be starved by production's cursor
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM cqc_providers WHERE provider_id='1-125892604'"
+    ).fetchone()["c"] == 1
+    # and left the cursor exactly as it found it
+    assert db.get_cursor(conn, "m05_cqc") == json.dumps(["1-125892604"])

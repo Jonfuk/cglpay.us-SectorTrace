@@ -1,9 +1,18 @@
 """Module 5 — CQC registered locations.
 
-The CQC API has no provider-name filter, so this follows the same pattern as
-Module 1: page the full provider index once (~64k rows, id and name only),
-filter locally, then fetch detail for matches only. That keeps the corpus
-re-filterable without re-fetching if the provider list changes.
+The CQC syndication API has no provider-name filter, so providers to walk
+are discovered rather than looked up: `pipeline/cqc_bulk.py`'s weekly
+care-directory CSV names every regulated provider once per location row,
+deduplicated locally to id-and-name pairs and matched exactly as an API
+provider-index entry would be. That CSV is also what m26_cqc_directory
+cross-checks against this module's own output -- here it does the opposite
+job, discovery rather than verification, but it is the same file either way.
+
+If the bulk export cannot be read (host down, page layout changed, expected
+columns missing), discovery falls back to the CQC API's own `/providers`
+index, paged in full (~64k rows) exactly as this module always used to --
+slower, and this used to be unconditional (see `_fetch_provider_index`), but
+it means an unreachable bulk export degrades the run rather than stopping it.
 
 Matching is exact-on-normalised-name, because a substring search returns
 plainly unrelated companies — "With You" also matches "At Home With You
@@ -22,9 +31,15 @@ activities; those go only to restricted_cqc_location_contacts.
 
 Matched providers are walked in priority order (`_prioritise`): the target
 provider first, every other tracked comparator next in the order
-pipeline/keywords.py lists them. This module has no cursor and does not
-resume, so on a run that is slow or gets interrupted, order is what decides
-whose data is current afterward.
+pipeline/keywords.py lists them. That matters more than it otherwise would
+because of the other half of this: a `module_cursors` row (see README's
+"only m01_procurement truly resumes" -- this is the second) records which
+providers this pass has already fully walked. A run that gets interrupted
+resumes past them next time instead of starting over from the target
+provider again; a run that reaches the end of `matched` clears the cursor,
+so the following invocation still does the full fresh refresh this module
+is meant to do (`supports_since=False`) rather than silently skipping
+everyone forever.
 """
 from __future__ import annotations
 
@@ -35,7 +50,7 @@ import re
 import httpx
 import structlog
 
-from pipeline import db, providers
+from pipeline import cqc_bulk, db, providers
 from pipeline.http import PipelineHTTPClient
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
@@ -144,6 +159,69 @@ def _fetch_provider_index(client: PipelineHTTPClient, conn, module_name: str) ->
             break
         page += 1
     return providers_seen
+
+
+def _match_providers(pairs, conn, module_name: str) -> list[tuple[str, str]]:
+    """pairs: iterable of (provider_id, provider_name), from either
+    discovery path. Exact matches come back as (provider_id, provider_key);
+    substring hits go to review_queue exactly as before, regardless of
+    which path found them -- one matching policy, one outcome either way.
+    """
+    matched: list[tuple[str, str]] = []
+    for provider_id, provider_name in pairs:
+        provider_key, basis = match_provider_name(provider_name)
+        if basis == "exact":
+            matched.append((provider_id, provider_key))
+        elif basis == "substring":
+            db.record_review_item(
+                conn, module_name, "possible_cqc_provider", f"{provider_id} {provider_name}",
+                json.dumps({"provider_key_guess": provider_key,
+                             "note": "name contains a provider variant but is not an exact "
+                                      "match; confirm before treating as this provider"}))
+    return matched
+
+
+def _discover_matched_providers(ctx: ModuleContext, module_name: str, key: str) -> list[tuple[str, str]]:
+    """(provider_id, provider_key) for every exact-matched provider.
+
+    Preferred path: CQC's own weekly bulk care-directory CSV (see
+    pipeline/cqc_bulk.py), which names every regulated provider in one
+    ~18MB download rather than the ~64k-row `/providers` index paged one
+    page at a time -- this used to be, in the module's own words, "the
+    longest silent stretch in the pipeline". If the bulk export cannot be
+    read, this falls back to that same paginated index instead of leaving
+    the run with nothing to walk: slower, but the module still finishes.
+    """
+    with PipelineHTTPClient(cqc_bulk.SOURCE_SYSTEM, settings=ctx.settings, conn=ctx.conn) as bulk_client:
+        ctx.phase("finding the current CQC care directory")
+        rows = cqc_bulk.fetch_directory_rows(bulk_client, ctx.conn, module_name)
+
+    if rows is not None:
+        seen: dict[str, str] = {}
+        for row in rows:
+            seen.setdefault(row.provider_id, row.provider_name)
+        log.info("cqc.discovered_via_bulk_export", providers_in_directory=len(seen))
+        matched = _match_providers(seen.items(), ctx.conn, module_name)
+    else:
+        log.warning("cqc.bulk_export_unavailable_for_discovery",
+                    note="falling back to the paginated /providers index")
+        with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=ctx.conn) as api_client:
+            api_client.set_default_headers({"Ocp-Apim-Subscription-Key": key})
+            ctx.phase("paging provider index (fallback)")
+            index = _fetch_provider_index(api_client, ctx.conn, module_name)
+        log.info("cqc.index_fetched", providers=len(index))
+        matched = _match_providers(
+            ((entry.get("providerId"), entry.get("providerName"))
+             for entry in index if entry.get("providerId")),
+            ctx.conn, module_name)
+
+    # One commit covering everything discovery wrote (bulk/index fetch
+    # failures, substring candidates) -- same durability guarantee the old
+    # single-path version had: if the run dies shortly after this, what it
+    # found is not lost with it.
+    if not ctx.dry_run:
+        ctx.conn.commit()
+    return matched
 
 
 def _default_priority_order() -> tuple[str, ...]:
@@ -264,37 +342,34 @@ def run(ctx: ModuleContext) -> None:
     provider_rows = 0
     location_rows = 0
 
+    ctx.phase("discovering CQC providers")
+    matched = _prioritise(_discover_matched_providers(ctx, module_name, key))
+
+    # Resume: a `--limit` run is deliberately partial (a smoke test, say),
+    # so it neither reads nor writes the cursor -- only a real full-coverage
+    # run participates in resuming or clearing it. `completed_ids` names
+    # providers this pass has already fully walked (see the per-provider
+    # cursor update below); skipping them is what makes an interrupted run
+    # continue past the target provider next time instead of re-walking it.
+    completed_ids: set[str] = set()
+    resuming = False
+    if ctx.limit is None:
+        cursor = db.get_cursor(conn, module_name)
+        if cursor:
+            completed_ids = set(json.loads(cursor))
+            resuming = True
+            before = len(matched)
+            matched = [pair for pair in matched if pair[0] not in completed_ids]
+            log.info("cqc.resuming_interrupted_pass", already_done=len(completed_ids),
+                     remaining=len(matched), skipped=before - len(matched))
+
+    if ctx.limit:
+        matched = matched[:ctx.limit]
+    log.info("cqc.providers_matched", count=len(matched), resuming=resuming)
+
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         headers = {"Ocp-Apim-Subscription-Key": key}
         client.set_default_headers(headers)
-
-        # The longest silent stretch in the pipeline: the CQC API has no
-        # name filter, so the whole ~64k-row provider index is paged before
-        # anything can be matched.
-        ctx.phase("paging provider index")
-        index = _fetch_provider_index(client, conn, module_name)
-        log.info("cqc.index_fetched", providers=len(index))
-
-        matched: list[tuple[str, str]] = []
-        for entry in index:
-            provider_key, basis = match_provider_name(entry.get("providerName"))
-            if basis == "exact":
-                matched.append((entry["providerId"], provider_key))
-            elif basis == "substring":
-                db.record_review_item(
-                    conn, module_name, "possible_cqc_provider",
-                    f"{entry.get('providerId')} {entry.get('providerName')}",
-                    json.dumps({"provider_key_guess": provider_key,
-                                 "note": "name contains a provider variant but is not an exact "
-                                          "match; confirm before treating as this provider"}),
-                )
-        if not ctx.dry_run:
-            conn.commit()
-
-        matched = _prioritise(matched)
-        if ctx.limit:
-            matched = matched[:ctx.limit]
-        log.info("cqc.providers_matched", count=len(matched))
 
         for provider_id, provider_key in ctx.track(matched, "CQC providers"):
             # One provider's persistent 5xx/429 (retries exhausted) must not
@@ -363,5 +438,22 @@ def run(ctx: ModuleContext) -> None:
                     conn.commit()
 
             log.info("cqc.provider_complete", provider_id=provider_id, provider_key=provider_key)
+
+            # Recorded only once every one of this provider's locations has
+            # been through the loop above -- marking it done any earlier
+            # would let a resumed run skip a provider it never finished.
+            if not ctx.dry_run and ctx.limit is None:
+                completed_ids.add(provider_id)
+                db.set_cursor(conn, module_name, json.dumps(sorted(completed_ids)))
+                conn.commit()
+
+        if not ctx.dry_run and ctx.limit is None:
+            # Reaching the end of `matched` means this pass is done, however
+            # many runs it took to get here -- clear the cursor so the next
+            # invocation does the full fresh refresh this module always
+            # promises (supports_since=False) rather than finding every
+            # provider already marked complete and walking none of them.
+            db.set_cursor(conn, module_name, "")
+            conn.commit()
 
     log.info("cqc.run_complete", providers=provider_rows, locations=location_rows)
