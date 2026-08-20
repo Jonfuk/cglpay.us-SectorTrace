@@ -9,6 +9,7 @@ them is the worst available outcome.
 """
 from __future__ import annotations
 
+import gc
 import sqlite3
 import threading
 import time
@@ -153,6 +154,53 @@ def test_the_write_slot_is_released_when_a_connection_is_closed_mid_transaction(
         second.commit()
     finally:
         second.close()
+
+
+def test_the_write_slot_is_released_when_a_connection_is_only_dropped(settings):
+    """Nobody closed it and nobody can: the slot still has to come back.
+
+    `close()` is a Python-level override, and sqlite3.Connection's
+    deallocation does not call it. Before `__del__` existed, a connection
+    abandoned inside a write transaction held the slot for the life of the
+    process — measured, with a full `gc.collect()` in between — and the next
+    writer in that thread was told the *same thread* already held it on
+    another connection. True, and useless: the connection it named no longer
+    existed, and the error landed on the innocent writer. One such leak in
+    this suite turned a single broken INSERT into 261 failures and 365
+    errors, none of them near the bug.
+
+    The second writer here is the other half of it. Every sqlite3.Connection
+    is in a reference cycle with its own statement cache, so an abandoned one
+    is freed by the cycle collector with its statements still unfinalized,
+    and sqlite3_close_v2 defers the close — leaving the write lock on the
+    file. Giving back the slot alone got this test past the queue and into
+    "database is locked" for the full 120s busy timeout, which is why __del__
+    closes rather than merely releasing.
+    """
+    def abandon():
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, settings.migrations_dir)
+        conn.commit()
+        conn.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                      "VALUES ('m01', 'abandoned', 'v', '2026-01-01')")
+        assert db.WRITE_SLOT.held()
+        # Returns without closing — the shape a module or a test takes when a
+        # statement raises before whatever would have closed it.
+
+    abandon()
+    gc.collect()
+    assert not db.WRITE_SLOT.held()
+
+    after = db.get_connection(settings)
+    try:
+        after.execute("INSERT INTO review_queue (module, item_type, raw_value, created_at) "
+                       "VALUES ('m02', 'after', 'v', '2026-01-01')")
+        after.commit()
+        # The abandoned transaction was rolled back on the way out, so the
+        # only row here is the one the surviving writer committed.
+        assert [r[0] for r in after.execute("SELECT module FROM review_queue")] == ["m02"]
+    finally:
+        after.close()
 
 
 def test_the_context_manager_releases_the_write_slot(settings):

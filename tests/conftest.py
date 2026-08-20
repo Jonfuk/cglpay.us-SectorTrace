@@ -27,6 +27,35 @@ def _reset_host_clock():
 
 
 @pytest.fixture(autouse=True)
+def _no_test_inherits_a_held_write_slot():
+    """The write slot is process-wide by design, so one abandoned write
+    transaction is every later test's problem.
+
+    A test that raises part-way through a write leaves its connection holding
+    the slot. `WriteSerialisedConnection.__del__` now hands it back when that
+    connection is collected, which covers the ordinary case promptly — but
+    collection is not scheduled, and a connection caught in a reference cycle
+    comes back on some later gc pass rather than at the end of the test that
+    dropped it.
+
+    That is the shape of failure this exists to stop: `tests/test_evidence_graph.py`
+    inserted ten values into a twelve-column `evidence_records` after migration
+    0054 extended it, died mid-transaction, and every subsequent test that
+    wrote failed with "the same thread already holds it on another connection"
+    — 261 failures and 365 errors, all of them naming a thread rather than the
+    one broken INSERT. Each module still passed when run alone, which is why
+    it went unnoticed.
+
+    A safety net, not a detector: it makes the leak stop at the test that
+    caused it. `tests/test_db_concurrency.py` is where the release itself is
+    pinned.
+    """
+    db.WRITE_SLOT.reset()
+    yield
+    db.WRITE_SLOT.reset()
+
+
+@pytest.fixture(autouse=True)
 def _contact_email_is_always_set(monkeypatch):
     """The one setting with no default, present for every test.
 

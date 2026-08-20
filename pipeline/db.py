@@ -199,6 +199,35 @@ class _FairWriteLock:
                 self._owner = None
                 self.holder = None
 
+    def held(self) -> bool:
+        with self._guard:
+            return self._held
+
+    def reset(self) -> None:
+        """Put the slot back to unheld. For tests; never call this during a run.
+
+        The slot is process-wide, so a test that abandons a write transaction
+        leaks it into every test that runs after — see the note on
+        WriteSerialisedConnection.__del__ for what that looks like from the
+        far end. __del__ closes that hole at the source; this is the backstop
+        for the case it cannot reach promptly, a connection caught in a
+        reference cycle and collected some arbitrary number of tests later.
+        """
+        with self._guard:
+            waiters, self._waiters = list(self._waiters), deque()
+            self._held = False
+            self._owner = None
+            self.holder = None
+        for ticket in waiters:
+            # A queued waiter at this point means a test ended with a writer
+            # thread still running, which no reset can make coherent: the
+            # woken thread will believe it holds a slot that the next arrival
+            # is also free to take. Waking it anyway, because the alternative
+            # is a thread that sits out the full fifteen-minute timeout and a
+            # suite that appears to hang. In practice there are none — every
+            # test that queues a writer joins its threads before it ends.
+            ticket.set()
+
 
 WRITE_SLOT = _FairWriteLock()
 
@@ -304,6 +333,54 @@ class WriteSerialisedConnection(sqlite3.Connection):
             # A connection closed mid-transaction rolls back, and the slot has
             # to come back either way or the run stops.
             self._release_slot()
+
+    # The slot also has to come back when nobody closed the connection at all.
+    #
+    # close() above is Python-level; sqlite3.Connection's deallocation is not,
+    # and it does not call an override. Measured: drop the last reference to a
+    # connection part-way through a write transaction, run a full
+    # gc.collect(), and the slot is still held — by an object that no longer
+    # exists and can therefore never commit, roll back or close. Nothing can
+    # ever give it back.
+    #
+    # The failure that follows names the wrong thing. The next writer in that
+    # thread is told the same thread already holds the slot on another
+    # connection, which is true and useless: the connection it names is gone,
+    # and the error points at the innocent writer rather than at whatever
+    # abandoned the transaction. One such leak in the offline suite — a test
+    # whose INSERT raised before its close() — turned a single broken
+    # statement into 261 failures and 365 errors, none of them near the bug.
+    #
+    # Calling close() rather than only releasing the slot, because the C-level
+    # deallocation does not reliably let go of the *database* either. Every
+    # sqlite3.Connection is in a reference cycle with its own statement cache
+    # (CPython builds it as an lru_cache over a closure bound to the
+    # connection), so an abandoned connection is freed by the cycle collector
+    # rather than by refcount, and the cached statements are still
+    # unfinalized when it goes. sqlite3_close_v2 then defers the close and
+    # leaves the write lock on the file: measured, releasing the slot alone
+    # got the next writer past the queue and straight into "database is
+    # locked" for the full 120s busy timeout. close() clears the statement
+    # cache first, which rolls the abandoned transaction back and lets the
+    # file go.
+    #
+    # This does not soften the re-entrancy check in _FairWriteLock.acquire.
+    # That check is about two *live* connections writing in one thread, which
+    # is still a deadlock and still an error. This covers only the case where
+    # the holder has ceased to exist, and its transaction is rolled back on
+    # the way out, so no committed state turns on it.
+    def __del__(self):
+        try:
+            # close() releases the slot in its own finally, so a connection
+            # being collected on a thread that did not open it — where
+            # check_same_thread makes the close itself raise — still gives the
+            # slot back before the exception reaches the handler below.
+            self.close()
+        except Exception:       # pragma: no cover - teardown and cross-thread
+            # __del__ runs at arbitrary times, including interpreter shutdown,
+            # when module globals may already be None. An exception here is
+            # noise on stderr that nothing can act on.
+            pass
 
 
 def get_connection(settings: Settings | None = None,
