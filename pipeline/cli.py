@@ -142,7 +142,7 @@ def documents_process(
     evidence_id: str = typer.Option(None),
     source_system: str = typer.Option(None),
     limit: int = typer.Option(25, min=1),
-    parser: str = typer.Option(None, help="docling or pymupdf"),
+    parser: str = typer.Option(None, help="docling, pymupdf, or docx"),
     force: bool = typer.Option(False, "--force", help="Create a new parse run even if configuration matches"),
 ) -> None:
     """Parse registered raw objects; collection and raw archive are untouched."""

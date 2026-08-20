@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import mimetypes
 import re
+from io import BytesIO
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 from pipeline.documents.models import Inspection
 
@@ -18,6 +20,18 @@ _HTML_PREFIX = re.compile(
     re.IGNORECASE,
 )
 
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _looks_like_docx(body: bytes) -> bool:
+    """Recognise a DOCX package without trusting the missing archive MIME."""
+    try:
+        with ZipFile(BytesIO(body)) as package:
+            names = set(package.namelist())
+    except (BadZipFile, OSError):
+        return False
+    return "[Content_Types].xml" in names and "word/document.xml" in names
+
 
 def _sniff_mime(body: bytes, mime: str) -> str:
     """Recover common document types when an archive was stored as binary."""
@@ -25,6 +39,8 @@ def _sniff_mime(body: bytes, mime: str) -> str:
         return "application/pdf"
     if mime in {"application/octet-stream", "binary/octet-stream"} and _HTML_PREFIX.match(body[:4096]):
         return "text/html"
+    if mime in {"application/octet-stream", "binary/octet-stream"} and _looks_like_docx(body):
+        return DOCX_MIME
     return mime
 
 

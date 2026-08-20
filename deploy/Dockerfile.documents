@@ -17,8 +17,8 @@ WORKDIR /app
 
 # Install the lockfile-resolved application environment before source so normal
 # code changes retain Docker's dependency-layer cache. Docling is deliberately
-# omitted: the Unraid batch uses the PyMuPDF parser and Docling pulls PyTorch
-# plus CUDA libraries, exhausting typical Docker image storage for no benefit.
+# omitted: the Unraid batch uses PyMuPDF plus the standard-library DOCX parser,
+# and Docling pulls PyTorch plus CUDA libraries for no benefit here.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
     --extra postgres --extra storage --extra graph

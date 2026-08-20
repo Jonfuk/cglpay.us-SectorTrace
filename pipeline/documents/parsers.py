@@ -4,11 +4,14 @@ from __future__ import annotations
 import re
 import tempfile
 from html.parser import HTMLParser
+from io import BytesIO
 from pathlib import Path
 from typing import Protocol
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
-from pipeline.documents.inspect import InspectionUnavailable, load_pymupdf
-from pipeline.documents.models import ParsedDocument, ParsedElement
+from pipeline.documents.inspect import DOCX_MIME, InspectionUnavailable, load_pymupdf
+from pipeline.documents.models import ParsedDocument, ParsedElement, ParsedTable
 
 
 class ParserUnavailable(RuntimeError):
@@ -61,6 +64,78 @@ class PyMuPDFParser:
         with self._pymupdf.open(stream=body, filetype="pdf") as pdf:
             elements = _elements_from_pages([page.get_text("text") for page in pdf])
         return ParsedDocument(self.name, self.version, elements)
+
+
+class DOCXParser:
+    """Small deterministic DOCX reader for the worker's lightweight image."""
+
+    name = "docx"
+    version = "stdlib-docx-parser-1"
+    _NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+    def supports(self, mime_type: str) -> bool:
+        return mime_type == DOCX_MIME
+
+    def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
+        if not self.supports(mime_type):
+            raise ValueError(f"{self.name} does not support {mime_type}")
+        with ZipFile(BytesIO(body)) as package:
+            root = ElementTree.fromstring(package.read("word/document.xml"))
+
+        elements: list[ParsedElement] = []
+        tables: list[ParsedTable] = []
+        sequence = 0
+        body_node = root.find("w:body", self._NS)
+        if body_node is None:
+            return ParsedDocument(self.name, self.version, elements)
+        for block in body_node:
+            if block.tag == self._W + "p":
+                text = self._paragraph_text(block)
+                if not text:
+                    continue
+                sequence += 1
+                heading_level = self._heading_level(block)
+                elements.append(ParsedElement(
+                    "HEADING" if heading_level else "PARAGRAPH", sequence, text=text,
+                    heading_level=heading_level))
+            elif block.tag == self._W + "tbl":
+                rows = self._table_rows(block)
+                text = "\n".join(" | ".join(row) for row in rows if any(row)).strip()
+                if not text:
+                    continue
+                sequence += 1
+                elements.append(ParsedElement("TABLE", sequence, text=text))
+                tables.append(ParsedTable(sequence, rows, markdown=self._table_markdown(rows)))
+        return ParsedDocument(self.name, self.version, elements, tables=tables)
+
+    def _paragraph_text(self, paragraph) -> str:
+        return " ".join(
+            "".join(node.text or "" for node in paragraph.findall(".//w:t", self._NS)).split())
+
+    def _heading_level(self, paragraph) -> int | None:
+        style = paragraph.find("./w:pPr/w:pStyle", self._NS)
+        value = style.get(self._W + "val", "").lower() if style is not None else ""
+        match = re.search(r"heading\s*([1-9])", value)
+        if match:
+            return int(match.group(1))
+        return 1 if value in {"title", "subtitle"} else None
+
+    def _table_rows(self, table) -> list[list[str]]:
+        rows = []
+        for row in table.findall("./w:tr", self._NS):
+            rows.append([self._paragraph_text(cell) for cell in row.findall("./w:tc", self._NS)])
+        return rows
+
+    def _table_markdown(self, rows: list[list[str]]) -> str | None:
+        if not rows:
+            return None
+        width = max(len(row) for row in rows)
+        normalized = [row + [""] * (width - len(row)) for row in rows]
+        lines = ["| " + " | ".join(normalized[0]) + " |",
+                 "| " + " | ".join("---" for _ in range(width)) + " |"]
+        lines.extend("| " + " | ".join(row) + " |" for row in normalized[1:])
+        return "\n".join(lines)
 
 
 class _HTMLTextCollector(HTMLParser):
@@ -170,6 +245,8 @@ def get_parser(name: str) -> DocumentParser:
         return DoclingParser()
     if name == "pymupdf":
         return PyMuPDFParser()
+    if name == "docx":
+        return DOCXParser()
     if name == "html":
         return HTMLParserAdapter()
-    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, html")
+    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, docx, html")

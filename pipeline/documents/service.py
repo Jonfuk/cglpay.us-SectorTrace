@@ -12,6 +12,7 @@ from pipeline.documents.classify import classify
 from pipeline.documents.inspect import inspect_bytes, ocr_required, source_filename
 from pipeline.documents.models import EvidenceReference
 from pipeline.documents.parsers import (
+    DOCXParser,
     HTMLParserAdapter,
     ParserUnavailable,
     PyMuPDFParser,
@@ -74,6 +75,8 @@ class DocumentService:
         if not parser.supports(inspection.mime_type):
             if inspection.mime_type == "text/html":
                 parser = HTMLParserAdapter()
+            elif DOCXParser().supports(inspection.mime_type):
+                parser = DOCXParser()
             else:
                 raise ValueError(f"{parser.name} does not support {inspection.mime_type}")
         config = {"parser": parser.name, "parser_version": parser.version,

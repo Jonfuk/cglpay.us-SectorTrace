@@ -121,9 +121,9 @@ type. Integrating a collector should call
 `DocumentService` after a successful archival write, while keeping parsing out
 of the HTTP transaction.
 
-The first rich-parser release targets PDFs and archived HTML. Structured
-machine-readable formats remain better served by the existing archive
-extraction ledger and their native ingestion modules; DOCX is prepared but
-not included in the initial batch workflow. Parser timeouts are configured
+The first rich-parser release targets PDFs, archived HTML, and DOCX. DOCX
+uses a small standard-library ZIP/XML adapter in the lightweight worker;
+structured machine-readable formats remain better served by the existing
+archive extraction ledger and their native ingestion modules. Parser timeouts are configured
 for worker orchestration; the synchronous CLI records a failed retryable run
 if an adapter raises.

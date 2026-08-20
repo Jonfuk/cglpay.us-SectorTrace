@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import zipfile
 
 from pipeline.archive import FilesystemArchive
 from pipeline.cli import _document_candidates
 from pipeline.documents import repository
 from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
-from pipeline.documents.inspect import inspect_bytes, ocr_required
+from pipeline.documents.inspect import DOCX_MIME, inspect_bytes, ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
-from pipeline.documents.parsers import HTMLParserAdapter
+from pipeline.documents.parsers import DOCXParser, HTMLParserAdapter
 from pipeline.documents.quality import assess
 
 
@@ -187,6 +188,34 @@ def test_inspection_recovers_html_from_generic_archive_mime():
     )
     assert inspection.mime_type == "text/html"
     assert inspection.status == "UNSUPPORTED"
+
+
+def test_docx_parser_recovers_text_headings_and_tables_from_generic_archive_mime():
+    document_xml = """\
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Report title</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Published finding.</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr><w:tc><w:p><w:r><w:t>Year</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:t>2026</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>42</w:t></w:r></w:p></w:tc></w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+    body = io.BytesIO()
+    with zipfile.ZipFile(body, "w") as package:
+        package.writestr("[Content_Types].xml", "<Types/>")
+        package.writestr("word/document.xml", document_xml)
+
+    inspection = inspect_bytes(body.getvalue(), "report.bin", "application/octet-stream")
+    parsed = DOCXParser().parse(body.getvalue(), inspection.mime_type)
+    assert inspection.mime_type == DOCX_MIME
+    assert [(item.element_type, item.text, item.heading_level) for item in parsed.elements] == [
+        ("HEADING", "Report title", 1),
+        ("PARAGRAPH", "Published finding.", None),
+        ("TABLE", "Year | Value\n2026 | 42", None),
+    ]
+    assert parsed.tables[0].rows == [["Year", "Value"], ["2026", "42"]]
 
 
 def test_unchanged_version_restores_completed_processing_state(conn):
