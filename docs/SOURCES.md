@@ -397,6 +397,17 @@ invisible here.
 | robots.txt | No directives for these paths (verified by request 2026-08-16) |
 | Notes | Adult social care pay and headcount benchmarks — the contextual comparator for the sector's workforce market, on the same side-by-side footing as Module 21 (ASHE). Three current-year workbooks (regional, local-area, ICB) share a data-sheet shape and are parsed: `fte_annual_pay`, `hourly_pay`, `turnover_rate` and `vacancy_rate` per (area, sector, service, job role), stored as the workbook published them (its `*` suppression marker is NULL, not a failure). The statistical appendix (report tables) and the trended workbook (the change-over-time series F-05 declined history for) are fetched and archived but their shapes are not parsed — recorded per file, never silently skipped. Figures are modelled estimates, rounded, for the whole adult social care workforce — a comparator, never an attribution to a tracked provider |
 
+## Module 26 — CQC bulk-export cross-check
+
+| | |
+| --- | --- |
+| Source | CQC bulk data downloads — the care directory (CSV, weekly) and ratings export (ODS, monthly) |
+| Endpoints | `https://www.cqc.org.uk/about-us/transparency/using-cqc-data` (landing page, scraped for the current dated file links), then the linked `*_CQC_directory.csv` and `*_Latest_ratings.ods` |
+| Licence | OGL v3.0 |
+| Key | None — a different host to Module 5's API, and no subscription key |
+| Rate limit | Default (2s/host), conditional requests |
+| Notes | Not a location source of its own — it never writes `cqc_locations`. It cross-checks what `m05_cqc`'s per-location API walk produced against CQC's own bulk snapshot, and flags a gap to `review_queue` (`cqc_directory_location_missing`, `cqc_directory_rating_stale`) rather than filling it in, which would mix a daily per-location record with a weekly/monthly bulk one in a single row. The ratings ODS is read by hand (stdlib `zipfile` + `xml.etree.iterparse`) rather than with odfpy (Module 13's ODS library): its `content.xml` runs past a gigabyte uncompressed, and odfpy's full-DOM load was observed still running past a gigabyte of resident memory without finishing. The streamed reader completes a pass over ~320k rows in about a minute with flat memory use — see the module docstring for the row-alignment trap ODS's repeated-cell compression sets for a naive version of this |
+
 ---
 
 ## Viability checks
