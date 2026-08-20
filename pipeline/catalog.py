@@ -72,6 +72,27 @@ def table_names(conn) -> list[str]:
     return [o["name"] for o in list_objects(conn) if o["type"] == "table"]
 
 
+def fts5_tables(conn) -> frozenset[str]:
+    """FTS5 virtual tables, and the shadow tables SQLite keeps behind them.
+
+    An FTS5 index is a SQLite-only mechanism — `document_element_search` and
+    its `_data`/`_idx`/`_docsize`/`_config`/`_content` tables appear in
+    `sqlite_master` like any other table, but PostgreSQL has no virtual-table
+    equivalent. `migrations/postgres/0053_document_analysis.sql` gives the
+    same search a `tsvector` GIN index instead, so these names are never
+    created there and are not part of the schema the two backends share.
+    Empty on PostgreSQL, where the question does not apply.
+    """
+    if db.backend_of(conn) == "postgres":
+        return frozenset()
+    virtual = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND sql LIKE 'CREATE VIRTUAL TABLE%USING fts5%'").fetchall()]
+    shadows = {f"{name}_{suffix}" for name in virtual
+               for suffix in ("data", "idx", "docsize", "config", "content")}
+    return frozenset(virtual) | shadows
+
+
 def row_counts(conn, names: Sequence[str]) -> dict[str, int]:
     """Exact row counts for `names`, asked once rather than once each.
 

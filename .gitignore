@@ -43,6 +43,13 @@ __pycache__/
 # Local Claude Code state (machine-specific permission rules and paths)
 .claude/
 
+# graphify skill state and its persistent knowledge-graph output
+.graphifyignore
+graphify-out/
+
+# mkdocs-material privacy plugin cache of vendored external assets
+.cache/
+
 # Extracted PDF page text — derived from data/raw/, regenerable, and large
 data/text/
 

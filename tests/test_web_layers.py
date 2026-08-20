@@ -241,18 +241,20 @@ def test_the_map_toggles_are_built_from_the_payload(geographyjs):
     gains a toggle here with its caveat by construction, and a layer with no
     caveats cannot be toggled on at all."""
     assert "fetchJSON('layers')" in geographyjs
-    assert "Object.entries(payload.layers" in geographyjs
+    assert "Object.entries(layerPayload.layers" in geographyjs
     assert "layer.caveats.join(' ')" in geographyjs
     assert "pinnedCaveat" in geographyjs
 
 
 def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs):
-    """The three point layers are alternative maps, and a click still opens
-    the authority evidence page rather than a map-only dead end."""
-    assert "POSITRON_LAYERS" in geographyjs
-    assert "basemaps.cartocdn.com/light_all" in geographyjs
-    assert "drawLeafletPoints" in geographyjs
-    assert "location.hash = `#/authorities/${point.ons_code}`" in geographyjs
+    """The point layers are drawn on the same MapLibre map as the authority
+    boundaries, and clicking one still reaches the authority evidence page
+    rather than a map-only dead end."""
+    assert "basemaps.cartocdn.com/gl/positron-gl-style/style.json" in geographyjs
+    assert "basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" in geographyjs
+    assert "function addLayer(map, key, layer, authorityGeo)" in geographyjs
+    assert "map.on('click', `${key}-point`, (event) => select(" in geographyjs
+    assert "href: `#/authorities/${code}`" in geographyjs
 
 
 def test_no_layer_caveat_text_is_hardcoded_in_the_map_page(geographyjs):

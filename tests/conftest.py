@@ -280,8 +280,10 @@ def settings(tmp_path: Path) -> Settings:
         # Every writable path this fixture hands out points into tmp. A
         # default that reaches back into the repo is how the suite ends up
         # depositing its own output next to the operator's — which it has now
-        # done twice, once into logs/ and once into data/backups/.
+        # done three times: once into logs/, once into data/backups/, and
+        # once into data/derived/ before this line existed.
         backup_dir=tmp_path / "backups",
+        derived_archive_dir=tmp_path / "derived",
         verified_websites_path=tmp_path / "verified_websites.json",
         # No politeness delay against mocked transports — the rate limiter is
         # exercised directly in test_http.py with its own explicit override.

@@ -138,12 +138,20 @@ def test_nothing_may_be_loaded_from_anywhere_else(client):
     found = directives(client.get("/"))
 
     assert found["default-src"] == "'self'"
-    assert found["connect-src"] == "'self'"
+    # The geography page's MapLibre GL map fetches its basemap style and
+    # vector tiles from CARTO's CDN — the one exception to the same-origin
+    # rule, and named exactly rather than opened to any host.
+    assert found["connect-src"] == (
+        "'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com "
+        "https://tiles.basemaps.cartocdn.com")
     assert found["object-src"] == "'none'"
     assert found["base-uri"] == "'none'"
     assert found["form-action"] == "'none'"
-    # The favicon is a data: URI in the page's own <head>.
-    assert found["img-src"] == "'self' data: https://*.basemaps.cartocdn.com"
+    # The favicon is a data: URI in the page's own <head>; the rest is the
+    # same CARTO basemap allowance as connect-src.
+    assert found["img-src"] == (
+        "'self' data: https://*.basemaps.cartocdn.com "
+        "https://tiles.basemaps.cartocdn.com")
 
 
 def test_the_referrer_stays_here(client):

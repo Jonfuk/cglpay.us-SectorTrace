@@ -91,6 +91,14 @@ TRIGGER_EDGES: dict[str, tuple[str, ...]] = {
     "foi_requests": ("evidence_promotions",),
     "workforce_census_metrics": ("census_verifications",),
     "claims": ("claim_verifications",),
+    # Migration 0049's `ai_promotion_requires_provenance` guards
+    # evidence_promotions itself, but only against the row's own columns
+    # (NEW.actor_id, NEW.model_id, ...) — it names no other table, so there is
+    # no load-order dependency to add. Listed with an empty tuple anyway,
+    # because the test below pins every trigger to an edge and a trigger that
+    # needed nothing would otherwise look identical to one nobody had
+    # accounted for yet.
+    "evidence_promotions": (),
 }
 
 # What each PostgreSQL type accepts from SQLite, and nothing else.
@@ -255,8 +263,9 @@ def preflight(source: sqlite3.Connection, target) -> list[str]:
         problems.append("the target is not a PostgreSQL connection.")
         return problems
 
+    source_only = SOURCE_ONLY_TABLES | catalog.fts5_tables(source)
     source_tables = {t for t in catalog.table_names(source)
-                      if t not in SOURCE_ONLY_TABLES}
+                      if t not in source_only}
     target_tables = {t for t in catalog.table_names(target)
                       if t not in SOURCE_ONLY_TABLES}
     missing = sorted(source_tables - target_tables)
@@ -308,8 +317,9 @@ def _storage_type_problems(source: sqlite3.Connection) -> list[str]:
     problems = []
     expected = {"TEXT": {"text"}, "INTEGER": {"integer"}, "REAL": {"real"},
                  "BLOB": {"blob"}}
+    skip = SOURCE_ONLY_TABLES | catalog.fts5_tables(source)
     for table in catalog.table_names(source):
-        if table in SOURCE_ONLY_TABLES:
+        if table in skip:
             continue
         columns = catalog.columns_of(source, table)
         if not columns:

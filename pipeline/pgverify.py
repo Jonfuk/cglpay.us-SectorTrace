@@ -305,8 +305,9 @@ def verify(source, target, *, deep: bool = True, tables: list[str] | None = None
     would need running as many times as there are faults, and each run reads
     the whole warehouse.
     """
+    excluded = SOURCE_ONLY_TABLES | catalog.fts5_tables(source)
     checked = tables or sorted(
-        t for t in catalog.table_names(source) if t not in SOURCE_ONLY_TABLES)
+        t for t in catalog.table_names(source) if t not in excluded)
 
     report: dict = {"tables": len(checked), "deep": deep, "problems": [],
                      "rows": 0, "checks": {}}

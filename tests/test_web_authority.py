@@ -370,9 +370,15 @@ def test_the_find_council_control_builds_the_authority_hash(appjs):
 
 def test_the_map_click_carries_the_ons_code(geographyjs):
     """W-14: the click target is the authority page, keyed by the boundary's
-    own property — so the code the map drew is the code that opens."""
-    assert re.search(r"location\.hash = `#/authorities/\$\{f\.properties\.ons_code\}`",
-                      geographyjs)
+    own property — so the code the map drew is the code that opens.
+
+    The map click no longer navigates directly; it selects the boundary and
+    shows a preview with an "Open authority" link, so this pins the two
+    halves of that chain instead — the click handing off the clicked
+    boundary's own `ons_code` property, and the resulting link keyed by the
+    same code the click passed in."""
+    assert "map.on('click', 'authority-fill', (event) => select(event.features?.[0]?.properties?.ons_code))" in geographyjs
+    assert "href: `#/authorities/${code}`" in geographyjs
 
 
 @pytest.fixture(scope="module")
