@@ -20,7 +20,12 @@ from __future__ import annotations
 import logging
 import os.path
 import re
+import subprocess
 from pathlib import Path
+
+# `git ls-files -z` separates entries with NUL. Named rather than written
+# as an escape in the split call, where it is easy to get wrong.
+NUL = chr(0)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = REPO_ROOT / "docs"
@@ -65,8 +70,47 @@ def _split_fences(markdown: str) -> list[tuple[bool, str]]:
     return runs
 
 
+def _tracked() -> frozenset[Path] | None:
+    """Everything git has, files and their directories. None if git cannot say.
+
+    Existence on disk is the wrong test and CI proved it: `logs/` is ignored,
+    so a link to a run log resolved on the machine that had done a run and
+    failed on a fresh checkout. A check that passes because of what happens to
+    be lying around is not a check. What a reader can follow is what is *in
+    the repository*, so that is what gets asked.
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        # A build from an unpacked tarball rather than a checkout. Fall back to
+        # the filesystem rather than reporting every link in the docs as
+        # broken, and say so once, because the check is weaker from here on.
+        log.info("git unavailable; falling back to filesystem checks for link targets")
+        return None
+
+    paths: set[Path] = set()
+    for entry in listing.split(NUL):
+        if not entry:
+            continue
+        path = (REPO_ROOT / entry).resolve()
+        paths.add(path)
+        # Directories are never listed by `git ls-files`, but docs link to
+        # them, so derive them from the files they contain.
+        for parent in path.parents:
+            if parent == REPO_ROOT:
+                break
+            paths.add(parent)
+    return frozenset(paths)
+
+
+TRACKED = _tracked()
+
+
 def _resolve(target: str, page_dir: Path) -> Path | None:
-    """First of the two bases that actually exists on disk, or None.
+    """First of the two bases that is in the repository, or None.
 
     Docs link both ways and always have: a sibling document by bare name, a
     source file by its path from the repository root. Guessing one convention
@@ -74,7 +118,8 @@ def _resolve(target: str, page_dir: Path) -> Path | None:
     """
     for base in (page_dir, REPO_ROOT):
         candidate = (base / target).resolve()
-        if candidate.exists():
+        found = candidate in TRACKED if TRACKED is not None else candidate.exists()
+        if found:
             return candidate
     return None
 
