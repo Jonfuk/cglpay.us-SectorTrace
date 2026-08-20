@@ -87,6 +87,42 @@ The wrapper equivalent is `./deploy/unraid-document-worker.sh verify`.
 Confirm that `gs --version` reports **10.02.1 or newer** before resuming an
 OCR batch.
 
+## Project into Neo4j
+
+The worker also includes the graph driver. Set the following in
+`/mnt/user/appdata/sectortrace/document-worker.env` before using graph commands:
+
+```dotenv
+NEO4J_ENABLED=true
+NEO4J_URI=bolt://host.docker.internal:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=replace-with-the-Neo4j-password
+NEO4J_DATABASE=neo4j
+```
+
+`host.docker.internal` reaches a Neo4j service published on the Unraid host;
+the wrapper maps it to Docker's host gateway. Start the local service from the
+checkout if it is not already running:
+
+```bash
+NEO4J_PASSWORD='choose-a-local-secret' \
+  docker compose -f deploy/docker-compose.graph.yml up -d
+```
+
+After rebuilding the worker image, seed and rebuild the disposable graph:
+
+```bash
+./deploy/unraid-document-worker.sh command graph status
+./deploy/unraid-document-worker.sh command graph backfill
+./deploy/unraid-document-worker.sh command graph rebuild --clear
+./deploy/unraid-document-worker.sh command graph status
+```
+
+This projects the document evidence records (source URL, retrieval metadata,
+hash, and archive path) into Neo4j. Parsed document text and elements remain
+canonical PostgreSQL records; they are not automatically promoted to claims or
+duplicated as graph nodes.
+
 ## Run a batch
 
 The worker's entry point is `pipeline`, so run individual commands directly:
@@ -121,6 +157,19 @@ With the wrapper:
 ```bash
 ./deploy/unraid-document-worker.sh batch /path/to/batch.sh
 ```
+
+To process every supported provenance-complete legacy source, use the tracked
+batch script instead of a committee-paper-only copy:
+
+```bash
+./deploy/unraid-document-worker.sh batch deploy/document-batch-all.sh
+```
+
+It processes `committee_papers`, `cdp_documents`, and `annual_reports` in
+turn, dynamically using the source-system value returned by registration. It
+is resumable and stops a source with unrecoverable raw objects rather than
+silently skipping them. Set `DOCUMENT_BATCH_SIZE` or `DOCUMENT_PARSER` in the
+environment to override its defaults of `25` and `pymupdf`.
 
 The wrapper accepts the existing host `batch.sh`: it makes an in-container
 temporary copy that omits host `git pull` and `uv sync` commands. The container

@@ -19,10 +19,10 @@ WORKDIR /app
 # normal code changes retain Docker's dependency-layer cache.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra documents
+    --extra postgres --extra storage --extra documents --extra graph
 
 COPY pipeline ./pipeline
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents --extra graph
 
 ENV PATH="/app/.venv/bin:$PATH" \
     UV_CACHE_DIR="/tmp/uv-cache" \
