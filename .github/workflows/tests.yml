@@ -94,37 +94,3 @@ jobs:
             tests/test_postgres_live.py \
             tests/test_pg_migration_live.py
 
-  docs:
-    # A separate job from `test`, not another step in it. The docs build needs
-    # a dependency set the suite deliberately does not install, and the two
-    # answer different questions: `test` asks whether the code works, this
-    # asks whether the documentation still describes code that exists.
-    #
-    # --strict is the entire point. It fails on a link to a file that has been
-    # renamed or deleted, on a document added to docs/ without a nav entry,
-    # and on an in-page anchor that no heading produces. Every one of those is
-    # a way documentation goes quietly wrong between the change and the day
-    # somebody tries to follow it.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
-        with:
-          enable-cache: true
-
-      - name: Sync dependencies, with the docs extra
-        run: uv sync --extra docs
-
-      - name: Lint
-        run: uv run ruff check scripts
-
-      - name: Build the documentation
-        # mkdocstrings reads pipeline/ with griffe, which parses rather than
-        # imports, so this needs no database, no network and no source extras.
-        # If that ever stops being true this job will be the thing that says
-        # so, loudly, rather than a doc build that quietly starts a run.
-        run: uv run mkdocs build --strict

@@ -1,0 +1,88 @@
+name: docs
+
+# Two things in one workflow, because they answer the same question and the
+# second is worthless without the first: build the site strictly, and publish
+# what was built. `--strict` fails on a link to a file that has been renamed
+# or deleted, on a document added to docs/ without a nav entry, and on an
+# in-page anchor no heading produces. Nothing is published that did not pass
+# that, which is the point of putting the deploy behind the same build rather
+# than in a workflow of its own.
+#
+# The build runs on pull requests too. Only master publishes.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Builds for a given ref supersede each other; several sessions push to this
+# repo in a day. The deploy job takes the `pages` group instead — see below.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Pinned to a commit rather than a tag, as everywhere else here: a tag
+      # is a moving pointer its owner can repoint. The comment keeps the
+      # version readable; Dependabot updates both.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies, with the docs extra
+        run: uv sync --extra docs
+
+      - name: Lint
+        run: uv run ruff check scripts
+
+      - name: Build the documentation
+        # mkdocstrings reads pipeline/ with griffe, which parses rather than
+        # imports, so this needs no database, no network and no source extras.
+        # If that ever stops being true this step will be the thing that says
+        # so, loudly, rather than a doc build that quietly starts a run.
+        run: uv run mkdocs build --strict
+
+      - name: Package the site
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    # Master only. A pull request from a fork must be able to run the build
+    # above without being able to publish, which is why the write scopes live
+    # on this job and not on the workflow.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      pages: write
+      id-token: write
+
+    # Never cancel a deploy in flight: the site would be left half-written.
+    # This is the opposite of what the build wants, so it is set per job.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Publish to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
