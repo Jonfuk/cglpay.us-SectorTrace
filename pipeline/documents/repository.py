@@ -112,30 +112,43 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
              _json(item.metadata)),
         )
         if settings.database_backend == "sqlite" and item.text:
-            conn.execute("INSERT INTO document_element_search VALUES (?, ?, ?, ?, ?)",
-                         (element_id, document_id, item.page_number, item.element_type, item.text))
+            # Named columns here despite positional being the FTS5 idiom. SQLite refuses
+            # ALTER on a virtual table, so this cannot drift the way 0054 drifted
+            # evidence_records; what remains reachable is a migration dropping and
+            # recreating the table in a different order, which naming survives.
+            conn.execute(
+                "INSERT INTO document_element_search (document_element_id, document_id, page_number, "
+                "element_type, text) VALUES (?, ?, ?, ?, ?)",
+                (element_id, document_id, item.page_number, item.element_type, item.text))
         for topic, count in topic_matches(item.text or "").items():
-            conn.execute("INSERT INTO document_topics VALUES (?, ?, ?, 'keyword_v1')",
-                         (element_id, topic, count))
+            conn.execute(
+                "INSERT INTO document_topics (document_element_id, topic, match_count, match_method) "
+                "VALUES (?, ?, ?, 'keyword_v1')",
+                (element_id, topic, count))
     for item in parsed.elements:
         if item.parent_sequence is not None:
             conn.execute("UPDATE document_elements SET parent_element_id=? WHERE document_element_id=?",
                          (element_ids.get(item.parent_sequence), element_ids[item.sequence]))
     for table in parsed.tables:
         element_id = element_ids[table.element_sequence]
-        conn.execute("INSERT INTO document_tables VALUES (?, ?, ?, ?, ?, ?)",
-                     (stable_id("document-table", element_id), element_id, len(table.rows),
-                      max((len(row) for row in table.rows), default=0), _json(table.rows), table.markdown))
+        conn.execute(
+            "INSERT INTO document_tables (document_table_id, document_element_id, row_count, column_count, "
+            "table_json, markdown) VALUES (?, ?, ?, ?, ?, ?)",
+            (stable_id("document-table", element_id), element_id, len(table.rows),
+             max((len(row) for row in table.rows), default=0), _json(table.rows), table.markdown))
     for link in parsed.links:
         element_id = element_ids[link.element_sequence]
-        conn.execute("INSERT INTO document_links VALUES (?, ?, ?, ?)",
-                     (stable_id("document-link", f"{element_id}|{link.href}"), element_id, link.href,
-                      link.anchor_text))
+        conn.execute(
+            "INSERT INTO document_links (document_link_id, document_element_id, href, anchor_text) "
+            "VALUES (?, ?, ?, ?)",
+            (stable_id("document-link", f"{element_id}|{link.href}"), element_id, link.href,
+             link.anchor_text))
     conn.execute(
-        "INSERT INTO document_quality VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO document_quality (document_version_id, status, metrics_json, warnings_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(document_version_id) DO UPDATE SET status=excluded.status, metrics_json=excluded.metrics_json, "
-        "warnings_json=excluded.warnings_json", (version_id, quality_status, _json(quality_metrics),
-                                                   _json(quality_warnings), now))
+        "warnings_json=excluded.warnings_json",
+        (version_id, quality_status, _json(quality_metrics), _json(quality_warnings), now))
     conn.execute(
         "UPDATE document_processing_states SET parse_status='SUCCESS', classification_status='SUCCESS', "
         "quality_status=?, active_document_version_id=?, last_processed_at=?, last_error=NULL "
