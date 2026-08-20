@@ -34,6 +34,15 @@ jobs:
       # is a moving pointer its owner can repoint. The comment keeps the
       # version readable; Dependabot updates both.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Full history, not the default shallow clone. The last-updated date
+          # on each page is read from the commit that last touched the file,
+          # and depth-1 has no such commit for anything. With
+          # fallback_to_build_date off -- deliberately, a build date is not a
+          # revision date and printing one as the other is worse than printing
+          # nothing -- a shallow clone fails the build instead of quietly
+          # stamping today on every page.
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
