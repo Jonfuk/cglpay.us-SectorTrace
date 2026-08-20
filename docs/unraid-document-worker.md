@@ -38,6 +38,11 @@ newer than 10.02.0; OCRmyPDF rejects the 10.0.0–10.02.0 releases because of
 known PDF-corruption regressions. Rebuilding replaces the previous image; it
 does not alter Unraid's host packages or the database.
 
+The worker deliberately installs the lightweight `pymupdf` parser and
+OCRmyPDF rather than the full Docling extra. The tracked batch defaults to
+`pymupdf`; installing Docling would add PyTorch and CUDA libraries of several
+gigabytes without benefiting that batch.
+
 ## Configuration and storage
 
 Place an environment file with the existing `DATABASE_URL`, archive, derived

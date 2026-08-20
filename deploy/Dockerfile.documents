@@ -15,14 +15,22 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install the lockfile-resolved Python environment before application source so
-# normal code changes retain Docker's dependency-layer cache.
+# Install the lockfile-resolved application environment before source so normal
+# code changes retain Docker's dependency-layer cache. Docling is deliberately
+# omitted: the Unraid batch uses the PyMuPDF parser and Docling pulls PyTorch
+# plus CUDA libraries, exhausting typical Docker image storage for no benefit.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra documents --extra graph
+    --extra postgres --extra storage --extra graph
 
 COPY pipeline ./pipeline
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra documents --extra graph
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph
+
+# These are the two document packages the PyMuPDF/OCRmyPDF batch actually
+# invokes. Keep them separate from the rich `documents` extra above so this
+# practical Unraid worker stays small and CPU-only.
+RUN uv pip install --python /app/.venv/bin/python --no-cache \
+    "PyMuPDF>=1.24,<2" "ocrmypdf>=16,<17"
 
 ENV PATH="/app/.venv/bin:$PATH" \
     UV_CACHE_DIR="/tmp/uv-cache" \
