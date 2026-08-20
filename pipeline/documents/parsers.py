@@ -10,7 +10,12 @@ from typing import Protocol
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
-from pipeline.documents.inspect import DOCX_MIME, InspectionUnavailable, load_pymupdf
+from pipeline.documents.inspect import (
+    DOCX_MIME,
+    PPTX_MIME,
+    InspectionUnavailable,
+    load_pymupdf,
+)
 from pipeline.documents.models import ParsedDocument, ParsedElement, ParsedTable
 
 
@@ -138,6 +143,79 @@ class DOCXParser:
         return "\n".join(lines)
 
 
+class PPTXParser:
+    """Small deterministic PPTX reader for slide text and simple tables."""
+
+    name = "pptx"
+    version = "stdlib-pptx-parser-1"
+    _NS = {
+        "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+        "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
+    }
+
+    def supports(self, mime_type: str) -> bool:
+        return mime_type == PPTX_MIME
+
+    def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
+        if not self.supports(mime_type):
+            raise ValueError(f"{self.name} does not support {mime_type}")
+        with ZipFile(BytesIO(body)) as package:
+            slide_names = sorted(
+                (name for name in package.namelist()
+                 if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)),
+                key=lambda name: int(re.search(r"\d+", name).group()),
+            )
+            elements: list[ParsedElement] = []
+            tables: list[ParsedTable] = []
+            sequence = 0
+            for slide_number, slide_name in enumerate(slide_names, start=1):
+                root = ElementTree.fromstring(package.read(slide_name))
+                for shape in root.findall(".//p:sp", self._NS):
+                    title = self._is_title_shape(shape)
+                    for paragraph in shape.findall(".//a:p", self._NS):
+                        text = self._paragraph_text(paragraph)
+                        if not text:
+                            continue
+                        sequence += 1
+                        elements.append(ParsedElement(
+                            "HEADING" if title else "PARAGRAPH", sequence, text=text,
+                            page_number=slide_number, heading_level=1 if title else None))
+                for table in root.findall(".//a:tbl", self._NS):
+                    rows = self._table_rows(table)
+                    text = "\n".join(" | ".join(row) for row in rows if any(row)).strip()
+                    if not text:
+                        continue
+                    sequence += 1
+                    elements.append(ParsedElement(
+                        "TABLE", sequence, text=text, page_number=slide_number))
+                    tables.append(ParsedTable(sequence, rows, markdown=self._table_markdown(rows)))
+        return ParsedDocument(self.name, self.version, elements, tables=tables)
+
+    def _paragraph_text(self, paragraph) -> str:
+        return " ".join(
+            "".join(node.text or "" for node in paragraph.findall(".//a:t", self._NS)).split())
+
+    def _is_title_shape(self, shape) -> bool:
+        placeholder = shape.find("./p:nvSpPr/p:nvPr/p:ph", self._NS)
+        return placeholder is not None and placeholder.get("type") in {"title", "ctrTitle", "subTitle"}
+
+    def _table_rows(self, table) -> list[list[str]]:
+        rows = []
+        for row in table.findall("./a:tr", self._NS):
+            rows.append([self._paragraph_text(cell) for cell in row.findall("./a:tc", self._NS)])
+        return rows
+
+    def _table_markdown(self, rows: list[list[str]]) -> str | None:
+        if not rows:
+            return None
+        width = max(len(row) for row in rows)
+        normalized = [row + [""] * (width - len(row)) for row in rows]
+        lines = ["| " + " | ".join(normalized[0]) + " |",
+                 "| " + " | ".join("---" for _ in range(width)) + " |"]
+        lines.extend("| " + " | ".join(row) + " |" for row in normalized[1:])
+        return "\n".join(lines)
+
+
 class _HTMLTextCollector(HTMLParser):
     """Collect readable HTML blocks without treating markup as source text."""
 
@@ -247,6 +325,8 @@ def get_parser(name: str) -> DocumentParser:
         return PyMuPDFParser()
     if name == "docx":
         return DOCXParser()
+    if name == "pptx":
+        return PPTXParser()
     if name == "html":
         return HTMLParserAdapter()
-    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, docx, html")
+    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, docx, pptx, html")

@@ -15,6 +15,7 @@ from pipeline.documents.parsers import (
     DOCXParser,
     HTMLParserAdapter,
     ParserUnavailable,
+    PPTXParser,
     PyMuPDFParser,
     get_parser,
 )
@@ -77,6 +78,8 @@ class DocumentService:
                 parser = HTMLParserAdapter()
             elif DOCXParser().supports(inspection.mime_type):
                 parser = DOCXParser()
+            elif PPTXParser().supports(inspection.mime_type):
+                parser = PPTXParser()
             else:
                 raise ValueError(f"{parser.name} does not support {inspection.mime_type}")
         config = {"parser": parser.name, "parser_version": parser.version,

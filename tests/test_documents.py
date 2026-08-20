@@ -9,9 +9,9 @@ from pipeline.cli import _document_candidates
 from pipeline.documents import repository
 from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
-from pipeline.documents.inspect import DOCX_MIME, inspect_bytes, ocr_required
+from pipeline.documents.inspect import DOCX_MIME, PPTX_MIME, inspect_bytes, ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
-from pipeline.documents.parsers import DOCXParser, HTMLParserAdapter
+from pipeline.documents.parsers import DOCXParser, HTMLParserAdapter, PPTXParser
 from pipeline.documents.quality import assess
 
 
@@ -216,6 +216,34 @@ def test_docx_parser_recovers_text_headings_and_tables_from_generic_archive_mime
         ("TABLE", "Year | Value\n2026 | 42", None),
     ]
     assert parsed.tables[0].rows == [["Year", "Value"], ["2026", "42"]]
+
+
+def test_pptx_parser_recovers_slide_text_from_generic_archive_mime():
+    slide_xml = """\
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+        xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree>
+    <p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:txBody><a:p><a:r><a:t>Slide title</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+    <p:sp><p:nvSpPr><p:nvPr/></p:nvSpPr>
+      <p:txBody><a:p><a:r><a:t>Finding on slide one.</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+</p:sld>"""
+    body = io.BytesIO()
+    with zipfile.ZipFile(body, "w") as package:
+        package.writestr("[Content_Types].xml", "<Types/>")
+        package.writestr("ppt/presentation.xml", "<p:presentation/>")
+        package.writestr("ppt/slides/slide1.xml", slide_xml)
+
+    inspection = inspect_bytes(body.getvalue(), "presentation.bin", "application/octet-stream")
+    parsed = PPTXParser().parse(body.getvalue(), inspection.mime_type)
+    assert inspection.mime_type == PPTX_MIME
+    assert [(item.element_type, item.text, item.page_number) for item in parsed.elements] == [
+        ("HEADING", "Slide title", 1),
+        ("PARAGRAPH", "Finding on slide one.", 1),
+    ]
 
 
 def test_unchanged_version_restores_completed_processing_state(conn):

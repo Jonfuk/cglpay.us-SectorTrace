@@ -21,6 +21,7 @@ _HTML_PREFIX = re.compile(
 )
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
 def _looks_like_docx(body: bytes) -> bool:
@@ -33,6 +34,16 @@ def _looks_like_docx(body: bytes) -> bool:
     return "[Content_Types].xml" in names and "word/document.xml" in names
 
 
+def _looks_like_pptx(body: bytes) -> bool:
+    """Recognise a PowerPoint package without trusting the missing MIME."""
+    try:
+        with ZipFile(BytesIO(body)) as package:
+            names = set(package.namelist())
+    except (BadZipFile, OSError):
+        return False
+    return "[Content_Types].xml" in names and "ppt/presentation.xml" in names
+
+
 def _sniff_mime(body: bytes, mime: str) -> str:
     """Recover common document types when an archive was stored as binary."""
     if body.startswith(b"%PDF-"):
@@ -41,6 +52,8 @@ def _sniff_mime(body: bytes, mime: str) -> str:
         return "text/html"
     if mime in {"application/octet-stream", "binary/octet-stream"} and _looks_like_docx(body):
         return DOCX_MIME
+    if mime in {"application/octet-stream", "binary/octet-stream"} and _looks_like_pptx(body):
+        return PPTX_MIME
     return mime
 
 
