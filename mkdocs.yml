@@ -1,0 +1,160 @@
+# The documentation site. It is built by CI and by whoever is editing docs;
+# nothing in a collection run, the test suite or either front end depends on
+# it, and `uv sync` without `--extra docs` will not install it.
+#
+# Read the validation block below before the theme block. That is where the
+# value is: `mkdocs build --strict` fails the build on a link to a file that
+# no longer exists, on a document added without a nav entry, and on a nav
+# entry pointing at a document that was deleted. The site being browsable is
+# the smaller half of why this exists.
+site_name: SectorTrace
+site_description: >-
+  England-wide substance misuse sector evidence pipeline: public-domain
+  evidence collected with full provenance for a trade union pay campaign.
+site_url: https://jonfuk.github.io/cglpay.us-SectorTrace/
+repo_url: https://github.com/Jonfuk/cglpay.us-SectorTrace
+repo_name: cglpay.us-SectorTrace
+# Relative to docs_dir, which is why it carries `docs/`. The generated
+# pages under reference/ back out of it with `../` -- see gen_ref_pages.py.
+edit_uri: edit/master/docs/
+copyright: Public-domain evidence. See docs/SOURCES.md for the licence of each source.
+
+docs_dir: docs
+site_dir: site
+
+# Every one of these is a build failure under --strict. `omitted_files` is
+# the one that does the work asked of it: a new document in docs/ that nobody
+# added to the nav below fails CI rather than sitting unreachable.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+theme:
+  name: material
+  language: en
+  # No CDN and no remote fonts. The same rule the two front ends follow:
+  # this has to render with the network cable unplugged.
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - content.action.edit
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+hooks:
+  - scripts/mkdocs_hooks.py
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - scripts/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            # The docstrings here are prose that explains a constraint, not
+            # Google-style sections. Handing them to a section parser makes
+            # it invent headings out of the first paragraph that happens to
+            # end in a colon, so no style is declared.
+            docstring_style: null
+            show_source: true
+            # The generated page already carries the dotted path as its
+            # H1; letting the handler add its own repeats it.
+            show_root_heading: false
+            show_root_full_path: false
+            show_if_no_docstring: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            filters: ["!^_[^_]"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  # GitHub's slug algorithm, not Python-Markdown's. These docs are written to
+  # be read in the checkout as much as on the site, so their in-page anchors
+  # are the ones GitHub generates -- an em-dash heading gives `--` there and a
+  # single `-` here. Matching GitHub means the same link works in both places;
+  # the alternative was editing anchors in the docs to suit the site and
+  # breaking every one of them on github.com.
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+nav:
+  - Home: index.md
+  - Evidence and method:
+      - Caveats: CAVEATS.md
+      - Sources: SOURCES.md
+      - Data dictionary: DATA_DICTIONARY.md
+      - AI promotion policy: AI_PROMOTION_POLICY.md
+  - Running it:
+      - Deployment: DEPLOYMENT.md
+      - Backups: BACKUP.md
+      - Document analysis: document-analysis.md
+      - Unraid document worker: unraid-document-worker.md
+      - Evidence graph: evidence-graph.md
+      - Benchmarks: benchmarks/README.md
+  - Verification records:
+      - Authority homepages: verification/authority_homepages.md
+      - CDP candidates: verification/cdp_candidates.md
+      - Census metrics: verification/census_metrics.md
+      - Committee URLs: verification/issue1_committee_urls.md
+  - Working notes:
+      - Upgrade roadmap: upgrade-roadmap.md
+      - Upgrade audit prompt: upgrade-audit-prompt.md
+      - Review queue improvements: review-queue-improvements.md
+      - Admin UI plan: admin-ui-plan.md
+      - Public portal UI spec: public-portal-ui-spec.md
+      - Public UI refinement backlog: public-ui-refinement-backlog.md
+      - mySociety access request: mysociety-access-request.md
+  - Reference: reference/

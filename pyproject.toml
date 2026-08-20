@@ -124,6 +124,28 @@ graph = [
     "neo4j>=5.20",
 ]
 
+# The documentation site. An extra rather than a dependency-group because a
+# collection run and the test suite must both stay runnable without it: the
+# site is built by CI and by whoever is editing docs, and by nobody else.
+#
+# The point of it is not publishing, it is drift. `mkdocs build --strict`
+# fails on a link to a file that no longer exists, on a doc that was added
+# without a nav entry, and on a reference to a module that was renamed --
+# the same class of gap tests/test_docs_coverage.py already guards for the
+# README, applied to the rest of docs/.
+#
+# mkdocstrings reads the source with griffe, which parses rather than
+# imports. That matters here: importing every module to document it would
+# run module-level code in a build that has no database and no network.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+    "mkdocs-section-index>=0.3",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script

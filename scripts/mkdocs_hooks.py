@@ -1,0 +1,142 @@
+"""Repo-relative links in the docs, resolved at build time.
+
+The docs here are written to be read in the checkout, so they link the way
+the code does -- `pipeline/runner.py:120`, `docs/CAVEATS.md:25`, `BACKUP.md`.
+Those targets mean nothing to a rendered site, and worse, they mean nothing
+to a *reader* of the checkout either once the file moves.
+
+So every link is resolved against the working tree while the site builds. A
+target that still exists is rewritten to something the site can follow: an
+internal page link if it is a document, a blob URL pinned to the line if it
+is source. A target that does not exist is a warning, which `--strict` turns
+into a failed build. That is the whole reason this file is here -- the site
+is the side effect, the broken link is the thing being caught.
+
+Links are left alone inside fenced code blocks. A doc that shows a Markdown
+example is showing it, not linking.
+"""
+from __future__ import annotations
+
+import logging
+import os.path
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DOCS_DIR = REPO_ROOT / "docs"
+_GITHUB = "https://github.com/Jonfuk/cglpay.us-SectorTrace/"
+BLOB = _GITHUB + "blob/master/"
+TREE = _GITHUB + "tree/master/"
+
+log = logging.getLogger(f"mkdocs.plugins.{__name__}")
+
+# Inline links only, and not images: `![alt](path)` is an asset reference and
+# MkDocs already resolves those itself.
+_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]*)\]\((?!<)([^)\s]+)((?:\s+\"[^\"]*\")?)\)")
+_FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
+
+# `pipeline/runner.py:120` -- the line suffix this codebase writes into prose.
+_LINE_SUFFIX_RE = re.compile(r":(\d+)$")
+
+_EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "//", "#")
+
+
+def _split_fences(markdown: str) -> list[tuple[bool, str]]:
+    """The document as (is_code, text) runs, so links in examples survive."""
+    runs: list[tuple[bool, str]] = []
+    buffer: list[str] = []
+    in_fence = False
+    fence: str | None = None
+
+    for line in markdown.splitlines(keepends=True):
+        match = _FENCE_RE.match(line)
+        if match and not in_fence:
+            runs.append((False, "".join(buffer)))
+            buffer = [line]
+            in_fence, fence = True, match.group(1)
+        elif match and in_fence and fence and match.group(1).startswith(fence[0] * len(fence)):
+            buffer.append(line)
+            runs.append((True, "".join(buffer)))
+            buffer, in_fence, fence = [], False, None
+        else:
+            buffer.append(line)
+
+    runs.append((in_fence, "".join(buffer)))
+    return runs
+
+
+def _resolve(target: str, page_dir: Path) -> Path | None:
+    """First of the two bases that actually exists on disk, or None.
+
+    Docs link both ways and always have: a sibling document by bare name, a
+    source file by its path from the repository root. Guessing one convention
+    and rewriting the other into a broken link would be worse than either.
+    """
+    for base in (page_dir, REPO_ROOT):
+        candidate = (base / target).resolve()
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _rewrite(target: str, page_dir: Path, page_path: str) -> str:
+    if target.startswith(_EXTERNAL_PREFIXES):
+        return target
+
+    anchor = ""
+    if "#" in target:
+        target, _, anchor = target.partition("#")
+        anchor = f"#{anchor}"
+        if not target:
+            return f"{anchor}"
+
+    line_match = _LINE_SUFFIX_RE.search(target)
+    line = line_match.group(1) if line_match else None
+    if line_match:
+        target = target[: line_match.start()]
+
+    resolved = _resolve(target, page_dir)
+    if resolved is None:
+        log.warning("%s: link target does not exist: %s", page_path, target)
+        return target + (f":{line}" if line else "") + anchor
+
+    inside_docs = DOCS_DIR in resolved.parents or resolved.parent == DOCS_DIR
+    if inside_docs and resolved.suffix == ".md" and line is None:
+        # A document the site also renders: keep it internal so the nav,
+        # the search index and the offline build all agree it is one page.
+        relative = Path(os.path.relpath(resolved, page_dir)).as_posix()
+        return relative + anchor
+
+    try:
+        within_repo = resolved.relative_to(REPO_ROOT)
+    except ValueError:
+        # A `../` link that climbs out of the checkout. It resolved, so the
+        # target exists on this machine, but it is not something a reader of
+        # the site can be sent to. Warn rather than raise: a build that dies
+        # with a traceback says less than one that names the link.
+        log.warning("%s: link target is outside the repository: %s", page_path, target)
+        return target + (f":{line}" if line else "") + anchor
+
+    # GitHub serves directories under tree/, not blob/.
+    kind = TREE if resolved.is_dir() else BLOB
+    return kind + within_repo.as_posix() + (f"#L{line}" if line else anchor)
+
+
+def on_page_markdown(markdown: str, page, config, files) -> str:  # noqa: ARG001
+    # reference/ is generated by scripts/gen_ref_pages.py into a virtual tree
+    # that has no counterpart on disk, so resolving its links against the
+    # working tree would report every one of them as missing. MkDocs already
+    # validates them against the file collection, which is the right check.
+    if page.file.src_uri.startswith("reference/"):
+        return markdown
+
+    page_dir = (DOCS_DIR / page.file.src_uri).parent
+
+    def replace(match: re.Match[str]) -> str:
+        text, target, title = match.groups()
+        return f"[{text}]({_rewrite(target, page_dir, page.file.src_uri)}{title})"
+
+    return "".join(
+        run if is_code else _LINK_RE.sub(replace, run)
+        for is_code, run in _split_fences(markdown)
+    )
