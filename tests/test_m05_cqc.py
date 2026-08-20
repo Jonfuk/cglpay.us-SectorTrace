@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+import httpx
 import pytest
 
 from pipeline import providers
@@ -223,3 +224,45 @@ def test_run_end_to_end(httpx_mock, settings, conn):
         "SELECT scheme, identifier FROM provider_identifiers WHERE provider_key='change_grow_live'")}
     assert ("cqc_provider_id", "1-125892604") in ids
     assert ("company_number", "03861209") in ids
+
+
+def test_a_location_that_keeps_failing_does_not_abort_the_run(httpx_mock, settings, monkeypatch, conn):
+    """A single CQC location that 5xx/429s past its retry budget raises
+    rather than returning a bad FetchResult (pipeline/http.py's `reraise=True`).
+    Before this was handled, that exception propagated out of run() and the
+    runner rolled the whole module back -- so one flaky location silently
+    truncated every location after it, for every provider after it."""
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    _seed_authority(conn, "E08000034", "Kirklees")
+
+    httpx_mock.add_response(
+        url=re.compile(rf"{re.escape(API)}/providers\?.*"),
+        json={"totalPages": 1, "providers": [
+            {"providerId": "1-125892604", "providerName": "Change, Grow, Live"},
+        ]})
+    httpx_mock.add_response(
+        url=f"{API}/providers/1-125892604",
+        json={"name": "Change, Grow, Live", "registrationStatus": "Registered",
+              "locationIds": ["1-flaky", "1-10559211016"]})
+
+    from pipeline.http import PipelineHTTPClient
+    real_get = PipelineHTTPClient.get
+
+    def flaky_get(self, url, *args, **kwargs):
+        if url == f"{API}/locations/1-flaky":
+            raise httpx.HTTPStatusError("500 for 1-flaky", request=None, response=None)
+        return real_get(self, url, *args, **kwargs)
+
+    monkeypatch.setattr(PipelineHTTPClient, "get", flaky_get)
+    httpx_mock.add_response(url=f"{API}/locations/1-10559211016", json=_location_payload())
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    cqc.run(ctx)  # must not raise
+
+    # the flaky location is queued for review, not silently dropped
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='cqc_location_unavailable'"
+    ).fetchone()["c"] == 1
+    # the location fetched *after* the flaky one still made it in
+    assert conn.execute("SELECT COUNT(*) c FROM cqc_locations").fetchone()["c"] == 1

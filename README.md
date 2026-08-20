@@ -153,6 +153,7 @@ one or both.
 | `m23_sector_universe` | *(fetches nothing)* | The sector population reconstructed from what is collected: the tracked providers, their companies/charities/CQC registrations, every distinct awardee in the notices, and unmatched buyers captured as funders — the denominator for every "we track N of the sector's ~M" statement, with m04's match-basis discipline on every row |
 | `m24_council_spend` | Council websites | £500+ spend-transparency files discovered on each council's own domain — "council X paid provider Y £Z in [period]", actual money rather than notices, with the NULL discipline doing the work on unreadable lines and files |
 | `m25_skills_for_care` | Skills for Care | ASC-WDS adult social care workforce estimates: pay and turnover comparators per (area, sector, service, job role), from the publisher's Excel data downloads, stored as published |
+| `m26_cqc_directory` | CQC bulk exports (care directory CSV, ratings ODS) | Cross-checks `cqc_locations` against CQC's own weekly/monthly bulk snapshots — flags a location the API-driven `m05_cqc` is missing, or whose rating is out of date, to `review_queue`. Writes no location rows of its own |
 
 ### Run order
 
@@ -175,6 +176,7 @@ deterministic and two logs are comparable). Three orderings matter:
 | `m14_annual_reports` | `m03_charity_finance` | reads the accounts PDFs `m03` archives |
 | `m20_gender_pay_gap` | `m04_companies` | company-number matching reads the identifiers `m04` discovered |
 | `m23_sector_universe` | `m01_procurement`, `m03_charity_finance`, `m04_companies`, `m05_cqc` | it reconciles their output — awardees, charities, companies, CQC providers — into one population; without them it is a capture of nothing |
+| `m26_cqc_directory` | `m05_cqc` | cross-checks `cqc_locations`, which only exists once `m05_cqc` has populated it |
 
 Alphabetical order breaks the second and third of these. Neither failed
 loudly when it did — `m04` simply confirmed nothing, and `m09`/`m10` searched
@@ -206,7 +208,7 @@ the next only begins once it has finished — `m04` still never starts before
 | --- | --- | --- |
 | 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25` | Independent geography, provider, workforce, pay and comparator sources |
 | 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15`, `m19` | Sources that use geography, provider accounts, or both |
-| 3 | `m04`, `m09`, `m10`, `m24` | Companies House and council sites, after their identifiers and home pages exist |
+| 3 | `m04`, `m09`, `m10`, `m24`, `m26` | Companies House and council sites, after their identifiers and home pages exist; `m26` after `cqc_locations` exists |
 | 4 | `m20`, `m23` | Gender pay matching and sector reconciliation, after company/source evidence exists |
 
 This is safe because the per-host rate limit is enforced **process-wide**. The

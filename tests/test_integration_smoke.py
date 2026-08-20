@@ -378,6 +378,24 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "figures. --limit is ignored: the downloads page names five "
               "files and all five are fetched.",
     ),
+    Smoke(
+        module="m26_cqc_directory",
+        produces=("review_queue",),
+        signal=(("review_queue", "context_json"),),
+        precondition="SELECT COUNT(*) FROM cqc_locations",
+        precondition_note="m05_cqc wrote no locations at this --limit, so there "
+                           "is nothing to cross-check against CQC's own bulk export",
+        limit=None,
+        note="Ignores --limit: both bulk exports are one fetch each, not a "
+              "paged list to sample from -- the CSV is ~18MB and the ODS's "
+              "content.xml runs past a gigabyte, read streamed rather than "
+              "loaded whole (see the module docstring). Unlike m09/m10, this "
+              "module writes nothing when the two sources simply agree, so "
+              "'produces nothing' is a real possible outcome on a small, "
+              "freshly-written m05_cqc precondition and not only a broken "
+              "run -- the same acknowledged risk as m01's note above, not "
+              "something this spec can fully rule out.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

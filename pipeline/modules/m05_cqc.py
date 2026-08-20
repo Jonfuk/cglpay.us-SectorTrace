@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 
+import httpx
 import structlog
 
 from pipeline import db, providers
@@ -115,8 +116,17 @@ def _fetch_provider_index(client: PipelineHTTPClient, conn, module_name: str) ->
     providers_seen: list[dict] = []
     page = 1
     while True:
-        result = client.get(f"{API_BASE}/providers",
-                             params={"perPage": INDEX_PAGE_SIZE, "page": page})
+        try:
+            result = client.get(f"{API_BASE}/providers",
+                                 params={"perPage": INDEX_PAGE_SIZE, "page": page})
+        except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            # A page that never comes back (retries exhausted) must not be
+            # indistinguishable from "the index ends here" — but it also
+            # must not take the whole run down; whatever pages were fetched
+            # are still usable, just recorded as an incomplete index.
+            db.record_review_item(conn, module_name, "cqc_provider_index_failed", str(page),
+                                   json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+            break
         if not result.ok:
             db.record_review_item(conn, module_name, "cqc_provider_index_failed", str(page),
                                    json.dumps({"status": result.status_code}))
@@ -250,7 +260,15 @@ def run(ctx: ModuleContext) -> None:
         log.info("cqc.providers_matched", count=len(matched))
 
         for provider_id, provider_key in ctx.track(matched, "CQC providers"):
-            detail = client.get(f"{API_BASE}/providers/{provider_id}")
+            # One provider's persistent 5xx/429 (retries exhausted) must not
+            # abort every provider still to come in `matched` — it goes to
+            # review like any other unavailable provider, and the run moves on.
+            try:
+                detail = client.get(f"{API_BASE}/providers/{provider_id}")
+            except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+                db.record_review_item(conn, module_name, "cqc_provider_unavailable", provider_id,
+                                       json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+                continue
             if not detail.ok:
                 db.record_review_item(conn, module_name, "cqc_provider_unavailable", provider_id,
                                        json.dumps({"status": detail.status_code}))
@@ -287,7 +305,16 @@ def run(ctx: ModuleContext) -> None:
                 conn, provider_key, "cqc_provider_id", provider_id, discovered_by=module_name)
 
             for location_id in data.get("locationIds") or []:
-                loc_result = client.get(f"{API_BASE}/locations/{location_id}")
+                # Same reasoning as the provider fetch above: a location
+                # that keeps failing after retries must not silently
+                # truncate every remaining location for this provider (and
+                # every provider after it) for the rest of the run.
+                try:
+                    loc_result = client.get(f"{API_BASE}/locations/{location_id}")
+                except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+                    db.record_review_item(conn, module_name, "cqc_location_unavailable", location_id,
+                                           json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+                    continue
                 if not loc_result.ok:
                     db.record_review_item(conn, module_name, "cqc_location_unavailable", location_id,
                                            json.dumps({"status": loc_result.status_code}))
