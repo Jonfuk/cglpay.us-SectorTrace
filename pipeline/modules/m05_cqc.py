@@ -19,6 +19,12 @@ services are not CQC-registered.
 
 Registered managers' names are embedded in each location's regulated
 activities; those go only to restricted_cqc_location_contacts.
+
+Matched providers are walked in priority order (`_prioritise`): the target
+provider first, every other tracked comparator next in the order
+pipeline/keywords.py lists them. This module has no cursor and does not
+resume, so on a run that is slow or gets interrupted, order is what decides
+whose data is current afterward.
 """
 from __future__ import annotations
 
@@ -140,6 +146,36 @@ def _fetch_provider_index(client: PipelineHTTPClient, conn, module_name: str) ->
     return providers_seen
 
 
+def _default_priority_order() -> tuple[str, ...]:
+    # Every tracked provider, target first, everyone else in the order
+    # pipeline/keywords.py lists them -- deliberately not a flat priority
+    # set. Every provider m05_cqc can ever match is already one of these
+    # (match_provider_name only returns a key from SUPPLIER_NAME_VARIANTS),
+    # so treating all 13 as equally "priority" would rank them all the
+    # same and fall straight back to CQC's arbitrary index order -- the
+    # target provider needs to outrank the rest, not tie with them.
+    return (providers.TARGET_PROVIDER_KEY,
+            *(key for key in SUPPLIER_NAME_VARIANTS if key != providers.TARGET_PROVIDER_KEY))
+
+
+def _prioritise(matched: list[tuple[str, str]],
+                 priority_order: tuple[str, ...] | None = None,
+                 ) -> list[tuple[str, str]]:
+    """Walk order: `priority_order` first (in the rank it names), anything
+    else after, in the order CQC's index returned it.
+
+    m05_cqc has no cursor and does not resume (see README's "only
+    m01_procurement truly resumes") -- for a run that is slow, gets
+    interrupted, or hits a fetch it cannot recover from partway through,
+    order is the only lever for making sure the providers that matter most
+    are not the ones left stale. Stable sort: ties (including everything
+    unranked) keep their original relative order.
+    """
+    order = priority_order if priority_order is not None else _default_priority_order()
+    rank = {key: i for i, key in enumerate(order)}
+    return sorted(matched, key=lambda pair: rank.get(pair[1], len(order)))
+
+
 def _contact_ref(activity_name: str, contact: dict) -> str:
     basis = "|".join(str(contact.get(k) or "") for k in
                       ("personTitle", "personGivenName", "personFamilyName", "personRole"))
@@ -255,6 +291,7 @@ def run(ctx: ModuleContext) -> None:
         if not ctx.dry_run:
             conn.commit()
 
+        matched = _prioritise(matched)
         if ctx.limit:
             matched = matched[:ctx.limit]
         log.info("cqc.providers_matched", count=len(matched))

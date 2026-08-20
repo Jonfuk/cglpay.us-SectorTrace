@@ -75,6 +75,48 @@ def test_generic_acronyms_are_not_substring_matched():
     assert cqc.match_provider_name("Inclusion Housing Group")[1] != "exact"
 
 
+# --- provider walk order -----------------------------------------------------
+
+def test_prioritise_moves_the_target_provider_to_the_front():
+    # Input order deliberately disagrees with both CQC's fictional index
+    # order and keywords.py's order, so a pass on this cannot be a
+    # coincidence of the input already being sorted.
+    matched = [("1-c", "with_you"), ("1-a", "turning_point"), ("1-b", "change_grow_live")]
+    ordered = cqc._prioritise(matched)
+    assert ordered[0] == ("1-b", "change_grow_live")
+
+
+def test_prioritise_ranks_every_tracked_comparator_by_keywords_order():
+    """Everything m05_cqc can ever match is already one of the 13 tracked
+    providers (match_provider_name only returns keys from
+    SUPPLIER_NAME_VARIANTS), so a flat priority *set* covering all of them
+    would rank every entry equally and be a no-op. The default instead
+    ranks the other 12 by pipeline/keywords.py's own order -- checked here
+    against an input order that disagrees with it.
+    """
+    matched = [("1-c", "with_you"), ("1-b", "waythrough"), ("1-a", "turning_point")]
+    ordered = [key for _id, key in cqc._prioritise(matched)]
+    assert ordered == ["turning_point", "with_you", "waythrough"]
+
+
+def test_prioritise_keeps_unranked_entries_at_the_back_in_original_order():
+    """The fallback for a key absent from priority_order -- unreachable via
+    the real default (matched can only ever hold tracked keys) but real
+    once a caller supplies its own list, as the next two tests do.
+    """
+    matched = [("1-x", "mystery_provider"), ("1-b", "change_grow_live"), ("1-y", "another_mystery")]
+    ordered = cqc._prioritise(matched, priority_order=("change_grow_live",))
+    assert ordered[0] == ("1-b", "change_grow_live")
+    assert ordered[1:] == [("1-x", "mystery_provider"), ("1-y", "another_mystery")]
+
+
+def test_prioritise_accepts_a_custom_priority_order():
+    matched = [("1-a", "turning_point"), ("1-b", "change_grow_live"), ("1-c", "with_you")]
+    ordered = cqc._prioritise(matched, priority_order=("with_you", "turning_point"))
+    assert [key for _id, key in ordered[:2]] == ["with_you", "turning_point"]
+    assert ordered[2] == ("1-b", "change_grow_live")
+
+
 # --- local authority resolution ---------------------------------------------------
 
 def test_local_authority_resolves_to_ons_code(conn):
