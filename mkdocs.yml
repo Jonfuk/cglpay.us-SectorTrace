@@ -39,9 +39,15 @@ validation:
 theme:
   name: materialx
   language: en
-  # No CDN and no remote fonts. The same rule the two front ends follow:
-  # this has to render with the network cable unplugged.
-  font: false
+  # Inter for body copy, Archivo for headings (see docs/stylesheets/extra.css).
+  # Naming them here would normally mean a request to Google on every page
+  # load, which the two front ends are not allowed to make and neither is
+  # this. The privacy plugin downloads both at build time and rewrites the
+  # references to local copies, so the published page still fetches nothing
+  # from anywhere else.
+  font:
+    text: Inter
+    code: Roboto Mono
   icon:
     repo: fontawesome/brands/github
   features:
@@ -58,15 +64,15 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -74,8 +80,41 @@ theme:
 hooks:
   - scripts/mkdocs_hooks.py
 
+extra_css:
+  # Archivo for headings. A URL rather than an import inside extra.css: the
+  # privacy plugin downloads this and rewrites the reference to a local copy,
+  # and it does that without discarding the stylesheet -- which is what it
+  # does to a stylesheet that carries the import itself. That cost this file
+  # a silent disappearance from the build once; hence the note.
+  - https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&display=swap
+  - stylesheets/extra.css
+
 plugins:
   - search
+
+  # Downloads every external asset the build references -- the two webfonts
+  # above -- and rewrites those references to local copies. The no-CDN rule
+  # enforced by the build rather than by remembering.
+  - materialx/privacy
+
+  # When a page was last changed, resolved from git while the site builds.
+  # The question it answers is how current a caveat is, which is worth a line
+  # on an evidence site.
+  #
+  # Not MaterialX's bundled document-dates, which was the obvious choice and
+  # was tried: its core.js requests gravatar.com and weavatar.com on every
+  # page load to decide which avatar host is faster, and it does that with
+  # show_author off and no author anywhere in the output. A documentation site
+  # that reports its readers' addresses to two third parties in order to print
+  # a date is not a trade this project makes.
+  #
+  # This one renders the date into the HTML at build time. Nothing runs in the
+  # reader's browser and nothing is fetched.
+  - git-revision-date-localized:
+      type: date
+      enable_creation_date: false
+      fallback_to_build_date: false
+      locale: en
   - gen-files:
       scripts:
         - scripts/gen_ref_pages.py
@@ -130,6 +169,14 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
 
+# Only the reference documentation. The working registers -- the roadmap, the
+# UI plans and backlogs, the verification records, the benchmark write-up, the
+# mySociety request -- are dropped from the build entirely by the hook in
+# scripts/mkdocs_hooks.py, not merely left out of this list: a page absent
+# from the nav is still built and still reachable by URL.
+#
+# They remain in the repository. Links to them from these pages resolve to
+# GitHub rather than to a page that would not exist here.
 nav:
   - Home: index.md
   - Evidence and method:
@@ -137,24 +184,8 @@ nav:
       - Sources: SOURCES.md
       - Data dictionary: DATA_DICTIONARY.md
       - AI promotion policy: AI_PROMOTION_POLICY.md
+      - Evidence graph: evidence-graph.md
   - Running it:
       - Deployment: DEPLOYMENT.md
       - Backups: BACKUP.md
-      - Document analysis: document-analysis.md
-      - Unraid document worker: unraid-document-worker.md
-      - Evidence graph: evidence-graph.md
-      - Benchmarks: benchmarks/README.md
-  - Verification records:
-      - Authority homepages: verification/authority_homepages.md
-      - CDP candidates: verification/cdp_candidates.md
-      - Census metrics: verification/census_metrics.md
-      - Committee URLs: verification/issue1_committee_urls.md
-  - Working notes:
-      - Upgrade roadmap: upgrade-roadmap.md
-      - Upgrade audit prompt: upgrade-audit-prompt.md
-      - Review queue improvements: review-queue-improvements.md
-      - Admin UI plan: admin-ui-plan.md
-      - Public portal UI spec: public-portal-ui-spec.md
-      - Public UI refinement backlog: public-ui-refinement-backlog.md
-      - mySociety access request: mysociety-access-request.md
   - Reference: reference/

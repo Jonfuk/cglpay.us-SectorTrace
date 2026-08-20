@@ -148,6 +148,12 @@ docs = [
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
     "mkdocs-section-index>=0.3",
+    # Last-updated dates resolved from git at build time. Not MaterialX's
+    # bundled document-dates, which ships a core.js that probes
+    # gravatar.com and weavatar.com on every page load even with authors
+    # turned off -- a third-party request and a visitor-IP leak, and this
+    # site is not allowed either.
+    "mkdocs-git-revision-date-localized-plugin>=1.2",
 ]
 
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
