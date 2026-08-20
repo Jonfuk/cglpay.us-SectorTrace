@@ -56,7 +56,6 @@ here reads an ODS anywhere near this size.
 """
 from __future__ import annotations
 
-import csv
 import io
 import json
 import re
@@ -67,21 +66,22 @@ from xml.etree import ElementTree as ET
 import structlog
 
 from pipeline import db
+from pipeline.cqc_bulk import (
+    DIRECTORY_LINK_RE,
+    LANDING_PAGE,
+    SOURCE_SYSTEM,
+    find_link,
+    parse_directory_csv,
+)
 from pipeline.http import PipelineHTTPClient
 from pipeline.modules.m05_cqc import match_provider_name
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
 
-SOURCE_SYSTEM = "cqc_bulk_export"
-LANDING_PAGE = "https://www.cqc.org.uk/about-us/transparency/using-cqc-data"
-
-DIRECTORY_LINK_RE = re.compile(
-    r'href="(https://www\.cqc\.org\.uk/system/files/[^"]+_CQC_directory\.csv)"', re.IGNORECASE)
 RATINGS_LINK_RE = re.compile(
     r'href="(https://www\.cqc\.org\.uk/system/files/[^"]+_Latest_ratings\.ods)"', re.IGNORECASE)
 
-DIRECTORY_LOCATION_ID_COLUMN = "CQC Location ID (for office use only)"
 RATINGS_DATE_FORMAT = "%d/%m/%Y"
 RATINGS_SHEET_NAME = "Locations"
 OVERALL = "Overall"
@@ -143,19 +143,6 @@ def iter_ods_rows(body: bytes, sheet_name: str):
 
 # --- shared helpers ----------------------------------------------------------
 
-def _search_link(pattern: re.Pattern, html: str) -> str | None:
-    match = pattern.search(html)
-    return match.group(1) if match else None
-
-
-def _find_csv_header(rows: list[list[str]], marker: str) -> tuple[int, dict[str, int]] | None:
-    marker = marker.lower()
-    for i, row in enumerate(rows):
-        if any((cell or "").strip().lower() == marker for cell in row):
-            return i, {name.strip(): idx for idx, name in enumerate(row) if name and name.strip()}
-    return None
-
-
 def _existing_location_ids(conn, provider_keys: set[str]) -> set[str]:
     if not provider_keys:
         return set()
@@ -191,44 +178,22 @@ def _parse_date(raw: str, fmt: str) -> str | None:
 def _check_directory_completeness(client: PipelineHTTPClient, conn, module_name: str,
                                    csv_url: str, ctx: ModuleContext) -> int:
     ctx.phase("checking directory completeness")
-    result = client.get(csv_url)
-    if not result.ok:
-        db.record_review_item(conn, module_name, "cqc_bulk_export_fetch_failed", csv_url,
-                               json.dumps({"status": result.status_code}))
+    directory_rows = parse_directory_csv(client, conn, module_name, csv_url)
+    if directory_rows is None:
         return 0
-
-    rows = list(csv.reader(io.StringIO(result.body.decode("utf-8", errors="replace"))))
-    header = _find_csv_header(rows[:10], DIRECTORY_LOCATION_ID_COLUMN)
-    if header is None:
-        db.record_review_item(
-            conn, module_name, "cqc_bulk_export_unreadable", csv_url,
-            json.dumps({"note": f"no header row containing {DIRECTORY_LOCATION_ID_COLUMN!r} found"}))
-        return 0
-    header_idx, col = header
-    required = ("Name", "Provider name", DIRECTORY_LOCATION_ID_COLUMN)
-    if not all(name in col for name in required):
-        db.record_review_item(conn, module_name, "cqc_bulk_export_unreadable", csv_url,
-                               json.dumps({"note": "expected columns missing", "header": list(col)}))
-        return 0
-    width = max(col[name] for name in required)
 
     entries: list[dict] = []
     provider_keys: set[str] = set()
-    for data_row in rows[header_idx + 1:]:
-        if len(data_row) <= width:
-            continue
-        provider_key, basis = match_provider_name(data_row[col["Provider name"]])
+    for row in directory_rows:
+        provider_key, basis = match_provider_name(row.provider_name)
         if basis != "exact":
-            continue
-        location_id = data_row[col[DIRECTORY_LOCATION_ID_COLUMN]]
-        if not location_id:
             continue
         provider_keys.add(provider_key)
         entries.append({
-            "location_id": location_id,
-            "location_name": data_row[col["Name"]],
+            "location_id": row.location_id,
+            "location_name": row.location_name,
             "provider_key": provider_key,
-            "provider_name": data_row[col["Provider name"]],
+            "provider_name": row.provider_name,
         })
 
     existing = _existing_location_ids(conn, provider_keys)
@@ -346,10 +311,10 @@ def run(ctx: ModuleContext) -> None:
 
         html = landing.body.decode("utf-8", errors="replace")
         checks = (
-            ("directory completeness", _search_link(DIRECTORY_LINK_RE, html),
+            ("directory completeness", find_link(DIRECTORY_LINK_RE, html),
              "no *_CQC_directory.csv link found; the page layout may have changed",
              _check_directory_completeness),
-            ("ratings currency", _search_link(RATINGS_LINK_RE, html),
+            ("ratings currency", find_link(RATINGS_LINK_RE, html),
              "no *_Latest_ratings.ods link found; the page layout may have changed",
              _check_ratings_currency),
         )

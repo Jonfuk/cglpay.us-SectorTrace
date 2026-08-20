@@ -130,12 +130,12 @@ def test_iter_ods_rows_reads_only_the_named_sheet():
 # --- landing-page link discovery --------------------------------------------
 
 def test_finds_the_dated_directory_and_ratings_links():
-    assert directory._search_link(directory.DIRECTORY_LINK_RE, LANDING_HTML) == CSV_URL
-    assert directory._search_link(directory.RATINGS_LINK_RE, LANDING_HTML) == ODS_URL
+    assert directory.find_link(directory.DIRECTORY_LINK_RE, LANDING_HTML) == CSV_URL
+    assert directory.find_link(directory.RATINGS_LINK_RE, LANDING_HTML) == ODS_URL
 
 
 def test_no_link_found_returns_none():
-    assert directory._search_link(directory.DIRECTORY_LINK_RE, "<html>nothing here</html>") is None
+    assert directory.find_link(directory.DIRECTORY_LINK_RE, "<html>nothing here</html>") is None
 
 
 # --- directory completeness check -------------------------------------------
