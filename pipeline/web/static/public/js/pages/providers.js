@@ -389,15 +389,26 @@ function renderCqc(container, data) {
             // own bulk export, not the per-location record m05_cqc fetched.
             const fromBulk = l.rating_source === 'bulk_export';
             const label = `${l.overall_rating || 'not rated'}${fromBulk ? '*' : ''}`;
-            return el(report ? 'a' : 'span', {
+            // No fetched report is not a reason to leave the badge dead:
+            // every location has a real, stable page on CQC's own site
+            // (confirmed present as a URL column in both bulk files this
+            // pipeline reads), which is where the report actually lives.
+            // Not a guess at the report's own path -- report_uri's own
+            // handling above is why this deliberately does not try that.
+            return el('a', {
               class: `badge ${ratingClass(l.overall_rating)}`,
               title: `${l.location_name} — ${label}`
-                + (fromBulk ? ' (from CQC’s bulk ratings export; the API has no rating on record)' : ''),
-              href: report ? cqcReportHref(report) : null,
-              target: report ? '_blank' : null, rel: report ? 'noopener noreferrer' : null,
+                + (fromBulk ? ' (from CQC’s bulk ratings export; the API has no rating on record)' : '')
+                + (report ? '' : ' — links to the CQC location page, not a specific report'),
+              href: report ? cqcReportHref(report) : cqcLocationHref(l.location_id),
+              target: '_blank', rel: 'noopener noreferrer',
             }, `${truncate(l.location_name, 34)} · ${label}`);
           }))
         : noData('CQC locations', './start.sh run m05_cqc'))));
+}
+
+function cqcLocationHref(locationId) {
+  return `https://www.cqc.org.uk/location/${encodeURIComponent(locationId)}`;
 }
 
 function cqcReportHref(report) {
