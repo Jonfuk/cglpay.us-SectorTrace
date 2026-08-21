@@ -421,6 +421,13 @@ function cqcReportHref(report) {
   if (/^https?:\/\//i.test(uri)) {
     try {
       const parsed = new URL(uri);
+      // A URL already hosted somewhere other than the syndication API is a
+      // real, ready-to-use link -- m26_cqc_directory's scraped report_uri
+      // values are exactly this (a location's own cqc.org.uk page), and
+      // forcing them onto api.cqc.org.uk the way the API's *own*
+      // report_uri values need normalising produces a dead link (confirmed
+      // live: api.cqc.org.uk/public/v1/location/.../reports/... 404s).
+      if (parsed.hostname !== 'api.cqc.org.uk') return uri;
       return `${apiRoot}${parsed.pathname.startsWith('/public/v1/')
         ? parsed.pathname.slice('/public/v1'.length)
         : reportPath(parsed.pathname).slice('/public/v1'.length)}${parsed.search}${parsed.hash}`;
