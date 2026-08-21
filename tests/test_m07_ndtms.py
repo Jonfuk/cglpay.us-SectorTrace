@@ -107,6 +107,67 @@ def test_find_header_row_accepts_area_code_header():
     assert ndtms.find_header_row(rows) == 1
 
 
+# --- two-row / colspan-compressed headers -----------------------------------------
+
+def _two_row_header_shape():
+    """The real shape of 2_1_Drug_prevalence in the 2018-19 and 2019-20 adult
+    publications: a colspan-compressed group-label row (6 cells; the
+    'Number of users' and 'Rate...' cells each cover a further 6-9 real
+    columns that do not appear as separate cells here) followed by a row of
+    per-column sub-labels, then real data with the full column count.
+    """
+    return [
+        ["Table 2.1: National and local prevalence estimates..."],
+        ["Link back to the index"],
+        ["https://www.gov.uk/government/publications/opiate-and-crack-cocaine-use-prevalence-estimates-for-local-populations"],
+        ["Region", "Local authority", "15-64 population", "Number of users",
+         "Rate of use per thousand of the population", ""],
+        ["OCU", "Lower bound 95% CI", "Upper bound 95% CI", "Opiates",
+         "Lower bound 95% CI", "Upper bound 95% CI", "Crack cocaine",
+         "Lower bound 95% CI", "Upper bound 95% CI", "OCU", "Lower bound 95% CI",
+         "Upper bound 95% CI", "Opiates", "Lower bound 95% CI", "Upper bound 95% CI",
+         "Crack cocaine", "Lower bound 95% CI", "Upper bound 95% CI", ""],
+        [""],
+        ["East Midlands", "Derby", "164,510", "2,162", "1,672", "2,647", "1,826",
+         "1,533", "2,103", "979", "696", "1,281", "13.14", "10.16", "16.09", "11.10",
+         "9.32", "12.78", "5.95", "4.23", "7.79", ""],
+    ]
+
+
+def test_find_header_row_still_locates_the_compressed_group_row():
+    """The group-label row is still recognisable as *a* header by its area
+    column; whether it can be trusted positionally is a separate question.
+    """
+    assert ndtms.find_header_row(_two_row_header_shape()) == 3
+
+
+def test_has_reliable_header_false_for_two_row_shape():
+    rows = _two_row_header_shape()
+    assert ndtms.has_reliable_header(rows, 3) is False
+
+
+def test_has_reliable_header_true_for_ordinary_single_row_header():
+    rows = [
+        ["Area name", "Age", "Time period", "Point estimate", "Observed"],
+        ["Barnsley", "18+", "April 2022 to March 2025", "1.23", "61"],
+    ]
+    assert ndtms.has_reliable_header(rows, 0) is True
+
+
+def test_extract_la_rows_leaves_two_row_header_sheet_unextracted():
+    """Regression: the sub-label row was previously read as a data row
+    (producing area_name_raw == 'Lower bound 95% CI'), and worse, the real
+    area rows below it were silently mis-paired by position -- Derby's
+    'Rate of use per thousand of the population' resolved to 1,672, which is
+    actually the opiate lower-bound *count* from an unrelated measure group.
+    Neither the phantom row nor the mis-paired real rows should be written.
+    """
+    rows = _two_row_header_shape()
+    header_index = ndtms.find_header_row(rows)
+    extracted = ndtms.extract_la_rows(rows, header_index)
+    assert extracted == []
+
+
 # --- row extraction -------------------------------------------------------------------
 
 def _real_shape_rows():

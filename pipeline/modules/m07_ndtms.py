@@ -110,6 +110,41 @@ def find_header_row(rows: list[list[str]], max_scan: int = 12) -> int | None:
     return None
 
 
+# The opiate/crack and alcohol prevalence sheets in the 2018-19 and 2019-20
+# editions write their header as two rows: a row of measure-group labels
+# ("Number of users", "Rate of use per thousand of the population") with the
+# per-measure breakdown (OCU/Opiates/Crack cocaine x point/lower/upper) held
+# in colspanned cells beneath each group, then a row spelling out those
+# sub-labels. `_sheet_rows` does not expand colspans, so the group-label row
+# has far fewer cells than the data rows it heads (6 against 21, for
+# 2_1_Drug_prevalence) and no column index in it lines up with a real data
+# column past the first couple. Later editions write one flat header row per
+# measure instead ("Crack cocaine (number) lower bound 95% CI"), which this
+# parser already handles correctly.
+#
+# There is no way to recover the true column mapping from the compressed
+# group row, so guessing at it would silently attach a value to the wrong
+# measure for every row in the sheet, not just the header -- confirmed
+# against the real files: "Rate of use per thousand of the population" for
+# Derby resolves to 1,672, which is actually the opiate lower-bound *count*
+# from a different measure group entirely. That is the same kind of invented
+# pairing docs/CAVEATS.md rules out for confidence intervals, so a sheet
+# shaped like this is recorded as seen in ndtms_sheet_inventory and left
+# unextracted rather than parsed positionally.
+_SUB_HEADER_MARKERS = {"lower bound 95% ci", "upper bound 95% ci"}
+
+
+def has_reliable_header(rows: list[list[str]], header_index: int) -> bool:
+    """False when the header is a colspan-compressed group-label row rather
+    than one flat row of column names -- signalled by the very next row
+    being a row of CI sub-labels instead of area data.
+    """
+    if header_index + 1 >= len(rows):
+        return True
+    next_row = {c.strip().lower() for c in rows[header_index + 1] if c.strip()}
+    return not (next_row & _SUB_HEADER_MARKERS)
+
+
 def _to_number(raw: str) -> float | None:
     text = (raw or "").strip().replace(",", "").replace("%", "")
     if text in {"", "-", "–", "—", "*", "c", "z", "x", ":"}:
@@ -122,6 +157,8 @@ def _to_number(raw: str) -> float | None:
 
 def extract_la_rows(rows: list[list[str]], header_index: int) -> list[dict]:
     """Long-form rows from one LA-level sheet: one per (area, indicator)."""
+    if not has_reliable_header(rows, header_index):
+        return []
     header = rows[header_index]
     lowered = [h.strip().lower() for h in header]
 
@@ -311,6 +348,17 @@ def run(ctx: ModuleContext) -> None:
                 if header_index is None:
                     continue
                 la_sheets += 1
+
+                if not has_reliable_header(rows, header_index):
+                    db.record_review_item(
+                        conn, module_name, "ndtms_two_row_header_sheet", table_ref,
+                        json.dumps({
+                            "publication": pub["publication_slug"],
+                            "note": "colspan-compressed group-label header; column "
+                                     "positions do not match the data columns, left "
+                                     "unextracted rather than parsed positionally",
+                        }))
+                    continue
 
                 for entry in extract_la_rows(rows, header_index):
                     ons_code = authority_lookup.get(normalise_area_name(entry["area_name_raw"]))

@@ -223,6 +223,16 @@ anyone using it.
   pairing unambiguous. Where a sheet carries several point estimates and one
   unlabelled pair of bounds, they are left unattached rather than assigned:
   a confidence interval put on the wrong estimate is invented.
+- **The opiate/crack prevalence sheet has no local-authority rows for 2018-19
+  or 2019-20**, even though `ndtms_sheet_inventory` marks it local-authority
+  level for those years. Its header is two rows — a colspan-compressed
+  group-label row, then a row of per-column sub-labels — so `_sheet_rows`
+  (which does not expand colspans) cannot line up column position with
+  measure. Guessing the pairing there would silently attach a count to the
+  wrong measure for every row, not just the header, so the sheet is recorded
+  as seen (`ndtms_two_row_header_sheet` in `review_queue`) and left
+  unextracted rather than parsed positionally. Later editions write one flat
+  header row per measure and are unaffected.
 
 ### PFD reports (Module 8)
 
