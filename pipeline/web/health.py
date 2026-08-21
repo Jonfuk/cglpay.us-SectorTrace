@@ -52,6 +52,13 @@ COVERAGE_COLUMNS: tuple[tuple[str, str, str, str], ...] = (
     ("Budget", "la_revenue_budgets", "ons_code", "m13_la_budgets"),
     ("Contracts", "contracts", "buyer_ons_code", "m01_procurement"),
     ("NDTMS", "ndtms_la_statistics", "ons_code", "m07_ndtms"),
+    # Its own column rather than folded into the one above. The two are
+    # different reports on different schedules -- m07 reads the annual
+    # publications, m27 the monthly provisional report -- and an authority can
+    # legitimately have one and not the other. A single merged column would
+    # answer "is there any NDTMS row for this authority", which is not a
+    # question anyone has, and would hide exactly the gap worth seeing.
+    ("NDTMS monthly", "ndtms_monthly_statistics", "ons_code", "m27_ndtms_monthly"),
     ("Fingertips", "fingertips_la_values", "ons_code", "m12_fingertips"),
     ("CQC", "cqc_locations", "local_authority_ons_code", "m05_cqc"),
     ("CDP docs", "cdp_documents", "authority_ons_code", "m09_cdp_documents"),
