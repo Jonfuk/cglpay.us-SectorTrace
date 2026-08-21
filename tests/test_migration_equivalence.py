@@ -97,10 +97,10 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 55 adds the bulk-ratings fallback columns m26_cqc_directory
-        # writes when the CQC API returns no rating for a location its own
-        # bulk export has one for.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 55
+        # through. 56 adds ndtms_monthly_statistics, the monthly provisional
+        # treatment report m27_ndtms_monthly collects -- its own table, kept
+        # apart from ndtms_la_statistics and from the workforce census.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 56
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

@@ -603,3 +603,66 @@ class PipelineHTTPClient:
             archived_ref=archived_ref,
             final_url=str(response.url),
         )
+
+    def post(
+        self,
+        url: str,
+        *,
+        data: dict | None = None,
+        headers: dict | None = None,
+        archive: bool = True,
+    ) -> FetchResult:
+        """POST a form and capture the response with the same robots/rate-limit/
+        provenance discipline as get(). No conditional-request cache: a POST's
+        response depends on the body sent, not just the URL, so there is
+        nothing here for an ETag to validate against.
+        """
+        if not self._robots.can_fetch(url):
+            override = self.settings.robots_override_for(url)
+            if override is None:
+                raise RobotsDisallowed(
+                    f"robots.txt disallows fetching {url} as {self.settings.user_agent!r}")
+            log.warning("http.robots_override", url=url, allowed_by=override,
+                        source_system=self.source_system)
+            if self.conn is not None and override not in self._overrides_recorded:
+                self._overrides_recorded.add(override)
+                db.record_review_item(
+                    self.conn, self.source_system, "robots_override_in_use", override,
+                    json.dumps({"note": "robots.txt disallows this prefix; fetched under an "
+                                        "explicit exception in Settings.robots_exceptions",
+                                "user_agent": self.settings.user_agent}))
+
+        host = urlparse(url).netloc
+        self._rate_limiter.wait(host)
+
+        log.info("http.post", url=url, source_system=self.source_system)
+        response = self._do_request("POST", url, data=data, headers=headers or {})
+        retrieved_at = datetime.now(timezone.utc)
+        REQUESTS.record(host, False)
+        NETWORK.add(len(response.content or b""))
+
+        body = response.content
+        sha256 = hashlib.sha256(body).hexdigest() if body else ""
+        archived_path = None
+        archived_ref = None
+        if archive and body:
+            logical = self.archive.put(self.source_system, sha256,
+                                        response.headers.get("content-type"), body)
+            archived_path = (Path(self.settings.raw_archive_dir) /
+                             logical.removeprefix("data/raw/")
+                             if self.archive.backend == "filesystem"
+                             else self.archive.lookup(self.source_system, sha256))
+            archived_ref = logical
+
+        return FetchResult(
+            url=url,
+            status_code=response.status_code,
+            body=body,
+            headers=response.headers,
+            retrieved_at=retrieved_at,
+            payload_sha256=sha256,
+            not_modified=False,
+            archived_path=archived_path,
+            archived_ref=archived_ref,
+            final_url=str(response.url),
+        )

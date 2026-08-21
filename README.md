@@ -159,6 +159,7 @@ one or both.
 | `m24_council_spend` | Council websites | £500+ spend-transparency files discovered on each council's own domain — "council X paid provider Y £Z in [period]", actual money rather than notices, with the NULL discipline doing the work on unreadable lines and files |
 | `m25_skills_for_care` | Skills for Care | ASC-WDS adult social care workforce estimates: pay and turnover comparators per (area, sector, service, job role), from the publisher's Excel data downloads, stored as published |
 | `m26_cqc_directory` | CQC bulk exports (care directory CSV, ratings ODS) | Cross-checks `cqc_locations` against CQC's own weekly/monthly bulk snapshots — flags a location the API-driven `m05_cqc` is missing, or whose rating is out of date, to `review_queue`. Writes no location rows of its own |
+| `m27_ndtms_monthly` | NDTMS monthly provisional reports (`ndtms.net`) | Numbers in treatment, new presentations and exits per local authority and substance, for the current report month, adults and young people separately — service demand alongside `m07_ndtms`'s published statistics, never merged with workforce figures |
 
 ### Run order
 

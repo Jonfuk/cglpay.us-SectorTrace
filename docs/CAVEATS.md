@@ -577,6 +577,39 @@ anyone using it.
   `skills_for_care_files` with its parse status, archived bytes, parse failure
   and review item.
 
+### NDTMS monthly provisional statistics (Module 27)
+
+- **Provisional means provisional.** This is the report NDTMS itself labels
+  monthly *provisional* statistics: the figures are revised in later months
+  and in the annual publication. A number from here is what the report said on
+  the day it was fetched, which is why `report_version_id`, `report_month` and
+  the fetch time are on every row. Do not quote one against an annual figure
+  as though the two disagree.
+- **Same separation rule as Module 7.** Service demand, not workforce data.
+  `ndtms_monthly_statistics` is never merged with the workforce census, and
+  nothing here is divided by a staff count.
+- **The column labels are periods, not months, and they overlap.** They are
+  kept verbatim in `time_period_raw` (`Jun24 - May25`, `Jul24 - Jun25`) because
+  they are rolling windows: consecutive columns share eleven months, so the
+  difference between two of them is not a month's change and successive
+  columns are not independent observations.
+- **Only the current report month is collected.** The site's own dropdown
+  addresses months back to April 2014; nothing here has walked them. An
+  absent month means it was never fetched, not that it does not exist.
+- **`dat_code` is NDTMS's own area code, not an ONS code.** NDTMS-style codes
+  (`B18B`) and ONS-style ones (`00EQ`) sit in the same list, so `ons_code` is
+  resolved from the area *name* against `authorities`; an unmatched name is
+  left NULL and sent to `review_queue` rather than guessed. Do not join on
+  `dat_code` as if it were portable.
+- **Placeholder and suppression cells are kept verbatim** in `value_text` with
+  `value` NULL. They do not mean zero.
+- **Adults and young people are different cohorts**, reported separately and
+  never added together.
+- A response whose `<h1>` does not name the area that was requested is
+  discarded, not stored: the form re-renders the England-wide page rather than
+  erroring when its anti-forgery token is rejected, so a missing area is a
+  fetch that was refused, not a zero.
+
 ---
 
 ## Personal data

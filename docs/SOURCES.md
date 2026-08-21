@@ -409,6 +409,17 @@ invisible here.
 | Rate limit | Default (2s/host), conditional requests |
 | Notes | Cross-checks what `m05_cqc`'s per-location API walk produced against CQC's own bulk snapshot, and flags a gap to `review_queue` (`cqc_directory_location_missing`, `cqc_directory_rating_stale`) for a person to act on. The one exception, confirmed for real (location `1-12790083928`, "Aspire Havering"): when the API returns no rating for a location at all — not older, nothing — re-running `m05_cqc` does not fix that, so this module backfills `cqc_locations.bulk_overall_rating`/`bulk_overall_rating_date` (migration 0055, kept separate from the API's own `overall_rating`/`overall_rating_date`) and, since the same silence extends to `cqc_location_reports`, scrapes the location's own page for its published report link and date (`_extract_report_info` — plain server-rendered HTML, no JavaScript execution needed, confirmed against two differently-shaped real pages). Both are cleared once the API supplies its own data, rather than left sitting beside a real value with nothing marking them stale. The ratings ODS is read by hand (stdlib `zipfile` + `xml.etree.iterparse`) rather than with odfpy (Module 13's ODS library): its `content.xml` runs past a gigabyte uncompressed, and odfpy's full-DOM load was observed still running past a gigabyte of resident memory without finishing. The streamed reader completes a pass over ~320k rows in about a minute with flat memory use — see the module docstring for the row-alignment trap ODS's repeated-cell compression sets for a naive version of this |
 
+## Module 27 — NDTMS monthly provisional statistics
+
+| | |
+| --- | --- |
+| Source | NDTMS monthly provisional treatment reports — the server-rendered "old version" of the report, not the Power BI dashboard those pages link to |
+| Endpoints | `https://www.ndtms.net/Monthly/Adults` and `.../Monthly/YoungPeople` (GET for the form, then POST back to the same URL per area), plus `https://www.ndtms.net/Monthly/GetDATByPHECentre?pheCentre={region}&vernum={version}` for each region's local authority list |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default (2s/host). POSTs are not conditional — a POST's response depends on the body sent, not the URL, so there is nothing for an ETag to validate |
+| Notes | A plain self-posting ASP.NET Core form: Region / Local Authority / Treatment provider / Report Date selects, and one `<table>` per indicator in the response. Tables are paired with the collapsible-panel heading that precedes them in document order rather than by index, because Adults carries six sections and YoungPeople four, and hardcoding either shape silently mislabels the other. The area check is the part that matters: when the anti-forgery token is rejected the form re-renders the England-wide page with HTTP 200 rather than erroring, so every response's `<h1>` is matched against the area that was requested before any row from it is trusted — a status code does not catch this. `DatCodeId` is NDTMS's own area code (`B18B` for Manchester), and NDTMS-style and ONS-style codes coexist in the same list, so `ons_code` is resolved by name against `authorities` the same way Module 7 does. Only the site's current default report month is fetched; `ReportVersionId` addresses months back to April 2014, and `report_version_id`/`report_month` are stored per row so a later pass can add specific months without a schema change |
+
 ---
 
 ## Viability checks

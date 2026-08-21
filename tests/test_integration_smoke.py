@@ -405,6 +405,30 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "acknowledged risk as m01's note above, not something this "
               "spec can fully rule out.",
     ),
+    Smoke(
+        module="m27_ndtms_monthly",
+        produces=("ndtms_monthly_statistics",),
+        signal=(("ndtms_monthly_statistics", "substance_category"),
+                ("ndtms_monthly_statistics", "time_period_raw"),
+                ("ndtms_monthly_statistics", "value"),
+                ("ndtms_monthly_statistics", "ons_code")),
+        limit=5,
+        note="--limit counts local authorities per cohort, so five is ten "
+              "report POSTs; the two landing GETs and the nine region "
+              "authority-list GETs happen either way, because the module has "
+              "to read the form before it knows what to ask for. ons_code is "
+              "a signal column for the same reason it is one in m07: these "
+              "pages carry NDTMS's own area codes, matching is by name "
+              "against `authorities`, and a naming change that breaks every "
+              "match is exactly the silent failure worth catching. value is "
+              "a signal column even though suppressed cells are legitimately "
+              "NULL -- a whole run in which no cell parsed to a number is a "
+              "shape change, not a suppressed report. The area check inside "
+              "the module matters more than anything asserted here: a "
+              "rejected anti-forgery token re-renders the England-wide page "
+              "with HTTP 200, so rows that reached this table have already "
+              "had their page's <h1> matched against the area requested.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

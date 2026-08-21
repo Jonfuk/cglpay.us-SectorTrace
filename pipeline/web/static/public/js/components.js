@@ -153,6 +153,7 @@ const MODULE_LICENCES = {
   m24_council_spend: 'authority_varies',
   m25_skills_for_care: 'skills_for_care',
   m26_cqc_directory: 'ogl_v3',
+  m27_ndtms_monthly: 'ogl_v3',
 };
 
 export function licenceFor(module) {
