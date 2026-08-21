@@ -138,6 +138,56 @@ def test_no_link_found_returns_none():
     assert directory.find_link(directory.DIRECTORY_LINK_RE, "<html>nothing here</html>") is None
 
 
+# --- report scraping: a location's own CQC page ------------------------------
+
+def _location_page_html(report_href: str | None = "/location/1-10559211016/reports/LAP-1/overall",
+                         published: str | None = "3 June 2026") -> str:
+    """Matches the real markup (both confirmed live): href before class,
+    the link text nested in its own <span>, and the publish date in a
+    separate sibling <p> with whitespace and a newline around the date."""
+    link_block = ""
+    if report_href is not None:
+        link_block = (
+            f'<a data-test="LAP-1-planId-overall" href="{report_href}" '
+            f'class="download-report__link"><span class="download-report__text">'
+            f'Read the latest assessment report - HTML</span></a>')
+    date_block = ""
+    if published is not None:
+        date_block = (
+            f'<p class="download-report__publish-info-date">\n    Published\n'
+            f'        {published}\n    </p>')
+    return (
+        '<div class="overview-download-report"><footer class="download-report">'
+        f'<div class="download-report__publish-info"><p class="download-report__publish-info-title">'
+        f'{link_block}</p>{date_block}</div></footer></div>')
+
+
+def test_extract_report_info_parses_a_relative_new_style_link():
+    """Confirmed live for a location the API has stopped serving reports
+    for (Aspire Havering): CQC's newer path, relative to the site root."""
+    uri, date = directory._extract_report_info(_location_page_html())
+    assert uri == "https://www.cqc.org.uk/location/1-10559211016/reports/LAP-1/overall"
+    assert date == "2026-06-03"
+
+
+def test_extract_report_info_parses_an_absolute_old_style_link():
+    """Confirmed live for a location the API still serves reports for
+    (CHART Kirklees): the older api.cqc.org.uk-hosted path, already
+    absolute."""
+    html = _location_page_html(
+        report_href="https://api.cqc.org.uk/public/v1/reports/106534dd-abcd?20220414070037",
+        published="14 April 2022")
+    uri, date = directory._extract_report_info(html)
+    assert uri == "https://api.cqc.org.uk/public/v1/reports/106534dd-abcd?20220414070037"
+    assert date == "2022-04-14"
+
+
+def test_extract_report_info_returns_none_when_nothing_published():
+    uri, date = directory._extract_report_info(
+        _location_page_html(report_href=None, published=None))
+    assert (uri, date) == (None, None)
+
+
 # --- directory completeness check -------------------------------------------
 
 def test_directory_flags_a_location_missing_from_cqc_locations(httpx_mock, settings, conn):
@@ -217,13 +267,17 @@ def test_ratings_flags_a_newer_publication_date(httpx_mock, settings, conn):
     assert '"api_overall_rating": "Requires improvement"' in row["context_json"]
 
 
+LOCATION_URL = "https://www.cqc.org.uk/location/1-10559211016"
+
+
 def test_ratings_backfills_when_the_api_returned_no_rating_at_all(httpx_mock, settings, conn):
     """Confirmed for real against location 1-12790083928 ('Aspire Havering'):
     a same-day fetch of GET /locations/{id} can return currentRatings.overall
     as null while the bulk export has a real published rating. Re-running
     m05_cqc does not fix that, so this is the one case where the module
     writes to cqc_locations -- into separate bulk_* columns, never into
-    overall_rating/overall_rating_date themselves.
+    overall_rating/overall_rating_date themselves -- and, since the API's
+    silence extends to reports too, the one case it also writes a report row.
     """
     _allow_all_robots(httpx_mock)
     _seed_location(conn, "1-10559211016", overall_rating=None, overall_rating_date=None)
@@ -233,6 +287,7 @@ def test_ratings_backfills_when_the_api_returned_no_rating_at_all(httpx_mock, se
          "Good", "03/06/2026"],
     ]})
     httpx_mock.add_response(url=ODS_URL, content=ods)
+    httpx_mock.add_response(url=LOCATION_URL, text=_location_page_html())
     ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
 
     stale = directory._check_ratings_currency(
@@ -249,6 +304,60 @@ def test_ratings_backfills_when_the_api_returned_no_rating_at_all(httpx_mock, se
     review = conn.execute(
         "SELECT * FROM review_queue WHERE item_type='cqc_directory_rating_backfilled'").fetchone()
     assert review["raw_value"] == "1-10559211016"
+
+    report = conn.execute(
+        "SELECT * FROM cqc_location_reports WHERE location_id='1-10559211016'").fetchone()
+    assert report["report_link_id"] == "bulk_export"
+    assert report["report_uri"] == "https://www.cqc.org.uk/location/1-10559211016/reports/LAP-1/overall"
+    assert report["report_date"] == "2026-06-03"
+    assert report["source_system"] == "cqc_location_page"
+
+
+def test_ratings_backfill_falls_back_to_the_ods_date_when_the_page_has_none(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _seed_location(conn, "1-10559211016", overall_rating=None, overall_rating_date=None)
+    ods = _build_ods({"Locations": [
+        RATINGS_HEADER,
+        ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
+         "Good", "03/06/2026"],
+    ]})
+    httpx_mock.add_response(url=ODS_URL, content=ods)
+    # A report link with no parseable publish-date block alongside it.
+    httpx_mock.add_response(url=LOCATION_URL, text=_location_page_html(published=None))
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+
+    directory._check_ratings_currency(_client(settings, conn), conn, "m26_cqc_directory", ODS_URL, ctx)
+
+    report = conn.execute(
+        "SELECT * FROM cqc_location_reports WHERE location_id='1-10559211016'").fetchone()
+    assert report["report_date"] == "2026-06-03"  # the ODS's own publication date
+
+
+def test_ratings_backfill_still_sets_the_rating_when_the_location_page_fetch_fails(
+        httpx_mock, settings, conn):
+    """A rating backfill this module is confident about must not be undone
+    by an unrelated failure to also fetch the location's own page."""
+    _allow_all_robots(httpx_mock)
+    _seed_location(conn, "1-10559211016", overall_rating=None, overall_rating_date=None)
+    ods = _build_ods({"Locations": [
+        RATINGS_HEADER,
+        ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
+         "Good", "03/06/2026"],
+    ]})
+    httpx_mock.add_response(url=ODS_URL, content=ods)
+    httpx_mock.add_response(url=LOCATION_URL, status_code=404)
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+
+    directory._check_ratings_currency(_client(settings, conn), conn, "m26_cqc_directory", ODS_URL, ctx)
+
+    row = conn.execute("SELECT * FROM cqc_locations WHERE location_id='1-10559211016'").fetchone()
+    assert row["bulk_overall_rating"] == "Good"
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM cqc_location_reports WHERE location_id='1-10559211016'"
+    ).fetchone()["c"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='cqc_location_page_unavailable'"
+    ).fetchone()["c"] == 1
 
 
 def test_ratings_does_not_backfill_when_the_bulk_export_also_has_nothing(httpx_mock, settings, conn):
@@ -270,13 +379,20 @@ def test_ratings_does_not_backfill_when_the_bulk_export_also_has_nothing(httpx_m
 
 def test_ratings_clears_a_backfill_once_the_api_supplies_its_own_rating(httpx_mock, settings, conn):
     """A fallback value left over from when the API was silent must not sit
-    beside a real API value forever with nothing marking it stale."""
+    beside a real API value forever with nothing marking it stale -- and
+    neither must a report row this module scraped in its absence."""
     _allow_all_robots(httpx_mock)
     _seed_location(conn, "1-10559211016", overall_rating="Good", overall_rating_date="2026-07-01")
     conn.execute(
         "UPDATE cqc_locations SET bulk_overall_rating='Good', bulk_overall_rating_date='2026-06-03', "
         "bulk_rating_source_url=?, bulk_rating_retrieved_at='2026-08-20T00:00:00Z' "
         "WHERE location_id='1-10559211016'", (ODS_URL,))
+    conn.execute(
+        "INSERT INTO cqc_location_reports (location_id, report_link_id, report_date, "
+        "first_visit_date, report_uri, source_url, retrieved_at, http_status, source_system, "
+        "payload_sha256) VALUES ('1-10559211016', 'bulk_export', '2026-06-03', NULL, ?, ?, "
+        "'2026-08-20T00:00:00Z', 200, 'cqc_location_page', 'page123')",
+        (LOCATION_URL, LOCATION_URL))
     ods = _build_ods({"Locations": [
         RATINGS_HEADER,
         ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
@@ -292,6 +408,10 @@ def test_ratings_clears_a_backfill_once_the_api_supplies_its_own_rating(httpx_mo
     assert row["bulk_overall_rating"] is None
     assert row["bulk_overall_rating_date"] is None
     assert row["bulk_rating_source_url"] is None
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM cqc_location_reports WHERE location_id='1-10559211016' "
+        "AND report_link_id='bulk_export'"
+    ).fetchone()["c"] == 0
 
 
 def test_ratings_ignores_non_overall_rows(httpx_mock, settings, conn):

@@ -393,12 +393,17 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
         note="Ignores --limit: both bulk exports are one fetch each, not a "
               "paged list to sample from -- the CSV is ~18MB and the ODS's "
               "content.xml runs past a gigabyte, read streamed rather than "
-              "loaded whole (see the module docstring). Unlike m09/m10, this "
-              "module writes nothing when the two sources simply agree, so "
-              "'produces nothing' is a real possible outcome on a small, "
-              "freshly-written m05_cqc precondition and not only a broken "
-              "run -- the same acknowledged risk as m01's note above, not "
-              "something this spec can fully rule out.",
+              "loaded whole (see the module docstring). One further fetch per "
+              "location the API returned no rating for at all: this module "
+              "scrapes that location's own cqc.org.uk page for its report "
+              "link and date, since the same API silence extends to "
+              "cqc_location_reports and there is no bulk-export equivalent "
+              "of that table. Unlike m09/m10, this module writes nothing "
+              "when the sources simply agree, so 'produces nothing' is a "
+              "real possible outcome on a small, freshly-written m05_cqc "
+              "precondition and not only a broken run -- the same "
+              "acknowledged risk as m01's note above, not something this "
+              "spec can fully rule out.",
     ),
 )}
 

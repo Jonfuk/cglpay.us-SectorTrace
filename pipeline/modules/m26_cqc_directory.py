@@ -48,6 +48,17 @@ writes these when the API *did* supply a rating: the bulk export being more
 current in the null case is not evidence it is also more current when the
 two sources actively disagree rather than one of them staying silent.
 
+The same "the API has nothing" case also leaves `cqc_location_reports`
+empty for that location -- confirmed for real, 53 of 157 CGL locations at
+time of writing. There is no bulk-export equivalent of that table (the
+ratings ODS carries a publication date but no report link), so this module
+reads the one place CQC does publish the link: the location's own page at
+`cqc.org.uk/location/{id}`, plain server-rendered HTML (`_extract_report_info`
+-- confirmed against two real, differently-shaped pages, no JavaScript
+execution needed). One synthetic row per location, keyed on
+`BULK_REPORT_LINK_ID` so re-runs update it rather than accumulate rows, and
+cleared alongside the rating fallback once the API supplies its own.
+
 Provider matching reuses `m05_cqc.match_provider_name` exactly, so a name
 that is only a substring candidate there is only a substring candidate
 here too — one matching policy, not two.
@@ -81,6 +92,7 @@ import zipfile
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
+import httpx
 import structlog
 
 from pipeline import db
@@ -101,6 +113,29 @@ RATINGS_LINK_RE = re.compile(
     r'href="(https://www\.cqc\.org\.uk/system/files/[^"]+_Latest_ratings\.ods)"', re.IGNORECASE)
 
 RATINGS_DATE_FORMAT = "%d/%m/%Y"
+
+# --- report backfill: a location's own CQC page ------------------------------
+#
+# cqc_location_reports has no bulk-export equivalent -- the ratings ODS
+# carries a publication date but no report link, and report_uri's own rule
+# has always been never to guess one. A location's own page at this URL is
+# the one place CQC publishes the actual link, and it is plain
+# server-rendered HTML: confirmed against two real, differently-shaped pages
+# (a location the API has stopped serving reports for, on CQC's newer
+# /location/{id}/reports/{planId}/overall path, and one it still serves, on
+# the older api.cqc.org.uk/public/v1/reports/{uuid} path) that the link and
+# its publish date are both sitting in the plain HTTP response -- no
+# JavaScript execution, no headless browser, needed to read either.
+LOCATION_PAGE_TEMPLATE = "https://www.cqc.org.uk/location/{location_id}"
+LOCATION_PAGE_SOURCE_SYSTEM = "cqc_location_page"
+BULK_REPORT_LINK_ID = "bulk_export"
+
+_REPORT_LINK_TAG_RE = re.compile(
+    r'<a\b[^>]*\bclass="download-report__link"[^>]*>', re.IGNORECASE)
+_HREF_ATTR_RE = re.compile(r'\bhref="([^"]*)"', re.IGNORECASE)
+_PUBLISH_DATE_BLOCK_RE = re.compile(
+    r'class="download-report__publish-info-date"[^>]*>(.*?)</p>', re.IGNORECASE | re.DOTALL)
+_PUBLISH_DATE_TEXT_RE = re.compile(r"(\d{1,2}\s+[A-Za-z]+\s+\d{4})")
 RATINGS_SHEET_NAME = "Locations"
 OVERALL = "Overall"
 
@@ -212,6 +247,73 @@ def _parse_date(raw: str, fmt: str) -> str | None:
         return None
 
 
+def _extract_report_info(html: str) -> tuple[str | None, str | None]:
+    """(report_uri, report_date) read from a location's own CQC page.
+    (None, None) if the page has nothing published yet -- a location that
+    genuinely has not been inspected carries no such block, and that is a
+    fact about the location, not a parse failure.
+    """
+    uri = None
+    tag_match = _REPORT_LINK_TAG_RE.search(html)
+    if tag_match:
+        href_match = _HREF_ATTR_RE.search(tag_match.group(0))
+        if href_match and href_match.group(1):
+            uri = href_match.group(1)
+            if uri.startswith("/"):
+                uri = f"https://www.cqc.org.uk{uri}"
+
+    report_date = None
+    date_block = _PUBLISH_DATE_BLOCK_RE.search(html)
+    if date_block:
+        date_text = _PUBLISH_DATE_TEXT_RE.search(date_block.group(1))
+        if date_text:
+            try:
+                report_date = datetime.strptime(date_text.group(1), "%d %B %Y").date().isoformat()
+            except ValueError:
+                report_date = None
+    return uri, report_date
+
+
+def _backfill_report(client: PipelineHTTPClient, conn, module_name: str, location_id: str,
+                      fallback_date: str | None) -> None:
+    """The one fetch in this module that reads a location's own webpage
+    rather than a bulk file, and the natural-key marker (BULK_REPORT_LINK_ID)
+    keeps it to at most one row per location, idempotent across runs. A
+    failure here does not undo the rating backfill that triggered it -- it
+    just means this location's badge stays linked to the page rather than a
+    specific report, which is what providers.js already falls back to when
+    there is no row here at all.
+    """
+    url = LOCATION_PAGE_TEMPLATE.format(location_id=location_id)
+    try:
+        result = client.get(url)
+    except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+        db.record_review_item(conn, module_name, "cqc_location_page_unavailable", location_id,
+                               json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+        return
+    if not result.ok:
+        db.record_review_item(conn, module_name, "cqc_location_page_unavailable", location_id,
+                               json.dumps({"status": result.status_code}))
+        return
+
+    report_uri, report_date = _extract_report_info(result.body.decode("utf-8", errors="replace"))
+    if report_uri is None and report_date is None:
+        return  # nothing published on the page either -- the rating backfill alone stands
+
+    db.upsert(conn, "cqc_location_reports", {
+        "location_id": location_id,
+        "report_link_id": BULK_REPORT_LINK_ID,
+        "report_date": report_date or fallback_date,
+        "first_visit_date": None,
+        "report_uri": report_uri,
+        "source_url": result.url,
+        "retrieved_at": result.retrieved_at.isoformat(),
+        "http_status": result.status_code,
+        "source_system": LOCATION_PAGE_SOURCE_SYSTEM,
+        "payload_sha256": result.payload_sha256,
+    }, natural_key=["location_id", "report_link_id"])
+
+
 # --- the two checks ----------------------------------------------------------
 
 def _check_directory_completeness(client: PipelineHTTPClient, conn, module_name: str,
@@ -320,6 +422,8 @@ def _check_ratings_currency(client: PipelineHTTPClient, conn, module_name: str, 
             if entry["rating"]:
                 _set_bulk_rating(conn, entry["location_id"], entry["rating"],
                                   entry["publication_date"], ods_url, retrieved_at)
+                _backfill_report(client, conn, module_name, entry["location_id"],
+                                  entry["publication_date"])
                 db.record_review_item(
                     conn, module_name, "cqc_directory_rating_backfilled", entry["location_id"],
                     json.dumps({
@@ -336,9 +440,13 @@ def _check_ratings_currency(client: PipelineHTTPClient, conn, module_name: str, 
 
         # The API does have a rating now. A fallback value left over from
         # when it did not would sit beside it with nothing marking it stale
-        # -- clear it rather than let a reader mistake it for current.
+        # -- clear it rather than let a reader mistake it for current, and
+        # the same for a report row this module scraped in its absence.
         if existing_bulk_rating is not None:
             _set_bulk_rating(conn, entry["location_id"], None, None, None, None)
+            conn.execute(
+                "DELETE FROM cqc_location_reports WHERE location_id = ? AND report_link_id = ?",
+                (entry["location_id"], BULK_REPORT_LINK_ID))
 
         if not entry["publication_date"]:
             continue
