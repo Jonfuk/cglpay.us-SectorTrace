@@ -562,6 +562,62 @@ def test_an_unknown_provider_timeline_is_refused(ro):
         public_queries.provider_timeline(ro, "not_a_provider")
 
 
+def _seed_cqc_location(warehouse, location_id, **overrides):
+    warehouse.execute(
+        "INSERT OR IGNORE INTO cqc_providers (provider_id, provider_key, provider_name, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('1-125892604', 'change_grow_live', 'Change, Grow, Live', "
+        "'https://example.com', '2026-08-20T00:00:00Z', 200, 'test', 'abc')")
+    row = {
+        "location_id": location_id, "provider_id": "1-125892604",
+        "provider_key": "change_grow_live", "location_name": "Test Location",
+        "overall_rating": None, "overall_rating_date": None,
+        "bulk_overall_rating": None, "bulk_overall_rating_date": None,
+        "bulk_rating_source_url": None,
+        "source_url": "https://api.example/locations/x", "retrieved_at": "2026-08-20T23:49:00Z",
+        "http_status": 200, "source_system": "cqc_public_api", "payload_sha256": "loc123",
+        **overrides,
+    }
+    columns = ", ".join(row)
+    placeholders = ", ".join(f":{c}" for c in row)
+    warehouse.execute(f"INSERT INTO cqc_locations ({columns}) VALUES ({placeholders})", row)
+    warehouse.commit()
+
+
+def test_provider_timeline_falls_back_to_the_bulk_rating_when_the_api_has_none(warehouse, ro):
+    """Confirmed for real against location 1-12790083928 ('Aspire Havering'):
+    the CQC API can return no rating for a location its own bulk export does
+    have one for. See m26_cqc_directory's module docstring."""
+    _seed_cqc_location(warehouse, "1-12790083928",
+                        bulk_overall_rating="Good", bulk_overall_rating_date="2026-06-03",
+                        bulk_rating_source_url="https://cqc.example/ratings.ods")
+
+    location = next(loc for loc in public_queries.provider_timeline(ro, "change_grow_live")["cqc_locations"]
+                     if loc["location_id"] == "1-12790083928")
+    assert location["overall_rating"] == "Good"
+    assert location["overall_rating_date"] == "2026-06-03"
+    assert location["rating_source"] == "bulk_export"
+
+
+def test_provider_timeline_marks_an_api_rating_as_such(warehouse, ro):
+    _seed_cqc_location(warehouse, "1-10559211016",
+                        overall_rating="Good", overall_rating_date="2022-04-14")
+
+    location = next(loc for loc in public_queries.provider_timeline(ro, "change_grow_live")["cqc_locations"]
+                     if loc["location_id"] == "1-10559211016")
+    assert location["overall_rating"] == "Good"
+    assert location["rating_source"] == "api"
+
+
+def test_provider_timeline_reports_no_source_when_neither_has_a_rating(warehouse, ro):
+    _seed_cqc_location(warehouse, "1-99999999999")
+
+    location = next(loc for loc in public_queries.provider_timeline(ro, "change_grow_live")["cqc_locations"]
+                     if loc["location_id"] == "1-99999999999")
+    assert location["overall_rating"] is None
+    assert location["rating_source"] is None
+
+
 # --- over HTTP ----------------------------------------------------------------
 
 

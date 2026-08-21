@@ -383,12 +383,19 @@ function renderCqc(container, data) {
         ? el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;' },
           locations.map((l) => {
             const report = latestReport.get(l.location_id);
+            // m26_cqc_directory backfills a rating here only when the CQC
+            // API supplied none at all for this location -- see its module
+            // docstring. Marked '*' rather than shown silently: it is CQC's
+            // own bulk export, not the per-location record m05_cqc fetched.
+            const fromBulk = l.rating_source === 'bulk_export';
+            const label = `${l.overall_rating || 'not rated'}${fromBulk ? '*' : ''}`;
             return el(report ? 'a' : 'span', {
               class: `badge ${ratingClass(l.overall_rating)}`,
-              title: `${l.location_name} — ${l.overall_rating || 'not rated'}`,
+              title: `${l.location_name} — ${label}`
+                + (fromBulk ? ' (from CQC’s bulk ratings export; the API has no rating on record)' : ''),
               href: report ? cqcReportHref(report) : null,
               target: report ? '_blank' : null, rel: report ? 'noopener noreferrer' : null,
-            }, `${truncate(l.location_name, 34)} · ${l.overall_rating || 'not rated'}`);
+            }, `${truncate(l.location_name, 34)} · ${label}`);
           }))
         : noData('CQC locations', './start.sh run m05_cqc'))));
 }

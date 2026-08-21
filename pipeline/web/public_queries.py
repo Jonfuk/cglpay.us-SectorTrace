@@ -1857,9 +1857,22 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     locations = _rows(conn, """
         SELECT location_id, location_name, local_authority_raw, region,
                overall_rating, overall_rating_date, registration_status,
-               source_url, retrieved_at
+               source_url, retrieved_at,
+               bulk_overall_rating, bulk_overall_rating_date, bulk_rating_source_url
         FROM cqc_locations WHERE provider_key = ?
         ORDER BY location_name""", (provider_key,))
+    # m26_cqc_directory backfills these two only when the API supplied
+    # nothing at all for a location -- see its module docstring for why a
+    # re-run of m05_cqc does not fix that. overall_rating/overall_rating_date
+    # stay in the payload exactly as the API said (including staying None);
+    # rating_source names which one a reader is actually looking at.
+    for row in locations:
+        if row["overall_rating"] is None and row["bulk_overall_rating"] is not None:
+            row["overall_rating"] = row["bulk_overall_rating"]
+            row["overall_rating_date"] = row["bulk_overall_rating_date"]
+            row["rating_source"] = "bulk_export"
+        else:
+            row["rating_source"] = "api" if row["overall_rating"] is not None else None
 
     edges = _rows(conn, """
         SELECT source_type, source_id, relationship, target_type, target_id,
@@ -2391,7 +2404,8 @@ def layers(conn: sqlite3.Connection) -> dict:
         ORDER BY count DESC""")
 
     cqc_features = _rows(conn, """
-        SELECT location_id, location_name, region, overall_rating,
+        SELECT location_id, location_name, region,
+               COALESCE(overall_rating, bulk_overall_rating) AS overall_rating,
                latitude, longitude, local_authority_ons_code AS ons_code
         FROM cqc_locations
         WHERE latitude IS NOT NULL AND longitude IS NOT NULL

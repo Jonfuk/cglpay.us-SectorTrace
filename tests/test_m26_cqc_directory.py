@@ -217,6 +217,83 @@ def test_ratings_flags_a_newer_publication_date(httpx_mock, settings, conn):
     assert '"api_overall_rating": "Requires improvement"' in row["context_json"]
 
 
+def test_ratings_backfills_when_the_api_returned_no_rating_at_all(httpx_mock, settings, conn):
+    """Confirmed for real against location 1-12790083928 ('Aspire Havering'):
+    a same-day fetch of GET /locations/{id} can return currentRatings.overall
+    as null while the bulk export has a real published rating. Re-running
+    m05_cqc does not fix that, so this is the one case where the module
+    writes to cqc_locations -- into separate bulk_* columns, never into
+    overall_rating/overall_rating_date themselves.
+    """
+    _allow_all_robots(httpx_mock)
+    _seed_location(conn, "1-10559211016", overall_rating=None, overall_rating_date=None)
+    ods = _build_ods({"Locations": [
+        RATINGS_HEADER,
+        ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
+         "Good", "03/06/2026"],
+    ]})
+    httpx_mock.add_response(url=ODS_URL, content=ods)
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+
+    stale = directory._check_ratings_currency(
+        _client(settings, conn), conn, "m26_cqc_directory", ODS_URL, ctx)
+
+    assert stale == 0  # backfilled, not flagged as merely stale
+    row = conn.execute("SELECT * FROM cqc_locations WHERE location_id='1-10559211016'").fetchone()
+    assert row["overall_rating"] is None  # the API's own answer is untouched
+    assert row["overall_rating_date"] is None
+    assert row["bulk_overall_rating"] == "Good"
+    assert row["bulk_overall_rating_date"] == "2026-06-03"
+    assert row["bulk_rating_source_url"] == ODS_URL
+
+    review = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type='cqc_directory_rating_backfilled'").fetchone()
+    assert review["raw_value"] == "1-10559211016"
+
+
+def test_ratings_does_not_backfill_when_the_bulk_export_also_has_nothing(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _seed_location(conn, "1-10559211016", overall_rating=None, overall_rating_date=None)
+    ods = _build_ods({"Locations": [
+        RATINGS_HEADER,
+        ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
+         "", "03/06/2026"],
+    ]})
+    httpx_mock.add_response(url=ODS_URL, content=ods)
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+
+    directory._check_ratings_currency(_client(settings, conn), conn, "m26_cqc_directory", ODS_URL, ctx)
+
+    row = conn.execute("SELECT * FROM cqc_locations WHERE location_id='1-10559211016'").fetchone()
+    assert row["bulk_overall_rating"] is None
+
+
+def test_ratings_clears_a_backfill_once_the_api_supplies_its_own_rating(httpx_mock, settings, conn):
+    """A fallback value left over from when the API was silent must not sit
+    beside a real API value forever with nothing marking it stale."""
+    _allow_all_robots(httpx_mock)
+    _seed_location(conn, "1-10559211016", overall_rating="Good", overall_rating_date="2026-07-01")
+    conn.execute(
+        "UPDATE cqc_locations SET bulk_overall_rating='Good', bulk_overall_rating_date='2026-06-03', "
+        "bulk_rating_source_url=?, bulk_rating_retrieved_at='2026-08-20T00:00:00Z' "
+        "WHERE location_id='1-10559211016'", (ODS_URL,))
+    ods = _build_ods({"Locations": [
+        RATINGS_HEADER,
+        ["1-10559211016", "CHART Kirklees", "Change, Grow, Live", "Overall", "Overall",
+         "Good", "03/06/2026"],
+    ]})
+    httpx_mock.add_response(url=ODS_URL, content=ods)
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+
+    directory._check_ratings_currency(_client(settings, conn), conn, "m26_cqc_directory", ODS_URL, ctx)
+
+    row = conn.execute("SELECT * FROM cqc_locations WHERE location_id='1-10559211016'").fetchone()
+    assert row["overall_rating"] == "Good"  # the API's own value, untouched
+    assert row["bulk_overall_rating"] is None
+    assert row["bulk_overall_rating_date"] is None
+    assert row["bulk_rating_source_url"] is None
+
+
 def test_ratings_ignores_non_overall_rows(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock)
     _seed_location(conn, "1-10559211016", overall_rating="Good", overall_rating_date="2019-01-21")

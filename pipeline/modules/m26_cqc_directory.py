@@ -19,16 +19,34 @@ recover (see the m05_cqc fix that stopped one bad location from aborting the
 whole run). This module catches that lag by comparing against CQC's own
 bulk snapshot rather than trusting m05_cqc's completeness.
 
-It does not add or correct rows in `cqc_locations` — that would mix a daily
-per-location API record and a weekly/monthly bulk export into one row,
-exactly the cross-source conflation docs/CAVEATS.md rules out. Instead it
-flags two things to review_queue for a person to act on (typically: re-run
-m05_cqc):
+It does not add rows to `cqc_locations`, and it never touches `overall_rating`
+/ `overall_rating_date` — those stay exactly what the API said, including
+staying NULL, which is the API's own honest answer. Mixing a daily
+per-location API record and a weekly/monthly bulk export into the same
+columns is exactly the cross-source conflation docs/CAVEATS.md rules out.
+It flags two things to review_queue for a person to act on:
 
   * `cqc_directory_location_missing` — the directory lists a location for a
-    matched provider that has no row at all in `cqc_locations`.
+    matched provider that has no row at all in `cqc_locations`. Re-run
+    m05_cqc.
   * `cqc_directory_rating_stale` — a location's ratings-export publication
-    date is newer than what m05_cqc last recorded for it.
+    date is newer than what m05_cqc last recorded for it, *and the API did
+    supply a rating* (just an older-looking one). Re-run m05_cqc; the two
+    sources plausibly just haven't caught up with each other yet.
+
+One exception to "does not add or correct rows", confirmed for real
+(location `1-12790083928`, "Aspire Havering"): a same-day fetch of
+`GET /locations/{id}` can return `currentRatings.overall` as null while the
+bulk ratings export -- CQC's own file, not a third party -- carries a real
+published rating for the same location. Re-running m05_cqc does not fix
+this; the API is not behind, it is structurally silent for that location.
+For exactly that case -- `overall_rating IS NULL` and the bulk export has a
+value -- this module writes `bulk_overall_rating` / `bulk_overall_rating_date`
+(migration 0055), separate columns from the API's own, so a reader can
+always tell which source a location's displayed rating came from. It never
+writes these when the API *did* supply a rating: the bulk export being more
+current in the null case is not evidence it is also more current when the
+two sources actively disagree rather than one of them staying silent.
 
 Provider matching reuses `m05_cqc.match_provider_name` exactly, so a name
 that is only a substring candidate there is only a substring candidate
@@ -153,14 +171,35 @@ def _existing_location_ids(conn, provider_keys: set[str]) -> set[str]:
     return {r["location_id"] for r in rows}
 
 
-def _existing_ratings(conn, provider_keys: set[str]) -> dict[str, tuple[str | None, str | None]]:
+def _existing_ratings(conn, provider_keys: set[str]) -> dict[str, tuple[str | None, str | None, str | None]]:
+    """location_id -> (overall_rating, overall_rating_date, bulk_overall_rating).
+    The third value is whatever a previous run may already have backfilled
+    into the fallback columns -- needed to know whether it now needs
+    clearing, not just whether it needs setting.
+    """
     if not provider_keys:
         return {}
     placeholders = ",".join("?" for _ in provider_keys)
     rows = conn.execute(
-        f"SELECT location_id, overall_rating, overall_rating_date FROM cqc_locations "
-        f"WHERE provider_key IN ({placeholders})", tuple(provider_keys)).fetchall()
-    return {r["location_id"]: (r["overall_rating"], r["overall_rating_date"]) for r in rows}
+        f"SELECT location_id, overall_rating, overall_rating_date, bulk_overall_rating "
+        f"FROM cqc_locations WHERE provider_key IN ({placeholders})", tuple(provider_keys)).fetchall()
+    return {r["location_id"]: (r["overall_rating"], r["overall_rating_date"], r["bulk_overall_rating"])
+            for r in rows}
+
+
+def _set_bulk_rating(conn, location_id: str, rating: str | None, rating_date: str | None,
+                      source_url: str | None, retrieved_at: str | None) -> None:
+    """A plain UPDATE, not db.upsert: the row is already known to exist (see
+    the `location_id not in existing` guard at every call site), and
+    db.upsert always attempts an INSERT first -- which SQLite validates
+    against cqc_locations' NOT NULL columns (provider_id, location_name, ...)
+    even when the row will end up conflicting, so a sparse row naming only
+    these four columns fails that INSERT before it ever reaches ON CONFLICT.
+    """
+    conn.execute(
+        "UPDATE cqc_locations SET bulk_overall_rating = ?, bulk_overall_rating_date = ?, "
+        "bulk_rating_source_url = ?, bulk_rating_retrieved_at = ? WHERE location_id = ?",
+        (rating, rating_date, source_url, retrieved_at, location_id))
 
 
 def _parse_date(raw: str, fmt: str) -> str | None:
@@ -264,11 +303,43 @@ def _check_ratings_currency(client: PipelineHTTPClient, conn, module_name: str, 
         })
 
     existing = _existing_ratings(conn, provider_keys)
+    retrieved_at = result.retrieved_at.isoformat()
     stale = 0
+    backfilled = 0
     for entry in ctx.track(entries, "ratings entries"):
         if entry["location_id"] not in existing:
             continue  # no row to compare against -- the completeness check owns this gap
-        stored_rating, stored_date = existing[entry["location_id"]]
+        stored_rating, stored_date, existing_bulk_rating = existing[entry["location_id"]]
+
+        if stored_rating is None:
+            # The API has nothing at all for this location -- not "older
+            # than the bulk export", nothing. Re-running m05_cqc will not
+            # change that (confirmed for real: see the module docstring), so
+            # a review-only flag would just repeat forever. Any rating the
+            # bulk export does have is strictly more informative than null.
+            if entry["rating"]:
+                _set_bulk_rating(conn, entry["location_id"], entry["rating"],
+                                  entry["publication_date"], ods_url, retrieved_at)
+                db.record_review_item(
+                    conn, module_name, "cqc_directory_rating_backfilled", entry["location_id"],
+                    json.dumps({
+                        "provider_key": entry["provider_key"],
+                        "bulk_overall_rating": entry["rating"],
+                        "bulk_overall_rating_date": entry["publication_date"],
+                        "ratings_source_url": ods_url,
+                        "note": "the CQC API returned no rating for this location; the portal "
+                                 "shows this bulk-export value instead of the API's until the "
+                                 "API supplies its own -- re-running m05_cqc will not change that",
+                    }))
+                backfilled += 1
+            continue
+
+        # The API does have a rating now. A fallback value left over from
+        # when it did not would sit beside it with nothing marking it stale
+        # -- clear it rather than let a reader mistake it for current.
+        if existing_bulk_rating is not None:
+            _set_bulk_rating(conn, entry["location_id"], None, None, None, None)
+
         if not entry["publication_date"]:
             continue
         if stored_date and entry["publication_date"] <= stored_date:
@@ -283,10 +354,11 @@ def _check_ratings_currency(client: PipelineHTTPClient, conn, module_name: str, 
                 "api_overall_rating_date": stored_date,
                 "ratings_source_url": ods_url,
                 "note": "CQC's ratings export shows a newer publication date than the API "
-                         "record for this location -- re-run m05_cqc",
+                         "record for this location, which did supply a rating -- re-run "
+                         "m05_cqc, the two sources plausibly just haven't caught up yet",
             }))
         stale += 1
-    log.info("cqc_directory.ratings_checked", matched=len(entries), stale=stale)
+    log.info("cqc_directory.ratings_checked", matched=len(entries), stale=stale, backfilled=backfilled)
     return stale
 
 
