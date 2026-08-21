@@ -76,6 +76,98 @@ def test_authority_lookup_matches_published_area_names(conn):
     assert lookup[ndtms.normalise_area_name("Barking and Dagenham")] == "E09000002"
 
 
+def _add_authority(conn, ons_code: str, name: str, kind: str = "unitary") -> None:
+    conn.execute(
+        "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
+        "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, ?, ?, '2020-01-01', 'x', 'x', 'https://example.com', "
+        "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (ons_code, name, kind))
+
+
+@pytest.fixture
+def lookup_conn(conn):
+    """The authorities the NDTMS naming problem actually turns on."""
+    for code, name in [
+        ("E06000023", "Bristol, City of"),
+        ("E06000019", "Herefordshire, County of"),
+        ("E06000010", "Kingston upon Hull, City of"),
+        ("E09000001", "City of London"),
+        ("E06000047", "County Durham"),
+        ("E06000004", "Stockton-on-Tees"),
+        ("E06000033", "Southend-on-Sea"),
+        ("E06000052", "Cornwall"),
+        ("E06000053", "Isles of Scilly"),
+        ("E06000058", "Bournemouth, Christchurch and Poole"),
+    ]:
+        _add_authority(conn, code, name)
+    return conn
+
+
+@pytest.mark.parametrize("published,expected", [
+    ("Bristol", "E06000023"),
+    ("Herefordshire", "E06000019"),
+    ("Kingston Upon Hull", "E06000010"),
+    # The full ONS spelling still resolves — the short form is an additional
+    # key, not a replacement. NDTMS publishes both across its sheets.
+    ("Kingston upon Hull, City of", "E06000010"),
+])
+def test_ons_trailing_qualifier_is_an_additional_lookup_key(lookup_conn, published, expected):
+    lookup = ndtms.build_authority_lookup(lookup_conn)
+    assert lookup.get(ndtms.normalise_area_name(published)) == expected
+
+
+def test_city_of_london_is_not_reduced_to_london(lookup_conn):
+    """The qualifier strip is anchored to the trailing comma form on purpose.
+    A leading "City of" is part of the name: reducing E09000001 to "london"
+    would file a London borough's figures under the London region, and it
+    would do it silently.
+    """
+    lookup = ndtms.build_authority_lookup(lookup_conn)
+    assert lookup[ndtms.normalise_area_name("City of London")] == "E09000001"
+    assert "london" not in lookup
+
+
+@pytest.mark.parametrize("published,expected", [
+    ("Durham", "E06000047"),
+    ("Stockton", "E06000004"),
+    ("Southend", "E06000033"),
+])
+def test_written_out_aliases_resolve(lookup_conn, published, expected):
+    """Three areas where NDTMS's name and the ONS name simply differ. Each is
+    written out with its code rather than derived by a rule.
+    """
+    lookup = ndtms.build_authority_lookup(lookup_conn)
+    assert lookup.get(ndtms.normalise_area_name(published)) == expected
+
+
+@pytest.mark.parametrize("published", [
+    "ENGLAND", "England", "National", "North East", "Yorkshire and the Humber",
+    # Two authorities reported as one: forcing it onto either component
+    # invents a figure for the other.
+    "Cornwall and Isles of Scilly", "Cornwall & Isles of Scilly",
+    # Abolished in 2019. Resolving these to Bournemouth, Christchurch and
+    # Poole would date a figure to a council that did not yet exist.
+    "Poole", "Bournemouth",
+])
+def test_aggregates_and_abolished_areas_stay_unmatched(lookup_conn, published):
+    """These are the names the alias map must never grow to cover. NULL plus
+    a review item is the correct answer for all of them, not a gap to close.
+    """
+    lookup = ndtms.build_authority_lookup(lookup_conn)
+    assert ndtms.normalise_area_name(published) not in lookup
+
+
+def test_a_real_name_is_never_shadowed_by_another_authoritys_abbreviation(conn):
+    """Every authority's own name is claimed before any shortened form, so an
+    authority actually called "Bristol" wins the key over another's
+    abbreviation of "Bristol, City of" — whichever order the rows arrive in.
+    """
+    _add_authority(conn, "E06000023", "Bristol, City of")
+    _add_authority(conn, "E99999999", "Bristol")
+    lookup = ndtms.build_authority_lookup(conn)
+    assert lookup["bristol"] == "E99999999"
+
+
 # --- LA sheet detection ------------------------------------------------------------
 
 def test_find_header_row_detects_la_sheet():

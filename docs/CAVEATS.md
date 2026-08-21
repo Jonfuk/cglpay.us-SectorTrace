@@ -206,9 +206,22 @@ anyone using it.
 - **LA-level detail has been reduced over time:** adult publications carried 3
   local-authority sheets from 2018-19 through 2021-22, and 1 from 2022-23
   onward.
-- About 5% of published area names do not resolve to a single ONS code and are
+- About 4% of published area names do not resolve to a single ONS code and are
   left unmatched: national and regional aggregates, combined reporting areas
   such as "Cornwall & Isles of Scilly", and pre-reorganisation authorities.
+  **None of those is a gap waiting to be closed.** "Cornwall & Isles of Scilly"
+  is two authorities reported as one, and "Poole" and "Bournemouth" were
+  abolished in 2019 — resolving any of them onto a live code would attach a
+  figure to a body that did not produce it, in the last two cases to a council
+  that did not yet exist. NULL plus a review item is the answer.
+- Where NDTMS's name and the ONS name differ for a *single live* authority,
+  the match is made deterministically and in two documented forms: a trailing
+  ONS qualifier the source drops ("Bristol, City of" published as "Bristol")
+  is stripped by rule, and three genuine differences (Durham/County Durham,
+  Stockton/Stockton-on-Tees, Southend/Southend-on-Sea) are written out in
+  `NDTMS_AREA_ALIASES` with the code each resolves to. Nothing is matched
+  fuzzily. Rows already stored keep whatever `ons_code` they were written
+  with — the alias set changes what a *re-run* resolves, not history.
 - Statistical disclosure markers (`c`, `*`) are kept verbatim in `value_text`
   with `value` NULL. They do not mean zero.
 - **The local-authority figures are modelled estimates, and the confidence

@@ -72,6 +72,35 @@ _COUNCIL_SUFFIX_RE = re.compile(
 )
 _TRAILING_STATUS_RE = re.compile(r"\s+(borough|ua|ua\b|unitary)$", re.IGNORECASE)
 
+# The other direction: a handful of ONS names carry a trailing qualifier that
+# NDTMS simply drops ("Bristol, City of" is NDTMS's "Bristol"). Stripping it
+# gives that authority a second lookup key. The pattern is anchored to the
+# trailing *comma* form deliberately -- "City of London" (E09000001) is a
+# different authority, and stripping a leading "City of" would reduce it to
+# "london", which is also a region name in these sheets. That would not fail
+# loudly; it would file a London borough's figures under a region.
+_ONS_TRAILING_QUALIFIER_RE = re.compile(r",\s*(?:city|county|borough)\s+of\s*$",
+                                          re.IGNORECASE)
+
+# And three areas where the two names simply differ, which is not a rule and
+# must not be turned into one. Each is written out with the code it resolves
+# to, so a reader can check it rather than trust it, and each maps one-to-one
+# onto a single live authority.
+#
+# What is deliberately NOT here, because every one would attach a figure to a
+# body that did not produce it:
+#   "Cornwall and Isles of Scilly" is two authorities (E06000052, E06000053);
+#   "Poole" and "Bournemouth" are pre-2019 authorities that no longer exist,
+#   and resolving either to Bournemouth, Christchurch and Poole (E06000058)
+#   would date a figure to a council that had not been created yet;
+#   "ENGLAND", "National" and the nine region names are aggregates, not areas.
+# Those stay NULL and go to review, which is the correct answer, not a gap.
+NDTMS_AREA_ALIASES = {
+    "durham": "E06000047",    # ONS "County Durham"
+    "stockton": "E06000004",  # ONS "Stockton-on-Tees"
+    "southend": "E06000033",  # ONS "Southend-on-Sea"
+}
+
 
 def _cell_text(cell) -> str:
     return "".join(str(p) for p in cell.getElementsByType(P))
@@ -93,9 +122,29 @@ def normalise_area_name(name: str) -> str:
 
 
 def build_authority_lookup(conn) -> dict[str, str]:
+    """Normalised area name -> ONS code.
+
+    Built in three passes, and the order is the point: every authority's own
+    name is claimed first, then the shortened forms, then the written-out
+    aliases. A name that some authority actually has can therefore never be
+    taken by another authority's abbreviation of it, because `setdefault` on
+    an already-claimed key does nothing. Run the passes the other way round
+    and a shortening could quietly outrank a real name.
+    """
     lookup: dict[str, str] = {}
+    shortened: dict[str, str] = {}
     for row in conn.execute("SELECT ons_code, name FROM authorities ORDER BY ons_code"):
-        lookup.setdefault(normalise_area_name(row["name"]), row["ons_code"])
+        canonical = normalise_area_name(row["name"])
+        lookup.setdefault(canonical, row["ons_code"])
+        without_qualifier = normalise_area_name(
+            _ONS_TRAILING_QUALIFIER_RE.sub("", row["name"]))
+        if without_qualifier and without_qualifier != canonical:
+            shortened.setdefault(without_qualifier, row["ons_code"])
+
+    for key, code in shortened.items():
+        lookup.setdefault(key, code)
+    for name, code in NDTMS_AREA_ALIASES.items():
+        lookup.setdefault(normalise_area_name(name), code)
     return lookup
 
 
