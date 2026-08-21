@@ -49,7 +49,11 @@ import structlog
 
 from pipeline import db
 from pipeline.http import PipelineHTTPClient
-from pipeline.modules.m07_ndtms import build_authority_lookup, normalise_area_name
+from pipeline.modules.m07_ndtms import (
+    build_authority_lookup,
+    build_transition_lookup,
+    match_area_name,
+)
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -264,6 +268,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m27_ndtms_monthly"
     conn = ctx.conn
     authority_lookup = build_authority_lookup(conn)
+    transitions = build_transition_lookup(conn)
     if not authority_lookup:
         log.info("ndtms_monthly.no_authorities",
                   note="run m00_geography first or every area will go to review_queue")
@@ -340,7 +345,7 @@ def run(ctx: ModuleContext) -> None:
                                            dat_code, json.dumps({"expected": area_name, "h1": page.h1}))
                     continue
 
-                ons_code = authority_lookup.get(normalise_area_name(area_name))
+                ons_code = match_area_name(area_name, authority_lookup, transitions)
                 if ons_code is None:
                     db.record_review_item(conn, module_name, "unmatched_ndtms_monthly_area",
                                            area_name, json.dumps({"dat_code": dat_code}))

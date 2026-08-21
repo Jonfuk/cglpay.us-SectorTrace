@@ -632,6 +632,32 @@ anyone using it.
   discarded, not stored: the form re-renders the England-wide page rather than
   erroring when its anti-forgery token is rejected, so a missing area is a
   fetch that was refused, not a zero.
+- **An authority can appear twice, either side of a reorganisation, and the
+  two halves must not be added.** NDTMS puts the lifecycle in the name:
+  `Barnsley (discontinued)` and `Barnsley (from April 2026)` are one borough
+  across the April 2026 ONS renumbering, and `North Yorkshire (pre April
+  2023)` is the county before it became a unitary. Both halves carry real
+  figures, so both are matched — to the predecessor and successor codes
+  respectively, read from `authority_successors` rather than from the date in
+  the name. The consequence to carry: **one authority's monthly series spans
+  two `ons_code` values**, so grouping by `ons_code` alone splits it, and
+  summing the two halves for the same period double-counts nothing only
+  because they never both hold a figure for the same period. Group by
+  `dat_code` when you need one reporting entity, and say which side of the
+  change a figure is from.
+- **A discontinued entity reports `0`, not a blank, for periods after its
+  cutover — and it is not a zero.** `Barnsley (discontinued)` shows 1,028 in
+  treatment for `Apr25 - Mar26` and a literal `0` for `May25 - Apr26` onward,
+  while `Barnsley (from April 2026)` picks those periods up at 1,022. Charting
+  one entity across the cutover shows treatment numbers collapsing to nothing.
+  They did not: the reporting moved. This is stored exactly as published,
+  because the alternative is deciding on the source's behalf that a published
+  `0` means "no data", which is a different claim from the one the source
+  made.
+- Only a marker this pipeline recognises (`discontinued`, `pre …`, `from …`)
+  resolves. Any other parenthesised suffix goes to `review_queue` rather than
+  falling back to the bare name, because falling back would answer a question
+  nobody has looked at with whichever code happened to sort first.
 
 ---
 

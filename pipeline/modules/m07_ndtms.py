@@ -101,6 +101,28 @@ NDTMS_AREA_ALIASES = {
     "southend": "E06000033",  # ONS "Southend-on-Sea"
 }
 
+# NDTMS puts a reporting entity's lifecycle in the name itself: "Barnsley
+# (discontinued)" and "Barnsley (from April 2026)" are the same borough
+# either side of an April 2026 renumbering, and "North Yorkshire (pre April
+# 2023)" is the county before it became a unitary. Both halves are real and
+# both carry figures -- the discontinued entity holds the periods ending
+# before the cutover, the new one the periods after -- so leaving them
+# unmatched loses whole authorities from the data.
+#
+# The date in the suffix is NOT parsed to decide which code applies. Which
+# code a half belongs to is read from `authority_successors`, the
+# geometry-derived predecessor/successor edges m00 already records, so this
+# follows the spine rather than a second opinion about English local
+# government reorganisation.
+_LIFECYCLE_SUFFIX_RE = re.compile(r"^(?P<base>.+?)\s*\((?P<marker>[^()]+)\)\s*$")
+
+# A pair counts as one authority renumbered only when predecessor and
+# successor cover effectively the same ground. Lower-overlap edges are real
+# reorganisations that moved boundaries -- Northamptonshire splitting into two
+# unitaries is 0.45/0.55 -- and carrying a figure across one of those would
+# make it a figure for a different place.
+_SAME_TERRITORY_OVERLAP = 0.99
+
 
 def _cell_text(cell) -> str:
     return "".join(str(p) for p in cell.getElementsByType(P))
@@ -146,6 +168,80 @@ def build_authority_lookup(conn) -> dict[str, str]:
     for name, code in NDTMS_AREA_ALIASES.items():
         lookup.setdefault(normalise_area_name(name), code)
     return lookup
+
+
+def build_transition_lookup(conn) -> dict[str, tuple[str, str]]:
+    """Normalised authority name -> (predecessor code, successor code).
+
+    Only the handful of authorities the spine holds under two codes because
+    ONS renumbered them: Barnsley and Sheffield at the April 2026 change,
+    North Yorkshire and Somerset at the 2023 unitarisation.
+
+    A name is only included when exactly one successor edge links two of the
+    codes sharing that name. Two conditions matter and both are about
+    refusing to guess. Ambiguity is dropped rather than resolved: if a name's
+    codes are linked by several edges there is no single answer, and one
+    invented here would be invisible downstream. And a successor may have
+    other predecessors that are not part of this -- three Somerset districts
+    also merge into E06000066 -- which is fine, because those districts do
+    not share the name and so never enter the pairing.
+    """
+    by_name: dict[str, list[str]] = {}
+    for row in conn.execute("SELECT ons_code, name FROM authorities ORDER BY ons_code"):
+        by_name.setdefault(normalise_area_name(row["name"]), []).append(row["ons_code"])
+
+    candidates = {name: codes for name, codes in by_name.items() if len(codes) > 1}
+    if not candidates:
+        return {}
+
+    edges: set[tuple[str, str]] = set()
+    for row in conn.execute(
+            "SELECT predecessor_code, successor_code, overlap_fraction "
+            "FROM authority_successors"):
+        overlap = row["overlap_fraction"]
+        if overlap is not None and overlap >= _SAME_TERRITORY_OVERLAP:
+            edges.add((row["predecessor_code"], row["successor_code"]))
+
+    transitions: dict[str, tuple[str, str]] = {}
+    for name, codes in candidates.items():
+        pairs = [(p, s) for p in codes for s in codes if p != s and (p, s) in edges]
+        if len(pairs) == 1:
+            transitions[name] = pairs[0]
+    return transitions
+
+
+def match_area_name(name: str, lookup: dict[str, str],
+                     transitions: dict[str, tuple[str, str]]) -> str | None:
+    """The published area name resolved to an ONS code, or None for review.
+
+    The plain lookup is tried first and always wins, so adding lifecycle
+    handling cannot change what an ordinary name already resolved to. Only a
+    name that did not match at all is examined for a `(...)` lifecycle
+    marker.
+
+    An unrecognised marker returns None rather than falling back to the base
+    name. "Barnsley (something new NDTMS started writing in 2028)" is a
+    question for a person, and quietly answering it with whichever Barnsley
+    sorted first is how a figure ends up under the wrong code.
+    """
+    code = lookup.get(normalise_area_name(name))
+    if code is not None:
+        return code
+
+    matched = _LIFECYCLE_SUFFIX_RE.match((name or "").strip())
+    if matched is None:
+        return None
+    pair = transitions.get(normalise_area_name(matched.group("base")))
+    if pair is None:
+        return None
+
+    predecessor, successor = pair
+    marker = matched.group("marker").strip().lower()
+    if marker == "discontinued" or marker.startswith("pre "):
+        return predecessor
+    if marker.startswith("from "):
+        return successor
+    return None
 
 
 def find_header_row(rows: list[list[str]], max_scan: int = 12) -> int | None:
@@ -312,6 +408,7 @@ def run(ctx: ModuleContext) -> None:
     module_name = "m07_ndtms"
     conn = ctx.conn
     authority_lookup = build_authority_lookup(conn)
+    transitions = build_transition_lookup(conn)
     if not authority_lookup:
         log.info("ndtms.no_authorities",
                   note="run m00_geography first or every area will go to review_queue")
@@ -410,7 +507,8 @@ def run(ctx: ModuleContext) -> None:
                     continue
 
                 for entry in extract_la_rows(rows, header_index):
-                    ons_code = authority_lookup.get(normalise_area_name(entry["area_name_raw"]))
+                    ons_code = match_area_name(
+                        entry["area_name_raw"], authority_lookup, transitions)
                     if ons_code is None and entry.get("published_area_code"):
                         ons_code = entry["published_area_code"]
                     if ons_code is None:

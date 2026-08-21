@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.modules import m07_ndtms as ndtms
+from pipeline.modules.m07_ndtms import build_authority_lookup, build_transition_lookup
 
 # --- publication title parsing ------------------------------------------------
 
@@ -166,6 +167,100 @@ def test_a_real_name_is_never_shadowed_by_another_authoritys_abbreviation(conn):
     _add_authority(conn, "E99999999", "Bristol")
     lookup = ndtms.build_authority_lookup(conn)
     assert lookup["bristol"] == "E99999999"
+
+
+# --- lifecycle-suffixed area names ---------------------------------------------------
+
+def _add_successor(conn, predecessor: str, successor: str, overlap: float) -> None:
+    conn.execute(
+        "INSERT INTO authority_successors (predecessor_code, successor_code, "
+        "overlap_fraction, method, transition_from_vintage, transition_to_vintage, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, ?, ?, 'geometry_overlap', 'A', 'B', 'https://example.com', "
+        "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (predecessor, successor, overlap))
+
+
+@pytest.fixture
+def renumbered_conn(conn):
+    """Barnsley as the spine actually holds it: two codes for one borough,
+    linked by a near-total geometry overlap at the April 2026 renumbering.
+    """
+    _add_authority(conn, "E08000016", "Barnsley", "metropolitan_district")
+    _add_authority(conn, "E08000038", "Barnsley", "metropolitan_district")
+    _add_successor(conn, "E08000016", "E08000038", 0.9997)
+    return conn
+
+
+def test_transition_lookup_pairs_the_two_codes(renumbered_conn):
+    transitions = build_transition_lookup(renumbered_conn)
+    assert transitions["barnsley"] == ("E08000016", "E08000038")
+
+
+@pytest.mark.parametrize("published,expected", [
+    ("Barnsley (discontinued)", "E08000016"),
+    ("Barnsley (pre April 2026)", "E08000016"),
+    ("Barnsley (from April 2026)", "E08000038"),
+])
+def test_lifecycle_markers_resolve_through_the_successor_edge(
+        renumbered_conn, published, expected):
+    """The date in the suffix is not parsed. Which side of the change a name
+    is on comes from the marker word; which code that side is comes from
+    `authority_successors`.
+    """
+    lookup = build_authority_lookup(renumbered_conn)
+    transitions = build_transition_lookup(renumbered_conn)
+    assert ndtms.match_area_name(published, lookup, transitions) == expected
+
+
+def test_a_plain_name_still_wins_over_lifecycle_handling(renumbered_conn):
+    """The ordinary lookup is tried first, so adding this cannot change what
+    an unsuffixed name already resolved to.
+    """
+    lookup = build_authority_lookup(renumbered_conn)
+    transitions = build_transition_lookup(renumbered_conn)
+    assert ndtms.match_area_name("Barnsley", lookup, transitions) == lookup["barnsley"]
+
+
+def test_an_unrecognised_marker_is_not_guessed(renumbered_conn):
+    """A marker nobody has seen before is a question for a person. Falling
+    back to the base name would answer it with whichever code sorted first.
+    """
+    lookup = build_authority_lookup(renumbered_conn)
+    transitions = build_transition_lookup(renumbered_conn)
+    assert ndtms.match_area_name("Barnsley (provisional)", lookup, transitions) is None
+
+
+def test_a_boundary_change_that_moved_land_is_not_treated_as_a_renumbering(conn):
+    """Northamptonshire split into two unitaries at 0.45/0.55 overlap. A pair
+    like that is a reorganisation, not the same place renumbered, and a figure
+    carried across it would be a figure for somewhere else.
+    """
+    _add_authority(conn, "E10000021", "Northamptonshire")
+    _add_authority(conn, "E06000061", "Northamptonshire")
+    _add_successor(conn, "E10000021", "E06000061", 0.4179)
+    transitions = build_transition_lookup(conn)
+    assert "northamptonshire" not in transitions
+    lookup = build_authority_lookup(conn)
+    assert ndtms.match_area_name(
+        "Northamptonshire (discontinued)", lookup, transitions) is None
+
+
+def test_an_ambiguous_pairing_is_dropped_rather_than_resolved(conn):
+    """Three codes under one name with two qualifying edges has no single
+    answer, and one invented here would be invisible downstream.
+    """
+    for code in ("E00000001", "E00000002", "E00000003"):
+        _add_authority(conn, code, "Ambiguous")
+    _add_successor(conn, "E00000001", "E00000002", 0.999)
+    _add_successor(conn, "E00000002", "E00000003", 0.999)
+    assert "ambiguous" not in build_transition_lookup(conn)
+
+
+def test_transition_lookup_ignores_names_holding_a_single_code(lookup_conn):
+    """Every authority in this fixture has exactly one code, so there is
+    nothing to pair and nothing should be invented.
+    """
+    assert build_transition_lookup(lookup_conn) == {}
 
 
 # --- LA sheet detection ------------------------------------------------------------
