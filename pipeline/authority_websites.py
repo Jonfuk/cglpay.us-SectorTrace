@@ -484,9 +484,12 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E10000018",
         name="Leicestershire",
         base_url="https://www.leicestershire.gov.uk",
-        committee_url="https://politics.leics.gov.uk",
+        # politics.leics.gov.uk (verified 2026-08-13) has since moved; the
+        # site itself now redirects to this host. Re-verified live 2026-08-22
+        # against /mgWhatsNew.aspx, which answers -- still ModernGov.
+        committee_url="https://democracy.leics.gov.uk",
         committee_system="moderngov",
-        verified_on="2026-08-13",
+        verified_on="2026-08-22",
         base_url_verified_on="2026-08-17",
     ),
     "E07000063": AuthorityWebsite(
@@ -2716,9 +2719,22 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
 }
 
 # Path signatures used to identify a committee system from its root URL.
-SYSTEM_SIGNATURES: dict[str, list[str]] = {
+#
+# An entry is either a bare path (answering at all is proof enough) or a
+# (path, content_marker) pair, needed where the path alone is too generic to
+# trust. CMIS gained the second form on 2026-08-22: the vendor is always a
+# DNN-hosted ASP.NET WebForms app, but the module is mounted at whatever path
+# each council's DNN portal gives it -- /cmis5/ (Harborough), no prefix at
+# all under a dedicated subdomain (Derby: democracy.derby.gov.uk), or under
+# the council's own domain (Nottinghamshire: nottinghamshire.gov.uk/dms/).
+# /Search.aspx answering 200 is not proof of anything on its own -- plenty of
+# unrelated sites have a page by that name -- so the marker is the DNN
+# module's own CSS class, present verbatim in all three installs checked
+# live that day.
+SYSTEM_SIGNATURES: dict[str, list[str | tuple[str, str]]] = {
     "moderngov": ["/mgWhatsNew.aspx", "/ieDocHome.aspx"],
-    "cmis": ["/CMIS5/Meetings.aspx", "/cmis5/Meetings.aspx"],
+    "cmis": ["/CMIS5/Meetings.aspx", "/cmis5/Meetings.aspx",
+             ("/Search.aspx", "ModCMISSearchC")],
 }
 
 # Paths that only a committee system serves, used to recognise one in a link
@@ -2739,16 +2755,25 @@ COMMITTEE_LINK_SIGNATURES: tuple[str, ...] = (
 
 def detect_committee_system(probe) -> tuple[str, str | None]:
     """(system, signature_path). `probe` is called with a path and returns
-    True if it exists. Returns ('unknown', None) when nothing matches — a
-    recorded answer, not a fallback guess.
+    whatever the fetch produced: falsy for "did not answer", or the response
+    body text for "answered, here it is". A path-only signature only needs
+    the truthy check; a (path, marker) signature also requires the marker
+    substring to appear in what was returned, so `probe` is free to keep
+    returning a plain bool for those and only bother decoding a body where a
+    marker entry might need it. Returns ('unknown', None) when nothing
+    matches — a recorded answer, not a fallback guess.
 
     Lives here rather than in Module 10 because the reviewer UI has to
     identify a system the same way when a human supplies a URL. Two copies of
     this would let the two disagree about what a council is running.
     """
     for system, paths in SYSTEM_SIGNATURES.items():
-        for path in paths:
-            if probe(path):
+        for entry in paths:
+            path, marker = entry if isinstance(entry, tuple) else (entry, None)
+            answer = probe(path)
+            if not answer:
+                continue
+            if marker is None or (isinstance(answer, str) and marker in answer):
                 return system, path
     return "unknown", None
 

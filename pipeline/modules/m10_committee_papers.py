@@ -488,6 +488,276 @@ def _search_moderngov(client, findings: AuthorityFindings) -> None:
             url = following
 
 
+# --- The CMIS adapter -------------------------------------------------------------
+#
+# CMIS is the second committee system this module can search, added
+# 2026-08-22 after being flagged 'committee_system_unsupported' for months.
+# Verified live against three unrelated installs that day -- Derby
+# (democracy.derby.gov.uk, no path prefix), Nottinghamshire
+# (nottinghamshire.gov.uk/dms/, under the council's own domain) and
+# Harborough (cmis.harborough.gov.uk/cmis5/, the standalone layout the old
+# signature already recognised). All three are DNN-hosted ASP.NET WebForms
+# apps sharing one detail that matters: unlike ModernGov, the search form
+# genuinely does carry __VIEWSTATE and __EVENTVALIDATION, so a plain GET
+# cannot answer it. Every field this adapter posts is read off the page that
+# came back, never hardcoded -- the DNN control id (ctr424 on all three
+# installs checked) is treated as an artefact of those three sites, not a
+# constant, and the same goes for the pager's own control name.
+#
+# CMIS shows no matched-text snippet under a hit (unlike ModernGov's
+# mgWordPara), so there is nothing here that needs the restricted table.
+
+_CMIS_HIDDEN_NAMES = ("__EVENTTARGET", "__EVENTARGUMENT", "__LASTFOCUS",
+                       "__VIEWSTATE", "__VIEWSTATEGENERATOR",
+                       "__VIEWSTATEENCRYPTED", "__EVENTVALIDATION")
+
+_CMIS_MONTHS = {name: i for i, name in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), start=1)}
+
+
+def _cmis_hidden_value(page_html: str, name: str) -> str:
+    match = re.search(rf'name="{re.escape(name)}"[^>]*value="([^"]*)"', page_html or "")
+    return html_lib.unescape(match.group(1)) if match else ""
+
+
+def harvest_cmis_postback_fields(page_html: str) -> dict[str, str]:
+    """The hidden fields every CMIS postback must carry, read off whatever
+    page produced them. A fresh __VIEWSTATE accompanies every response and
+    the one from the previous request is invalid on the next -- this must be
+    called again against each new response, never reused.
+    """
+    return {name: _cmis_hidden_value(page_html, name) for name in _CMIS_HIDDEN_NAMES}
+
+
+def find_cmis_search_fields(page_html: str) -> dict[str, str] | None:
+    """This install's DNN control names for the search form, or None if
+    `page_html` does not carry the fields this adapter expects at all.
+
+    The control id is not assumed to be universal (see module note above) --
+    it is read from the field names themselves, the same way a document URL
+    is read from a link rather than constructed.
+    """
+    search_for = re.search(r'name="([\w$]+SimpleSearchFor)"', page_html or "")
+    selector = re.search(r'name="([\w$]+SimpleSearchSelector)"', page_html or "")
+    submit = re.search(r'name="([\w$]+SimpleSearchSubmit)"', page_html or "")
+    if not (search_for and selector and submit):
+        return None
+    return {"search_for": search_for.group(1), "selector": selector.group(1),
+            "submit": submit.group(1)}
+
+
+def build_cmis_search_data(page_html: str, term: str) -> dict[str, str] | None:
+    """POST body for a first-page CMIS document search, or None if
+    `page_html` is not a CMIS search form this module recognises.
+
+    __EVENTTARGET is set to the submit control's own name: that is what the
+    form's onclick handler (WebForm_DoPostBackWithOptions) does before
+    submitting, in place of the plain click a JS-free browser would send, so
+    replicating the click means replicating that override rather than
+    including the button as a normal field.
+    """
+    fields = find_cmis_search_fields(page_html)
+    if fields is None:
+        return None
+    data = harvest_cmis_postback_fields(page_html)
+    data["__EVENTTARGET"] = fields["submit"]
+    data[fields["search_for"]] = term
+    data[fields["selector"]] = "documents"
+    return data
+
+
+_CMIS_PAGER_TARGET_RE = re.compile(r"__doPostBack\('([^']+grdDocuments)','Page\$(\d+)'\)")
+
+
+def cmis_pager_targets(page_html: str) -> dict[int, str]:
+    """{page_number: grid_control_name} for every page link CMIS printed in
+    its own pager row. Read from the page rather than derived from the
+    search fields, the same discipline this module already applies to
+    ModernGov's next-page link -- and the only page numbers present are the
+    ones CMIS is actually offering, so an absent page number means there is
+    no next page rather than something to construct.
+    """
+    return {int(page): name for name, page in _CMIS_PAGER_TARGET_RE.findall(page_html or "")}
+
+
+def build_cmis_page_data(page_html: str, page: int) -> dict[str, str] | None:
+    """POST body for page `page` of the current CMIS result set, built from
+    the *previous response* -- each response carries the only viewstate its
+    own next postback will accept. None means CMIS did not offer this page
+    (either there is no pager at all, or it stopped short of `page`).
+    """
+    grid_name = cmis_pager_targets(page_html).get(page)
+    if grid_name is None:
+        return None
+    data = harvest_cmis_postback_fields(page_html)
+    data["__EVENTTARGET"] = grid_name
+    data["__EVENTARGUMENT"] = f"Page${page}"
+    return data
+
+
+_CMIS_NO_RESULTS_RE = re.compile(r"pnlNoResults|produced no results", re.IGNORECASE)
+
+
+def has_cmis_no_results(page_html: str) -> bool:
+    """True when CMIS states there were no matches -- the difference between
+    "searched and found nothing" and "could not search", same as ModernGov's
+    has_no_results.
+    """
+    return bool(_CMIS_NO_RESULTS_RE.search(page_html or ""))
+
+
+def _cmis_iso_date(raw: str | None) -> str | None:
+    """CMIS prints D/Mon/YYYY ('01/Sep/2026'). A value that does not parse
+    returns None so the caller logs it rather than storing a guess.
+    """
+    if not raw:
+        return None
+    match = re.fullmatch(r"(\d{1,2})/([A-Za-z]{3})/(\d{4})", raw.strip())
+    if not match:
+        return None
+    day, month_name, year = match.groups()
+    month = _CMIS_MONTHS.get(month_name.title())
+    if month is None:
+        return None
+    try:
+        from datetime import date
+
+        return date(int(year), month, int(day)).isoformat()
+    except ValueError:
+        return None
+
+
+_CMIS_ROW_RE = re.compile(
+    r'<tr class="CMIS_Grid_(?:Row|AlternatingRow)Style">(.*?)</tr>', re.DOTALL)
+_CMIS_CELL_RE = re.compile(r'<td[^>]*>(.*?)</td>', re.DOTALL)
+_CMIS_MEETING_PARENT_RE = re.compile(r"^Meeting:\s*(.+?)\s*-\s*(\d{1,2}/[A-Za-z]{3}/\d{4})$")
+
+
+def parse_cmis_results(page_html: str, page_url: str, term: str) -> list[dict]:
+    """Candidate rows from one CMIS results page.
+
+    Each row of the CMIS_Grid table is one document: a hit-highlight icon,
+    hit count, a title (usually linked -- a small number of hits are
+    login-gated previews with no href at all, and those fall back to the
+    row's meeting/folder link rather than being invented), document type,
+    size, and the meeting or folder it belongs to. A row with neither link
+    carries nothing citable and is skipped rather than written with a NULL
+    document_url.
+    """
+    out: list[dict] = []
+    for row_html in _CMIS_ROW_RE.findall(page_html or ""):
+        cells = _CMIS_CELL_RE.findall(row_html)
+        if len(cells) < 6:
+            continue
+        _hit_icon, _hits, document_cell, type_cell, _size_cell, parent_cell = cells[:6]
+
+        doc_link = _first_link(document_cell)
+        parent_link = _first_link(parent_cell)
+        parent_text = parent_link[1] if parent_link else _text(parent_cell)
+
+        document_url = urljoin(page_url, doc_link[0]) if doc_link else None
+        if document_url is None and parent_link is not None:
+            document_url = urljoin(page_url, parent_link[0])
+        if document_url is None:
+            continue
+
+        title = doc_link[1] if doc_link else _text(document_cell)
+        meeting_match = _CMIS_MEETING_PARENT_RE.match(parent_text)
+        committee_name = meeting_match.group(1) if meeting_match else None
+        meeting_date_raw = meeting_match.group(2) if meeting_match else None
+
+        out.append({
+            "document_url": document_url,
+            "agenda_item_title": None,
+            "item_reference": None,
+            "committee_name": committee_name,
+            "meeting_date_raw": meeting_date_raw,
+            "meeting_date": _cmis_iso_date(meeting_date_raw),
+            "report_title": (title or "")[:300] or None,
+            "match_quality": None,
+            "matched_term": term,
+            "snippet": None,
+            "result_type": (_text(type_cell) or "document").lower().replace(" ", "_") or "document",
+        })
+    return out
+
+
+def _search_cmis(client, findings: AuthorityFindings) -> None:
+    """Every configured term against one CMIS instance.
+
+    The search page is fetched fresh per term rather than once for all of
+    them: a viewstate is only valid for the postback it was issued with, and
+    reusing one across terms would mean the second term's request carries a
+    viewstate the server has already moved past.
+    """
+    search_url = urljoin(findings.committee_url.rstrip("/") + "/", "Search.aspx")
+
+    for term in COMMITTEE_SEARCH_TERMS:
+        try:
+            form_result = client.get(search_url)
+        except RobotsDisallowed:
+            findings.flag("committee_search_robots_disallowed", search_url,
+                           {"authority": findings.name})
+            findings.searched_cleanly = False
+            break
+        if not form_result.ok:
+            findings.flag("committee_search_blocked", search_url,
+                           {"authority": findings.name, "term": term,
+                            "status": form_result.status_code})
+            findings.searched_cleanly = False
+            break
+
+        form_html = form_result.body.decode("utf-8", errors="replace")
+        data = build_cmis_search_data(form_html, term)
+        if data is None:
+            findings.flag("cmis_search_form_unrecognised", search_url,
+                           {"authority": findings.name, "term": term,
+                            "note": "Search.aspx did not carry the CMIS search form "
+                                     "fields this module expects"})
+            findings.unreadable = True
+            break
+
+        for page_number in range(1, MAX_RESULT_PAGES + 1):
+            try:
+                result = client.post(search_url, data=data)
+            except RobotsDisallowed:
+                findings.flag("committee_search_robots_disallowed", search_url,
+                               {"authority": findings.name})
+                findings.searched_cleanly = False
+                break
+            if not result.ok:
+                findings.flag("committee_search_blocked", search_url,
+                               {"authority": findings.name, "term": term,
+                                "status": result.status_code})
+                findings.searched_cleanly = False
+                break
+
+            page_html = result.body.decode("utf-8", errors="replace")
+            rows = parse_cmis_results(page_html, result.url, term)
+
+            if not rows and not has_cmis_no_results(page_html):
+                findings.flag("cmis_results_unrecognised", result.url,
+                               {"authority": findings.name, "term": term,
+                                "note": "page carried neither a results grid nor a "
+                                         "no-results message"})
+                findings.unreadable = True
+                break
+
+            provenance = _provenance(result)
+            for row in rows:
+                meeting_date_raw = row.pop("meeting_date_raw", None)
+                if meeting_date_raw and row["meeting_date"] is None:
+                    findings.parse_failures.append(
+                        ("meeting_date", meeting_date_raw,
+                         "CMIS meeting heading date is not D/Mon/YYYY", result.url))
+                findings.candidates.append({**row, **provenance})
+
+            data = build_cmis_page_data(page_html, page_number + 1)
+            if data is None:
+                break
+
+
 def collect_authority(unit, client) -> AuthorityFindings:
     """One authority's entire fetch workload. Runs on a pool thread."""
     authority, site = unit
@@ -502,31 +772,39 @@ def collect_authority(unit, client) -> AuthorityFindings:
                                  "page; add a verified committee_url"})
         return findings
 
-    def probe(path: str) -> bool:
+    def probe(path: str) -> str | bool:
         try:
             result = client.get(
                 urljoin(findings.committee_url.rstrip("/") + "/", path.lstrip("/")))
         except RobotsDisallowed:
             return False
-        return result.ok
+        if not result.ok:
+            return False
+        # A marker-bearing signature needs the body to check against; a
+        # bare-path one only needed the bool truthiness this string also
+        # has, so one fetch serves both signature shapes.
+        return result.body.decode("utf-8", errors="replace")
 
     findings.system, findings.signature = detect_committee_system(probe)
 
-    if findings.system != "moderngov":
-        # Null adapter: CMIS and Democracy search interfaces are not
-        # implemented, and an unknown system cannot be searched at all.
-        # Recorded rather than skipped silently.
+    if findings.system == "moderngov":
+        findings.searched = True
+        _search_moderngov(client, findings)
+    elif findings.system == "cmis":
+        findings.searched = True
+        _search_cmis(client, findings)
+    else:
+        # Null adapter: Democracy and any other system remain unimplemented,
+        # and an unknown system cannot be searched at all. Recorded rather
+        # than skipped silently.
         findings.flag("committee_system_unsupported", findings.ons_code,
                        {"authority": findings.name, "system": findings.system,
                         "committee_url": findings.committee_url,
                         "note": "no adapter for this system; search manually or add one"})
         return findings
 
-    findings.searched = True
-    _search_moderngov(client, findings)
-
     if not findings.candidates and findings.searched_cleanly and not findings.unreadable:
-        # Every term returned ModernGov's own no-results message. Worth
+        # Every term returned the system's own no-results message. Worth
         # recording as a fact about the council rather than leaving it as an
         # absence indistinguishable from a failure.
         findings.flag("committee_search_no_matches", findings.ons_code,

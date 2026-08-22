@@ -37,6 +37,17 @@ SEARCH_FORM = (FIXTURES / "moderngov_doc_search_form.html").read_text(encoding="
 KENT_URL = "https://democracy.kent.gov.uk/ieSearchResults2.aspx?SS=substance%20misuse&PG=1"
 KIRKLEES_URL = "https://democracy.kirklees.gov.uk/ieSearchResults2.aspx?SS=drug%20and%20alcohol&PG=1"
 
+# Captured live from three unrelated CMIS installs on 2026-08-22 (see the
+# module note above _search_cmis): Harborough is the standalone /cmis5/
+# layout, and the same DNN control naming was independently confirmed
+# against Derby (democracy.derby.gov.uk) and Nottinghamshire
+# (nottinghamshire.gov.uk/dms/) in that session without capturing their raw
+# HTML, so only Harborough's is fixture-backed here.
+CMIS_FORM = (FIXTURES / "cmis_search_harborough_form.html").read_text(encoding="utf-8")
+CMIS_RESULTS = (FIXTURES / "cmis_search_harborough_council_page1.html").read_text(encoding="utf-8")
+CMIS_NO_RESULTS = (FIXTURES / "cmis_search_no_results.html").read_text(encoding="utf-8")
+CMIS_URL = "https://cmis.harborough.gov.uk/cmis5/Search.aspx"
+
 
 # --- system detection ------------------------------------------------------------
 
@@ -578,3 +589,310 @@ def test_every_registry_entry_is_well_formed():
         assert entry.committee_system in (None, "moderngov", "cmis", "democracy"), (
             f"{code} claims an unknown committee system")
         assert entry.verified_on, f"{code} does not say when it was verified"
+
+
+# --- CMIS: detection ---------------------------------------------------------------------
+
+def test_a_bare_path_answering_is_still_enough_for_moderngov():
+    """The content-marker mechanism added for CMIS must not change what
+    already worked: a bare-path signature only needs a truthy answer.
+    """
+    system, signature = cp.detect_committee_system(
+        lambda p: "ok" if p == "/mgWhatsNew.aspx" else False)
+    assert system == "moderngov"
+    assert signature == "/mgWhatsNew.aspx"
+
+
+def test_a_generic_search_aspx_that_is_not_cmis_is_not_mistaken_for_it():
+    """/Search.aspx answering is not proof of anything on its own -- plenty
+    of unrelated sites have a page by that name. Only the marker settles it.
+    """
+    system, _ = cp.detect_committee_system(
+        lambda p: "<html>Some unrelated council search page</html>" if p == "/Search.aspx" else False)
+    assert system == "unknown"
+
+
+def test_cmis_is_recognised_by_its_dnn_module_marker():
+    system, signature = cp.detect_committee_system(
+        lambda p: CMIS_FORM if p == "/Search.aspx" else False)
+    assert system == "cmis"
+    assert signature == "/Search.aspx"
+
+
+def test_the_standalone_cmis5_path_still_matches_without_a_body():
+    """Harborough's own /cmis5/Meetings.aspx signature (the one this module
+    already had) keeps working for a probe that never returns content.
+    """
+    system, _ = cp.detect_committee_system(lambda p: "cmis5" in p.lower())
+    assert system == "cmis"
+
+
+# --- CMIS: reading the search form ---------------------------------------------------------
+
+def test_finds_the_dnn_controls_this_install_uses():
+    fields = cp.find_cmis_search_fields(CMIS_FORM)
+    assert fields is not None
+    assert fields["search_for"] == "dnn$ctr424$ViewCMIS_Search$SimpleSearchFor"
+    assert fields["selector"] == "dnn$ctr424$ViewCMIS_Search$SimpleSearchSelector"
+    assert fields["submit"] == "dnn$ctr424$ViewCMIS_Search$SimpleSearchSubmit"
+
+
+def test_a_page_without_the_cmis_form_is_not_mistaken_for_one():
+    assert cp.find_cmis_search_fields("<html><body>Not CMIS at all</body></html>") is None
+    assert cp.build_cmis_search_data("<html></html>", "TUPE") is None
+
+
+def test_harvests_the_hidden_postback_fields():
+    fields = cp.harvest_cmis_postback_fields(CMIS_FORM)
+    assert fields["__VIEWSTATE"] == "FAKEVIEWSTATEFORFIXTUREPURPOSESONLYnotreal=="
+    assert fields["__EVENTVALIDATION"] == "FAKEEVENTVALIDATIONFORFIXTUREPURPOSESONLYnotreal=="
+    assert fields["__EVENTTARGET"] == ""
+
+
+def test_the_search_post_targets_the_submit_control_not_a_plain_click():
+    """The form's onclick overrides native submission with
+    WebForm_DoPostBackWithOptions, which sets __EVENTTARGET to the button's
+    own name rather than sending it as an ordinary field.
+    """
+    data = cp.build_cmis_search_data(CMIS_FORM, "drug and alcohol")
+    assert data is not None
+    assert data["__EVENTTARGET"] == "dnn$ctr424$ViewCMIS_Search$SimpleSearchSubmit"
+    assert data["dnn$ctr424$ViewCMIS_Search$SimpleSearchFor"] == "drug and alcohol"
+    assert data["dnn$ctr424$ViewCMIS_Search$SimpleSearchSelector"] == "documents"
+    assert data["__VIEWSTATE"] == "FAKEVIEWSTATEFORFIXTUREPURPOSESONLYnotreal=="
+
+
+# --- CMIS: results parsing, against a real page ---------------------------------------------
+
+def test_parses_every_row_of_a_real_results_page():
+    rows = cp.parse_cmis_results(CMIS_RESULTS, CMIS_URL, "council")
+    assert len(rows) == 10
+    assert all(r["document_url"] for r in rows)
+    assert all(r["matched_term"] == "council" for r in rows)
+
+
+def test_a_login_gated_preview_falls_back_to_its_meeting_link_not_dropped():
+    """One hit in the fixture is a 'Complete Access Preview' with no href on
+    its own title -- the row still carries its meeting's URL rather than
+    being silently skipped, which would otherwise look like a shorter result
+    set than the source actually returned.
+    """
+    rows = cp.parse_cmis_results(CMIS_RESULTS, CMIS_URL, "council")
+    preview = next(r for r in rows if "Complete Access Preview" in (r["report_title"] or ""))
+    assert preview["document_url"] is not None
+    assert "ViewMeetingPublic" in preview["document_url"]
+
+
+def test_a_row_with_no_link_at_all_would_be_skipped_not_written_null():
+    assert cp.parse_cmis_results(
+        '<tr class="CMIS_Grid_RowStyle"><td>x</td><td>1</td><td>no link here</td>'
+        '<td>Report</td><td>1 Kb</td><td>no link here either</td></tr>',
+        CMIS_URL, "x") == []
+
+
+def test_reads_a_meeting_hit_with_its_date_and_committee():
+    rows = cp.parse_cmis_results(CMIS_RESULTS, CMIS_URL, "council")
+    dated = [r for r in rows if r["meeting_date"]]
+    assert dated
+    assert dated[0]["meeting_date"] == "2026-09-01"
+    assert dated[0]["committee_name"]
+
+
+def test_a_public_document_not_attached_to_a_meeting_has_no_committee():
+    """Not every hit is a meeting paper -- 'Public Document' results attach
+    to a folder instead, and that shape is real (seen live on Harborough's
+    own /cmis5/ install alongside the meeting hits CMIS_RESULTS captured)
+    even though page 1 of the fixture search happened to be all meetings.
+    """
+    from_folder_row = (
+        '<tr class="CMIS_Grid_RowStyle"><td></td><td>2</td>'
+        '<td><a href="/cmis5/Document.ashx?x=y">Neighbourhood Planning Grant Aid Support</a></td>'
+        '<td>Public Document</td><td>1.36 Mb</td>'
+        '<td>From folder: 2026/27 - Added on 20/Aug/2026</td></tr>')
+    rows = cp.parse_cmis_results(from_folder_row, CMIS_URL, "council")
+    assert len(rows) == 1
+    assert rows[0]["committee_name"] is None
+    assert rows[0]["meeting_date"] is None
+    assert rows[0]["document_url"].endswith("Document.ashx?x=y")
+
+
+def test_document_type_is_recorded_from_the_source():
+    rows = cp.parse_cmis_results(CMIS_RESULTS, CMIS_URL, "council")
+    assert "agendapack" in {r["result_type"] for r in rows}
+
+
+def test_no_snippet_field_is_invented_for_cmis():
+    """Unlike ModernGov, CMIS shows no matched-text snippet in a hit."""
+    rows = cp.parse_cmis_results(CMIS_RESULTS, CMIS_URL, "council")
+    assert all(r["snippet"] is None for r in rows)
+
+
+def test_parse_cmis_empty_html():
+    assert cp.parse_cmis_results("", CMIS_URL, "x") == []
+
+
+def test_cmis_dates_parse_the_source_format():
+    assert cp._cmis_iso_date("01/Sep/2026") == "2026-09-01"
+    assert cp._cmis_iso_date("29/Feb/2026") is None  # 2026 is not a leap year
+    assert cp._cmis_iso_date("not a date") is None
+    assert cp._cmis_iso_date(None) is None
+
+
+# --- CMIS: knowing empty from broken ---------------------------------------------------------
+
+def test_cmis_no_results_page_is_recognised_as_an_answer():
+    assert cp.has_cmis_no_results(CMIS_NO_RESULTS) is True
+    assert cp.parse_cmis_results(CMIS_NO_RESULTS, CMIS_URL, "zzq") == []
+
+
+def test_a_cmis_page_with_hits_is_not_a_no_results_page():
+    assert cp.has_cmis_no_results(CMIS_RESULTS) is False
+
+
+# --- CMIS: pagination is a further postback, not a link -------------------------------------
+
+def test_pager_targets_are_read_from_the_pages_own_links():
+    targets = cp.cmis_pager_targets(CMIS_RESULTS)
+    assert targets[2] == "dnn$ctr424$ViewCMIS_Search$grdDocuments"
+    assert targets[3] == "dnn$ctr424$ViewCMIS_Search$grdDocuments"
+    assert 1 not in targets, "page 1 is the page already showing, not a link"
+
+
+def test_next_page_data_carries_the_grid_as_the_event_target():
+    data = cp.build_cmis_page_data(CMIS_RESULTS, 2)
+    assert data is not None
+    assert data["__EVENTTARGET"] == "dnn$ctr424$ViewCMIS_Search$grdDocuments"
+    assert data["__EVENTARGUMENT"] == "Page$2"
+
+
+def test_a_page_cmis_never_offered_is_not_constructed():
+    """The fixture's pager stops at page 3. Asking for page 4 must not
+    synthesise a request CMIS never advertised.
+    """
+    assert cp.build_cmis_page_data(CMIS_RESULTS, 4) is None
+
+
+def test_a_no_results_page_offers_no_next_page():
+    assert cp.cmis_pager_targets(CMIS_NO_RESULTS) == {}
+    assert cp.build_cmis_page_data(CMIS_NO_RESULTS, 2) is None
+
+
+# --- CMIS: end to end through the module ------------------------------------------------------
+
+def _register_cmis_authority(monkeypatch, ons_code="E10000016",
+                              committee_url="https://cmis.example.gov.uk/cmis5"):
+    from pipeline import authority_websites
+
+    monkeypatch.setitem(
+        authority_websites.AUTHORITY_WEBSITES, ons_code,
+        authority_websites.AuthorityWebsite(
+            ons_code=ons_code, name="Kent", base_url="https://x.gov.uk",
+            committee_url=committee_url, committee_system="cmis",
+            verified_on="2026-08-22"))
+
+
+def _mock_cmis(httpx_mock, form_body: str, results_body: str, status_code: int = 200):
+    httpx_mock.add_response(url="https://cmis.example.gov.uk/robots.txt",
+                             status_code=404, text="", is_reusable=True)
+    # Detection tries moderngov's signatures before cmis's own (dict order in
+    # SYSTEM_SIGNATURES), and cmis's own two bare-path signatures before the
+    # marker-based /Search.aspx one -- all four must 404 for detection to
+    # reach the entry this test is actually exercising.
+    for probe_path in ("mgWhatsNew.aspx", "ieDocHome.aspx",
+                        "CMIS5/Meetings.aspx", "cmis5/Meetings.aspx"):
+        httpx_mock.add_response(url=f"https://cmis.example.gov.uk/cmis5/{probe_path}",
+                                 status_code=404, text="", is_reusable=True)
+    httpx_mock.add_response(url="https://cmis.example.gov.uk/cmis5/Search.aspx",
+                             method="GET", text=form_body, is_reusable=True)
+    httpx_mock.add_response(url="https://cmis.example.gov.uk/cmis5/Search.aspx",
+                             method="POST", status_code=status_code, text=results_body,
+                             is_reusable=True)
+
+
+def test_a_cmis_authority_is_searched_end_to_end(conn, settings, httpx_mock, monkeypatch):
+    _seed_authority(conn)
+    _register_cmis_authority(monkeypatch)
+    _mock_cmis(httpx_mock, CMIS_FORM, CMIS_RESULTS)
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT committee_system FROM authority_committee_systems"
+    ).fetchone()["committee_system"] == "cmis"
+    rows = conn.execute("SELECT * FROM committee_paper_candidates").fetchall()
+    assert rows
+    assert all(r["verified"] == 0 and r["rejected"] == 0 for r in rows)
+    assert all(r["source_url"] and r["retrieved_at"] and r["payload_sha256"] for r in rows)
+    assert conn.execute("SELECT COUNT(*) c FROM committee_papers").fetchone()["c"] == 0
+
+
+def test_cmis_is_no_longer_the_null_adapter(conn, settings, httpx_mock, monkeypatch):
+    """The failure this adapter replaces: every CMIS authority used to be
+    flagged committee_system_unsupported and never searched at all.
+    """
+    _seed_authority(conn)
+    _register_cmis_authority(monkeypatch)
+    _mock_cmis(httpx_mock, CMIS_FORM, CMIS_RESULTS)
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='committee_system_unsupported'"
+    ).fetchone()["c"] == 0
+
+
+def test_a_genuinely_empty_cmis_search_is_recorded_as_such(conn, settings, httpx_mock, monkeypatch):
+    _seed_authority(conn)
+    _register_cmis_authority(monkeypatch)
+    _mock_cmis(httpx_mock, CMIS_FORM, CMIS_NO_RESULTS)
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='committee_search_no_matches'"
+    ).fetchone()["c"] == 1
+
+
+def test_a_blocked_cmis_search_is_recorded_not_read_as_empty(conn, settings, httpx_mock, monkeypatch):
+    _seed_authority(conn)
+    _register_cmis_authority(monkeypatch)
+    _mock_cmis(httpx_mock, CMIS_FORM, "", status_code=403)
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='committee_search_blocked'"
+    ).fetchone()["c"] >= 1
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM committee_paper_candidates").fetchone()["c"] == 0
+
+
+def test_an_unrecognised_cmis_form_is_flagged(conn, settings, httpx_mock, monkeypatch):
+    """A page still carrying the CMIS module's own marker (so detection
+    correctly calls this a CMIS install, not 'unknown') but not the specific
+    field names this adapter posts against -- the failure mode this flag
+    exists for is CMIS changing its markup, not CMIS being absent. No POST
+    is mocked: the module must recognise the form is unusable and stop
+    before ever attempting one.
+    """
+    _seed_authority(conn)
+    _register_cmis_authority(monkeypatch)
+    httpx_mock.add_response(url="https://cmis.example.gov.uk/robots.txt",
+                             status_code=404, text="", is_reusable=True)
+    for probe_path in ("mgWhatsNew.aspx", "ieDocHome.aspx",
+                        "CMIS5/Meetings.aspx", "cmis5/Meetings.aspx"):
+        httpx_mock.add_response(url=f"https://cmis.example.gov.uk/cmis5/{probe_path}",
+                                 status_code=404, text="", is_reusable=True)
+    httpx_mock.add_response(
+        url="https://cmis.example.gov.uk/cmis5/Search.aspx", method="GET",
+        text='<div class="ModCMISSearchC">unexpected markup, no recognisable fields</div>',
+        is_reusable=True)
+
+    _run(conn, settings)
+
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='cmis_search_form_unrecognised'"
+    ).fetchone()["c"] >= 1
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM review_queue WHERE item_type='committee_system_unsupported'"
+    ).fetchone()["c"] == 0

@@ -140,11 +140,14 @@ def check_url(url: str, settings: Settings | None = None,
         # Probe the signature paths rather than believing the form. A HEAD
         # would be lighter, but several ModernGov instances answer HEAD with
         # 405 while serving the page perfectly well on GET.
-        def probe(path: str) -> bool:
+        def probe(path: str) -> str | bool:
             try:
-                return client.get(urljoin(url + "/", path.lstrip("/"))).ok
+                probed = client.get(urljoin(url + "/", path.lstrip("/")))
             except Exception:
                 return False
+            if not probed.ok:
+                return False
+            return probed.body.decode("utf-8", errors="replace")
 
         result["system"], result["signature"] = detect_committee_system(probe)
 

@@ -1,0 +1,51 @@
+{
+  "authorities": {
+    "E06000001": {
+      "name": "Hartlepool",
+      "committee_url": "https://www.hartlepool.gov.uk/homepage/115/agendas-meetings-and-minutes",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E06000003": {
+      "name": "Redcar and Cleveland",
+      "committee_url": "https://rcbc.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E06000047": {
+      "name": "County Durham",
+      "committee_url": "https://democracy.durham.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E06000056": {
+      "name": "Central Bedfordshire",
+      "committee_url": "https://centralbeds.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E06000057": {
+      "name": "Northumberland",
+      "committee_url": "https://northumberland.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E10000003": {
+      "name": "Cambridgeshire",
+      "committee_url": "https://cambridgeshire.cmis.uk.com/ccc_live",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E10000012": {
+      "name": "Essex",
+      "committee_url": "https://cmis.essex.gov.uk/essexcmis5",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, 2026-08-22)"
+    }
+  },
+  "note": "Written by the review UI when a reviewer answers where a council publishes, after the server has confirmed the URL responds. Tracked in git so an answer outlives the warehouse -- see pipeline/authority_websites.py. Safe to hand-edit; entries here are read by website_for()."
+}
