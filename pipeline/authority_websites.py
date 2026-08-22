@@ -259,10 +259,14 @@ AUTHORITY_WEBSITES: dict[str, AuthorityWebsite] = {
         ons_code="E06000015",
         name="Derby",
         base_url="https://www.derby.gov.uk",
-        committee_url="https://www.derby.gov.uk/council-and-democracy",
-        committee_system=None,
+        # council-and-democracy (verified 2026-08-13) is the council's own
+        # landing page, not the committee system's root -- it links here.
+        # Re-verified live 2026-08-22 through check_url(): CMIS, detected at
+        # /Search.aspx. See the CMIS adapter note in m10_committee_papers.py.
+        committee_url="https://democracy.derby.gov.uk",
+        committee_system="cmis",
         base_url_verified_on="2026-08-17",
-        verified_on="2026-08-13",
+        verified_on="2026-08-22",
     ),
     "E10000007": AuthorityWebsite(
         ons_code="E10000007",
