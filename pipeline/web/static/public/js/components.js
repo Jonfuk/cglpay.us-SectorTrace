@@ -724,7 +724,17 @@ export function table(container, columns, rows, { height = 420, rowClass = null 
       column.headerFilter === undefined && column.field
         ? { ...column, headerFilter: 'input', headerFilterPlaceholder: 'search' }
         : column)),
-    maxHeight: height,
+    // `height`, not `maxHeight`: Tabulator's RowManager only sets
+    // `fixedHeight = true` when `options.height` is given. Without it, its
+    // "fill" renderer resizes the row viewport from the table element's own
+    // clientHeight on every redraw and, when that height hasn't settled,
+    // calls redraw() again from inside adjustTableSize() -- direct recursion
+    // with no depth guard. A holder with no intrinsic size of its own (every
+    // caller here) makes that height chase its own tail and blow the call
+    // stack (vendor/tabulator.min.js, RowManager.redraw/adjustTableSize).
+    // `height` fixes the table at this size up front instead, which is a
+    // wash for a full page and blank space under a short last page.
+    height,
     layout: 'fitColumns',
     pagination: true,
     paginationSize: perPage,
