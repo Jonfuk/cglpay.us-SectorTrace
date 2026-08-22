@@ -80,11 +80,48 @@ class Settings(BaseSettings):
     #                           the ModernGov search paths.
     #   committees.scilly.gov.uk — m10 committee portal. robots.txt refuses
     #                           automated access; note the scheme is http.
+    #
+    # Second batch, audited 2026-08-22 during a regional sweep for committee
+    # URLs that resolve but are blocked. Same shape as the first batch: each
+    # host served this pipeline's real User-Agent a robots.txt that refuses
+    # the committee-search paths m10 needs, none of them are 403s (which stay
+    # blocked, not overridden), and each is an m10 ModernGov or CMIS committee
+    # portal unless noted. councillors.liverpool.gov.uk is a distinct host
+    # from the www.liverpool.gov.uk m09 exception above — Liverpool also has
+    # 7 existing cdp_path_robots_disallowed review items, a consistently
+    # robots-strict site. www.herefordshire.gov.uk is m24's transparency
+    # section rather than a committee portal (70+ individual spend files
+    # already sitting in review_queue as council_spend_file_robots_disallowed)
+    # and is scoped to the domain root only because no narrower transparency
+    # path is on file — tighten this prefix if the actual sub-path turns up.
     robots_exceptions: tuple[str, ...] = (
         "https://www.whatdotheyknow.com/feed/",
         "https://www.liverpool.gov.uk/",
         "https://democracy.eastsussex.gov.uk/",
         "http://committees.scilly.gov.uk/",
+        "https://democracy.newcastle.gov.uk/",
+        "https://moderngov.stoke.gov.uk/",
+        "https://www.herefordshire.gov.uk/",
+        "https://democracy.bathnes.gov.uk/",
+        "https://democracy.cornwall.gov.uk/",
+        "https://ww5.swindon.gov.uk/moderngov",
+        "https://cms.wiltshire.gov.uk/",
+        "https://democracy.blackpool.gov.uk/",
+        "https://moderngov.halton.gov.uk/",
+        "https://councillors.knowsley.gov.uk/",
+        "https://councillors.liverpool.gov.uk/",
+        "https://sccdemocracy.salford.gov.uk/",
+        "https://democracy.stockport.gov.uk/",
+        "https://cds.bromley.gov.uk/",
+        "https://democracy.cityoflondon.gov.uk/",
+        "https://modgov.hillingdon.gov.uk/",
+        "https://democraticservices.hounslow.gov.uk/",
+        "https://moderngov.lambeth.gov.uk/",
+        "https://moderngov.redbridge.gov.uk/",
+        "https://cabnet.richmond.gov.uk/",
+        "https://moderngov.southwark.gov.uk/",
+        "https://democracy.walthamforest.gov.uk/",
+        "https://democracy.wandsworth.gov.uk/",
     )
 
     # How many hosts the council-walking modules (m09, m10, m15) read at once.
