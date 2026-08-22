@@ -80,7 +80,7 @@ def audit_counts(conn, module: str) -> dict[str, int]:
 
 
 def execute_module(name: str, fn, settings, since, dry_run, limit,
-                    observer: RunObserver) -> dict:
+                    observer: RunObserver, source: str = "all") -> dict:
     """Run one module on its own connection, and report what it did.
 
     A connection per module rather than one shared across the run. That is
@@ -121,7 +121,8 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
             before = audit_counts(conn, name)
             changes_before = conn.total_changes
             ctx = ModuleContext(conn=conn, settings=settings, since=since,
-                                 dry_run=dry_run, limit=limit, progress=reporter)
+                                 dry_run=dry_run, limit=limit, source=source,
+                                 progress=reporter)
             try:
                 fn(ctx)
             except Exception as exc:
@@ -157,7 +158,7 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
 
 
 def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
-               observer: RunObserver | None = None) -> list[dict]:
+               observer: RunObserver | None = None, source: str = "all") -> list[dict]:
     """Each wave concurrently, waves in order.
 
     Every module in a wave has its dependencies satisfied by an earlier wave,
@@ -179,7 +180,8 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
         if width == 1:
             for name in wave:
                 row = execute_module(
-                    name, MODULE_REGISTRY[name], settings, since, dry_run, limit, observer)
+                    name, MODULE_REGISTRY[name], settings, since, dry_run, limit, observer,
+                    source=source)
                 summary.append(row)
                 observer.module_finished(row)
             continue
@@ -187,7 +189,7 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
         observer.wave_starting(list(wave), width)
         with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
             futures = [pool.submit(execute_module, name, MODULE_REGISTRY[name],
-                                    settings, since, dry_run, limit, observer)
+                                    settings, since, dry_run, limit, observer, source=source)
                         for name in wave]
             # Collected in submission order, so the summary reads the same way
             # twice regardless of which API answered first.

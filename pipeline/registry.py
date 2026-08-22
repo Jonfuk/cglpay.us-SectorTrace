@@ -47,6 +47,13 @@ class ModuleMeta:
     # filtered run over the whole source.
     supports_since: bool = False
     since_note: str = ""
+    # Whether the module reads ctx.source to scope itself to a subset of its
+    # own channels (currently just m01, whose live-API and CSV-archive
+    # channels can be run independently). Declared for the same reason as
+    # supports_since: so --api/--csv/--all passed to a module that ignores it
+    # is a warning, not a silent no-op.
+    supports_source: bool = False
+    source_note: str = ""
     # Modules whose output this one reads. `run all` orders on these rather
     # than running alphabetically, which silently produced worse results:
     # m04 ran before m05 and so missed the company numbers CQC publishes, and
@@ -64,6 +71,10 @@ class ModuleContext:
     since: str | None
     dry_run: bool
     limit: int | None
+    # "api" | "csv" | "all" — which of a module's own channels to run. Only
+    # m01 reads this today (see its module docstring); every other module
+    # ignores it, so the default of "all" is a no-op for them.
+    source: str = "all"
     # Write-only. A module reports progress through this and collects exactly
     # the same evidence whether or not anything is displaying it — the default
     # reporter is a no-op, so `ctx.track(...)` is a plain loop under cron.
@@ -110,12 +121,14 @@ class ModuleContext:
 
 
 def register_module(name: str, supports_since: bool = False, since_note: str = "",
+                     supports_source: bool = False, source_note: str = "",
                      depends_on: tuple[str, ...] = (),
                      depends_note: str = "") -> Callable[[ModuleFn], ModuleFn]:
     def decorator(fn: ModuleFn) -> ModuleFn:
         MODULE_REGISTRY[name] = fn
         MODULE_META[name] = ModuleMeta(
             name=name, supports_since=supports_since, since_note=since_note,
+            supports_source=supports_source, source_note=source_note,
             depends_on=tuple(depends_on), depends_note=depends_note)
         return fn
 

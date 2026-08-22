@@ -1310,17 +1310,17 @@ class _BarObserver(runner.RunObserver):
             self._bar.advance(self._overall)
 
 
-def _execute_module(name: str, fn, settings, since, dry_run, limit, bar) -> dict:
+def _execute_module(name: str, fn, settings, since, dry_run, limit, bar, source="all") -> dict:
     """Kept as the CLI's bar-shaped way in. The run is runner.execute_module."""
     return runner.execute_module(name, fn, settings, since, dry_run, limit,
-                                  _BarObserver(bar))
+                                  _BarObserver(bar), source=source)
 
 
 def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
-                bar) -> list[dict]:
+                bar, source="all") -> list[dict]:
     """Every wave, painted onto `bar`. The ordering rules are in runner.py."""
     return runner.run_waves(waves, jobs, settings, since, dry_run, limit,
-                             _BarObserver(bar))
+                             _BarObserver(bar), source=source)
 
 
 @app.command()
@@ -1333,6 +1333,15 @@ def run(
         1, "--jobs", "-j", min=1,
         help="Modules to run at once (`run all` only). Different APIs are "
               "independent; the per-host rate limit still holds."),
+    api: bool = typer.Option(
+        False, "--api", help="m01 only: run just the Find a Tender + Contracts "
+                              "Finder live-API channels, skip the CSV archive backfill"),
+    csv: bool = typer.Option(
+        False, "--csv", help="m01 only: run just the Contracts Finder CSV archive "
+                              "backfill, skip the live-API channels. The default when "
+                              "none of --api/--csv/--all is given."),
+    all_sources: bool = typer.Option(
+        False, "--all", help="m01 only: run every channel (live APIs + CSV archive)"),
 ) -> None:
     if limit is not None and limit < 1:
         # Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
@@ -1342,6 +1351,14 @@ def run(
         ui.error(f"--limit must be 1 or more; got {limit}. "
                   "Use --dry-run to fetch and parse without writing.")
         raise typer.Exit(code=1)
+
+    chosen_sources = [name for name, flag in (("api", api), ("csv", csv), ("all", all_sources)) if flag]
+    if len(chosen_sources) > 1:
+        ui.error("--api, --csv and --all are mutually exclusive; got "
+                  + ", ".join(f"--{name}" for name in chosen_sources) + ".")
+        raise typer.Exit(code=1)
+    # csv is the default: m01's live-API channels are only walked on request.
+    source = chosen_sources[0] if chosen_sources else "csv"
 
     configure_logging(module)
     settings = get_settings()
@@ -1393,7 +1410,22 @@ def run(
         typer.echo(f"Unknown module {module!r}. Available: {available}", err=True)
         raise typer.Exit(code=1)
 
-    ctx = ModuleContext(conn=conn, settings=settings, since=since, dry_run=dry_run, limit=limit)
+    ctx = ModuleContext(conn=conn, settings=settings, since=since, dry_run=dry_run,
+                         limit=limit, source=source)
+
+    if chosen_sources:
+        # Only warn when a flag was actually given -- "csv" is also the
+        # silent default for every module that ignores ctx.source entirely.
+        ignoring = [name for name, _ in targets if not module_meta(name).supports_source]
+        if ignoring:
+            typer.echo(
+                f"warning: --{chosen_sources[0]} has no effect on {', '.join(ignoring)} — "
+                "those modules do not scope themselves by source and will run as normal.",
+                err=True)
+            for name in ignoring:
+                note = module_meta(name).source_note
+                if note:
+                    typer.echo(f"  {name}: {note}", err=True)
 
     if since:  # noqa: SIM102 - kept adjacent to the validation it guards
         # Validate once, up front, rather than letting each module discover a
@@ -1419,7 +1451,7 @@ def run(
     waves = resolve_run_waves([name for name, _ in targets])
 
     with ui.progress() as bar:
-        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar)
+        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar, source=source)
 
     failed = [row for row in summary if row["status"] == "failed"]
     for row in failed:

@@ -26,6 +26,14 @@ archive channel applies the identical matching and buyer/supplier logic to
 releases reconstructed from flattened CSV rows — see
 `_unflatten_release_row`.
 
+`pipeline run m01_procurement` takes `--api`, `--csv` or `--all` to scope a
+run to one of the two channel groups above (the two live APIs, or the CSV
+archive) instead of every channel — `--csv` is the default when none is
+given, since the two live channels are re-walked incrementally on every run
+via their own cursors while the CSV archive is a one-time historical
+backfill. Passing the same flag to any other module is a no-op with a
+warning; see ModuleMeta.supports_source in pipeline/registry.py.
+
 Buyer-to-ons_code matching is deterministic normalisation first (strip
 common council-name suffixes, compare against pipeline.db's authorities
 table — including retired rows, so historical notices referencing an
@@ -623,6 +631,10 @@ def _walk_and_process_csv_archive(
 
 @register_module(
     "m01_procurement", supports_since=True,
+    supports_source=True,
+    source_note="'api' runs only the Find a Tender + Contracts Finder live channels; "
+                 "'csv' (the CLI default) runs only the pre-WINDOW_START CCS CSV "
+                 "archive backfill; 'all' runs every channel.",
     depends_on=("m00_geography",),
     depends_note="matches free-text buyer names against the authorities table",
 )
@@ -635,33 +647,43 @@ def run(ctx: ModuleContext) -> None:
         conn.commit()
     authority_lookup = _build_authority_lookup(conn)
 
-    window_to = date.today() + timedelta(days=1)
-    sources = [
-        ("fts", SOURCE_FTS, FTS_URL, ("updatedFrom", "updatedTo")),
-        ("cf", SOURCE_CF, CF_URL, ("publishedFrom", "publishedTo")),
-    ]
+    # ctx.source ("api" | "csv" | "all", set by --api/--csv/--all on the CLI,
+    # "csv" by default) scopes this run to one or both channel groups below.
+    # See the register_module() source_note and the module docstring for why
+    # the two live APIs and the CSV archive are independent channels.
+    if ctx.source not in ("api", "csv", "all"):
+        raise ValueError(f"ctx.source must be 'api', 'csv' or 'all'; got {ctx.source!r}")
 
-    for source_key, source_system, base_url, date_params in ctx.track(sources, "sources"):
-        cursor_key = f"{module_name}:{source_key}"
-        resume_url, window_from = _resolve_start(conn, cursor_key, ctx.since, WINDOW_START)
-        with PipelineHTTPClient(source_system, settings=ctx.settings, conn=conn) as client:
-            matched = _walk_and_process(
-                client, conn, module_name, source_system, base_url, date_params,
-                resume_url, window_from, window_to, cursor_key, authority_lookup,
-                ctx.limit, ctx.dry_run,
+    if ctx.source in ("api", "all"):
+        window_to = date.today() + timedelta(days=1)
+        sources = [
+            ("fts", SOURCE_FTS, FTS_URL, ("updatedFrom", "updatedTo")),
+            ("cf", SOURCE_CF, CF_URL, ("publishedFrom", "publishedTo")),
+        ]
+
+        for source_key, source_system, base_url, date_params in ctx.track(sources, "sources"):
+            cursor_key = f"{module_name}:{source_key}"
+            resume_url, window_from = _resolve_start(conn, cursor_key, ctx.since, WINDOW_START)
+            with PipelineHTTPClient(source_system, settings=ctx.settings, conn=conn) as client:
+                matched = _walk_and_process(
+                    client, conn, module_name, source_system, base_url, date_params,
+                    resume_url, window_from, window_to, cursor_key, authority_lookup,
+                    ctx.limit, ctx.dry_run,
+                )
+            log.info("procurement.source_complete", source=source_key, matched_rows=matched)
+
+    if ctx.source in ("csv", "all"):
+        # Historical Contracts Finder backfill — CCS's own CSV dumps for
+        # everything before WINDOW_START. Not part of the `sources` loop
+        # above: it doesn't page through a live API window, it walks a
+        # discovered list of monthly files, and its own cursor
+        # (`DONE:YYYY-MM`) is unrelated to `ctx.since`, which governs the two
+        # live channels' incremental catch-up.
+        ctx.phase("cf_csv_archive")
+        csv_cursor_key = f"{module_name}:cf_csv"
+        with PipelineHTTPClient(SOURCE_CF_CSV, settings=ctx.settings, conn=conn) as client:
+            matched = _walk_and_process_csv_archive(
+                client, conn, module_name, SOURCE_CF_CSV, csv_cursor_key, WINDOW_START,
+                authority_lookup, ctx.limit, ctx.dry_run,
             )
-        log.info("procurement.source_complete", source=source_key, matched_rows=matched)
-
-    # Historical Contracts Finder backfill — CCS's own CSV dumps for
-    # everything before WINDOW_START. Not part of the `sources` loop above:
-    # it doesn't page through a live API window, it walks a discovered list
-    # of monthly files, and its own cursor (`DONE:YYYY-MM`) is unrelated to
-    # `ctx.since`, which governs the two live channels' incremental catch-up.
-    ctx.phase("cf_csv_archive")
-    csv_cursor_key = f"{module_name}:cf_csv"
-    with PipelineHTTPClient(SOURCE_CF_CSV, settings=ctx.settings, conn=conn) as client:
-        matched = _walk_and_process_csv_archive(
-            client, conn, module_name, SOURCE_CF_CSV, csv_cursor_key, WINDOW_START,
-            authority_lookup, ctx.limit, ctx.dry_run,
-        )
-    log.info("procurement.source_complete", source="cf_csv", matched_rows=matched)
+        log.info("procurement.source_complete", source="cf_csv", matched_rows=matched)
