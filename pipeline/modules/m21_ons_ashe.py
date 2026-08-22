@@ -21,26 +21,49 @@ HOW THE QUERY IS BUILT, AND WHY:
     than silently disappearing. Labels are read from the same options
     response — the code-list items themselves carry no label text (verified
     2026-08-15), but the per-version options do.
-  * One request per dataset: every pinned code, both geographies, and
-    `time=*` (the API's wildcard for a dimension, documented on the
-    developer hub) for all published tax years of that version. The
-    response pages by offset to its own `total_observations`.
+  * One request per (geography, code) pair, `time=*` (the API's wildcard for
+    a dimension, documented on the developer hub) for all published tax
+    years of that version. NOT one request naming every code and both
+    geographies at once — verified 2026-08-22, the API now answers a
+    multi-valued query with 400 "multi-valued query parameters for the
+    following dimensions", which it did not at the 2026-08-15 verification.
+    Each combination's response pages by offset to its own
+    `total_observations`.
   * An observation that is not a number is NULL plus a `parse_failures`
     row, with the text kept verbatim — ASHE suppresses some cells, and a
     suppressed cell is not zero.
+  * `ashe-table-5`'s industry dimension has two names depending on which
+    endpoint is asked (verified 2026-08-22): `/dimensions/{name}/options`
+    answers under `unofficialstandardindustrialclassification` with real
+    codes and labels (code list `sic-unofficial`) and answers empty under
+    `standardindustrialclassification`; `/observations` is the other way
+    round — it 400s on the "unofficial" name ("these dimensions do not
+    exist for this version") and wants the name without it. So the module
+    tracks both names for this dataset: `dimension_param` for options and
+    labels, `observations_dimension_param` for the query itself.
 
-KNOWN ACCESS SHAPE AT VERIFICATION (2026-08-15): the dataset, edition,
-dimension and options endpoints all answer; the observations endpoint
-answered 502 for every ASHE query tried (single-observation and wildcard),
-while a cpih01 query answered. The shared client retries a 5xx and then
-raises — the house rule that a persistent server failure must fail the run
-loudly rather than look like a source with nothing to report — so a run
-against the current API fails at this module with the 502 in its traceback.
-A 4xx or an unreadable response records `ons_ashe_observations_failed` and
-writes nothing for that dataset rather than guessing. The API's ASHE
-versions also lag the publication (table 3 served version 7, released
-2024-01-19, at verification) — the version that is served is what gets
-read, and the caveats say so.
+KNOWN ACCESS SHAPE AT VERIFICATION (2026-08-15, re-verified 2026-08-22): the
+dataset, edition, dimension and options endpoints all answer; the
+observations endpoint does not serve ASHE data at all right now, whatever
+the query looks like. At 2026-08-15 a multi-valued query answered 502; at
+2026-08-22 the same shape answers a fast 400 (the new multi-value
+validation above), but a corrected single-valued, single-year query —
+tested against every published version of ashe-tables-3, 1 through 7 —
+still just hangs (30-90s, no bytes) or answers 502. The identical shape
+against a known-good dataset (`cpih01`) answers in well under a second.
+This is a source-side outage specific to the ASHE observations endpoint,
+not a symptom of the query shape, and no version pin or retry policy on our
+side will make it answer. The per-combination loop below fails fast on the
+first transport-level failure (timeout or persistent 5xx) for a dataset
+rather than repeating a multi-minute retry-and-backoff cycle across every
+remaining code and geography — that would be several minutes of politely-
+paced requests against a host that is not going to answer, for a beta API
+whose own docs warn it changes without notice. A 4xx on an individual
+combination is cheap and does not stop the others; it records
+`ons_ashe_observations_failed` and moves on. The API's ASHE versions also
+lag the publication (table 3 served version 7, released 2024-01-19, at
+verification) — the version that is served is what gets read, and the
+caveats say so.
 
 The gate from the phase plan governs anything built on this table: an
 ASHE-versus-adverts statement is a side-by-side comparison, never an
@@ -51,6 +74,7 @@ from __future__ import annotations
 import json
 import re
 
+import httpx
 import structlog
 
 from pipeline import db
@@ -92,6 +116,10 @@ DATASETS = {
     "ashe-table-5": {
         "dimension_kind": "industry",
         "dimension_param": "unofficialstandardindustrialclassification",
+        # See the module docstring: /observations rejects the name above
+        # (which is what /dimensions/{name}/options needs) and wants this
+        # one instead. Verified 2026-08-22.
+        "observations_dimension_param": "standardindustrialclassification",
         "codes": ["84", "86", "87", "88"],
     },
 }
@@ -155,57 +183,71 @@ def _provenance(result) -> dict:
 
 def _fetch_observations(client, *, dataset_id: str, version: str,
                         dimension_param: str, codes: list[str]):
-    """One paged query over the pinned codes, both geographies and all
-    years. Returns (rows, error_note); raises nothing. Each row carries its
-    page's provenance.
+    """One paged query per (geography, code) pair — see the module docstring
+    for why: the API now 400s a request naming every code and both
+    geographies at once. Returns (rows, errors); raises nothing itself, but
+    stops issuing further combinations for this dataset the moment one
+    raises rather than answers (a timeout or a persistent 5xx, after the
+    shared client's own retries are exhausted) — that is the endpoint not
+    answering at all, and repeating a multi-minute retry cycle across every
+    remaining combination would not change that. Each row carries its own
+    request's provenance.
     """
-    params: dict = {
-        "time": "*",
-        "averagesandpercentiles": AVERAGESAND_PERCENTILES,
-        "hoursandearnings": HOURSAND_EARNINGS,
-        "sex": SEX,
-        "workingpattern": WORKING_PATTERN,
-        "geography": [code for code, _ in GEOGRAPHIES],
-        dimension_param: codes,
-    }
-
     base = (f"{API_BASE}/datasets/{dataset_id}/editions/{EDITION}"
             f"/versions/{version}/observations")
-    offset = 0
     rows: list[dict] = []
-    error: str | None = None
-    # Fallback for a single-value query, whose response carries the
-    # dimensions at the top level rather than per observation.
-    fallback = {dimension_param: (codes[0] if codes else ""),
-                "geography": GEOGRAPHIES[0][0]}
+    errors: list[str] = []
 
-    for _page in range(MAX_PAGES):
-        query = dict(params)
-        if offset:
-            query["offset"] = offset
-        result = client.get(base, params=query)
-        if not result.ok:
-            error = (f"observations answered {result.status_code}; the API's ASHE "
-                     "observations endpoint was already failing at verification "
-                     "(502) — see the module docstring")
-            break
-        payload = json.loads(result.body)
-        observations = payload.get("observations") or []
-        for observation in observations:
-            rows.append({
-                "observation": observation.get("observation"),
-                "dimensions": _observation_dimensions(observation, fallback),
-                "unit_of_measure": payload.get("unit_of_measure"),
-                "provenance": _provenance(result),
-            })
+    for geography, _ in GEOGRAPHIES:
+        for code in codes:
+            params: dict = {
+                "time": "*",
+                "averagesandpercentiles": AVERAGESAND_PERCENTILES,
+                "hoursandearnings": HOURSAND_EARNINGS,
+                "sex": SEX,
+                "workingpattern": WORKING_PATTERN,
+                "geography": geography,
+                dimension_param: code,
+            }
+            # Fallback for this single-value query, whose response carries
+            # the dimensions at the top level rather than per observation.
+            fallback = {dimension_param: code, "geography": geography}
+            offset = 0
 
-        total = payload.get("total_observations") or len(observations)
-        offset += len(observations)
-        if offset >= total or not observations:
-            break
-    else:
-        error = f"more than {MAX_PAGES} pages of observations; the query shape has changed"
-    return rows, error
+            for _page in range(MAX_PAGES):
+                query = dict(params)
+                if offset:
+                    query["offset"] = offset
+                try:
+                    result = client.get(base, params=query)
+                except httpx.HTTPError as exc:
+                    errors.append(
+                        f"{geography}/{code}: request raised {exc.__class__.__name__} "
+                        "rather than answering — the observations endpoint is not "
+                        "responding; not trying the remaining combinations for this dataset")
+                    return rows, errors
+                if not result.ok:
+                    errors.append(f"{geography}/{code}: observations answered {result.status_code}")
+                    break
+                payload = json.loads(result.body)
+                observations = payload.get("observations") or []
+                for observation in observations:
+                    rows.append({
+                        "observation": observation.get("observation"),
+                        "dimensions": _observation_dimensions(observation, fallback),
+                        "unit_of_measure": payload.get("unit_of_measure"),
+                        "provenance": _provenance(result),
+                    })
+
+                total = payload.get("total_observations") or len(observations)
+                offset += len(observations)
+                if offset >= total or not observations:
+                    break
+            else:
+                errors.append(f"{geography}/{code}: more than {MAX_PAGES} pages of "
+                               "observations; the query shape has changed")
+
+    return rows, errors
 
 
 @register_module(
@@ -265,26 +307,36 @@ def run(ctx: ModuleContext) -> None:
                                          "version's options; the code has left the "
                                          "source or the standard has moved"}))
 
-            rows, error = _fetch_observations(
+            # See the module docstring: ashe-table-5's dimension has a
+            # different name on /observations than the one that answers
+            # /dimensions/{name}/options above.
+            obs_dimension_param = dataset.get("observations_dimension_param", dimension_param)
+            rows, errors = _fetch_observations(
                 client, dataset_id=dataset_id, version=version,
-                dimension_param=dimension_param, codes=dataset["codes"])
-            if error:
-                db.record_review_item(
-                    conn, module_name, "ons_ashe_observations_failed", dataset_id,
-                    json.dumps({"version": version, "note": error}))
-                log.info("ashe.dataset_failed", dataset=dataset_id, note=error)
-                continue
+                dimension_param=obs_dimension_param, codes=dataset["codes"])
 
-            if not rows:
+            if not rows and not errors:
                 db.record_review_item(
                     conn, module_name, "ons_ashe_observations_failed", dataset_id,
                     json.dumps({"version": version,
                                  "note": "the query answered with no observations"}))
                 continue
 
+            if errors:
+                # Real, validated rows (if any) are still written below — a
+                # failure on one geography/code combination is not a reason
+                # to discard the ones that answered. See the docstring for
+                # why the endpoint currently fails at all.
+                db.record_review_item(
+                    conn, module_name, "ons_ashe_observations_failed", dataset_id,
+                    json.dumps({"version": version, "failed_combinations": len(errors),
+                                 "rows_recovered": len(rows), "notes": errors[:5]}))
+                log.info("ashe.dataset_partial_failure", dataset=dataset_id,
+                          failed_combinations=len(errors), rows_recovered=len(rows))
+
             for row in ctx.track(rows, f"{dataset_id} observations"):
                 dims = row["dimensions"] if isinstance(row["dimensions"], dict) else {}
-                code = dims.get(dimension_param)
+                code = dims.get(obs_dimension_param)
                 geography = dims.get("geography")
                 time_value = dims.get("time")
                 if not (code and geography and time_value):
