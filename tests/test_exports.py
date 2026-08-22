@@ -41,9 +41,9 @@ def test_every_tab_declares_its_columns_and_they_match_the_query(conn):
         assert columns == tab.columns, f"{tab.name}: declared columns differ from query output"
 
 
-def test_there_are_ten_tabs():
-    assert len(TABS) == 10
-    assert len({t.name for t in TABS}) == 10
+def test_there_are_eleven_tabs():
+    assert len(TABS) == 11
+    assert len({t.name for t in TABS}) == 11
 
 
 def test_every_tab_has_a_description_and_at_least_one_caveat():
@@ -56,7 +56,7 @@ def test_every_tab_has_a_description_and_at_least_one_caveat():
 
 def test_sheets_export_writes_csv_and_provenance(conn, tmp_path):
     paths = sheets_export.export_sheets(conn, tmp_path)
-    assert len(paths) == 10
+    assert len(paths) == 11
     for path in paths:
         assert path.exists()
         provenance = path.with_suffix(path.suffix + ".provenance.json")

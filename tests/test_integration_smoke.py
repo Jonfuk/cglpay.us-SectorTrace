@@ -429,6 +429,20 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "with HTTP 200, so rows that reached this table have already "
               "had their page's <h1> matched against the area requested.",
     ),
+    Smoke(
+        module="m28_sar_reports",
+        produces=("sar_documents",),
+        signal=(("sar_documents", "document_ext"), ("sar_documents", "library_year")),
+        limit=5,
+        note="One national listing rather than a paginated source; --limit "
+              "counts newly-fetched documents, not how much of the index "
+              "page is read -- the whole listing (~800 rows) is parsed every "
+              "run regardless, and a document already in sar_documents from "
+              "an earlier run is skipped rather than re-fetched. sab_name is "
+              "not a signal column: NULL is a legitimate, common outcome "
+              "when a document does not state its board plainly, not a sign "
+              "the source changed shape.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

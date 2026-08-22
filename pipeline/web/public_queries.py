@@ -187,6 +187,30 @@ CAVEATS = {
         "authorities. They do not share boundaries and are not mapped as if "
         "they did."
     ),
+    "sar_scope": (
+        "Read from the National SAR Library, which boards submit their "
+        "published reviews to rather than a directory the pipeline built "
+        "itself. It is not known to be complete for any board or any year, "
+        "so an absence here is a gap in the library, not evidence that no "
+        "review was carried out."
+    ),
+    "sar_board": (
+        "sab_name is read from the words the document itself uses to name "
+        "its commissioning board, not validated against a fixed list of the "
+        "~150 Safeguarding Adults Boards. A document with no board named "
+        "plainly in its opening pages carries no board name here."
+    ),
+    "sar_mentions": (
+        "A provider mention is not a finding of fault, causation, "
+        "prevalence, or responsibility. The library gives no distribution "
+        "list, so unlike the PFD reports above there is only one kind of "
+        "mention: named somewhere in the text."
+    ),
+    "sar_terms": (
+        "A term here means the word appears somewhere in the document. It "
+        "is a finding aid — it points at reviews worth reading — not a "
+        "characterisation of what the review found. Read the review."
+    ),
     "cqc_inspection_dates": (
         "A report date is when an inspection report was published, not when "
         "a rating changed. The ratings beside it are CQC's own record; the "
@@ -1690,8 +1714,72 @@ def _pfd_year(report_date: str | None) -> int | None:
     return int(match.group(0)) if match else None
 
 
+def _sar_payload(conn: sqlite3.Connection) -> dict:
+    """The sector-level view of the Safeguarding Adult Review corpus.
+
+    Deliberately thinner than the PFD payload above it: the source gives no
+    structured date and no per-document excerpt to show (see
+    m28_sar_reports's docstring on why no section is auto-extracted), so
+    there is no "matters of concern" equivalent and no by-year concerns
+    split -- only what the source actually supports: counts, the boards that
+    named themselves, term frequency, and provider mentions.
+    """
+    _public(["sar_documents", "sar_concern_terms", "sar_provider_mentions"])
+
+    documents = _rows(conn, """
+        SELECT document_url, document_ext, library_year, sab_name,
+               has_body_text, source_url, retrieved_at
+        FROM sar_documents""")
+
+    by_year: dict[int, dict] = {}
+    by_board: dict[str, int] = {}
+    for document in documents:
+        bucket = by_year.setdefault(
+            document["library_year"], {"year": document["library_year"],
+                                         "documents": 0, "with_text": 0})
+        bucket["documents"] += 1
+        bucket["with_text"] += int(document["has_body_text"])
+        if document["sab_name"]:
+            by_board[document["sab_name"]] = by_board.get(document["sab_name"], 0) + 1
+
+    return {
+        "totals": {
+            "documents": len(documents),
+            "with_text": sum(1 for d in documents if d["has_body_text"]),
+            "with_board_name": sum(1 for d in documents if d["sab_name"]),
+        },
+        "by_year": [by_year[y] for y in sorted(by_year)],
+        "by_board": [
+            {"sab_name": name, "documents": count}
+            for name, count in sorted(by_board.items(), key=lambda kv: -kv[1])[:25]],
+        "concern_terms": _rows(conn, """
+            SELECT term, SUM(occurrences) AS occurrences
+            FROM sar_concern_terms GROUP BY term
+            ORDER BY occurrences DESC, term LIMIT 25"""),
+        "mentions": {
+            "naming_providers": _one(
+                conn, "SELECT COUNT(DISTINCT document_url) AS n "
+                      "FROM sar_provider_mentions").get("n", 0),
+        },
+        # Newest library year first; there is no finer-grained date to sort
+        # on, so within a year the order is whatever SQLite returns.
+        "recent": _rows(conn, """
+            SELECT document_url, document_ext, library_year, sab_name,
+                   has_body_text, source_url, retrieved_at
+            FROM sar_documents ORDER BY library_year DESC LIMIT 50"""),
+        "caveats": {
+            "scope": CAVEATS["sar_scope"],
+            "board": CAVEATS["sar_board"],
+            "mentions": CAVEATS["sar_mentions"],
+            "terms": CAVEATS["sar_terms"],
+        },
+    }
+
+
 def pfd(conn: sqlite3.Connection) -> dict:
-    """The sector-level view of the coroners' report corpus."""
+    """The sector-level view of the coroners' report corpus, plus Safeguarding
+    Adult Reviews (see `_sar_payload`) -- two distinct evidence streams under
+    one "Safety & legal evidence" page, never combined into one series."""
     _public(["pfd_reports", "pfd_concern_terms", "pfd_provider_mentions",
               "pfd_recipients"])
 
@@ -1760,6 +1848,7 @@ def pfd(conn: sqlite3.Connection) -> dict:
             "terms": CAVEATS["pfd_terms"],
             "areas": CAVEATS["pfd_areas"],
         },
+        "sar": _sar_payload(conn),
     }
 
 

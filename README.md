@@ -160,6 +160,7 @@ one or both.
 | `m25_skills_for_care` | Skills for Care | ASC-WDS adult social care workforce estimates: pay and turnover comparators per (area, sector, service, job role), from the publisher's Excel data downloads, stored as published |
 | `m26_cqc_directory` | CQC bulk exports (care directory CSV, ratings ODS) | Cross-checks `cqc_locations` against CQC's own weekly/monthly bulk snapshots — flags a location the API-driven `m05_cqc` is missing, or whose rating is out of date, to `review_queue`. Writes no location rows of its own |
 | `m27_ndtms_monthly` | NDTMS monthly provisional reports (`ndtms.net`) | Numbers in treatment, new presentations and exits per local authority and substance, for the current report month, adults and young people separately — service demand alongside `m07_ndtms`'s published statistics, never merged with workforce figures |
+| `m28_sar_reports` | National SAR Library (`nationalnetwork.org.uk`) | Safeguarding Adult Reviews: the commissioning board's own name for itself (read from the document, not guessed), workforce concern terms and provider mentions across the text. One national source in place of ~150 independent board websites — the board name and any excerpt are only as good as what the document states plainly; see the module's docstring |
 
 ### Run order
 
@@ -212,7 +213,7 @@ the next only begins once it has finished — `m04` still never starts before
 
 | Wave | Modules | Backends |
 | --- | --- | --- |
-| 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25` | Independent geography, provider, workforce, pay and comparator sources |
+| 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25`, `m28` | Independent geography, provider, workforce, pay and comparator sources |
 | 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15`, `m19` | Sources that use geography, provider accounts, or both |
 | 3 | `m04`, `m09`, `m10`, `m24`, `m26` | Companies House and council sites, after their identifiers and home pages exist; `m26` after `cqc_locations` exists |
 | 4 | `m20`, `m23` | Gender pay matching and sector reconciliation, after company/source evidence exists |

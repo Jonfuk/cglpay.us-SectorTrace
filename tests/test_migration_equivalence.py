@@ -97,10 +97,9 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 56 adds ndtms_monthly_statistics, the monthly provisional
-        # treatment report m27_ndtms_monthly collects -- its own table, kept
-        # apart from ndtms_la_statistics and from the workforce census.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 56
+        # through. 57 adds sar_documents and its restricted companions, the
+        # Safeguarding Adult Reviews m28_sar_reports collects.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 57
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

@@ -461,6 +461,17 @@ invisible here.
 | Rate limit | Default (2s/host). POSTs are not conditional — a POST's response depends on the body sent, not the URL, so there is nothing for an ETag to validate |
 | Notes | A plain self-posting ASP.NET Core form: Region / Local Authority / Treatment provider / Report Date selects, and one `<table>` per indicator in the response. Tables are paired with the collapsible-panel heading that precedes them in document order rather than by index, because Adults carries six sections and YoungPeople four, and hardcoding either shape silently mislabels the other. The area check is the part that matters: when the anti-forgery token is rejected the form re-renders the England-wide page with HTTP 200 rather than erroring, so every response's `<h1>` is matched against the area that was requested before any row from it is trusted — a status code does not catch this. `DatCodeId` is NDTMS's own area code (`B18B` for Manchester), and NDTMS-style and ONS-style codes coexist in the same list, so `ons_code` is resolved by name against `authorities` the same way Module 7 does. Only the site's current default report month is fetched; `ReportVersionId` addresses months back to April 2014, and `report_version_id`/`report_month` are stored per row so a later pass can add specific months without a schema change |
 
+## Module 28 — Safeguarding Adult Reviews (SARs)
+
+| | |
+| --- | --- |
+| Source | The National SAR Library (`nationalnetwork.org.uk`), maintained by the National Network for Chairs of Adult Safeguarding Boards — a single library ~150 independent Safeguarding Adults Boards submit their published SARs to, read in place of crawling each board's own council website |
+| Endpoints | `https://nationalnetwork.org.uk/search.html` (the whole library, back to 2015, in one page), then each document's own link |
+| Licence | Varies by authority — each SAR is commissioned and published by its Safeguarding Adults Board, a local authority partnership; same rule as Modules 9, 10 and 24. Check the individual document before republishing it |
+| Key | None |
+| Rate limit | Default (2s/host), conditional requests |
+| Notes | The library gives no structured metadata per document — no board name, no publication date, no distribution list, only a title (as submitted, often a bare filename) and a download link, grouped by the year the library filed it under. `sab_name` is read from the document's own text where it names its board plainly ("... Safeguarding Adults Board"), never guessed from the title or the year folder — NULL plus a `parse_failures` row when the pattern is not found. There is no PFD-style "matters of concern" excerpt: judiciary.uk's reports share one template and SAR reports are written by ~150 different boards over a decade with no shared one, so no section is extracted into a public column by pattern-matching. What this module gives instead is the same term-frequency finding aid Module 8 uses and provider mentions across the full text. A title is very often the subject's own name or a chosen pseudonym with nothing in the source to say which, so every title lives only in `restricted_sar_persons`, never a public column. A document already read is skipped on a later run rather than re-fetched — there is no per-document date to filter on with `--since`, so revisiting the full listing every run is the only way to notice additions |
+
 ---
 
 ## Viability checks

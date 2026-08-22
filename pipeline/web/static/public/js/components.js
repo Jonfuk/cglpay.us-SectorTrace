@@ -154,6 +154,7 @@ const MODULE_LICENCES = {
   m25_skills_for_care: 'skills_for_care',
   m26_cqc_directory: 'ogl_v3',
   m27_ndtms_monthly: 'ogl_v3',
+  m28_sar_reports: 'authority_varies',
 };
 
 export function licenceFor(module) {

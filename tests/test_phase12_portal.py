@@ -125,6 +125,32 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
     conn.execute("INSERT INTO restricted_pfd_report_text (report_ref, body_text) "
                   "VALUES ('2026-0001', 'Full text naming the deceased throughout.')")
 
+    # --- Safeguarding Adult Reviews: one board-named PDF, one unread scan ---
+    conn.execute(
+        "INSERT INTO sar_documents (document_url, document_ext, library_year, "
+        " sab_name, has_body_text, source_url, retrieved_at, http_status, "
+        " source_system, payload_sha256) VALUES "
+        "('https://nationalnetwork.example/2026/edward.pdf', '.pdf', 2026, "
+        " 'Hertfordshire Safeguarding Adults Board', 1, "
+        " 'https://nationalnetwork.example/2026/edward.pdf', "
+        " '2026-08-01T00:00:00Z', 200, 'national_sar_library', 's1'),"
+        "('https://nationalnetwork.example/2025/hannah.pdf', '.pdf', 2025, "
+        " NULL, 0, 'https://nationalnetwork.example/2025/hannah.pdf', "
+        " '2026-08-01T00:00:00Z', 200, 'national_sar_library', 's2')")
+    conn.execute(
+        "INSERT INTO sar_concern_terms (document_url, term, occurrences) VALUES "
+        "('https://nationalnetwork.example/2026/edward.pdf', 'staffing', 2)")
+    conn.execute(
+        "INSERT INTO sar_provider_mentions (document_url, provider_key, matched_name) "
+        "VALUES ('https://nationalnetwork.example/2026/edward.pdf', "
+        " 'change_grow_live', 'Change Grow Live')")
+    conn.execute("INSERT INTO restricted_sar_persons (document_url, title_raw) "
+                  "VALUES ('https://nationalnetwork.example/2026/edward.pdf', "
+                  " 'HSAB SAR Edward report.pdf')")
+    conn.execute("INSERT INTO restricted_sar_report_text (document_url, body_text) "
+                  "VALUES ('https://nationalnetwork.example/2026/edward.pdf', "
+                  " 'Full text naming the subject throughout.')")
+
     # --- W-24: cqc inspections, charity finance, disclosure, filings --------
     conn.execute(
         "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
@@ -334,6 +360,46 @@ def test_the_pfd_payload_names_no_personal_data_columns(warehouse):
     assert "deceased_name" not in keys
     assert "page_title_raw" not in keys
     assert "matters_of_concern" not in keys  # verbatim text stays in the warehouse
+
+
+# --- Safeguarding Adult Reviews, alongside PFD on the same page --------------
+
+
+def test_sar_cannot_reach_either_restricted_table():
+    with pytest.raises(Exception, match="restricted"):
+        public_queries._public(["sar_documents", "restricted_sar_report_text"])
+    with pytest.raises(Exception, match="restricted"):
+        public_queries._public(["restricted_sar_persons"])
+
+
+def test_the_sar_payload_sits_under_the_pfd_payload(warehouse):
+    sar = public_queries.pfd(warehouse)["sar"]
+
+    assert sar["totals"]["documents"] == 2
+    assert sar["totals"]["with_text"] == 1
+    assert sar["totals"]["with_board_name"] == 1
+
+    by_year = {y["year"]: y for y in sar["by_year"]}
+    assert by_year[2026]["documents"] == 1
+    assert by_year[2026]["with_text"] == 1
+    assert by_year[2025]["with_text"] == 0
+
+    boards = {b["sab_name"]: b["documents"] for b in sar["by_board"]}
+    assert boards == {"Hertfordshire Safeguarding Adults Board": 1}
+
+    assert sar["mentions"]["naming_providers"] == 1
+    terms = {t["term"]: t["occurrences"] for t in sar["concern_terms"]}
+    assert terms["staffing"] == 2
+
+    for key in ("scope", "board", "mentions", "terms"):
+        assert sar["caveats"][key]
+
+
+def test_the_sar_payload_names_no_personal_data_columns(warehouse):
+    payload = public_queries.pfd(warehouse)["sar"]
+    keys = {key for row in payload["recent"] for key in row}
+    assert "title_raw" not in keys
+    assert "body_text" not in keys
 
 
 # --- W-24: the provider deep dive gains four sources -------------------------
