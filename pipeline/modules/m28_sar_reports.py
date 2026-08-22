@@ -53,6 +53,8 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 import structlog
 
 from pipeline import db, ocr, pdftext, providers
+from pipeline.documents.inspect import DOCX_MIME
+from pipeline.documents.parsers import DOCXParser
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
 from pipeline.keywords import PFD_CONCERN_INDEX_TERMS, SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
@@ -272,6 +274,34 @@ def _read_pdf(ctx: ModuleContext, module_name: str, document_url: str,
     return ocr_text, "ocr"
 
 
+def _read_docx(conn, module_name: str, document_url: str,
+                fetch_result) -> tuple[str | None, str | None]:
+    """The text of one SAR document published as DOCX rather than PDF.
+
+    A meaningful minority of the library is DOCX -- boards submit whatever
+    file they have. Reads it with the stdlib-only DOCX parser already built
+    for the document-analysis worker (zipfile + xml.etree against
+    word/document.xml) rather than adding a python-docx dependency for a
+    handful of documents; that parser has no optional-extra requirement.
+    """
+    try:
+        parsed = DOCXParser().parse(fetch_result.body, DOCX_MIME)
+    except Exception as exc:
+        log.warning("sar.docx_unreadable", url=document_url, error=f"{type(exc).__name__}: {exc}")
+        db.record_parse_failure(conn, module_name, "body_text", document_url,
+                                 f"DOCX could not be opened: {type(exc).__name__}",
+                                 source_url=document_url)
+        return None, None
+
+    text = parsed.text.strip()
+    if not text:
+        db.record_parse_failure(
+            conn, module_name, "body_text", document_url,
+            "DOCX opened but contained no extractable text", source_url=document_url)
+        return None, None
+    return text, "docx"
+
+
 @register_module(
     "m28_sar_reports", supports_since=False,
     since_note="the library gives no per-document date; a document already read is skipped "
@@ -345,10 +375,13 @@ def run(ctx: ModuleContext) -> None:
             if ext == ".pdf":
                 ctx.phase(f"reading {row['title'][:60]}")
                 body_text, body_source = _read_pdf(ctx, module_name, document_url, fetch_result)
+            elif ext == ".docx":
+                ctx.phase(f"reading {row['title'][:60]}")
+                body_text, body_source = _read_docx(conn, module_name, document_url, fetch_result)
             else:
                 db.record_parse_failure(
                     conn, module_name, "body_text", document_url,
-                    f"document is {ext}, not a PDF; text was not extracted",
+                    f"document is {ext}, not a PDF or DOCX; text was not extracted",
                     source_url=document_url)
 
             sab_name = extract_sab_name(body_text)

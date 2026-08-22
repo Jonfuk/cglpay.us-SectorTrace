@@ -9,11 +9,33 @@ end-to-end run against a small mocked library page.
 """
 from __future__ import annotations
 
+import io
+import zipfile
+from types import SimpleNamespace
+
 import pytest
 
 from pipeline.exports import guard_columns
 from pipeline.modules import m28_sar_reports as sar
 from pipeline.registry import ModuleContext
+
+
+def _build_docx(paragraphs: list[str]) -> bytes:
+    """A minimal, real DOCX package -- same technique as
+    tests/test_documents.py's DOCXParser coverage -- so the module's DOCX
+    path is exercised against actual zip + word/document.xml bytes rather
+    than a placeholder that only ever hits the failure branch.
+    """
+    body = "".join(
+        f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>" for text in paragraphs)
+    document_xml = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as package:
+        package.writestr("[Content_Types].xml", "<Types/>")
+        package.writestr("word/document.xml", document_xml)
+    return buffer.getvalue()
 
 # Shape of the real library page: a "SARs <year>" collapsible heading over a
 # <table> of <tr><td>title</td><td><a href="...">Download</a></td></tr> rows,
@@ -54,6 +76,38 @@ Executive summary. Edward was known to several agencies. Change Grow Live
 provided his community treatment. Staffing levels on the ward were a
 recurring theme and vacancy rates had been high for months.
 """
+
+# A plausible SAR published as DOCX rather than PDF -- boards submit
+# whatever file they have.
+DOCX_PARAGRAPHS = [
+    "Turning Point Safeguarding Adults Board",
+    "Safeguarding Adult Review: Mr B",
+    "Turning Point managed his care in the community. Caseload pressures "
+    "were significant during the review period.",
+]
+
+
+# --- reading a document's text --------------------------------------------------
+
+def test_read_docx_extracts_paragraph_text(conn):
+    body = _build_docx(DOCX_PARAGRAPHS)
+    text, source = sar._read_docx(
+        conn, "m28_sar_reports", "https://example.org/doc.docx", SimpleNamespace(body=body))
+    assert source == "docx"
+    assert "Turning Point Safeguarding Adults Board" in text
+    assert "Caseload pressures" in text
+
+
+def test_read_docx_records_a_parse_failure_for_a_corrupt_file(conn):
+    text, source = sar._read_docx(
+        conn, "m28_sar_reports", "https://example.org/bad.docx",
+        SimpleNamespace(body=b"not a zip archive"))
+    assert text is None
+    assert source is None
+    failure = conn.execute(
+        "SELECT reason FROM parse_failures WHERE source_url = ?",
+        ("https://example.org/bad.docx",)).fetchone()
+    assert "DOCX could not be opened" in failure["reason"]
 
 
 # --- parsing the library page ---------------------------------------------------
@@ -183,7 +237,7 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
     mr_b_url = sar.resolve_document_url("./2026/MrBSARFinalReport.docx")
     hannah_url = sar.resolve_document_url("./2025/Camden Hannah (1).pdf")
     httpx_mock.add_response(url=edward_url, content=b"%PDF-1.4 fake")
-    httpx_mock.add_response(url=mr_b_url, content=b"fake docx bytes")
+    httpx_mock.add_response(url=mr_b_url, content=_build_docx(DOCX_PARAGRAPHS))
     httpx_mock.add_response(url=hannah_url, content=b"%PDF-1.4 fake")
 
     monkeypatch.setattr(sar.pdftext, "page_texts", lambda *a, **k: [REPORT_TEXT])
@@ -202,8 +256,9 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
     assert pdf_row["has_body_text"] == 1
 
     docx_row = documents[mr_b_url]
-    assert docx_row["has_body_text"] == 0
-    assert docx_row["sab_name"] is None
+    assert docx_row["document_ext"] == ".docx"
+    assert docx_row["has_body_text"] == 1
+    assert docx_row["sab_name"] == "Turning Point Safeguarding Adults Board"
 
     # The title never reaches the public table as its own field. (The
     # document_url/source_url are exempt: they are links to the public PDF
@@ -220,18 +275,24 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
         "SELECT document_url, title_raw FROM restricted_sar_persons").fetchall()}
     assert restricted_titles[edward_url] == "HSAB SAR Edward report.pdf"
 
-    # Both PDFs share the mocked text, so both get the mention -- one row
-    # per document, keyed on (document_url, provider_key).
+    # Both PDFs share the mocked text, plus the DOCX's own mention of
+    # Turning Point -- one row per document, keyed on (document_url, provider_key).
     mentions = conn.execute(
         "SELECT document_url, provider_key FROM sar_provider_mentions").fetchall()
     assert {(r["document_url"], r["provider_key"]) for r in mentions} == {
-        (edward_url, "change_grow_live"), (hannah_url, "change_grow_live")}
+        (edward_url, "change_grow_live"), (hannah_url, "change_grow_live"),
+        (mr_b_url, "turning_point")}
 
     terms = {r["term"]: r["occurrences"] for r in conn.execute(
         "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
         (edward_url,)).fetchall()}
     assert terms["staffing"] == 1
     assert terms["vacancy"] == 1
+
+    docx_terms = {r["term"]: r["occurrences"] for r in conn.execute(
+        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
+        (mr_b_url,)).fetchall()}
+    assert docx_terms["caseload"] == 1
 
 
 def test_run_skips_a_document_already_processed(httpx_mock, settings, conn):
