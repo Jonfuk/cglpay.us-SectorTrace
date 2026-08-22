@@ -446,6 +446,25 @@ def test_unflatten_release_row_ignores_package_level_columns():
     assert release == {"id": "abc-1"}
 
 
+def test_unflatten_release_row_drops_padded_none_list_gaps():
+    """Real-world crash fixture: a CSV file's column set is shared across
+    every release in it, and a release whose first populated value at some
+    array path is index 2 (nothing this release had at 0 or 1 fell inside
+    this file's columns) makes `_assign_flattened_path` pad indices 0 and 1
+    with `None` to reach index 2. Left in, that `None` reaches
+    `_process_release`'s `p.get("roles")` over `parties` as something with
+    no `.get()` -- an AttributeError seen against a real archive month.
+    """
+    row = {
+        "releases/0/id": "abc-1",
+        "releases/0/parties/2/name": "Change, Grow, Live",
+        "releases/0/parties/2/roles/0": "supplier",
+    }
+    release = proc._unflatten_release_row(row)
+
+    assert release["parties"] == [{"name": "Change, Grow, Live", "roles": ["supplier"]}]
+
+
 def test_process_csv_release_row_matches_and_persists(conn):
     _seed_authority(conn, "E06000061", "West Northamptonshire")
     row = {

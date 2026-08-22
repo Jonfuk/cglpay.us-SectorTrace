@@ -424,7 +424,9 @@ def _unflatten_release_row(row: dict[str, str | None]) -> dict:
     not this release, and are not part of what `_process_release` consumes.
     Blank cells (the CSV form of "this field was absent") are skipped rather
     than written as empty strings, so `.get()` calls downstream see the same
-    absence the JSON APIs would produce.
+    absence the JSON APIs would produce. `_drop_none_placeholders` cleans up
+    the other blank-cell artefact: a list index this release's data first
+    reaches above 0.
     """
     root: dict = {}
     prefix = "releases/0/"
@@ -433,7 +435,7 @@ def _unflatten_release_row(row: dict[str, str | None]) -> dict:
             continue
         _assign_flattened_path(root, column[len(prefix):].split("/"), value)
     _coerce_amount_fields(root)
-    return root
+    return _drop_none_placeholders(root)
 
 
 def _assign_flattened_path(container: dict, path: list[str], value: str) -> None:
@@ -473,6 +475,29 @@ def _assign_flattened_path(container: dict, path: list[str], value: str) -> None
 # under — the flattened CSV's column set already varies file to file with
 # whatever fields that day's releases actually used.
 _AMOUNT_LEAF_KEYS = {"amount", "amountGross"}
+
+
+def _drop_none_placeholders(node: object) -> object:
+    """Strip list entries left as `None` by `_assign_flattened_path`'s pad.
+
+    That function pads a list with `None` up to whatever index it next has
+    to set — see its docstring. A release genuinely populates its own
+    `parties`/`awards`/`suppliers` array elements from index 0, but this
+    file's column set is a schema shared across every release in it, and a
+    release whose only value at a given path first appears at, say, index 2
+    (everything this release had at 0 and 1 happened to fall outside this
+    file's columns) leaves 0 and 1 as bare `None`. A real OCDS release never
+    contains a null array element, so surviving `None` here is always that
+    padding artefact, not data — and left in, it reaches `_process_release`
+    (parties) or `_iter_supplier_rows` (awards/suppliers) as something with
+    no `.get()` to call, crashing on a release this CSV row simply never
+    carried the full array for.
+    """
+    if isinstance(node, dict):
+        return {key: _drop_none_placeholders(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_drop_none_placeholders(item) for item in node if item is not None]
+    return node
 
 
 def _coerce_amount_fields(node: object) -> None:
