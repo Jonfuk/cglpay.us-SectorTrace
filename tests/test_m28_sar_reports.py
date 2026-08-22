@@ -295,30 +295,32 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
     assert docx_terms["caseload"] == 1
 
 
+def _insert_sar_document(conn, document_url: str, *, ext: str, year: int,
+                          sab_name: str | None, has_body_text: int) -> None:
+    conn.execute(
+        "INSERT INTO sar_documents (document_url, document_ext, library_year, sab_name, "
+        "has_body_text, source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
+        (document_url, ext, year, sab_name, has_body_text, document_url))
+    conn.commit()
+
+
 def test_run_skips_a_document_already_processed(httpx_mock, settings, conn):
     """The expensive part -- fetching and reading ~800 documents -- must not
-    repeat on a second run. httpx_mock fails the test if an unregistered URL
-    is requested, which is what proves the skip: only the library index is
-    mocked, no document fetch.
+    repeat on a second run once text has actually been extracted from a
+    document. httpx_mock fails the test if an unregistered URL is requested,
+    which is what proves the skip: only the library index and the one truly
+    new document are mocked.
     """
     _allow_all_robots(httpx_mock)
     httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
 
     already = sar.resolve_document_url("./2026/HSAB SAR Edward report.pdf")
-    conn.execute(
-        "INSERT INTO sar_documents (document_url, document_ext, library_year, sab_name, "
-        "has_body_text, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '.pdf', 2026, 'Hertfordshire Safeguarding Adults Board', 1, ?, "
-        "'2026-01-01T00:00:00Z', 200, 'test', 'abc')", (already, already))
-    conn.commit()
+    _insert_sar_document(conn, already, ext=".pdf", year=2026,
+                         sab_name="Hertfordshire Safeguarding Adults Board", has_body_text=1)
 
     other_pdf = sar.resolve_document_url("./2025/Camden Hannah (1).pdf")
-    conn.execute(
-        "INSERT INTO sar_documents (document_url, document_ext, library_year, sab_name, "
-        "has_body_text, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '.pdf', 2025, NULL, 0, ?, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
-        (other_pdf, other_pdf))
-    conn.commit()
+    _insert_sar_document(conn, other_pdf, ext=".pdf", year=2025, sab_name=None, has_body_text=1)
 
     httpx_mock.add_response(
         url="https://nationalnetwork.org.uk/2026/MrBSARFinalReport.docx",
@@ -328,3 +330,53 @@ def test_run_skips_a_document_already_processed(httpx_mock, settings, conn):
     sar.run(ctx)
 
     assert conn.execute("SELECT COUNT(*) AS n FROM sar_documents").fetchone()["n"] == 3
+
+
+def test_run_retries_a_document_recorded_with_no_text(httpx_mock, settings, conn, monkeypatch):
+    """A document read before this module could handle its format -- the
+    real case this covers is every DOCX read before DOCX support existed --
+    stayed `has_body_text = 0` forever under the old "any existing row is
+    done" rule. A plain rerun must pick it up without any special command.
+    """
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
+
+    mr_b_url = sar.resolve_document_url("./2026/MrBSARFinalReport.docx")
+    _insert_sar_document(conn, mr_b_url, ext=".docx", year=2026, sab_name=None, has_body_text=0)
+
+    edward_url = sar.resolve_document_url("./2026/HSAB SAR Edward report.pdf")
+    hannah_url = sar.resolve_document_url("./2025/Camden Hannah (1).pdf")
+    httpx_mock.add_response(url=edward_url, content=b"%PDF-1.4 fake")
+    httpx_mock.add_response(url=hannah_url, content=b"%PDF-1.4 fake")
+    httpx_mock.add_response(url=mr_b_url, content=_build_docx(DOCX_PARAGRAPHS))
+    monkeypatch.setattr(sar.pdftext, "page_texts", lambda *a, **k: [REPORT_TEXT])
+
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    sar.run(ctx)
+
+    row = conn.execute(
+        "SELECT has_body_text, sab_name FROM sar_documents WHERE document_url = ?",
+        (mr_b_url,)).fetchone()
+    assert row["has_body_text"] == 1
+    assert row["sab_name"] == "Turning Point Safeguarding Adults Board"
+
+
+@pytest.mark.parametrize("ext", [".doc", ".odt"])
+def test_already_processed_does_not_retry_a_permanently_unreadable_extension(conn, ext):
+    """A .doc or .odt document with no text is not this module gaining a new
+    capability -- it is a format this module still cannot read at all -- so
+    it stays settled rather than being refetched every run for nothing.
+    """
+    url = f"https://nationalnetwork.example/2020/legacy-review{ext}"
+    _insert_sar_document(conn, url, ext=ext, year=2020, sab_name=None, has_body_text=0)
+    assert sar._already_processed(conn, url) is True
+
+
+def test_already_processed_retries_a_readable_extension_with_no_text(conn):
+    url = "https://nationalnetwork.example/2026/report.docx"
+    _insert_sar_document(conn, url, ext=".docx", year=2026, sab_name=None, has_body_text=0)
+    assert sar._already_processed(conn, url) is False
+
+
+def test_already_processed_is_false_for_an_unseen_url(conn):
+    assert sar._already_processed(conn, "https://nationalnetwork.example/never-seen.pdf") is False

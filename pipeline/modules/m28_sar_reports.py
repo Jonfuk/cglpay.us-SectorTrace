@@ -37,11 +37,16 @@ restricted_sar_persons and never to a public column — restricted_ tables are
 kept out of every export by guard_columns() and the reveal gate, not by
 this module remembering to redact.
 
-SCALE. Roughly 800 documents across the whole library. Each already read is
-skipped on a later run (see `_already_processed`) — there is no per-document
-date to filter on with --since, so revisiting the full listing every run is
-the only way to notice additions, but re-fetching a document already read
-would cost real crawl time for nothing.
+SCALE. Roughly 800 documents across the whole library. A document already
+read successfully is skipped on a later run (see `_already_processed`) —
+there is no per-document date to filter on with --since, so revisiting the
+full listing every run is the only way to notice additions, but re-fetching
+a document already read would cost real crawl time for nothing. A document
+recorded with no text is retried rather than skipped forever, because this
+module's ability to read it can improve after the fact — DOCX support was
+added after the first run, and every DOCX read before that stayed
+`has_body_text = 0` until the very next plain rerun picked them up under
+this rule.
 """
 from __future__ import annotations
 
@@ -208,9 +213,27 @@ def find_provider_mentions(text: str) -> list[tuple[str, str]]:
 
 
 def _already_processed(conn, document_url: str) -> bool:
+    """Whether an earlier run already got everything out of this document
+    that this module currently knows how to get.
+
+    Not simply "does a row exist": a row with `has_body_text = 0` recorded
+    a document this module could not read *at the time* -- most concretely,
+    every DOCX document read before DOCX support existed. Read ability can
+    change under a document that has not itself changed (this module gaining
+    a new parser, OCR being enabled), so a document is only treated as
+    settled once text was actually extracted, or its extension is one this
+    module still cannot read at all. Mirrors m08_pfd_reports'
+    `_already_has_concerns`, which retries a report's PDF for the same
+    reason: existing but empty is not the same as done.
+    """
     row = conn.execute(
-        "SELECT 1 FROM sar_documents WHERE document_url = ?", (document_url,)).fetchone()
-    return row is not None
+        "SELECT has_body_text, document_ext FROM sar_documents WHERE document_url = ?",
+        (document_url,)).fetchone()
+    if row is None:
+        return False
+    if row["has_body_text"]:
+        return True
+    return row["document_ext"] not in (".pdf", ".docx")
 
 
 def _provenance(result) -> dict:
