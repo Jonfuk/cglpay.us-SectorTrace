@@ -6,6 +6,13 @@
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
     },
+    "E06000002": {
+      "name": "Middlesbrough",
+      "committee_url": "https://moderngov.middlesbrough.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
     "E06000003": {
       "name": "Redcar and Cleveland",
       "committee_url": "https://rcbc.moderngov.co.uk",
@@ -34,6 +41,13 @@
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
     },
+    "E08000024": {
+      "name": "Sunderland",
+      "committee_url": "https://committees.sunderland.gov.uk/committees/cmis5",
+      "committee_system": "cmis",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
     "E10000003": {
       "name": "Cambridgeshire",
       "committee_url": "https://cambridgeshire.cmis.uk.com/ccc_live",
@@ -45,6 +59,13 @@
       "committee_url": "https://cmis.essex.gov.uk/essexcmis5",
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E10000024": {
+      "name": "Nottinghamshire",
+      "committee_url": "https://www.nottinghamshire.gov.uk/dms",
+      "committee_system": "cmis",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (CMIS adapter verification, 2026-08-22)"
     }
   },
   "note": "Written by the review UI when a reviewer answers where a council publishes, after the server has confirmed the URL responds. Tracked in git so an answer outlives the warehouse -- see pipeline/authority_websites.py. Safe to hand-edit; entries here are read by website_for()."
