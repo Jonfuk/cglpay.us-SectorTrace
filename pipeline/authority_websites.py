@@ -2817,18 +2817,24 @@ def verified_websites(settings=None) -> dict[str, AuthorityWebsite]:
             # A malformed file must not take the modules down: the registry
             # below and the override table still answer.
             return {}
-        entries = {
-            code: AuthorityWebsite(
+        # A reviewer answering one question (say, committee_url) must not
+        # blank out the other if the seed registry already had it -- the same
+        # rule _override_for() follows for the DB override path. Nottinghamshire,
+        # Essex and Cambridgeshire hit exactly this on 2026-08-22: their
+        # committee-only JSON answers were shadowing a base_url that the seed
+        # registry already carried, until this fell back to it too.
+        entries = {}
+        for code, item in sorted(raw.get("authorities", {}).items()):
+            seed = AUTHORITY_WEBSITES.get(code)
+            entries[code] = AuthorityWebsite(
                 ons_code=code,
                 name=item.get("name") or code,
-                base_url=item.get("base_url"),
-                committee_url=item.get("committee_url"),
-                committee_system=item.get("committee_system"),
+                base_url=item.get("base_url") or (seed.base_url if seed else None),
+                committee_url=item.get("committee_url") or (seed.committee_url if seed else None),
+                committee_system=item.get("committee_system") or (seed.committee_system if seed else None),
                 verified_on=item.get("verified_on"),
                 source="human_verified",
             )
-            for code, item in sorted(raw.get("authorities", {}).items())
-        }
         _VERIFIED_CACHE.update(mtime=mtime, path=path, entries=entries)
         return entries
 
