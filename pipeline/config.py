@@ -133,6 +133,16 @@ class Settings(BaseSettings):
         "https://moderngov.southwark.gov.uk/",
         "https://democracy.walthamforest.gov.uk/",
         "https://democracy.wandsworth.gov.uk/",
+        # A handful of the earliest (Dec 2014) files in the m01 CSV archive
+        # backfill are hosted on www.dropbox.com rather than CCS's own
+        # domain. Dropbox's robots.txt disallows /s/ (shared-link paths) for
+        # every crawler except Twitterbot/facebookexternalhit -- a general
+        # anti-scraping stance aimed at arbitrary user-shared content, not at
+        # this specific case: a public open-data CSV, published under OGL by
+        # a government body (CCS), that happens to be link-hosted on Dropbox
+        # rather than gov.uk. Scoped to the /s/ prefix those files sit under,
+        # not the whole domain.
+        "https://www.dropbox.com/s/",
     )
 
     # How many hosts the council-walking modules (m09, m10, m15) read at once.

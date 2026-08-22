@@ -568,6 +568,58 @@ def test_walk_and_process_csv_archive_end_to_end(httpx_mock, settings, conn):
     assert db.get_cursor(conn, "m01_procurement:cf_csv") == "DONE:2016-06-01"
 
 
+def test_walk_and_process_csv_archive_skips_robots_disallowed_file(httpx_mock, settings, conn):
+    """A resource host with no configured robots_exceptions entry must not
+    take the whole month down if its robots.txt blocks a file -- the
+    disallowed file is recorded to review_queue and its siblings still
+    process, exactly like every other module that walks many individual
+    files (m09/m10/m15/m22/m24/m28). www.dropbox.com is the real host this
+    was found against (a handful of the earliest, Dec-2014 archive files),
+    but that host now has its own robots_exceptions entry and would no
+    longer reach this code path -- so this uses an unrelated host that
+    carries no exception, to keep exercising the fallback itself.
+    """
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
+    _allow_all_robots(httpx_mock, "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com")
+    httpx_mock.add_response(
+        url="https://blocked-mirror.test/robots.txt", status_code=200,
+        text="User-agent: *\nDisallow: /\n")
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+
+    package = _ckan_package("Contracts Finder Notices 12 2014", "contracts-finder-notices-12-2014", 0, "2018-01-10")
+    package["resources"] = [
+        {"format": "CSV", "url": "https://blocked-mirror.test/day0.csv"},
+        {"format": "CSV", "url": "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com/Harvester-new/2014-12/day1.csv"},
+    ]
+    ckan_response = {"success": True, "result": {"count": 1, "results": [package]}}
+    httpx_mock.add_response(url=re.compile(r".*package_search.*"), json=ckan_response)
+
+    csv_body = (
+        "releases/0/ocid,releases/0/id,releases/0/tender/title,releases/0/buyer/name\r\n"
+        "ocds-b5fd17-hist2,4e24328a-95cd-43b6-97f4-4c6cb25649ab-298467,"
+        "Substance misuse recovery service,West Northamptonshire Council\r\n"
+    )
+    httpx_mock.add_response(url=package["resources"][1]["url"], text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
+        matched = proc._walk_and_process_csv_archive(
+            client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
+            "m01_procurement:cf_csv", proc.WINDOW_START,
+            proc._build_authority_lookup(conn), None, False,
+        )
+
+    assert matched == 1
+    row = conn.execute(
+        "SELECT * FROM contracts WHERE notice_id = ?",
+        ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298467",)).fetchone()
+    assert row is not None
+    review_row = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'cf_csv_file_robots_disallowed'").fetchone()
+    assert review_row["raw_value"] == "https://blocked-mirror.test/day0.csv"
+    # The month still completes -- one disallowed file does not stall the cursor.
+    assert db.get_cursor(conn, "m01_procurement:cf_csv") == "DONE:2014-12-01"
+
+
 def test_walk_and_process_csv_archive_skips_months_already_done(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
     db.set_cursor(conn, "m01_procurement:cf_csv", "DONE:2016-06-01")

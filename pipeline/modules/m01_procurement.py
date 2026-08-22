@@ -52,7 +52,7 @@ import structlog
 
 from pipeline import db
 from pipeline.buyer_name_overrides import BUYER_NAME_OVERRIDES
-from pipeline.http import PipelineHTTPClient
+from pipeline.http import PipelineHTTPClient, RobotsDisallowed
 from pipeline.keywords import (
     RELEVANT_CPV_PREFIXES,
     SUBSTANCE_MISUSE_KEYWORDS,
@@ -602,7 +602,21 @@ def _walk_and_process_csv_archive(
             key=lambda r: r.get("url"),
         )
         for resource in csv_resources:
-            result = client.get(resource["url"])
+            try:
+                result = client.get(resource["url"])
+            except RobotsDisallowed:
+                # A handful of the earliest (Dec 2014) files are hosted on
+                # www.dropbox.com rather than CCS's own domain, whose
+                # robots.txt disallows /s/ (shared-link paths) for every
+                # crawler but Twitterbot/facebookexternalhit link-preview
+                # bots — a blanket anti-scraping stance on Dropbox's part,
+                # not the "aimed at a search UI" situation the
+                # robots_exceptions entries above are for. Recorded and
+                # skipped rather than added there or left to take the whole
+                # month down.
+                db.record_review_item(conn, module_name, "cf_csv_file_robots_disallowed",
+                                       resource["url"], json.dumps({"month": month_start.isoformat()}))
+                continue
             if not result.ok:
                 db.record_parse_failure(conn, module_name, "csv_file", resource["url"],
                                          f"status {result.status_code}", source_url=result.url)
