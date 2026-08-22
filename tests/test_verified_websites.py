@@ -77,6 +77,29 @@ def test_answering_one_question_does_not_erase_the_other(settings):
     assert entry["committee_system"] == "moderngov", "not cleared by the second answer"
 
 
+def test_a_committee_only_answer_inherits_base_url_from_the_seed(settings, monkeypatch):
+    """A reviewer answering committee_url for an authority the seed registry
+    already has a base_url for must not blank that base_url out. This broke
+    for real on 2026-08-22: Nottinghamshire, Essex and Cambridgeshire already
+    had a seeded base_url, and a committee-only JSON answer for each shadowed
+    it, because this loader (unlike _override_for) built the AuthorityWebsite
+    from the JSON item alone instead of falling back to the seed."""
+    monkeypatch.setitem(
+        authority_websites.AUTHORITY_WEBSITES, "E10000030",
+        authority_websites.AuthorityWebsite(
+            ons_code="E10000030", name="Surrey",
+            base_url="https://www.surreycc.gov.uk"))
+
+    authority_websites.record_verified_website(
+        ons_code="E10000030", name="Surrey", field="committee_url",
+        url="https://democracy.surreycc.gov.uk", committee_system="moderngov",
+        verified_by="Jon", verified_on="2026-08-13", settings=settings)
+
+    found = authority_websites.verified_websites(settings)["E10000030"]
+    assert found.base_url == "https://www.surreycc.gov.uk"
+    assert found.committee_url == "https://democracy.surreycc.gov.uk"
+
+
 def test_the_file_is_sorted_and_carries_its_own_explanation(settings):
     for code in ("E10000030", "E06000001", "E09000002"):
         authority_websites.record_verified_website(
