@@ -77,6 +77,21 @@ anyone using it.
   a mapping verified against every archived page, and labels it as built.
   Both reach the notice. Only the first is something the source stated, so
   cite `source_url` and the payload hash as provenance, never the link.
+- **Contracts Finder rows before `WINDOW_START` (2020-08-06) come from a
+  different channel than everything after it, and are not uniformly
+  complete.** The live CF search API's date filtering stops being
+  trustworthy for windows entirely before roughly 2016 (a manual check
+  returned a release dated 2018 for a window entirely in 2008-2010), so
+  earlier history instead comes from Crown Commercial Service's own daily
+  CSV dumps, catalogued on data.gov.uk back to December 2014. Those dumps
+  themselves thin out going backwards: CCS's resource counts per month only
+  reach a consistent one-file-per-day from around March 2015, and December
+  2014 - February 2015 carry a handful of files, not a full month.
+  `source_system = 'contracts_finder_csv_archive'` marks which channel a row
+  came through; `source_url` on those rows is the specific daily CSV file,
+  not the live API page. A month with few rows here may be a quiet month or
+  a thin archive — this pipeline does not compute or assert "completeness"
+  for either channel, only what was published.
 
 ### Employment tribunals (Module 2)
 

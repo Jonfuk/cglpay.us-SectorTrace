@@ -24,9 +24,14 @@ from __future__ import annotations
 import re
 
 # The publishing services, keyed by the `source_system` m01 records.
+# contracts_finder_csv_archive is a *different channel* (Crown Commercial
+# Service's own CSV dumps) for the *same* publishing service as
+# contracts_finder — the notice pages are on the same host regardless of
+# which channel m01 fetched a given release through.
 NOTICE_HOSTS = {
     "find_a_tender": "www.find-tender.service.gov.uk",
     "contracts_finder": "www.contractsfinder.service.gov.uk",
+    "contracts_finder_csv_archive": "www.contractsfinder.service.gov.uk",
 }
 
 # A Contracts Finder release id is the notice GUID with a release sequence

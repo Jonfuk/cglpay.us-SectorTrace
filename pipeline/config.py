@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # default than the general 2s/host.
     rate_limit_overrides: dict[str, float] = {
         "www.contractsfinder.service.gov.uk": 5.0,
+        # Its own robots.txt states "Crawl-Delay: 10", which RobotsRules does
+        # not parse (only Allow/Disallow) — honoured here explicitly instead.
+        "ckan.publishing.service.gov.uk": 10.0,
     }
 
     # URL prefixes fetched despite robots.txt disallowing them. Structural
@@ -95,6 +98,14 @@ class Settings(BaseSettings):
     # and is scoped to the domain root only because no narrower transparency
     # path is on file — tighten this prefix if the actual sub-path turns up.
     robots_exceptions: tuple[str, ...] = (
+        # data.gov.uk's real API host. Its robots.txt disallows /api/
+        # wholesale, which reads as aimed at crawlers hitting the CKAN search
+        # UI rather than at scripted reuse of a public open-data catalogue
+        # API under OGL -- the same reasoning as the WhatDoTheyKnow feed
+        # exception below. Scoped to the one endpoint m01 (G6, the Contracts
+        # Finder CSV archive backfill) actually calls, not the whole /api/
+        # tree.
+        "https://ckan.publishing.service.gov.uk/api/3/action/package_search",
         "https://www.whatdotheyknow.com/feed/",
         "https://www.liverpool.gov.uk/",
         "https://democracy.eastsussex.gov.uk/",

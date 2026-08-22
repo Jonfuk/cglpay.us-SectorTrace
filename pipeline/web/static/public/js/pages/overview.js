@@ -26,6 +26,7 @@ import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
+  contracts_finder_csv_archive: 'Contracts Finder (historical CSV archive)',
   all_staff: 'All staff',
   change_grow_live: 'Change Grow Live',
 };

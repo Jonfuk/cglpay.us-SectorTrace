@@ -370,6 +370,7 @@ def test_match_supplier_key_exact_variant_only():
 def test_run_end_to_end(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock, "https://www.find-tender.service.gov.uk")
     _allow_all_robots(httpx_mock, "https://www.contractsfinder.service.gov.uk")
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
 
     _seed_authority(conn, "E06000061", "West Northamptonshire")
     release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
@@ -380,8 +381,10 @@ def test_run_end_to_end(httpx_mock, settings, conn):
 
     fts_page = {"releases": [release]}
     cf_page = {"releases": []}
+    ckan_page = {"success": True, "result": {"count": 0, "results": []}}
     httpx_mock.add_response(url=re.compile(r".*find-tender.*ocdsReleasePackages\?updatedFrom.*"), json=fts_page)
     httpx_mock.add_response(url=re.compile(r".*contractsfinder.*publishedFrom.*"), json=cf_page)
+    httpx_mock.add_response(url=re.compile(r".*ckan\.publishing\.service\.gov\.uk.*package_search.*"), json=ckan_page)
 
     ctx = ModuleContext(conn=conn, settings=settings, since="2026-08-01", dry_run=False, limit=None)
     proc.run(ctx)
@@ -391,3 +394,194 @@ def test_run_end_to_end(httpx_mock, settings, conn):
     assert row["buyer_ons_code"] == "E06000061"
     assert db.get_cursor(conn, "m01_procurement:fts").startswith("DONE:")
     assert db.get_cursor(conn, "m01_procurement:cf").startswith("DONE:")
+
+
+# --- Contracts Finder CSV archive ---------------------------------------------
+
+def test_unflatten_release_row_reconstructs_nested_shape():
+    row = {
+        "uri": "https://www.contractsfinder.service.gov.uk/Published/Notice/releases/x.json",
+        "publishedDate": "2019-06-30T17:31:14+01:00",
+        "releases/0/ocid": "ocds-b5fd17-abc",
+        "releases/0/id": "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",
+        "releases/0/tag/0": "award",
+        "releases/0/tender/title": "Recovery service",
+        "releases/0/tender/classification/scheme": "CPV",
+        "releases/0/tender/classification/id": "85312000",
+        "releases/0/tender/value/amount": "90000",
+        "releases/0/tender/value/currency": "GBP",
+        "releases/0/buyer/name": "West Northamptonshire Council",
+        "releases/0/parties/0/name": "West Northamptonshire Council",
+        "releases/0/parties/0/roles/0": "buyer",
+        "releases/0/parties/1/name": "Change, Grow, Live",
+        "releases/0/parties/1/roles/0": "supplier",
+        "releases/0/awards/0/id": "1",
+        "releases/0/awards/0/value/amount": "90000",
+        "releases/0/awards/0/suppliers/0/id": "S1",
+        "releases/0/awards/0/suppliers/0/name": "Change, Grow, Live",
+        # blank cells -- the CSV form of "absent" -- must not appear as ""
+        "releases/0/tender/description": "",
+    }
+    release = proc._unflatten_release_row(row)
+
+    assert release["ocid"] == "ocds-b5fd17-abc"
+    assert release["id"] == "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466"
+    assert release["tag"] == ["award"]
+    assert release["tender"]["classification"] == {"scheme": "CPV", "id": "85312000"}
+    assert "description" not in release["tender"]
+    assert release["buyer"] == {"name": "West Northamptonshire Council"}
+    assert release["parties"][0] == {"name": "West Northamptonshire Council", "roles": ["buyer"]}
+    assert release["parties"][1] == {"name": "Change, Grow, Live", "roles": ["supplier"]}
+    assert release["awards"][0]["suppliers"][0] == {"id": "S1", "name": "Change, Grow, Live"}
+    # OCDS Amount fields are numeric regardless of nesting depth or path.
+    assert release["tender"]["value"]["amount"] == 90000.0
+    assert isinstance(release["tender"]["value"]["amount"], float)
+    assert release["awards"][0]["value"]["amount"] == 90000.0
+
+
+def test_unflatten_release_row_ignores_package_level_columns():
+    row = {"uri": "https://example.com/x.json", "publisher/name": "Cabinet Office",
+           "releases/0/id": "abc-1"}
+    release = proc._unflatten_release_row(row)
+    assert release == {"id": "abc-1"}
+
+
+def test_process_csv_release_row_matches_and_persists(conn):
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+    row = {
+        "releases/0/ocid": "ocds-b5fd17-hist1",
+        "releases/0/id": "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",
+        "releases/0/tender/title": "Substance misuse recovery service",
+        "releases/0/buyer/name": "West Northamptonshire Council",
+    }
+
+    class _FakeResult:
+        url = "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com/Harvester-new/2016-06/x.csv"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 22, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    written = proc._process_csv_release_row(
+        conn, "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), proc._build_authority_lookup(conn))
+    assert written == 1
+
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+                           (row["releases/0/id"],)).fetchone()
+    assert stored["buyer_ons_code"] == "E06000061"
+    assert stored["source_system"] == proc.SOURCE_CF_CSV
+    # Same host as the live channel -- the notice lives on Contracts Finder
+    # regardless of which channel fetched the bytes.
+    assert stored["notice_web_url"] is None or "contractsfinder.service.gov.uk" in stored["notice_web_url"]
+
+
+def test_process_csv_release_row_out_of_scope_writes_nothing(conn):
+    row = {"releases/0/id": "abc-1", "releases/0/tender/title": "Playground equipment"}
+    written = proc._process_csv_release_row(conn, "m01_procurement", proc.SOURCE_CF_CSV,
+                                             row, object(), {})
+    assert written == 0
+    assert conn.execute("SELECT * FROM contracts").fetchone() is None
+
+
+def _ckan_package(title: str, name: str, csv_count: int, modified: str) -> dict:
+    resources = [{"format": "CSV", "url": f"https://s3.example/{name}-{i}.csv"} for i in range(csv_count)]
+    resources.append({"format": "HTML", "url": "https://standard.open-contracting.org/"})
+    return {"title": title, "name": name, "metadata_modified": modified, "resources": resources}
+
+
+def test_select_best_cf_csv_packages_prefers_more_csv_resources():
+    packages = [
+        _ckan_package("Contracts Finder Notices 09 2021", "contracts-finder-notices-09-20214", 0, "2018-01-10"),
+        _ckan_package("Contracts Finder Notices 09 2021", "contracts-finder-notices-09-20215", 30, "2026-08-20"),
+    ]
+    best = proc._select_best_cf_csv_packages(packages)
+    assert best[(2021, 9)]["name"] == "contracts-finder-notices-09-20215"
+
+
+def test_select_best_cf_csv_packages_ties_break_on_recency():
+    packages = [
+        _ckan_package("Contracts Finder Notices 06 2016", "contracts-finder-notices-06-2016", 30, "2018-01-10"),
+        _ckan_package("Contracts Finder Notices 06 2016", "contracts-finder-notices-06-20162", 30, "2026-08-20"),
+    ]
+    best = proc._select_best_cf_csv_packages(packages)
+    assert best[(2016, 6)]["name"] == "contracts-finder-notices-06-20162"
+
+
+def test_select_best_cf_csv_packages_ignores_unrelated_titles():
+    packages = [{"title": "Something else entirely", "name": "x", "resources": []}]
+    assert proc._select_best_cf_csv_packages(packages) == {}
+
+
+def test_discover_cf_csv_months_paginates_and_filters_to_window(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
+    page1 = {"success": True, "result": {"count": 2, "results": [
+        _ckan_package("Contracts Finder Notices 12 2014", "contracts-finder-notices-12-2014", 4, "2018-01-10"),
+    ]}}
+    page2 = {"success": True, "result": {"count": 2, "results": [
+        # This month is on/after WINDOW_START (2020-08-06) and must be excluded --
+        # the live API channel already covers it.
+        _ckan_package("Contracts Finder Notices 09 2020", "contracts-finder-notices-09-2020", 30, "2026-08-20"),
+    ]}}
+    httpx_mock.add_response(
+        url=re.compile(r".*package_search.*start=0.*"), json=page1)
+    httpx_mock.add_response(
+        url=re.compile(r".*package_search.*start=1.*"), json=page2)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
+        months = proc._discover_cf_csv_months(client, conn, "m01_procurement", proc.WINDOW_START)
+
+    assert [m[0] for m in months] == [date(2014, 12, 1)]
+
+
+def test_walk_and_process_csv_archive_end_to_end(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
+    _allow_all_robots(httpx_mock, "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com")
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+
+    package = _ckan_package("Contracts Finder Notices 06 2016", "contracts-finder-notices-06-2016", 0, "2018-01-10")
+    package["resources"] = [{
+        "format": "CSV",
+        "url": "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com/Harvester-new/2016-06/day1.csv",
+    }]
+    ckan_response = {"success": True, "result": {"count": 1, "results": [package]}}
+    httpx_mock.add_response(url=re.compile(r".*package_search.*"), json=ckan_response)
+
+    csv_body = (
+        "releases/0/ocid,releases/0/id,releases/0/tender/title,releases/0/buyer/name\r\n"
+        "ocds-b5fd17-hist1,4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466,"
+        "Substance misuse recovery service,West Northamptonshire Council\r\n"
+    )
+    httpx_mock.add_response(url=package["resources"][0]["url"], text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
+        matched = proc._walk_and_process_csv_archive(
+            client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
+            "m01_procurement:cf_csv", proc.WINDOW_START,
+            proc._build_authority_lookup(conn), None, False,
+        )
+
+    assert matched == 1
+    row = conn.execute(
+        "SELECT * FROM contracts WHERE notice_id = ?",
+        ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",)).fetchone()
+    assert row["buyer_ons_code"] == "E06000061"
+    assert row["source_system"] == proc.SOURCE_CF_CSV
+    assert db.get_cursor(conn, "m01_procurement:cf_csv") == "DONE:2016-06-01"
+
+
+def test_walk_and_process_csv_archive_skips_months_already_done(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
+    db.set_cursor(conn, "m01_procurement:cf_csv", "DONE:2016-06-01")
+
+    package = _ckan_package("Contracts Finder Notices 06 2016", "contracts-finder-notices-06-2016", 1, "2018-01-10")
+    ckan_response = {"success": True, "result": {"count": 1, "results": [package]}}
+    httpx_mock.add_response(url=re.compile(r".*package_search.*"), json=ckan_response)
+    # No CSV-file response registered: if the month were reprocessed, the
+    # missing mock would fail the test with an unmatched request.
+
+    with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
+        matched = proc._walk_and_process_csv_archive(
+            client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
+            "m01_procurement:cf_csv", proc.WINDOW_START, {}, None, False,
+        )
+
+    assert matched == 0

@@ -41,13 +41,54 @@ OGL".
 
 | | |
 | --- | --- |
-| Sources | Find a Tender Service (FTS); Contracts Finder |
-| Endpoints | `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages`; `https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search` |
-| Standard | OCDS 1.1.5 with UK extensions |
+| Sources | Find a Tender Service (FTS); Contracts Finder (live API); Contracts Finder CSV archive (Crown Commercial Service, via data.gov.uk's CKAN catalogue) |
+| Endpoints | `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages`; `https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search`; `https://ckan.publishing.service.gov.uk/api/3/action/package_search` (discovery) + daily CSV files it points to, hosted on CCS's own S3 bucket |
+| Standard | OCDS 1.1.5 with UK extensions; the CSV archive is the OCDS flattened-CSV serialisation of the same standard |
 | Licence | OGL v3.0 |
 | Key | None |
-| Rate limit | FTS default; **Contracts Finder 5s** — it imposes a multi-minute block on repeat rate-limit violations, unlike FTS's simple `Retry-After` |
-| Notice pages | `https://www.find-tender.service.gov.uk/Notice/{notice_id}`; `https://www.contractsfinder.service.gov.uk/Notice/{notice_guid}` |
+| Rate limit | FTS default; **Contracts Finder 5s** — it imposes a multi-minute block on repeat rate-limit violations, unlike FTS's simple `Retry-After`; CSV archive default (CKAN's own robots.txt asks for a 10s crawl-delay, honoured via `rate_limit_overrides`) |
+| Notice pages | `https://www.find-tender.service.gov.uk/Notice/{notice_id}`; `https://www.contractsfinder.service.gov.uk/Notice/{notice_guid}` (both live-API and CSV-archive Contracts Finder rows resolve to this host — see `pipeline/notice_urls.py`) |
+
+### Why Contracts Finder has two channels, not an earlier WINDOW_START
+
+`WINDOW_START` (2020-08-06) is not an arbitrary cutoff for the live APIs —
+it is roughly where the *live* Contracts Finder search API's
+`publishedFrom`/`publishedTo` filtering stops behaving reliably. Verified
+manually before building this: a `publishedFrom`/`publishedTo` window
+entirely inside 2008-2010 returned a release dated 2018, outside the
+requested range. Pulling `WINDOW_START` back on the live channel would have
+meant trusting a filter already shown to misbehave that far back.
+
+Crown Commercial Service separately publishes the same Contracts Finder
+notices as daily OCDS-flattened-CSV files, catalogued as ~200 monthly CKAN
+packages ("Contracts Finder Notices MM YYYY") going back to December 2014.
+`_walk_and_process_csv_archive` in `pipeline/modules/m01_procurement.py`
+walks this channel for exactly the span the live API does not reliably
+cover — every month strictly before `WINDOW_START` — and reconstructs each
+CSV row back into the same nested release shape the live JSON APIs produce
+(`_unflatten_release_row`), so it feeds the identical matching, buyer-match
+and provenance logic. The `(notice_id, supplier_id)` natural key both
+channels write to means a release the live channel also picks up (there is
+no reason for the two windows to overlap, but nothing prevents CCS from
+changing that) reconciles automatically rather than duplicating.
+
+Two things this channel does **not** do:
+
+- **It does not claim complete coverage back to December 2014.** CCS's own
+  resource counts per monthly package rise from 4 (December 2014, a sparse
+  early stub) to a consistent 30+ (one CSV per day, plus 2 standing
+  reference links) only from around March 2015. Earlier months are
+  genuinely thinner archives on CCS's side, not something this pipeline can
+  complete by parsing harder.
+- **It does not trust a dataset's canonical name.** CCS's own re-harvesting
+  has, for many months, left the original CKAN package behind with an
+  emptied resource list and republished the real files under a
+  differently-suffixed slug (`contracts-finder-notices-09-20214` empty,
+  `...-09-20215` holding the 30 files) — most conspicuously for September
+  2021 through August 2023, where the original slug is empty every month.
+  `_select_best_cf_csv_packages` compares every same-month variant a search
+  turns up on what it actually contains (most CSV resources, ties broken by
+  most recently modified) rather than assuming any one slug is the live one.
 
 ### The notice's address is not the address it was fetched from
 
