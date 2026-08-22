@@ -20,12 +20,88 @@
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
     },
+    "E06000024": {
+      "name": "North Somerset",
+      "committee_url": "https://n-somerset.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000027": {
+      "name": "Torbay",
+      "committee_url": "https://www.torbay.gov.uk/DemocraticServices",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000036": {
+      "name": "Bracknell Forest",
+      "committee_url": "https://democratic.bracknell-forest.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000037": {
+      "name": "West Berkshire",
+      "base_url": "https://www.westberks.gov.uk",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000040": {
+      "name": "Windsor and Maidenhead",
+      "committee_url": "https://rbwm.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000041": {
+      "name": "Wokingham",
+      "committee_url": "https://wokingham.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000042": {
+      "name": "Milton Keynes",
+      "committee_url": "https://milton-keynes.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000045": {
+      "name": "Southampton",
+      "committee_url": "https://www.southampton.gov.uk/moderngov",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000046": {
+      "name": "Isle of Wight",
+      "committee_url": "https://iow.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
     "E06000047": {
       "name": "County Durham",
       "committee_url": "https://democracy.durham.gov.uk",
       "committee_system": "moderngov",
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
+    },
+    "E06000049": {
+      "name": "Cheshire East",
+      "committee_url": "https://moderngov.cheshireeast.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000051": {
+      "name": "Shropshire",
+      "committee_url": "https://shropshire.gov.uk/committee-services",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
     },
     "E06000056": {
       "name": "Central Bedfordshire",
@@ -41,10 +117,184 @@
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, 2026-08-22)"
     },
+    "E06000059": {
+      "name": "Dorset",
+      "committee_url": "https://moderngov.dorsetcouncil.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000060": {
+      "name": "Buckinghamshire",
+      "committee_url": "https://buckinghamshire.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000063": {
+      "name": "Cumberland",
+      "committee_url": "https://cumberland.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E06000064": {
+      "name": "Westmorland and Furness",
+      "committee_url": "https://westmorlandandfurness.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000001": {
+      "name": "Bolton",
+      "committee_url": "https://bolton.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000004": {
+      "name": "Oldham",
+      "committee_url": "https://committees.oldham.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000008": {
+      "name": "Tameside",
+      "committee_url": "https://tameside.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000009": {
+      "name": "Trafford",
+      "committee_url": "https://democratic.trafford.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000013": {
+      "name": "St. Helens",
+      "committee_url": "https://sthelens.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000017": {
+      "name": "Doncaster",
+      "committee_url": "https://doncaster.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
     "E08000024": {
       "name": "Sunderland",
       "committee_url": "https://committees.sunderland.gov.uk/committees/cmis5",
       "committee_system": "cmis",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000025": {
+      "name": "Birmingham",
+      "committee_url": "https://www.birmingham.gov.uk/cmis",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000028": {
+      "name": "Sandwell",
+      "committee_url": "https://sandwell.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000031": {
+      "name": "Wolverhampton",
+      "committee_url": "https://wolverhampton.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000032": {
+      "name": "Bradford",
+      "committee_url": "https://bradford.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000033": {
+      "name": "Calderdale",
+      "committee_url": "https://calderdale.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000036": {
+      "name": "Wakefield",
+      "committee_url": "https://mg.wakefield.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E08000038": {
+      "name": "Barnsley",
+      "committee_url": "https://barnsleymbc.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000003": {
+      "name": "Barnet",
+      "committee_url": "https://barnet.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000004": {
+      "name": "Bexley",
+      "committee_url": "https://bexley.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000009": {
+      "name": "Ealing",
+      "committee_url": "https://ealing.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000010": {
+      "name": "Enfield",
+      "committee_url": "https://governance.enfield.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000011": {
+      "name": "Greenwich",
+      "committee_url": "https://greenwich.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000012": {
+      "name": "Hackney",
+      "committee_url": "https://hackney.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000015": {
+      "name": "Harrow",
+      "committee_url": "https://moderngov.harrow.gov.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E09000020": {
+      "name": "Kensington and Chelsea",
+      "committee_url": "https://www.rbkc.gov.uk/committees",
+      "committee_system": "moderngov",
       "verified_on": "2026-08-22",
       "verified_by": "Claude (web research sweep, local, 2026-08-22)"
     },
@@ -66,6 +316,27 @@
       "committee_system": "cmis",
       "verified_on": "2026-08-22",
       "verified_by": "Claude (CMIS adapter verification, 2026-08-22)"
+    },
+    "E10000028": {
+      "name": "Staffordshire",
+      "committee_url": "https://staffordshire.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E10000032": {
+      "name": "West Sussex",
+      "committee_url": "https://westsussex.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
+    },
+    "E10000034": {
+      "name": "Worcestershire",
+      "committee_url": "https://worcestershire.moderngov.co.uk",
+      "committee_system": "moderngov",
+      "verified_on": "2026-08-22",
+      "verified_by": "Claude (web research sweep, local, 2026-08-22)"
     }
   },
   "note": "Written by the review UI when a reviewer answers where a council publishes, after the server has confirmed the URL responds. Tracked in git so an answer outlives the warehouse -- see pipeline/authority_websites.py. Safe to hand-edit; entries here are read by website_for()."
