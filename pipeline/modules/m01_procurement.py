@@ -800,26 +800,37 @@ def _map_kaggle_row_to_release(row: dict, index: dict[str, str]) -> dict | None:
     Unlike that channel, the source file is not itself a flattened-JSON
     serialisation, so there is no general unflattening rule here — each
     field is named explicitly, defensively, from candidate column names.
-    Returns None (never a partial release) when no id column can be found at
-    all, since a release this pipeline cannot identify cannot be compared
-    against anything.
+    Returns None (never a partial release) when no ocid can be found at all,
+    since a release this pipeline cannot identify cannot be compared against
+    anything.
+
+    Confirmed against a live sample of the real file (2026-08-23; the
+    uploader's own extraction script — see the module docstring — turned out
+    not to match it): there is no release/notice id column at all, only
+    `ocid` — the file keeps one row per contracting *process*, not per
+    release, so `ocid` is used as this release's `id` too. There is also no
+    currency column anywhere in the file; `_check_kaggle_against_other_
+    channels`'s currency comparison is written defensively enough that this
+    just means it never fires for Kaggle rows, never a crash — nothing here
+    invents a currency the file does not state, even though it is
+    overwhelmingly likely GBP.
     """
-    notice_id = _kaggle_field(row, index, "release_id", "id", "notice_id")
-    if not notice_id:
+    ocid = _kaggle_field(row, index, "ocid")
+    if not ocid:
         return None
 
-    buyer_name = _kaggle_field(row, index, "buyer_name")
+    buyer_name = _kaggle_field(row, index, "buyer", "buyer_name")
     tags = _kaggle_field(row, index, "release_tag", "release_tags_all", "tag")
-    cpv_id = _kaggle_field(row, index, "cpv_id")
-    additional_cpv_ids = _kaggle_field(row, index, "additional_cpv_ids") or ""
+    cpv_id = _kaggle_field(row, index, "cpv_main", "cpv_id")
+    additional_cpv_ids = _kaggle_field(row, index, "cpv_additional", "additional_cpv_ids") or ""
 
-    value_amount = _kaggle_amount(row, index, "value_amount", "tender_value_amount")
+    value_amount = _kaggle_amount(row, index, "tender_value", "value_amount", "tender_value_amount")
     value_currency = _kaggle_field(row, index, "value_currency", "tender_value_currency")
-    award_value_amount = _kaggle_amount(row, index, "award_value_amount")
+    award_value_amount = _kaggle_amount(row, index, "award_value", "award_value_amount")
     award_value_currency = _kaggle_field(row, index, "award_value_currency")
 
-    supplier_names = [n for n in (_kaggle_field(row, index, "supplier_party_names", "award_suppliers_names")
-                                   or "").split("|") if n]
+    supplier_names = [n for n in (_kaggle_field(row, index, "supplier", "supplier_party_names",
+                                                 "award_suppliers_names") or "").split("|") if n]
     supplier_ids = [i for i in (_kaggle_field(row, index, "supplier_party_ids", "award_suppliers_ids")
                                  or "").split("|") if i]
 
@@ -841,10 +852,10 @@ def _map_kaggle_row_to_release(row: dict, index: dict[str, str]) -> dict | None:
         parties.append({"id": supplier_id, "name": name, "roles": ["supplier"]})
 
     release: dict = {
-        "id": notice_id,
-        "ocid": _kaggle_field(row, index, "ocid"),
+        "id": ocid,
+        "ocid": ocid,
         "tag": tags.split("|") if tags else [],
-        "date": _kaggle_field(row, index, "release_date", "notice_publish_date", "publisheddate"),
+        "date": _kaggle_field(row, index, "notice_publish_date", "release_date", "publisheddate"),
         "tender": tender,
         "buyer": {"name": buyer_name} if buyer_name else {},
         "parties": parties,
@@ -860,41 +871,53 @@ def _map_kaggle_row_to_release(row: dict, index: dict[str, str]) -> dict | None:
         ]
         release["awards"] = [award]
 
-    contract_start = _kaggle_field(row, index, "contract_startdate", "contract_start_date")
-    contract_end = _kaggle_field(row, index, "contract_enddate", "contract_end_date")
+    contract_start = _kaggle_field(row, index, "contract_start_date")
+    contract_end = _kaggle_field(row, index, "contract_end_date")
     if contract_start or contract_end:
         release["contracts"] = [{"awardID": "1", "period": {"startDate": contract_start, "endDate": contract_end}}]
 
     return release
 
 
-def _check_kaggle_against_other_channels(conn, module_name: str, notice_id: str) -> None:
+def _check_kaggle_against_other_channels(conn, module_name: str, ocid: str) -> None:
     """Everything --kag itself decides: never a correction to `contracts`,
     only a review item pointing a human at what to check, because Kaggle's
     own transcription is not trusted over the primary channels'.
 
-    A notice with no sighting from any other source_system is a coverage
+    Matched by `ocid`, not `notice_id` — Kaggle's file carries no release id
+    (see `_map_kaggle_row_to_release`), only the OCDS *process* id, so its
+    own sighting rows are stored under notice_id=ocid. The other three
+    channels' rows keep their real release id as notice_id but do carry the
+    correct `ocid` too, and a contracting process can have several releases
+    (tender, then award) across which ocid is the one thing that stays
+    constant — so ocid is the only identifier both sides can actually agree
+    on, and comparing on notice_id here would never match anything a live
+    channel recorded, however completely it covers the process.
+
+    A process with no sighting from any other source_system is a coverage
     gap worth checking by hand against the live source — most plausibly it
     means the live walk or CSV archive missed something, since --api/--csv
     already walk the same underlying publisher this Kaggle re-host does.
-    Where another channel does have the notice, only fields that should be
-    byte-identical (both ultimately came from the same published OCDS
-    release) are compared — `total_award_value_amount` is deliberately not
-    one of them, since Kaggle keeps only the first award on a multi-award
-    notice and would "mismatch" against every genuinely multi-award notice
-    for a reason that has nothing to do with either channel being wrong.
+    Where another channel does have it, only fields that should be
+    byte-identical (both ultimately came from the same published OCDS data)
+    are compared — `total_award_value_amount` is deliberately not one of
+    them, since Kaggle keeps only the first award on a multi-award notice
+    and would "mismatch" against every genuinely multi-award notice for a
+    reason that has nothing to do with either channel being wrong; currency
+    fields never mismatch in practice either, since the Kaggle file carries
+    no currency column at all.
     """
     kaggle_row = conn.execute(
         "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
-        (notice_id, SOURCE_CF_KAGGLE)).fetchone()
+        (ocid, SOURCE_CF_KAGGLE)).fetchone()
     others = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system != ?",
-        (notice_id, SOURCE_CF_KAGGLE)).fetchall()
+        "SELECT * FROM procurement_channel_sightings WHERE ocid = ? AND source_system != ?",
+        (ocid, SOURCE_CF_KAGGLE)).fetchall()
 
     if not others:
-        db.record_review_item(conn, module_name, "kaggle_coverage_gap", notice_id, json.dumps({
-            "note": "seen in the Kaggle re-host but not recorded by --api or --csv for this "
-                    "notice id; check whether the live walk or CSV archive missed it",
+        db.record_review_item(conn, module_name, "kaggle_coverage_gap", ocid, json.dumps({
+            "note": "seen in the Kaggle re-host but no --api/--csv sighting shares this ocid; "
+                    "check whether the live walk or CSV archive missed this contracting process",
             "buyer_name": kaggle_row["buyer_name"], "title": kaggle_row["title"],
         }))
         return
@@ -906,7 +929,7 @@ def _check_kaggle_against_other_channels(conn, module_name: str, notice_id: str)
             if kaggle_value is not None and other_value is not None and kaggle_value != other_value:
                 mismatches[field] = {"kaggle": kaggle_value, other["source_system"]: other_value}
         if mismatches:
-            db.record_review_item(conn, module_name, "kaggle_cross_channel_mismatch", notice_id,
+            db.record_review_item(conn, module_name, "kaggle_cross_channel_mismatch", ocid,
                                    json.dumps({"other_source": other["source_system"], "fields": mismatches}))
 
 
@@ -914,19 +937,19 @@ def _process_kaggle_release_row(conn, module_name: str, row: dict, index: dict[s
     release = _map_kaggle_row_to_release(row, index)
     if release is None:
         db.record_parse_failure(conn, module_name, "kaggle_row", json.dumps(row)[:500],
-                                 "no recognisable notice/release id column", source_url=result.url)
+                                 "no ocid column found", source_url=result.url)
         return 0
     if not _release_matches_scope(release):
         return 0
 
-    notice_id = release["id"]
+    ocid = release["ocid"]  # == release["id"]; the file has no separate release id, see the mapper
     supplier_rows = _iter_supplier_rows(release)
     award_values = [sr["value_core"] for sr in supplier_rows if sr.get("value_core") is not None]
     supplier_names = "|".join(sr["supplier_name_raw"] for sr in supplier_rows if sr.get("supplier_name_raw")) or None
     tender_value = (release.get("tender") or {}).get("value") or {}
 
-    _record_channel_sighting(conn, notice_id, SOURCE_CF_KAGGLE, {
-        "ocid": release.get("ocid"),
+    _record_channel_sighting(conn, ocid, SOURCE_CF_KAGGLE, {
+        "ocid": ocid,
         "buyer_name": (release.get("buyer") or {}).get("name"),
         "title": (release.get("tender") or {}).get("title"),
         "cpv_codes": ",".join(sorted(_extract_cpv_codes(release))) or None,
@@ -937,7 +960,7 @@ def _process_kaggle_release_row(conn, module_name: str, row: dict, index: dict[s
         "date_published": release.get("date"),
     }, result)
 
-    _check_kaggle_against_other_channels(conn, module_name, notice_id)
+    _check_kaggle_against_other_channels(conn, module_name, ocid)
     return 1
 
 

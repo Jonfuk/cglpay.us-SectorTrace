@@ -683,57 +683,61 @@ def _kaggle_result(url: str = "https://www.kaggle.com/api/v1/datasets/download/x
 
 def test_kaggle_field_matches_across_naming_variants():
     """The real file's column names were not independently verified against
-    a fetched copy (see the module docstring) -- the lookup has to survive
-    both the uploader's own extraction-script names and the alternate names
-    Kaggle's own dataset preview showed for the same logical fields.
+    a fetched copy until after this channel first ran -- the lookup has to
+    survive both the uploader's own extraction-script names and the file's
+    actual, simpler names for the same logical fields (confirmed live
+    2026-08-23: e.g. `buyer` and `tender_value`, not `buyer_name`/
+    `value_amount`).
     """
-    index_a = proc._kaggle_column_index(["release_id", "tender_title", "tender_endDate"])
-    index_b = proc._kaggle_column_index(["id", "title", "tender_end_date"])
+    index_a = proc._kaggle_column_index(["ocid", "tender_title", "tender_end_date"])
+    index_b = proc._kaggle_column_index(["OCID", "Tender_Title", "tender_endDate"])
 
-    row_a = {"release_id": "abc-1", "tender_title": "Recovery service", "tender_endDate": "2026-01-01"}
-    row_b = {"id": "abc-1", "title": "Recovery service", "tender_end_date": "2026-01-01"}
+    row_a = {"ocid": "ocds-abc", "tender_title": "Recovery service", "tender_end_date": "2026-01-01"}
+    row_b = {"OCID": "ocds-abc", "Tender_Title": "Recovery service", "tender_endDate": "2026-01-01"}
 
     for row, index in ((row_a, index_a), (row_b, index_b)):
-        assert proc._kaggle_field(row, index, "release_id", "id", "notice_id") == "abc-1"
+        assert proc._kaggle_field(row, index, "ocid") == "ocds-abc"
         assert proc._kaggle_field(row, index, "tender_title", "release_title", "title") == "Recovery service"
 
 
 def test_kaggle_field_returns_none_for_blank_or_missing():
-    index = proc._kaggle_column_index(["buyer_name"])
-    assert proc._kaggle_field({"buyer_name": ""}, index, "buyer_name") is None
-    assert proc._kaggle_field({"buyer_name": "X"}, index, "cpv_id") is None
+    index = proc._kaggle_column_index(["buyer"])
+    assert proc._kaggle_field({"buyer": ""}, index, "buyer") is None
+    assert proc._kaggle_field({"buyer": "X"}, index, "cpv_main") is None
 
 
 def test_map_kaggle_row_to_release_builds_ocds_shape():
+    """Field names match the live file's real header (confirmed 2026-08-23),
+    not the uploader's own extraction-script names -- see the module
+    docstring on why the two differ and why lookup is defensive regardless.
+    """
     row = {
-        "release_id": "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",
         "ocid": "ocds-b5fd17-abc",
         "tender_title": "Substance misuse recovery service",
-        "buyer_name": "West Northamptonshire Council",
-        "cpv_id": "85312000",
-        "value_amount": "90000",
-        "value_currency": "GBP",
-        "award_value_amount": "90000",
-        "supplier_party_names": "Change, Grow, Live",
-        "supplier_party_ids": "S1",
+        "buyer": "West Northamptonshire Council",
+        "CPV_main": "85312000",
+        "tender_value": "90000",
+        "award_value": "90000",
+        "supplier": "Change, Grow, Live",
     }
     index = proc._kaggle_column_index(list(row.keys()))
     release = proc._map_kaggle_row_to_release(row, index)
 
-    assert release["id"] == "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466"
+    # No separate release id in this file -- ocid stands in for it (see the mapper's docstring).
+    assert release["id"] == "ocds-b5fd17-abc"
     assert release["ocid"] == "ocds-b5fd17-abc"
-    assert release["tender"]["value"] == {"amount": 90000.0, "currency": "GBP"}
+    assert release["tender"]["value"] == {"amount": 90000.0, "currency": None}
     assert release["tender"]["classification"] == {"scheme": "CPV", "id": "85312000"}
     assert release["buyer"] == {"name": "West Northamptonshire Council"}
-    assert release["awards"][0]["suppliers"] == [{"id": "S1", "name": "Change, Grow, Live"}]
+    assert release["awards"][0]["suppliers"] == [{"id": "", "name": "Change, Grow, Live"}]
 
 
-def test_map_kaggle_row_to_release_none_without_an_id():
-    assert proc._map_kaggle_row_to_release({"buyer_name": "X"}, {"buyername": "buyer_name"}) is None
+def test_map_kaggle_row_to_release_none_without_an_ocid():
+    assert proc._map_kaggle_row_to_release({"buyer": "X"}, {"buyer": "buyer"}) is None
 
 
 def test_process_kaggle_release_row_out_of_scope_writes_nothing(conn):
-    row = {"release_id": "abc-1", "tender_title": "Playground equipment"}
+    row = {"ocid": "ocds-1", "tender_title": "Playground equipment"}
     index = proc._kaggle_column_index(list(row.keys()))
     written = proc._process_kaggle_release_row(conn, "m01_procurement", row, index, _kaggle_result())
     assert written == 0
@@ -742,49 +746,56 @@ def test_process_kaggle_release_row_out_of_scope_writes_nothing(conn):
 
 def test_process_kaggle_release_row_matched_writes_sighting_and_coverage_gap(conn):
     row = {
-        "release_id": "abc-2", "tender_title": "Substance misuse recovery service",
-        "buyer_name": "West Northamptonshire Council", "value_amount": "50000", "value_currency": "GBP",
+        "ocid": "ocds-2", "tender_title": "Substance misuse recovery service",
+        "buyer": "West Northamptonshire Council", "tender_value": "50000",
     }
     index = proc._kaggle_column_index(list(row.keys()))
     written = proc._process_kaggle_release_row(conn, "m01_procurement", row, index, _kaggle_result())
     assert written == 1
 
     sighting = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'abc-2'").fetchone()
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'ocds-2'").fetchone()
     assert sighting["source_system"] == proc.SOURCE_CF_KAGGLE
     assert sighting["tender_value_amount"] == 50000
 
-    # No other channel has seen this notice id -- a coverage gap, not a mismatch.
+    # No other channel has a sighting sharing this ocid -- a coverage gap, not a mismatch.
     review = conn.execute(
         "SELECT * FROM review_queue WHERE item_type = 'kaggle_coverage_gap'").fetchone()
-    assert review["raw_value"] == "abc-2"
+    assert review["raw_value"] == "ocds-2"
     assert conn.execute(
         "SELECT * FROM review_queue WHERE item_type = 'kaggle_cross_channel_mismatch'").fetchone() is None
 
 
-def test_check_kaggle_against_other_channels_flags_a_real_mismatch(conn):
+def test_check_kaggle_against_other_channels_matches_by_ocid_not_notice_id(conn):
+    """The regression this exists to catch: a live channel's notice_id is a
+    real release id (e.g. an FTS notice number), never equal to the Kaggle
+    row's ocid -- so the comparison has to join on the `ocid` column, or
+    every single in-scope Kaggle row would misreport as a coverage gap even
+    when the other channels have the exact same contracting process.
+    """
     _record = proc._record_channel_sighting
     fts_result = _kaggle_result("https://www.find-tender.service.gov.uk/x")
     kag_result = _kaggle_result()
 
-    _record(conn, "abc-3", proc.SOURCE_FTS, {
-        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+    _record(conn, "076079-2026", proc.SOURCE_FTS, {
+        "ocid": "ocds-shared-3", "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
         "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
         "total_award_value_amount": None, "supplier_names": None, "date_published": None,
     }, fts_result)
-    _record(conn, "abc-3", proc.SOURCE_CF_KAGGLE, {
-        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
-        "cpv_codes": None, "tender_value_amount": 12345, "tender_value_currency": "GBP",
+    _record(conn, "ocds-shared-3", proc.SOURCE_CF_KAGGLE, {
+        "ocid": "ocds-shared-3", "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+        "cpv_codes": None, "tender_value_amount": 12345, "tender_value_currency": None,
         "total_award_value_amount": None, "supplier_names": None, "date_published": None,
     }, kag_result)
 
-    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "abc-3")
+    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "ocds-shared-3")
 
     review = conn.execute(
         "SELECT * FROM review_queue WHERE item_type = 'kaggle_cross_channel_mismatch'").fetchone()
     assert review is not None
     context = json.loads(review["context_json"])
     assert context["fields"]["tender_value_amount"] == {"kaggle": 12345, proc.SOURCE_FTS: 90000}
+    # ocid-matched, despite the two channels' notice_id values being completely different.
     assert conn.execute(
         "SELECT * FROM review_queue WHERE item_type = 'kaggle_coverage_gap'").fetchone() is None
 
@@ -792,14 +803,14 @@ def test_check_kaggle_against_other_channels_flags_a_real_mismatch(conn):
 def test_check_kaggle_against_other_channels_agrees_raises_nothing(conn):
     _record = proc._record_channel_sighting
     shared_fields = {
-        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+        "ocid": "ocds-shared-4", "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
         "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
         "total_award_value_amount": None, "supplier_names": None, "date_published": None,
     }
-    _record(conn, "abc-4", proc.SOURCE_CF, dict(shared_fields), _kaggle_result("https://cf.example"))
-    _record(conn, "abc-4", proc.SOURCE_CF_KAGGLE, dict(shared_fields), _kaggle_result())
+    _record(conn, "some-other-notice-id", proc.SOURCE_CF, dict(shared_fields), _kaggle_result("https://cf.example"))
+    _record(conn, "ocds-shared-4", proc.SOURCE_CF_KAGGLE, dict(shared_fields), _kaggle_result())
 
-    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "abc-4")
+    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "ocds-shared-4")
 
     assert conn.execute("SELECT * FROM review_queue").fetchone() is None
 
@@ -830,9 +841,9 @@ def test_walk_and_process_kaggle_end_to_end(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock, "https://www.kaggle.com")
     _seed_authority(conn, "E06000061", "West Northamptonshire")
     csv_body = (
-        "release_id,tender_title,buyer_name,value_amount,value_currency\r\n"
-        "abc-5,Substance misuse recovery service,West Northamptonshire Council,90000,GBP\r\n"
-        "abc-6,Playground equipment,Some Council,1000,GBP\r\n"
+        "ocid,tender_title,buyer,tender_value\r\n"
+        "ocds-5,Substance misuse recovery service,West Northamptonshire Council,90000\r\n"
+        "ocds-6,Playground equipment,Some Council,1000\r\n"
     )
     httpx_mock.add_response(url=proc.KAGGLE_DOWNLOAD_URL, text=csv_body)
 
@@ -844,7 +855,7 @@ def test_walk_and_process_kaggle_end_to_end(httpx_mock, settings, conn):
     assert matched == 1  # only the in-scope row
     assert db.get_cursor(conn, "m01_procurement:kaggle") == "DONE"
     row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'abc-5'").fetchone()
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'ocds-5'").fetchone()
     assert row["source_system"] == proc.SOURCE_CF_KAGGLE
 
 
@@ -860,9 +871,9 @@ def test_walk_and_process_kaggle_skips_when_already_done(httpx_mock, settings, c
 def test_walk_and_process_kaggle_stops_at_limit_and_saves_row_offset(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock, "https://www.kaggle.com")
     csv_body = (
-        "release_id,tender_title\r\n"
-        "abc-7,Substance misuse recovery service\r\n"
-        "abc-8,Substance misuse treatment service\r\n"
+        "ocid,tender_title\r\n"
+        "ocds-7,Substance misuse recovery service\r\n"
+        "ocds-8,Substance misuse treatment service\r\n"
     )
     httpx_mock.add_response(url=proc.KAGGLE_DOWNLOAD_URL, text=csv_body)
 
