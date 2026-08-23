@@ -815,6 +815,29 @@ def test_check_kaggle_against_other_channels_agrees_raises_nothing(conn):
     assert conn.execute("SELECT * FROM review_queue").fetchone() is None
 
 
+def test_check_kaggle_against_other_channels_ignores_case_and_whitespace_only_differences(conn):
+    """Regression for the 2026-08-23 production sample: ~20% of raised
+    mismatches were purely "DERBYSHIRE COUNTY COUNCIL" vs "Derbyshire County
+    Council" -- formatting, not a finding, and comparing case/whitespace
+    means one production entity is not flagged as disagreeing with itself.
+    """
+    _record = proc._record_channel_sighting
+    _record(conn, "some-other-notice-id", proc.SOURCE_CF, {
+        "ocid": "ocds-shared-5", "buyer_name": "  Derbyshire   County Council", "title": "Recovery Service",
+        "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
+        "total_award_value_amount": None, "supplier_names": None, "date_published": None,
+    }, _kaggle_result("https://cf.example"))
+    _record(conn, "ocds-shared-5", proc.SOURCE_CF_KAGGLE, {
+        "ocid": "ocds-shared-5", "buyer_name": "DERBYSHIRE COUNTY COUNCIL", "title": "RECOVERY SERVICE",
+        "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
+        "total_award_value_amount": None, "supplier_names": None, "date_published": None,
+    }, _kaggle_result())
+
+    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "ocds-shared-5")
+
+    assert conn.execute("SELECT * FROM review_queue").fetchone() is None
+
+
 def test_kaggle_csv_text_reads_plain_csv(conn):
     text = proc._kaggle_csv_text(b"a,b\r\n1,2\r\n", "m01_procurement", conn, "https://example.com")
     assert text == "a,b\r\n1,2\r\n"

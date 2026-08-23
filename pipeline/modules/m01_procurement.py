@@ -898,14 +898,16 @@ def _check_kaggle_against_other_channels(conn, module_name: str, ocid: str) -> N
     gap worth checking by hand against the live source — most plausibly it
     means the live walk or CSV archive missed something, since --api/--csv
     already walk the same underlying publisher this Kaggle re-host does.
-    Where another channel does have it, only fields that should be
-    byte-identical (both ultimately came from the same published OCDS data)
-    are compared — `total_award_value_amount` is deliberately not one of
-    them, since Kaggle keeps only the first award on a multi-award notice
-    and would "mismatch" against every genuinely multi-award notice for a
-    reason that has nothing to do with either channel being wrong; currency
-    fields never mismatch in practice either, since the Kaggle file carries
-    no currency column at all.
+    Where another channel does have it, only fields that both ultimately
+    came from the same published OCDS data — so should agree, modulo
+    formatting — are compared, text fields case/whitespace-folded first so
+    "DERBYSHIRE COUNTY COUNCIL" vs "Derbyshire County Council" is not
+    reported as a finding. `total_award_value_amount` is deliberately not
+    one of the compared fields, since Kaggle keeps only the first award on a
+    multi-award notice and would "mismatch" against every genuinely
+    multi-award notice for a reason that has nothing to do with either
+    channel being wrong; currency fields rarely mismatch in practice either,
+    since the Kaggle file carries no currency column at all.
     """
     kaggle_row = conn.execute(
         "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
@@ -922,12 +924,29 @@ def _check_kaggle_against_other_channels(conn, module_name: str, ocid: str) -> N
         }))
         return
 
+    # Case/whitespace only ("DERBYSHIRE COUNTY COUNCIL" vs "Derbyshire County
+    # Council") is not a finding -- an early sample against production
+    # (2026-08-23) was ~20% this, drowning out the genuine differences (a
+    # real one: several dozen contracts_finder_csv_archive rows carry an
+    # e-tendering platform's own name -- "DUE NORTH LIMITED", "IN-TEND
+    # LIMITED" -- as buyer_name, confirmed against the archived source bytes
+    # to be exactly what Contracts Finder itself published that day, not a
+    # parsing bug here). Numeric/currency fields need no such normalisation.
+    def _fold(value: str) -> str:
+        return re.sub(r"\s+", " ", value.strip()).casefold()
+
     for other in others:
         mismatches = {}
         for field in ("buyer_name", "title", "tender_value_amount", "tender_value_currency"):
             kaggle_value, other_value = kaggle_row[field], other[field]
-            if kaggle_value is not None and other_value is not None and kaggle_value != other_value:
-                mismatches[field] = {"kaggle": kaggle_value, other["source_system"]: other_value}
+            if kaggle_value is None or other_value is None:
+                continue
+            if isinstance(kaggle_value, str) and isinstance(other_value, str):
+                if _fold(kaggle_value) == _fold(other_value):
+                    continue
+            elif kaggle_value == other_value:
+                continue
+            mismatches[field] = {"kaggle": kaggle_value, other["source_system"]: other_value}
         if mismatches:
             db.record_review_item(conn, module_name, "kaggle_cross_channel_mismatch", ocid,
                                    json.dumps({"other_source": other["source_system"], "fields": mismatches}))
