@@ -1050,6 +1050,48 @@ def _walk_and_process_kaggle(
     return total_matched
 
 
+def backfill_channel_sightings(conn) -> int:
+    """One-time repair for `contracts` rows written before
+    `procurement_channel_sightings` (migration 0058) existed.
+
+    --api/--csv's own cursors are already `DONE` once a notice is processed,
+    so they never naturally revisit it — meaning without this, every notice
+    fetched before this table existed has no sighting row from the channel
+    that actually found it, and looks identical to a genuine coverage gap to
+    `_check_kaggle_against_other_channels`. That is exactly what happened on
+    first deploy (2026-08-23): --kag raised thousands of `kaggle_coverage_gap`
+    items against notices `contracts` already held correctly, sourced from
+    `find_a_tender`/`contracts_finder`/`contracts_finder_csv_archive`.
+
+    Deliberately conservative about what it can answer from `contracts`
+    alone: `value_core` there is already "award value if present, else the
+    tender estimate" (see `_process_release`'s fallback) — a decision already
+    applied per row, and not something this can unpick back into a separate
+    tender estimate vs. awarded total after the fact. So this leaves
+    tender_value_amount/tender_value_currency/total_award_value_amount NULL
+    rather than guess; that only makes the mismatch check unable to compare
+    values for pre-existing notices (a NULL never mismatches), and does not
+    weaken the coverage-gap check at all, which only tests presence.
+
+    Idempotent (`ON CONFLICT DO NOTHING` on the same natural key
+    `_record_channel_sighting` uses) and safe to run more than once, or
+    alongside a fresh run continuing to add rows the normal way.
+    """
+    cursor = conn.execute(
+        "INSERT INTO procurement_channel_sightings "
+        "(notice_id, source_system, ocid, buyer_name, title, cpv_codes, date_published, "
+        " source_url, retrieved_at, http_status, payload_sha256) "
+        "SELECT notice_id, source_system, MIN(ocid), MIN(buyer_name), MIN(title), "
+        "       MIN(cpv_codes), MIN(date_published), MIN(source_url), MIN(retrieved_at), "
+        "       MIN(http_status), MIN(payload_sha256) "
+        "FROM contracts WHERE source_system IN (?, ?, ?) "
+        "GROUP BY notice_id, source_system "
+        "ON CONFLICT (notice_id, source_system) DO NOTHING",
+        (SOURCE_FTS, SOURCE_CF, SOURCE_CF_CSV),
+    )
+    return cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else 0
+
+
 @register_module(
     "m01_procurement", supports_since=True,
     supports_source=True,

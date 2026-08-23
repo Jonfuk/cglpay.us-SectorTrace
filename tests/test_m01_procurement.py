@@ -893,6 +893,87 @@ def test_require_kaggle_credentials_raises_when_unset(settings):
         settings.require_kaggle_credentials()
 
 
+def test_backfill_channel_sightings_derives_rows_from_existing_contracts(conn):
+    """The 2026-08-23 incident this exists to fix: a notice --api/--csv
+    already fetched, with no sighting row because it predates migration
+    0058, must stop reading as a --kag coverage gap once backfilled.
+    """
+    release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
+    lookup = {}  # buyer matching irrelevant here
+
+    class _FakeResult:
+        url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 10, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    # Simulate the pre-existing state: a contracts row with no sighting row,
+    # as if it had been written before procurement_channel_sightings existed.
+    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    assert conn.execute("SELECT * FROM procurement_channel_sightings").fetchone() is None
+
+    inserted = proc.backfill_channel_sightings(conn)
+    assert inserted == 1
+
+    row = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        (release["id"], proc.SOURCE_FTS)).fetchone()
+    assert row is not None
+    assert row["ocid"] == release["ocid"]
+    assert row["buyer_name"] == "West Northamptonshire Council"
+    # Deliberately not reconstructed -- see the function's docstring.
+    assert row["tender_value_amount"] is None
+
+
+def test_backfill_channel_sightings_is_idempotent(conn):
+    release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
+
+    class _FakeResult:
+        url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 10, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+
+    first = proc.backfill_channel_sightings(conn)
+    second = proc.backfill_channel_sightings(conn)
+    assert first == 1
+    assert second == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM procurement_channel_sightings").fetchone()["n"] == 1
+
+
+def test_backfill_then_kaggle_check_reports_no_coverage_gap(conn):
+    """End-to-end proof of the fix: a notice fetched before migration 0058,
+    then backfilled, is no longer flagged when --kag sees the same ocid.
+    """
+    release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
+
+    class _FakeResult:
+        url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 10, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    # The fixture is a genuinely out-of-scope passenger-transport award --
+    # retitled in-place, the same as test_run_end_to_end, purely so the
+    # scope filter passes and this test actually reaches the check it means
+    # to exercise.
+    release["tender"]["title"] = "Substance misuse treatment and recovery service recommissioning"
+    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    proc.backfill_channel_sightings(conn)
+
+    row = {"ocid": release["ocid"], "tender_title": release["tender"]["title"], "buyer": "West Northamptonshire Council"}
+    index = proc._kaggle_column_index(list(row.keys()))
+    proc._process_kaggle_release_row(conn, "m01_procurement", row, index, _kaggle_result())
+
+    assert conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'kaggle_coverage_gap'").fetchone() is None
+
+
 def test_walk_and_process_csv_archive_skips_months_already_done(httpx_mock, settings, conn):
     _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
     db.set_cursor(conn, "m01_procurement:cf_csv", "DONE:2016-06-01")

@@ -431,6 +431,31 @@ def graph_backfill() -> None:
             conn.close()
 
 
+@app.command("backfill-procurement-sightings")
+def backfill_procurement_sightings() -> None:
+    """One-time repair: populate procurement_channel_sightings for contracts
+    rows written before that table existed, so --kag's coverage-gap check
+    stops misreporting them. See m01_procurement.backfill_channel_sightings
+    for why this is needed and what it deliberately does not backfill.
+    """
+    conn = None
+    try:
+        from pipeline.modules.m01_procurement import backfill_channel_sightings
+
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        inserted = backfill_channel_sightings(conn)
+        conn.commit()
+        typer.echo(f"procurement sightings backfill: {inserted} rows added")
+    except Exception as exc:
+        typer.echo(f"procurement sightings backfill failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.command("list-modules")
 def list_modules() -> None:
     """List every module currently registered with the CLI."""
