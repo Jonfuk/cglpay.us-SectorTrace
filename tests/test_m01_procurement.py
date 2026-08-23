@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import re
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -637,6 +639,247 @@ def test_walk_and_process_csv_archive_skips_robots_disallowed_file(httpx_mock, s
     assert review_row["raw_value"] == "https://blocked-mirror.test/day0.csv"
     # The month still completes -- one disallowed file does not stall the cursor.
     assert db.get_cursor(conn, "m01_procurement:cf_csv") == "DONE:2014-12-01"
+
+
+def test_process_release_records_a_channel_sighting(conn):
+    """Every channel that writes `contracts` also leaves a notice-level
+    summary in procurement_channel_sightings -- not just --kag -- so the
+    three supply routes can be compared against each other directly.
+    """
+    release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+    lookup = proc._build_authority_lookup(conn)
+
+    class _FakeResult:
+        url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 10, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+
+    row = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        (release["id"], proc.SOURCE_FTS)).fetchone()
+    assert row is not None
+    assert row["buyer_name"] == "West Northamptonshire Council"
+    assert row["total_award_value_amount"] == 90000
+    assert row["supplier_names"] == "H2S Cars Ltd"
+
+
+# --- Kaggle cross-check archive ------------------------------------------------
+
+def _kaggle_result(url: str = "https://www.kaggle.com/api/v1/datasets/download/x") -> object:
+    class _FakeResult:
+        pass
+
+    result = _FakeResult()
+    result.url = url
+    result.retrieved_at = __import__("datetime").datetime(2026, 8, 23, tzinfo=__import__("datetime").timezone.utc)
+    result.status_code = 200
+    result.payload_sha256 = "kaggledeadbeef"
+    return result
+
+
+def test_kaggle_field_matches_across_naming_variants():
+    """The real file's column names were not independently verified against
+    a fetched copy (see the module docstring) -- the lookup has to survive
+    both the uploader's own extraction-script names and the alternate names
+    Kaggle's own dataset preview showed for the same logical fields.
+    """
+    index_a = proc._kaggle_column_index(["release_id", "tender_title", "tender_endDate"])
+    index_b = proc._kaggle_column_index(["id", "title", "tender_end_date"])
+
+    row_a = {"release_id": "abc-1", "tender_title": "Recovery service", "tender_endDate": "2026-01-01"}
+    row_b = {"id": "abc-1", "title": "Recovery service", "tender_end_date": "2026-01-01"}
+
+    for row, index in ((row_a, index_a), (row_b, index_b)):
+        assert proc._kaggle_field(row, index, "release_id", "id", "notice_id") == "abc-1"
+        assert proc._kaggle_field(row, index, "tender_title", "release_title", "title") == "Recovery service"
+
+
+def test_kaggle_field_returns_none_for_blank_or_missing():
+    index = proc._kaggle_column_index(["buyer_name"])
+    assert proc._kaggle_field({"buyer_name": ""}, index, "buyer_name") is None
+    assert proc._kaggle_field({"buyer_name": "X"}, index, "cpv_id") is None
+
+
+def test_map_kaggle_row_to_release_builds_ocds_shape():
+    row = {
+        "release_id": "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",
+        "ocid": "ocds-b5fd17-abc",
+        "tender_title": "Substance misuse recovery service",
+        "buyer_name": "West Northamptonshire Council",
+        "cpv_id": "85312000",
+        "value_amount": "90000",
+        "value_currency": "GBP",
+        "award_value_amount": "90000",
+        "supplier_party_names": "Change, Grow, Live",
+        "supplier_party_ids": "S1",
+    }
+    index = proc._kaggle_column_index(list(row.keys()))
+    release = proc._map_kaggle_row_to_release(row, index)
+
+    assert release["id"] == "4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466"
+    assert release["ocid"] == "ocds-b5fd17-abc"
+    assert release["tender"]["value"] == {"amount": 90000.0, "currency": "GBP"}
+    assert release["tender"]["classification"] == {"scheme": "CPV", "id": "85312000"}
+    assert release["buyer"] == {"name": "West Northamptonshire Council"}
+    assert release["awards"][0]["suppliers"] == [{"id": "S1", "name": "Change, Grow, Live"}]
+
+
+def test_map_kaggle_row_to_release_none_without_an_id():
+    assert proc._map_kaggle_row_to_release({"buyer_name": "X"}, {"buyername": "buyer_name"}) is None
+
+
+def test_process_kaggle_release_row_out_of_scope_writes_nothing(conn):
+    row = {"release_id": "abc-1", "tender_title": "Playground equipment"}
+    index = proc._kaggle_column_index(list(row.keys()))
+    written = proc._process_kaggle_release_row(conn, "m01_procurement", row, index, _kaggle_result())
+    assert written == 0
+    assert conn.execute("SELECT * FROM procurement_channel_sightings").fetchone() is None
+
+
+def test_process_kaggle_release_row_matched_writes_sighting_and_coverage_gap(conn):
+    row = {
+        "release_id": "abc-2", "tender_title": "Substance misuse recovery service",
+        "buyer_name": "West Northamptonshire Council", "value_amount": "50000", "value_currency": "GBP",
+    }
+    index = proc._kaggle_column_index(list(row.keys()))
+    written = proc._process_kaggle_release_row(conn, "m01_procurement", row, index, _kaggle_result())
+    assert written == 1
+
+    sighting = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'abc-2'").fetchone()
+    assert sighting["source_system"] == proc.SOURCE_CF_KAGGLE
+    assert sighting["tender_value_amount"] == 50000
+
+    # No other channel has seen this notice id -- a coverage gap, not a mismatch.
+    review = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'kaggle_coverage_gap'").fetchone()
+    assert review["raw_value"] == "abc-2"
+    assert conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'kaggle_cross_channel_mismatch'").fetchone() is None
+
+
+def test_check_kaggle_against_other_channels_flags_a_real_mismatch(conn):
+    _record = proc._record_channel_sighting
+    fts_result = _kaggle_result("https://www.find-tender.service.gov.uk/x")
+    kag_result = _kaggle_result()
+
+    _record(conn, "abc-3", proc.SOURCE_FTS, {
+        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+        "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
+        "total_award_value_amount": None, "supplier_names": None, "date_published": None,
+    }, fts_result)
+    _record(conn, "abc-3", proc.SOURCE_CF_KAGGLE, {
+        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+        "cpv_codes": None, "tender_value_amount": 12345, "tender_value_currency": "GBP",
+        "total_award_value_amount": None, "supplier_names": None, "date_published": None,
+    }, kag_result)
+
+    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "abc-3")
+
+    review = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'kaggle_cross_channel_mismatch'").fetchone()
+    assert review is not None
+    context = json.loads(review["context_json"])
+    assert context["fields"]["tender_value_amount"] == {"kaggle": 12345, proc.SOURCE_FTS: 90000}
+    assert conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'kaggle_coverage_gap'").fetchone() is None
+
+
+def test_check_kaggle_against_other_channels_agrees_raises_nothing(conn):
+    _record = proc._record_channel_sighting
+    shared_fields = {
+        "ocid": None, "buyer_name": "West Northamptonshire Council", "title": "Recovery service",
+        "cpv_codes": None, "tender_value_amount": 90000, "tender_value_currency": "GBP",
+        "total_award_value_amount": None, "supplier_names": None, "date_published": None,
+    }
+    _record(conn, "abc-4", proc.SOURCE_CF, dict(shared_fields), _kaggle_result("https://cf.example"))
+    _record(conn, "abc-4", proc.SOURCE_CF_KAGGLE, dict(shared_fields), _kaggle_result())
+
+    proc._check_kaggle_against_other_channels(conn, "m01_procurement", "abc-4")
+
+    assert conn.execute("SELECT * FROM review_queue").fetchone() is None
+
+
+def test_kaggle_csv_text_reads_plain_csv(conn):
+    text = proc._kaggle_csv_text(b"a,b\r\n1,2\r\n", "m01_procurement", conn, "https://example.com")
+    assert text == "a,b\r\n1,2\r\n"
+
+
+def test_kaggle_csv_text_unzips_a_zip_response(conn):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("contracts_finder_2014-2025.csv", "a,b\r\n1,2\r\n")
+    text = proc._kaggle_csv_text(buf.getvalue(), "m01_procurement", conn, "https://example.com")
+    assert text == "a,b\r\n1,2\r\n"
+
+
+def test_kaggle_csv_text_records_parse_failure_for_zip_with_no_csv(conn):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("readme.txt", "not a csv")
+    text = proc._kaggle_csv_text(buf.getvalue(), "m01_procurement", conn, "https://example.com")
+    assert text is None
+    assert conn.execute("SELECT * FROM parse_failures WHERE field_name = 'kaggle_zip'").fetchone() is not None
+
+
+def test_walk_and_process_kaggle_end_to_end(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://www.kaggle.com")
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+    csv_body = (
+        "release_id,tender_title,buyer_name,value_amount,value_currency\r\n"
+        "abc-5,Substance misuse recovery service,West Northamptonshire Council,90000,GBP\r\n"
+        "abc-6,Playground equipment,Some Council,1000,GBP\r\n"
+    )
+    httpx_mock.add_response(url=proc.KAGGLE_DOWNLOAD_URL, text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
+        client.set_basic_auth("user", "key")
+        matched = proc._walk_and_process_kaggle(
+            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False)
+
+    assert matched == 1  # only the in-scope row
+    assert db.get_cursor(conn, "m01_procurement:kaggle") == "DONE"
+    row = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = 'abc-5'").fetchone()
+    assert row["source_system"] == proc.SOURCE_CF_KAGGLE
+
+
+def test_walk_and_process_kaggle_skips_when_already_done(httpx_mock, settings, conn):
+    db.set_cursor(conn, "m01_procurement:kaggle", "DONE")
+    # No response registered: if this re-fetched, the missing mock would fail the test.
+    with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
+        matched = proc._walk_and_process_kaggle(
+            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False)
+    assert matched == 0
+
+
+def test_walk_and_process_kaggle_stops_at_limit_and_saves_row_offset(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://www.kaggle.com")
+    csv_body = (
+        "release_id,tender_title\r\n"
+        "abc-7,Substance misuse recovery service\r\n"
+        "abc-8,Substance misuse treatment service\r\n"
+    )
+    httpx_mock.add_response(url=proc.KAGGLE_DOWNLOAD_URL, text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
+        client.set_basic_auth("user", "key")
+        matched = proc._walk_and_process_kaggle(
+            client, conn, "m01_procurement", "m01_procurement:kaggle", 1, False)
+
+    assert matched == 1
+    assert db.get_cursor(conn, "m01_procurement:kaggle") == "ROW:1"
+
+
+def test_require_kaggle_credentials_raises_when_unset(settings):
+    settings.kaggle_username = None
+    settings.kaggle_key = None
+    with pytest.raises(RuntimeError, match="KAGGLE_USERNAME"):
+        settings.require_kaggle_credentials()
 
 
 def test_walk_and_process_csv_archive_skips_months_already_done(httpx_mock, settings, conn):

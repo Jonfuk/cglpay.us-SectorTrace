@@ -1339,9 +1339,17 @@ def run(
     csv: bool = typer.Option(
         False, "--csv", help="m01 only: run just the Contracts Finder CSV archive "
                               "backfill, skip the live-API channels. The default when "
-                              "none of --api/--csv/--all is given."),
+                              "none of --api/--csv/--kag/--all is given."),
+    kag: bool = typer.Option(
+        False, "--kag", help="m01 only: run just the Kaggle cross-check archive -- "
+                              "compares --api/--csv coverage against a third-party "
+                              "re-host of Contracts Finder, writes only to "
+                              "procurement_channel_sightings/review_queue, never to "
+                              "contracts. Needs KAGGLE_USERNAME/KAGGLE_KEY in .env. "
+                              "Never included in --all."),
     all_sources: bool = typer.Option(
-        False, "--all", help="m01 only: run every channel (live APIs + CSV archive)"),
+        False, "--all", help="m01 only: run every channel that writes contracts "
+                              "(live APIs + CSV archive) -- not --kag, see --kag's help"),
 ) -> None:
     if limit is not None and limit < 1:
         # Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
@@ -1352,9 +1360,10 @@ def run(
                   "Use --dry-run to fetch and parse without writing.")
         raise typer.Exit(code=1)
 
-    chosen_sources = [name for name, flag in (("api", api), ("csv", csv), ("all", all_sources)) if flag]
+    chosen_sources = [name for name, flag in
+                      (("api", api), ("csv", csv), ("kag", kag), ("all", all_sources)) if flag]
     if len(chosen_sources) > 1:
-        ui.error("--api, --csv and --all are mutually exclusive; got "
+        ui.error("--api, --csv, --kag and --all are mutually exclusive; got "
                   + ", ".join(f"--{name}" for name in chosen_sources) + ".")
         raise typer.Exit(code=1)
     # csv is the default: m01's live-API channels are only walked on request.

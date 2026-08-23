@@ -283,6 +283,15 @@ class Settings(BaseSettings):
     companies_house_api_key: str | None = None
     cqc_subscription_key: str | None = None
 
+    # m01's --kag channel: a third-party (not the publisher) re-hosting of
+    # Contracts Finder notices on Kaggle, downloaded via Kaggle's API rather
+    # than an anonymous fetch — see the module docstring for why this channel
+    # never writes to `contracts` itself. Kaggle authenticates downloads with
+    # HTTP basic auth: username plus an API key, both from a free account's
+    # kaggle.json (Account settings -> Create New Token).
+    kaggle_username: str | None = None
+    kaggle_key: str | None = None
+
     # Deliberately opt-in. These are used only by m15 when a person promotes a
     # WhatDoTheyKnow request candidate; no other module may route traffic
     # through either provider, and the ordinary CSV/feed/disclosure-log
@@ -504,6 +513,16 @@ class Settings(BaseSettings):
                 "subscription key and set it before running m05_cqc."
             )
         return self.cqc_subscription_key
+
+    def require_kaggle_credentials(self) -> tuple[str, str]:
+        if not self.kaggle_username or not self.kaggle_key:
+            raise RuntimeError(
+                "KAGGLE_USERNAME and KAGGLE_KEY are not both set in .env. "
+                "Create a free Kaggle account and an API token (Account "
+                "settings -> Create New Token) before running "
+                "m01_procurement --kag."
+            )
+        return self.kaggle_username, self.kaggle_key
 
     def require_brightdata_key(self) -> str:
         if not self.brightdata_api_key:

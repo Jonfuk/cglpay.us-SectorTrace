@@ -71,9 +71,9 @@ class ModuleContext:
     since: str | None
     dry_run: bool
     limit: int | None
-    # "api" | "csv" | "all" — which of a module's own channels to run. Only
-    # m01 reads this today (see its module docstring); every other module
-    # ignores it, so the default of "all" is a no-op for them.
+    # "api" | "csv" | "kag" | "all" — which of a module's own channels to
+    # run. Only m01 reads this today (see its module docstring); every other
+    # module ignores it, so the default of "all" is a no-op for them.
     source: str = "all"
     # Write-only. A module reports progress through this and collects exactly
     # the same evidence whether or not anything is displaying it — the default

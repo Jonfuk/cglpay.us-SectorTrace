@@ -97,9 +97,9 @@ class TestTheTreesMatch:
     def test_the_expected_number_of_them(self):
         # A count, so that deleting the same file from both trees is still a
         # deliberate act rather than something the equality check above waves
-        # through. 57 adds sar_documents and its restricted companions, the
-        # Safeguarding Adult Reviews m28_sar_reports collects.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 57
+        # through. 58 adds procurement_channel_sightings, m01's cross-channel
+        # comparison table for the --kag Kaggle cross-check.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 58
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

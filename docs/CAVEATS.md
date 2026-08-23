@@ -92,6 +92,22 @@ anyone using it.
   not the live API page. A month with few rows here may be a quiet month or
   a thin archive — this pipeline does not compute or assert "completeness"
   for either channel, only what was published.
+- **The optional `--kag` channel never contributes to `contracts` at all.**
+  It cross-checks `--api`/`--csv` against a third-party re-host of Contracts
+  Finder on Kaggle (a single author's university coursework upload, not the
+  publisher) rather than adding coverage, because it is the same underlying
+  source the other two channels already fetch directly. Its own observations
+  live only in `procurement_channel_sightings` (one row per notice per
+  channel, so the three routes can be compared directly) and in
+  `review_queue` as `kaggle_coverage_gap` (a notice Kaggle has that neither
+  `--api` nor `--csv` recorded — check the live source by hand) or
+  `kaggle_cross_channel_mismatch` (the channels disagree on a field that
+  should be identical). Neither review item is a finding about which channel
+  is right; both are pointers for a human to check. The Kaggle file also
+  keeps only the first award on a multi-award notice, so award totals are
+  never compared across channels — only buyer name, title and the tender
+  value estimate, fields that should be byte-identical however each channel
+  reached them.
 
 ### Employment tribunals (Module 2)
 

@@ -26,13 +26,33 @@ archive channel applies the identical matching and buyer/supplier logic to
 releases reconstructed from flattened CSV rows — see
 `_unflatten_release_row`.
 
-`pipeline run m01_procurement` takes `--api`, `--csv` or `--all` to scope a
-run to one of the two channel groups above (the two live APIs, or the CSV
-archive) instead of every channel — `--csv` is the default when none is
-given, since the two live channels are re-walked incrementally on every run
-via their own cursors while the CSV archive is a one-time historical
-backfill. Passing the same flag to any other module is a no-op with a
-warning; see ModuleMeta.supports_source in pipeline/registry.py.
+A fourth, optional channel — `--kag` — cross-checks the three above against
+a third-party re-host of Contracts Finder on Kaggle (a single author's
+university coursework upload, not CF's own publisher). It is deliberately
+NOT a fourth way to populate `contracts`: it is the same source the other
+three already fetch directly from the publisher, so a row from it would
+carry weaker provenance than the primary channels for no new coverage, and
+because it spans 2014-2025 — the whole of both other channels' windows,
+unlike CF-CSV/live's clean split — it would silently overwrite a
+primary-sourced value on every overlapping notice if it wrote there too. It
+writes only to `procurement_channel_sightings` (migration 0058) and to
+`review_queue` (`kaggle_coverage_gap`, `kaggle_cross_channel_mismatch`) —
+see `_check_kaggle_against_other_channels`. Every channel, including the
+three that do write `contracts`, records its own per-notice summary to that
+same sightings table, so "do the three supply routes agree, and does one see
+something the others miss" is answerable directly from it, not just from
+whatever --kag happens to flag.
+
+`pipeline run m01_procurement` takes `--api`, `--csv`, `--kag` or `--all` to
+scope a run to one channel (or, for `--all`, both live-API/CSV-archive
+channels together — `--kag` is never implied by `--all` and always needs
+its own invocation, since it needs Kaggle credentials the other three don't
+and exists to audit them rather than to be run routinely alongside them).
+`--csv` is the default when none is given, since the two live channels are
+re-walked incrementally on every run via their own cursors while the CSV
+archive is a one-time historical backfill. Passing an unsupported flag to
+any other module is a no-op with a warning; see ModuleMeta.supports_source
+in pipeline/registry.py.
 
 Buyer-to-ons_code matching is deterministic normalisation first (strip
 common council-name suffixes, compare against pipeline.db's authorities
@@ -46,6 +66,7 @@ import csv
 import io
 import json
 import re
+import zipfile
 from datetime import date, timedelta
 
 import structlog
@@ -66,9 +87,31 @@ log = structlog.get_logger()
 SOURCE_FTS = "find_a_tender"
 SOURCE_CF = "contracts_finder"
 SOURCE_CF_CSV = "contracts_finder_csv_archive"
+SOURCE_CF_KAGGLE = "contracts_finder_kaggle_archive"
 FTS_URL = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages"
 CF_URL = "https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search"
 WINDOW_START = date(2020, 8, 6)
+
+# qmanhbeo/uk-public-procurement-data-contracts-finder on Kaggle: a single
+# author's "cleaned and merged" re-host of Contracts Finder notices
+# (2014-2025), uploaded as a university coursework project. See the module
+# docstring for why this channel exists and what it is and is not allowed to
+# write. Kaggle's per-file download endpoint is used (rather than the
+# whole-dataset endpoint, which always zips) so the common case is a plain
+# CSV response; `_kaggle_csv_text` still checks for a zip, since this is a
+# third-party API this pipeline does not control the exact behaviour of.
+KAGGLE_OWNER = "qmanhbeo"
+KAGGLE_DATASET_SLUG = "uk-public-procurement-data-contracts-finder"
+KAGGLE_CSV_FILENAME = "contracts_finder_2014-2025.csv"
+KAGGLE_DOWNLOAD_URL = (
+    f"https://www.kaggle.com/api/v1/datasets/download/{KAGGLE_OWNER}/"
+    f"{KAGGLE_DATASET_SLUG}/{KAGGLE_CSV_FILENAME}"
+)
+# How often the kaggle walk checkpoints its row offset and commits. The file
+# is one ~700MB download processed as a single long loop rather than many
+# small requests, so there is no natural per-request checkpoint the way the
+# other three channels have one per page/file.
+KAGGLE_COMMIT_EVERY_ROWS = 1000
 
 # Crown Commercial Service's own CKAN catalogue of daily Contracts Finder
 # OCDS-flattened-CSV dumps. robots.txt on this host disallows /api/ wholesale
@@ -254,6 +297,23 @@ def _provenance(result, source_system: str) -> dict:
     }
 
 
+def _record_channel_sighting(conn, notice_id: str, source_system: str, fields: dict, result) -> None:
+    """What *this* channel itself observed for `notice_id`, kept alongside
+    (never instead of) `contracts` — see migration 0058. Every channel calls
+    this, not just --kag, so "do the supply routes agree" is answerable from
+    one table rather than only from whatever --kag's own check flags.
+    """
+    db.upsert(conn, "procurement_channel_sightings", {
+        "notice_id": notice_id,
+        "source_system": source_system,
+        **fields,
+        "source_url": result.url,
+        "retrieved_at": result.retrieved_at.isoformat(),
+        "http_status": result.status_code,
+        "payload_sha256": result.payload_sha256,
+    }, natural_key=["notice_id", "source_system"])
+
+
 def _process_release(conn, module_name: str, source_system: str, release: dict, result, authority_lookup: dict[str, str]) -> int:
     notice_id = release.get("id")
     if not notice_id:
@@ -283,8 +343,9 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
     provenance = _provenance(result, source_system)
     notice_web_url = published_notice_url(release, source_system)
 
+    supplier_rows = _iter_supplier_rows(release)
     rows_written = 0
-    for supplier_row in _iter_supplier_rows(release):
+    for supplier_row in supplier_rows:
         value_core = supplier_row["value_core"] if supplier_row["value_core"] is not None else tender_value.get("amount")
         value_max = supplier_row["value_max"] if supplier_row["value_max"] is not None else tender_value.get("amountGross")
         currency = supplier_row["currency"] or tender_value.get("currency")
@@ -325,6 +386,24 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
             **provenance,
         }, natural_key=["notice_id", "supplier_id"])
         rows_written += 1
+
+    # Own-award values only (pre tender-estimate fallback) -- summing the
+    # fallback would double-count the tender estimate as if it were an award
+    # every time a notice has no award yet, which is most rows.
+    award_values = [sr["value_core"] for sr in supplier_rows if sr.get("value_core") is not None]
+    supplier_names = "|".join(sr["supplier_name_raw"] for sr in supplier_rows if sr.get("supplier_name_raw")) or None
+    _record_channel_sighting(conn, notice_id, source_system, {
+        "ocid": ocid,
+        "buyer_name": buyer_name,
+        "title": tender.get("title"),
+        "cpv_codes": cpv_codes,
+        "tender_value_amount": tender_value.get("amount"),
+        "tender_value_currency": tender_value.get("currency"),
+        "total_award_value_amount": sum(award_values) if award_values else None,
+        "supplier_names": supplier_names,
+        "date_published": release.get("date"),
+    }, result)
+
     return rows_written
 
 
@@ -668,12 +747,295 @@ def _walk_and_process_csv_archive(
     return total_matched
 
 
+# --- Kaggle cross-check archive: coverage/mismatch audit, never `contracts` -
+#
+# See the module docstring for why this channel exists and what it must not
+# do. The CSV's exact column names were not independently verified against a
+# fetched copy of the file — the uploader's own extraction script does not
+# match the column names Kaggle's dataset preview shows, which is itself a
+# small sign of how lightly curated this particular re-host is — so every
+# logical field is looked up by normalised name (`_kaggle_column_index`)
+# rather than assumed to sit at one fixed header spelling. A field this
+# export does not carry, however it is spelled, reads as NULL, the same
+# "unparseable is NULL" discipline as everywhere else in this module.
+
+def _kaggle_column_index(fieldnames: list[str]) -> dict[str, str]:
+    """Lowercased, non-alphanumeric-stripped column name -> the header's
+    actual spelling, so `tender_endDate`, `tender_end_date` and
+    `TenderEndDate` all resolve to whichever one this export used.
+    """
+    index: dict[str, str] = {}
+    for name in fieldnames:
+        key = re.sub(r"[^a-z0-9]", "", name.lower())
+        index.setdefault(key, name)
+    return index
+
+
+def _kaggle_field(row: dict, index: dict[str, str], *candidates: str) -> str | None:
+    for candidate in candidates:
+        header = index.get(re.sub(r"[^a-z0-9]", "", candidate.lower()))
+        if header is not None:
+            value = row.get(header)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _kaggle_amount(row: dict, index: dict[str, str], *candidates: str) -> float | None:
+    raw = _kaggle_field(row, index, *candidates)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _map_kaggle_row_to_release(row: dict, index: dict[str, str]) -> dict | None:
+    """Reconstructs a minimal OCDS-shaped release from one Kaggle CSV row —
+    just enough of the shape for `_release_matches_scope`,
+    `_extract_cpv_codes` and `_iter_supplier_rows` to run unchanged, the same
+    reuse `_unflatten_release_row` gets for the CSV-archive channel.
+
+    Unlike that channel, the source file is not itself a flattened-JSON
+    serialisation, so there is no general unflattening rule here — each
+    field is named explicitly, defensively, from candidate column names.
+    Returns None (never a partial release) when no id column can be found at
+    all, since a release this pipeline cannot identify cannot be compared
+    against anything.
+    """
+    notice_id = _kaggle_field(row, index, "release_id", "id", "notice_id")
+    if not notice_id:
+        return None
+
+    buyer_name = _kaggle_field(row, index, "buyer_name")
+    tags = _kaggle_field(row, index, "release_tag", "release_tags_all", "tag")
+    cpv_id = _kaggle_field(row, index, "cpv_id")
+    additional_cpv_ids = _kaggle_field(row, index, "additional_cpv_ids") or ""
+
+    value_amount = _kaggle_amount(row, index, "value_amount", "tender_value_amount")
+    value_currency = _kaggle_field(row, index, "value_currency", "tender_value_currency")
+    award_value_amount = _kaggle_amount(row, index, "award_value_amount")
+    award_value_currency = _kaggle_field(row, index, "award_value_currency")
+
+    supplier_names = [n for n in (_kaggle_field(row, index, "supplier_party_names", "award_suppliers_names")
+                                   or "").split("|") if n]
+    supplier_ids = [i for i in (_kaggle_field(row, index, "supplier_party_ids", "award_suppliers_ids")
+                                 or "").split("|") if i]
+
+    tender: dict = {
+        "title": _kaggle_field(row, index, "tender_title", "release_title", "title"),
+        "description": _kaggle_field(row, index, "tender_description", "description"),
+    }
+    if value_amount is not None or value_currency:
+        tender["value"] = {"amount": value_amount, "currency": value_currency}
+    if cpv_id:
+        tender["classification"] = {"scheme": "CPV", "id": cpv_id}
+    if additional_cpv_ids:
+        tender["items"] = [{"additionalClassifications": [
+            {"scheme": "CPV", "id": c} for c in additional_cpv_ids.split("|") if c]}]
+
+    parties = []
+    for position, name in enumerate(supplier_names):
+        supplier_id = supplier_ids[position] if position < len(supplier_ids) else ""
+        parties.append({"id": supplier_id, "name": name, "roles": ["supplier"]})
+
+    release: dict = {
+        "id": notice_id,
+        "ocid": _kaggle_field(row, index, "ocid"),
+        "tag": tags.split("|") if tags else [],
+        "date": _kaggle_field(row, index, "release_date", "notice_publish_date", "publisheddate"),
+        "tender": tender,
+        "buyer": {"name": buyer_name} if buyer_name else {},
+        "parties": parties,
+    }
+
+    if award_value_amount is not None or supplier_names:
+        award: dict = {"id": "1"}
+        if award_value_amount is not None:
+            award["value"] = {"amount": award_value_amount, "currency": award_value_currency}
+        award["suppliers"] = [
+            {"id": supplier_ids[position] if position < len(supplier_ids) else "", "name": name}
+            for position, name in enumerate(supplier_names)
+        ]
+        release["awards"] = [award]
+
+    contract_start = _kaggle_field(row, index, "contract_startdate", "contract_start_date")
+    contract_end = _kaggle_field(row, index, "contract_enddate", "contract_end_date")
+    if contract_start or contract_end:
+        release["contracts"] = [{"awardID": "1", "period": {"startDate": contract_start, "endDate": contract_end}}]
+
+    return release
+
+
+def _check_kaggle_against_other_channels(conn, module_name: str, notice_id: str) -> None:
+    """Everything --kag itself decides: never a correction to `contracts`,
+    only a review item pointing a human at what to check, because Kaggle's
+    own transcription is not trusted over the primary channels'.
+
+    A notice with no sighting from any other source_system is a coverage
+    gap worth checking by hand against the live source — most plausibly it
+    means the live walk or CSV archive missed something, since --api/--csv
+    already walk the same underlying publisher this Kaggle re-host does.
+    Where another channel does have the notice, only fields that should be
+    byte-identical (both ultimately came from the same published OCDS
+    release) are compared — `total_award_value_amount` is deliberately not
+    one of them, since Kaggle keeps only the first award on a multi-award
+    notice and would "mismatch" against every genuinely multi-award notice
+    for a reason that has nothing to do with either channel being wrong.
+    """
+    kaggle_row = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        (notice_id, SOURCE_CF_KAGGLE)).fetchone()
+    others = conn.execute(
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system != ?",
+        (notice_id, SOURCE_CF_KAGGLE)).fetchall()
+
+    if not others:
+        db.record_review_item(conn, module_name, "kaggle_coverage_gap", notice_id, json.dumps({
+            "note": "seen in the Kaggle re-host but not recorded by --api or --csv for this "
+                    "notice id; check whether the live walk or CSV archive missed it",
+            "buyer_name": kaggle_row["buyer_name"], "title": kaggle_row["title"],
+        }))
+        return
+
+    for other in others:
+        mismatches = {}
+        for field in ("buyer_name", "title", "tender_value_amount", "tender_value_currency"):
+            kaggle_value, other_value = kaggle_row[field], other[field]
+            if kaggle_value is not None and other_value is not None and kaggle_value != other_value:
+                mismatches[field] = {"kaggle": kaggle_value, other["source_system"]: other_value}
+        if mismatches:
+            db.record_review_item(conn, module_name, "kaggle_cross_channel_mismatch", notice_id,
+                                   json.dumps({"other_source": other["source_system"], "fields": mismatches}))
+
+
+def _process_kaggle_release_row(conn, module_name: str, row: dict, index: dict[str, str], result) -> int:
+    release = _map_kaggle_row_to_release(row, index)
+    if release is None:
+        db.record_parse_failure(conn, module_name, "kaggle_row", json.dumps(row)[:500],
+                                 "no recognisable notice/release id column", source_url=result.url)
+        return 0
+    if not _release_matches_scope(release):
+        return 0
+
+    notice_id = release["id"]
+    supplier_rows = _iter_supplier_rows(release)
+    award_values = [sr["value_core"] for sr in supplier_rows if sr.get("value_core") is not None]
+    supplier_names = "|".join(sr["supplier_name_raw"] for sr in supplier_rows if sr.get("supplier_name_raw")) or None
+    tender_value = (release.get("tender") or {}).get("value") or {}
+
+    _record_channel_sighting(conn, notice_id, SOURCE_CF_KAGGLE, {
+        "ocid": release.get("ocid"),
+        "buyer_name": (release.get("buyer") or {}).get("name"),
+        "title": (release.get("tender") or {}).get("title"),
+        "cpv_codes": ",".join(sorted(_extract_cpv_codes(release))) or None,
+        "tender_value_amount": tender_value.get("amount"),
+        "tender_value_currency": tender_value.get("currency"),
+        "total_award_value_amount": sum(award_values) if award_values else None,
+        "supplier_names": supplier_names,
+        "date_published": release.get("date"),
+    }, result)
+
+    _check_kaggle_against_other_channels(conn, module_name, notice_id)
+    return 1
+
+
+def _kaggle_csv_text(body: bytes, module_name: str, conn, source_url: str) -> str | None:
+    """Kaggle's per-file download endpoint (used here, over the
+    whole-dataset one, precisely to avoid this) has been observed to serve
+    the raw file directly; handled defensively rather than assumed, since
+    this is a third-party API this pipeline does not control the behaviour
+    of. `PK\\x03\\x04` is the zip local-file-header magic number.
+    """
+    payload = body
+    if body[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                csv_names = [n for n in archive.namelist() if n.lower().endswith(".csv")]
+                if not csv_names:
+                    db.record_parse_failure(conn, module_name, "kaggle_zip", source_url,
+                                             "zip archive contains no CSV member")
+                    return None
+                payload = archive.read(csv_names[0])
+        except zipfile.BadZipFile as exc:
+            db.record_parse_failure(conn, module_name, "kaggle_zip", source_url, str(exc))
+            return None
+    try:
+        return payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        db.record_parse_failure(conn, module_name, "kaggle_csv", source_url, str(exc))
+        return None
+
+
+def _walk_and_process_kaggle(
+    client: PipelineHTTPClient, conn, module_name: str, cursor_key: str,
+    limit: int | None, dry_run: bool,
+) -> int:
+    """Downloads the Kaggle archive's one CSV file and walks it row by row.
+
+    The download itself goes through the same conditional-request cache and
+    content-addressed archive as every other fetch in this pipeline, so only
+    the first run pays the ~700MB transfer — a later run's `client.get()`
+    gets a 304 and the cached bytes. Checkpointed by row offset (`ROW:n`),
+    since one file has no natural per-request boundary to checkpoint on the
+    way the other three channels' pages/months do; `DONE` once every row has
+    been read means later runs are a no-op until the archive changes.
+    """
+    cursor = db.get_cursor(conn, cursor_key)
+    if cursor == "DONE":
+        return 0
+    resume_from = int(cursor[4:]) if cursor and cursor.startswith("ROW:") else 0
+
+    result = client.get(KAGGLE_DOWNLOAD_URL)
+    if not result.ok:
+        db.record_parse_failure(conn, module_name, "kaggle_download", KAGGLE_DOWNLOAD_URL,
+                                 f"status {result.status_code}", source_url=result.url)
+        return 0
+
+    text = _kaggle_csv_text(result.body, module_name, conn, result.url)
+    if text is None:
+        return 0
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        db.record_parse_failure(conn, module_name, "kaggle_csv", result.url, "CSV has no header row")
+        return 0
+    index = _kaggle_column_index(reader.fieldnames)
+
+    total_matched = 0
+    processed = 0
+    for row_index, row in enumerate(reader):
+        if row_index < resume_from:
+            continue
+        total_matched += _process_kaggle_release_row(conn, module_name, row, index, result)
+        processed += 1
+
+        if processed % KAGGLE_COMMIT_EVERY_ROWS == 0:
+            db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+            if not dry_run:
+                conn.commit()
+        if limit and processed >= limit:
+            db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+            if not dry_run:
+                conn.commit()
+            return total_matched
+
+    db.set_cursor(conn, cursor_key, "DONE")
+    if not dry_run:
+        conn.commit()
+    return total_matched
+
+
 @register_module(
     "m01_procurement", supports_since=True,
     supports_source=True,
     source_note="'api' runs only the Find a Tender + Contracts Finder live channels; "
                  "'csv' (the CLI default) runs only the pre-WINDOW_START CCS CSV "
-                 "archive backfill; 'all' runs every channel.",
+                 "archive backfill; 'kag' runs only the Kaggle cross-check archive "
+                 "(needs KAGGLE_USERNAME/KAGGLE_KEY); 'all' runs the live channels + "
+                 "CSV archive — 'kag' is never included in 'all' and always needs its "
+                 "own invocation.",
     depends_on=("m00_geography",),
     depends_note="matches free-text buyer names against the authorities table",
 )
@@ -686,12 +1048,14 @@ def run(ctx: ModuleContext) -> None:
         conn.commit()
     authority_lookup = _build_authority_lookup(conn)
 
-    # ctx.source ("api" | "csv" | "all", set by --api/--csv/--all on the CLI,
-    # "csv" by default) scopes this run to one or both channel groups below.
-    # See the register_module() source_note and the module docstring for why
-    # the two live APIs and the CSV archive are independent channels.
-    if ctx.source not in ("api", "csv", "all"):
-        raise ValueError(f"ctx.source must be 'api', 'csv' or 'all'; got {ctx.source!r}")
+    # ctx.source ("api" | "csv" | "kag" | "all", set by --api/--csv/--kag/--all
+    # on the CLI, "csv" by default) scopes this run to one channel below (or,
+    # for "all", the two that write `contracts`). See the register_module()
+    # source_note and the module docstring for why the two live APIs, the CSV
+    # archive and the Kaggle cross-check are four independent channels, and
+    # why "all" never implies "kag".
+    if ctx.source not in ("api", "csv", "kag", "all"):
+        raise ValueError(f"ctx.source must be 'api', 'csv', 'kag' or 'all'; got {ctx.source!r}")
 
     if ctx.source in ("api", "all"):
         window_to = date.today() + timedelta(days=1)
@@ -726,3 +1090,18 @@ def run(ctx: ModuleContext) -> None:
                 authority_lookup, ctx.limit, ctx.dry_run,
             )
         log.info("procurement.source_complete", source="cf_csv", matched_rows=matched)
+
+    if ctx.source == "kag":
+        # Coverage/mismatch audit against a third-party re-host — see the
+        # module docstring. Deliberately excluded from "all": it needs its
+        # own Kaggle credentials, downloads ~700MB on a first run, and exists
+        # to check the other three channels rather than to run alongside
+        # them routinely.
+        ctx.phase("cf_kaggle_archive")
+        kaggle_cursor_key = f"{module_name}:kaggle"
+        username, key = ctx.settings.require_kaggle_credentials()
+        with PipelineHTTPClient(SOURCE_CF_KAGGLE, settings=ctx.settings, conn=conn) as client:
+            client.set_basic_auth(username, key)
+            matched = _walk_and_process_kaggle(client, conn, module_name, kaggle_cursor_key,
+                                                ctx.limit, ctx.dry_run)
+        log.info("procurement.source_complete", source="kaggle", matched_rows=matched)
