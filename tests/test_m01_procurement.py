@@ -114,6 +114,38 @@ def test_release_matches_scope_via_item_primary_classification():
     assert proc._release_matches_scope(release)
 
 
+def test_extract_cpv_codes_from_tender_level_additional_classifications():
+    """Regression: a January 2016 notice ("Framework Agreement for the
+    provision of Vulnerable Victim and Counselling Services") had its only
+    CPV code at the tender level -- not nested in an item at all -- as
+    tender.additionalClassifications[0], a sibling field to
+    tender.classification this function didn't check. Confirmed against the
+    archived bytes 2026-08-24: still absent from contracts after the first
+    (item-level) CPV fix, because this was a second, different gap in the
+    same function.
+    """
+    release = {"tender": {
+        "classification": {"scheme": "CPV", "id": "75200000"},
+        "additionalClassifications": [{"scheme": "CPV", "id": "85141000"}],
+    }}
+    assert proc._extract_cpv_codes(release) == {"75200000", "85141000"}
+
+
+def test_extract_cpv_codes_from_award_level_fields():
+    release = {"awards": [{
+        "classification": {"scheme": "CPV", "id": "85000000"},
+        "additionalClassifications": [{"scheme": "CPV", "id": "85312000"}],
+    }]}
+    assert proc._extract_cpv_codes(release) == {"85000000", "85312000"}
+
+
+def test_release_matches_scope_via_tender_level_additional_classification():
+    release = {"tender": {"title": "Framework Agreement for the provision of Vulnerable "
+                                    "Victim and Counselling Services to Bedfordshire only",
+                           "additionalClassifications": [{"scheme": "CPV", "id": "85141000"}]}}
+    assert proc._release_matches_scope(release)
+
+
 def test_release_matches_scope_via_keyword():
     release = {"tender": {"title": "Substance misuse recovery service recommissioning", "description": ""}}
     assert proc._release_matches_scope(release)
