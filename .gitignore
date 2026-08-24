@@ -4,6 +4,13 @@ secrets/
 *.pem
 *-service-account.json
 
+# The Ansible self-host build's secrets file. ansible-vault encrypts it in
+# place, at which point it's safe to track deliberately with `git add -f` —
+# this is a safety net against committing it unencrypted by mistake, not a
+# statement that an encrypted vault.yml can't be checked in.
+deploy/ansible/group_vars/all/vault.yml
+deploy/ansible/*.retry
+
 # Data — raw archives and the canonical warehouse are local state, not source
 data/raw/
 data/warehouse.db

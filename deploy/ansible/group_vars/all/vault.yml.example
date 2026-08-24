@@ -1,0 +1,43 @@
+---
+# Copy this file to vault.yml, fill in real values, then encrypt it in
+# place before the first run:
+#
+#   cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#   $EDITOR group_vars/all/vault.yml
+#   ansible-vault encrypt group_vars/all/vault.yml
+#
+# To edit it again later: ansible-vault edit group_vars/all/vault.yml
+#
+# Generate strong passwords with, e.g.: openssl rand -base64 24
+
+vault_contact_email: ""
+
+# --- PostgreSQL --------------------------------------------------------------
+# sectortrace_app: owner, DML+DDL — DATABASE_URL. Created as the container's
+# POSTGRES_USER on first boot.
+# sectortrace_reader: SELECT-only — DATABASE_RO_URL. Created by
+# roles/sectortrace/templates/postgres-init-roles.sql.j2, which also grants
+# it SELECT by default on every table sectortrace_app creates from then on,
+# so a later migration's new table doesn't need a manual GRANT.
+vault_postgres_app_password: ""
+vault_postgres_reader_password: ""
+
+# --- Neo4j ---------------------------------------------------------------------
+vault_neo4j_password: ""
+
+# --- Raw archive: S3-compatible bucket (leave blank for local-disk fallback) -
+# Set the whole group together, matching .env.example's own rule — a partial
+# set is refused by the application rather than silently falling back.
+vault_archive_s3_bucket: ""
+vault_archive_s3_endpoint: ""
+vault_archive_s3_region: "ams"
+vault_archive_s3_url_style: "virtual"
+vault_archive_s3_access_key: ""
+vault_archive_s3_secret: ""
+
+# --- Optional module API keys (blank is fine; only that module refuses) -----
+vault_charity_commission_api_key: ""
+vault_companies_house_api_key: ""
+vault_cqc_subscription_key: ""
+vault_kaggle_username: ""
+vault_kaggle_key: ""

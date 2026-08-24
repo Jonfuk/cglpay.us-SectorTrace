@@ -1,0 +1,89 @@
+---
+- name: Create state directory tree (outside the git checkout)
+  ansible.builtin.file:
+    path: "{{ state_dir }}/{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - postgres-init
+    - data/postgres
+    - data/neo4j/data
+    - data/neo4j/logs
+    - data/backups
+    - data/derived
+    - data/caddy
+    - data/caddy-config
+
+- name: Render .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ state_dir }}/.env"
+    mode: "0600"
+
+- name: Render Postgres role-bootstrap SQL (only applied on first init by the image)
+  ansible.builtin.template:
+    src: postgres-init-roles.sql.j2
+    dest: "{{ state_dir }}/postgres-init/01-roles.sql"
+    mode: "0600"
+
+- name: Render the always-on stack's docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.selfhost.yml.j2
+    dest: "{{ state_dir }}/docker-compose.yml"
+    mode: "0644"
+  register: main_compose
+
+- name: Render the on-demand documents-worker compose file
+  ansible.builtin.template:
+    src: docker-compose.documents.yml.j2
+    dest: "{{ state_dir }}/docker-compose.documents.yml"
+    mode: "0644"
+
+- name: Render the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ state_dir }}/Caddyfile"
+    mode: "0644"
+  register: caddyfile
+
+- name: Build the app image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml build app
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+- name: Build the documents-worker image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml build documents
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+- name: Bring up the always-on stack (postgres, neo4j, app, caddy)
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml up -d
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+- name: Reload Caddy if only its config changed
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+    chdir: "{{ state_dir }}"
+  when: caddyfile.changed and not main_compose.changed
+  changed_when: true
+  failed_when: false
+
+- name: Install the backup systemd unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-backup.service
+    - sectortrace-backup.timer
+  notify: reload systemd
+
+- name: Enable and start the backup timer
+  ansible.builtin.service:
+    name: sectortrace-backup.timer
+    enabled: true
+    state: started
