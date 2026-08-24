@@ -1,0 +1,6 @@
+---
+# The Debian `ansible` apt package (installed by ansible-install.sh) already
+# bundles community.general, so this is normally a no-op — kept explicit so
+# the playbook doesn't silently depend on that packaging detail.
+collections:
+  - name: community.general

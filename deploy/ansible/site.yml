@@ -1,0 +1,16 @@
+---
+# Provisions the box this playbook runs on (see inventory/localhost.ini) to
+# serve the whole SectorTrace stack: PostgreSQL, Neo4j, the app, Caddy in
+# front of it on the public domain, and a built (not running) documents
+# image for on-demand OCR/parsing batches. Re-run after `git pull` to apply
+# playbook or compose changes to an existing box — every task is idempotent.
+- name: SectorTrace self-hosted stack
+  hosts: localhost
+  become: true
+  vars:
+    repo_root: "{{ (playbook_dir + '/../..') | realpath }}"
+  roles:
+    - common
+    - docker
+    - firewall
+    - sectortrace

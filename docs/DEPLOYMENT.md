@@ -209,6 +209,14 @@ Rolling back at any point before step 8 is unsetting the variable. After it,
 the SQLite file is as current as the last sync, which `sync-sqlite --check`
 will tell you.
 
+## Somewhere else: your own VPS
+
+`deploy/ansible/` provisions the whole stack — PostgreSQL, Neo4j, the app,
+Caddy for TLS, and a built-but-not-running documents-worker image — as a
+reproducible Docker Compose build on a single Debian VPS, run locally on the
+box itself rather than from a separate control machine. See
+[`deploy/ansible/README.md`](../deploy/ansible/README.md).
+
 ## Somewhere else: Railway, or any managed PostgreSQL
 
 The repository now includes a Railway deployment path in `Dockerfile`,

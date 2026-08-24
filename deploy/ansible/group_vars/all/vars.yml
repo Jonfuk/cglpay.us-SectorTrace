@@ -1,0 +1,59 @@
+---
+# Non-secret configuration. Secrets (passwords, API keys, S3 credentials)
+# live in vault.yml, which is ansible-vault encrypted — see
+# group_vars/all/vault.yml.example.
+
+# --- Domain -----------------------------------------------------------------
+# The A record you're pointing at this VPS. Caddy requests a Let's Encrypt
+# certificate for it automatically the first time it starts — the record
+# must already resolve to this box's IP before that first run, or the ACME
+# HTTP-01 challenge fails.
+domain: "example.org"
+
+# The email Caddy gives Let's Encrypt for expiry notices, and the
+# CONTACT_EMAIL sent in every source's User-Agent per settled decision 5.
+# Kept here rather than only in vault.yml because it isn't a secret; move it
+# there instead if you'd rather not have it in plaintext git history.
+contact_email: "{{ vault_contact_email }}"
+
+# --- Where generated state lives ---------------------------------------------
+# Deliberately outside the git checkout (repo_root), matching the project's
+# own "never write into the repo" rule for anything generated at runtime:
+# .env, the rendered docker-compose.yml, Postgres/Neo4j data volumes, and
+# local backups all live here instead.
+state_dir: /opt/sectortrace/state
+
+# --- Feature flags ------------------------------------------------------------
+# The operator UI has no authentication of its own (settled decision 8), so
+# it is not exposed on the public domain — Caddy 403s /admin and
+# /api/admin/*. Reach it by SSH-tunnelling to the app's loopback-only
+# published port instead:
+#   ssh -L 1801:127.0.0.1:1801 <user>@<this-vps> -N
+#   open http://127.0.0.1:1801/admin
+# Set expose_admin_publicly: true and re-run if you'd rather have Caddy
+# proxy it too (e.g. behind your own IP allowlist added to Caddyfile.j2).
+admin_ui_enabled: true
+expose_admin_publicly: false
+
+# PostgreSQL tuned for the 8GB/4vCPU VM6 "UK AMD G8" plan: Neo4j gets a
+# fixed ~1.5GB, the app process is light, and this leaves headroom for OS
+# cache and an occasional document-processing batch. Adjust if you resize.
+postgres_shared_buffers: "2GB"
+postgres_effective_cache_size: "6GB"
+postgres_max_connections: 100
+postgres_work_mem: "10MB"
+
+neo4j_heap_size: "1g"
+neo4j_pagecache_size: "512m"
+
+# Hardening toggles in the common/firewall roles.
+enable_fail2ban: true
+enable_unattended_upgrades: true
+ssh_port: 22
+
+# Daily verified application-level backup (pipeline backup --keep N), on top
+# of the VPS provider's own daily snapshots. Writes to
+# {{ state_dir }}/data/backups, which is outside both the git checkout and
+# the Postgres data volume.
+backup_keep: 7
+backup_time: "03:15"

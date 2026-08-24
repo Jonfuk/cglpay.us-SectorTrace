@@ -1,0 +1,34 @@
+---
+# Only SSH and Caddy's 80/443 need to be reachable from the internet.
+# Postgres, Neo4j, and the app itself are published to 127.0.0.1 only (see
+# roles/sectortrace/templates/docker-compose.selfhost.yml.j2), so ufw here
+# is defense-in-depth for those rather than the only thing stopping them
+# being reachable — note that Docker manipulates iptables directly for
+# published ports, which is exactly why every port that isn't meant to be
+# public is bound to loopback rather than left to ufw alone.
+- name: Set ufw default policies
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: Allow SSH (rate-limited against brute force)
+  community.general.ufw:
+    rule: limit
+    port: "{{ ssh_port | string }}"
+    proto: tcp
+
+- name: Allow HTTP/HTTPS for Caddy
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "80"
+    - "443"
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
