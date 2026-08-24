@@ -187,19 +187,32 @@ def _match_buyer(raw_name: str, authority_lookup: dict[str, str]) -> str | None:
 
 
 def _extract_cpv_codes(release: dict) -> set[str]:
+    """Every place a release can carry a CPV code, across two OCDS
+    conventions this pipeline has to read at once: Find a Tender puts an
+    item's CPV under `additionalClassifications[]`, while the pre-2020
+    Contracts Finder OCDS export (what the CSV archive channel reconstructs)
+    puts it under `classification` — the item's *primary* classification, a
+    genuinely different standard OCDS field, not a formatting variant of the
+    other. Checking only one silently drops every release using the other,
+    with no error to show for it: an unmatched CPV code looks identical to
+    an absent one. Confirmed against a live sample (2026-08-23): a 2015
+    Contracts Finder notice with `items[0].classification.id = 85000000`
+    sitting untouched in the archived bytes, invisible to scope-matching
+    because only `additionalClassifications` was read.
+    """
     codes: set[str] = set()
     tender = release.get("tender") or {}
     classification = tender.get("classification") or {}
     if classification.get("scheme") == "CPV" and classification.get("id"):
         codes.add(classification["id"])
     for item in tender.get("items") or []:
-        for c in item.get("additionalClassifications") or []:
-            if c.get("scheme") == "CPV" and c.get("id"):
+        for c in [item.get("classification"), *(item.get("additionalClassifications") or [])]:
+            if c and c.get("scheme") == "CPV" and c.get("id"):
                 codes.add(c["id"])
     for award in release.get("awards") or []:
         for item in award.get("items") or []:
-            for c in item.get("additionalClassifications") or []:
-                if c.get("scheme") == "CPV" and c.get("id"):
+            for c in [item.get("classification"), *(item.get("additionalClassifications") or [])]:
+                if c and c.get("scheme") == "CPV" and c.get("id"):
                     codes.add(c["id"])
     return codes
 

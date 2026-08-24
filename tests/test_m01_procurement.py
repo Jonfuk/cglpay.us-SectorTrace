@@ -84,6 +84,36 @@ def test_extract_cpv_codes_from_tender_and_award_items():
     assert proc._extract_cpv_codes(release) == {"85000000", "85312000"}
 
 
+def test_extract_cpv_codes_from_item_primary_classification():
+    """Regression: the pre-2020 Contracts Finder OCDS export (what the CSV
+    archive channel reconstructs) puts an item's CPV code under
+    `classification`, not `additionalClassifications` -- a real 2015 notice
+    ("Derbyshire Educational Psychology Service") was invisible to scope
+    matching until this was checked too, confirmed against the archived
+    bytes 2026-08-23.
+    """
+    release = {
+        "tender": {"items": [{"classification": {"scheme": "CPV", "id": "85000000"}}]},
+        "awards": [{"items": [{"classification": {"scheme": "CPV", "id": "85312000"}}]}],
+    }
+    assert proc._extract_cpv_codes(release) == {"85000000", "85312000"}
+
+
+def test_extract_cpv_codes_from_both_item_classification_fields_at_once():
+    release = {"tender": {"items": [{
+        "classification": {"scheme": "CPV", "id": "85000000"},
+        "additionalClassifications": [{"scheme": "CPV", "id": "85312000"}],
+    }]}}
+    assert proc._extract_cpv_codes(release) == {"85000000", "85312000"}
+
+
+def test_release_matches_scope_via_item_primary_classification():
+    release = {"tender": {"title": "Derbyshire Educational Psychology Service", "items": [
+        {"classification": {"scheme": "CPV", "id": "85000000"}}
+    ]}}
+    assert proc._release_matches_scope(release)
+
+
 def test_release_matches_scope_via_keyword():
     release = {"tender": {"title": "Substance misuse recovery service recommissioning", "description": ""}}
     assert proc._release_matches_scope(release)
