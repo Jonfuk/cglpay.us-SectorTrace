@@ -41,7 +41,11 @@ does not alter Unraid's host packages or the database.
 The worker deliberately installs the lightweight `pymupdf` parser and
 OCRmyPDF rather than the full Docling extra. The tracked batch defaults to
 `pymupdf`; installing Docling would add PyTorch and CUDA libraries of several
-gigabytes without benefiting that batch.
+gigabytes without benefiting that batch. Legacy binary `.doc` files
+(`application/msword`) are parsed through the `antiword` system binary; PDF,
+DOCX, PPTX and HTML have their own stdlib/pymupdf parsers. A raw object in
+any other format is skipped with a recorded reason (`SKIPPED_UNSUPPORTED_FORMAT`)
+rather than aborting the batch.
 
 ## Configuration and storage
 
@@ -85,7 +89,7 @@ Then verify the required binaries:
 
 ```bash
 docker run --rm --entrypoint /bin/sh sectortrace-document-worker:latest \
-  -c 'tesseract --version && gs --version && ocrmypdf --version'
+  -c 'tesseract --version && gs --version && ocrmypdf --version && command -v antiword'
 ```
 
 The wrapper equivalent is `./deploy/unraid-document-worker.sh verify`.

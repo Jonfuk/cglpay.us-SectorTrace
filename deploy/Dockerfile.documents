@@ -11,6 +11,7 @@ RUN apt-get update \
         ghostscript \
         tesseract-ocr \
         tesseract-ocr-eng \
+        antiword \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

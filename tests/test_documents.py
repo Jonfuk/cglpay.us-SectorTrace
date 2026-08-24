@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import subprocess
 import zipfile
+
+import pytest
 
 from pipeline.archive import FilesystemArchive
 from pipeline.cli import _document_candidates
@@ -11,8 +14,15 @@ from pipeline.documents.artifacts import DerivedArtifactStore
 from pipeline.documents.bridge import register_existing
 from pipeline.documents.inspect import DOCX_MIME, PPTX_MIME, inspect_bytes, ocr_required
 from pipeline.documents.models import EvidenceReference, Inspection, ParsedDocument, ParsedElement
-from pipeline.documents.parsers import DOCXParser, HTMLParserAdapter, PPTXParser
+from pipeline.documents.parsers import (
+    DOCXParser,
+    HTMLParserAdapter,
+    MSWordParser,
+    ParserUnavailable,
+    PPTXParser,
+)
 from pipeline.documents.quality import assess
+from pipeline.documents.service import DocumentService
 
 
 def reference() -> EvidenceReference:
@@ -266,3 +276,68 @@ def test_default_batch_selection_skips_successful_documents(conn):
     conn.execute("UPDATE document_processing_states SET parse_status='SUCCESS' WHERE evidence_id=?",
                  (source.evidence_id,))
     assert _document_candidates(conn, None, "fixture", None, None, 25, pending_only=True) == []
+
+
+def test_msword_parser_reports_unavailable_without_antiword(monkeypatch):
+    monkeypatch.setattr("pipeline.documents.parsers.shutil.which", lambda name: None)
+    with pytest.raises(ParserUnavailable):
+        MSWordParser()
+
+
+def test_msword_parser_extracts_text_via_antiword(monkeypatch):
+    monkeypatch.setattr("pipeline.documents.parsers.shutil.which", lambda name: "/usr/bin/antiword")
+
+    def fake_run(args, capture_output=True, text=True, check=False):
+        del capture_output, text, check
+        if len(args) == 1:
+            return subprocess.CompletedProcess(args, 0, stdout="Version: 0.37  (21 Oct 2005)\n", stderr="")
+        return subprocess.CompletedProcess(
+            args, 0, stdout="REPORT TITLE\n\nA finding about workforce pressure.\n", stderr="")
+
+    monkeypatch.setattr("pipeline.documents.parsers.subprocess.run", fake_run)
+    parser = MSWordParser()
+    assert parser.version == "Version: 0.37"
+    parsed = parser.parse(b"fake legacy doc bytes", "application/msword")
+    assert parsed.parser_name == "msword"
+    assert [(item.element_type, item.text) for item in parsed.elements] == [
+        ("HEADING", "REPORT TITLE"),
+        ("PARAGRAPH", "A finding about workforce pressure."),
+    ]
+
+
+def test_msword_document_is_skipped_not_raised_without_antiword(conn, settings, monkeypatch):
+    monkeypatch.setattr("pipeline.documents.parsers.shutil.which", lambda name: None)
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    body = b"\xd0\xcf\x11\xe0legacy word bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_path = archive.put("committee_papers", digest, "application/msword", body)
+    doc_reference = EvidenceReference(
+        evidence_id="evidence-msword", source_system="committee_papers",
+        source_url="https://example.test/report.doc", retrieved_at="2026-08-19T00:00:00+00:00",
+        http_status=200, payload_sha256=digest, raw_object_path=raw_path, mime_type="application/msword")
+
+    result = DocumentService(conn, settings).process(doc_reference)
+
+    assert result["status"] == "SKIPPED_UNSUPPORTED_FORMAT"
+    assert "antiword" in result["error"]
+    row = conn.execute(
+        "SELECT parse_status, last_error FROM document_processing_states WHERE evidence_id=?",
+        (doc_reference.evidence_id,)).fetchone()
+    assert row["parse_status"] == "FAILED"
+    assert "antiword" in row["last_error"]
+
+
+def test_unrecognised_format_is_skipped_not_raised(conn, settings):
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    body = b"binary spreadsheet bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_path = archive.put("committee_papers", digest, "application/vnd.ms-excel", body)
+    doc_reference = EvidenceReference(
+        evidence_id="evidence-xls", source_system="committee_papers",
+        source_url="https://example.test/report.xls", retrieved_at="2026-08-19T00:00:00+00:00",
+        http_status=200, payload_sha256=digest, raw_object_path=raw_path, mime_type="application/vnd.ms-excel")
+
+    result = DocumentService(conn, settings).process(doc_reference)
+
+    assert result["status"] == "SKIPPED_UNSUPPORTED_FORMAT"
+    assert "application/vnd.ms-excel" in result["error"]

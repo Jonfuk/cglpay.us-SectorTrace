@@ -14,6 +14,7 @@ from pipeline.documents.models import EvidenceReference
 from pipeline.documents.parsers import (
     DOCXParser,
     HTMLParserAdapter,
+    MSWordParser,
     ParserUnavailable,
     PPTXParser,
     PyMuPDFParser,
@@ -80,8 +81,23 @@ class DocumentService:
                 parser = DOCXParser()
             elif PPTXParser().supports(inspection.mime_type):
                 parser = PPTXParser()
+            elif inspection.mime_type == "application/msword":
+                try:
+                    parser = MSWordParser()
+                except ParserUnavailable as exc:
+                    error = str(exc)
+                    repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, ocr_status, error)
+                    return {"status": "SKIPPED_UNSUPPORTED_FORMAT", "evidence_id": reference.evidence_id,
+                            "error": error}
             else:
-                raise ValueError(f"{parser.name} does not support {inspection.mime_type}")
+                # No committed source in this pipeline produces types outside
+                # PDF/DOCX/PPTX/HTML/legacy DOC, so this is treated the same
+                # as DOCUMENT_MAX_PAGES: a non-fatal skip with a recorded
+                # reason, not a raised exception that would abort a batch run.
+                error = f"no parser supports {inspection.mime_type}"
+                repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, ocr_status, error)
+                return {"status": "SKIPPED_UNSUPPORTED_FORMAT", "evidence_id": reference.evidence_id,
+                        "error": error}
         config = {"parser": parser.name, "parser_version": parser.version,
                   "schema_version": "1", "ocr": ocr_status,
                   "min_text_chars_per_page": self.settings.document_min_text_chars_per_page,

@@ -62,7 +62,7 @@ case "${1:-}" in
     ;;
   verify)
     docker run --rm --entrypoint /bin/sh "$image" \
-      -c 'tesseract --version && gs --version && ocrmypdf --version'
+      -c 'tesseract --version && gs --version && ocrmypdf --version && command -v antiword'
     ;;
   status)
     run_pipeline documents status

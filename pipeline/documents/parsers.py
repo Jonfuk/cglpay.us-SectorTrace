@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import tempfile
 from html.parser import HTMLParser
 from io import BytesIO
@@ -141,6 +143,46 @@ class DOCXParser:
                  "| " + " | ".join("---" for _ in range(width)) + " |"]
         lines.extend("| " + " | ".join(row) + " |" for row in normalized[1:])
         return "\n".join(lines)
+
+
+class MSWordParser:
+    """Legacy binary .doc reader via the `antiword` system binary.
+
+    The binary format has no reliable page boundaries, so the extracted text
+    is treated as a single page through the same `_elements_from_pages`
+    fallback the Docling adapter uses for its markdown export.
+    """
+
+    name = "msword"
+
+    def __init__(self) -> None:
+        self._executable = shutil.which("antiword")
+        if self._executable is None:
+            raise ParserUnavailable(
+                "Legacy .doc parsing needs the antiword system binary (apt install antiword).")
+        probe = subprocess.run([self._executable], capture_output=True, text=True)
+        match = re.search(r"Version:?\s+[\d.]+", probe.stdout + probe.stderr)
+        self.version = match.group(0) if match else "unknown"
+
+    def supports(self, mime_type: str) -> bool:
+        return mime_type == "application/msword"
+
+    def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
+        if not self.supports(mime_type):
+            raise ValueError(f"{self.name} does not support {mime_type}")
+        # A TemporaryDirectory + explicit path, not NamedTemporaryFile: an
+        # open NamedTemporaryFile handle can't be reopened by the antiword
+        # subprocess on every platform this parser might run on.
+        with tempfile.TemporaryDirectory(prefix="sectortrace-doc-") as directory:
+            source = Path(directory) / "input.doc"
+            source.write_bytes(body)
+            try:
+                result = subprocess.run(
+                    [self._executable, str(source)], check=True, capture_output=True, text=True)
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "antiword failed").strip()
+                raise ValueError(detail[:2000]) from exc
+        return ParsedDocument(self.name, self.version, _elements_from_pages([result.stdout]))
 
 
 class PPTXParser:
@@ -329,4 +371,6 @@ def get_parser(name: str) -> DocumentParser:
         return PPTXParser()
     if name == "html":
         return HTMLParserAdapter()
-    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, docx, pptx, html")
+    if name == "msword":
+        return MSWordParser()
+    raise ValueError(f"Unknown document parser {name!r}; supported: docling, pymupdf, docx, pptx, html, msword")
