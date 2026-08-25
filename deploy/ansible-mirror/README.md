@@ -42,7 +42,7 @@ the box. A mirror is not a lower-security tier of the thing it copies.
 | Contact email | Let's Encrypt notices, and the operator contact the app requires |
 | This box's database passwords | **Offers to generate them** — say yes. They are not the source's |
 | The source deployment's domain | For the record only. Nothing connects to it |
-| How the warehouse gets here | Snapshot-from-S3, or direct over an SSH tunnel — below |
+| How the warehouse gets here | Snapshot-from-S3, SSH tunnel, or a directly reachable PostgreSQL URL — below |
 | The source's raw archive bucket | Read-only keys. Optional, but see below |
 | The source's backup bucket | Snapshot mode only; defaults to the archive bucket and credentials |
 | Sync time | Nightly, default 04:30 UTC |
@@ -58,9 +58,9 @@ Every credential this box holds for the source deployment should be
 writes to either. A key here that could write to the authoritative
 deployment is a key that could damage it from the disposable copy of it.
 
-## The two sync paths
+## The three sync paths
 
-Both are built. `mirror_sync_mode` chooses which the timer runs, and the
+All three are built. `mirror_sync_mode` chooses which the timer runs, and the
 wizard sets it.
 
 ### `snapshot` — the source's nightly verified backup, from S3
@@ -117,9 +117,28 @@ pins its own Docker subnet (`mirror_docker_subnet`, default
 `172.29.0.0/16`) so the two differ. If you ever do see that refusal, change
 that variable in `zz-local.yml` and re-run.
 
-Switching between the two is `./ansible-mirror.sh --reconfigure` and a
+Switching between the modes is `./ansible-mirror.sh --reconfigure` and a
 re-run. Nothing about the warehouse on this box depends on which one filled
 it.
+
+### `url` — `migrate-postgres`, from a managed PostgreSQL URL
+
+Use this when the source database is hosted by a provider such as Railway and
+its public PostgreSQL URL is reachable from the mirror VPS. The wizard asks
+for the complete URL and stores it in the encrypted vault; it is rendered only
+in `.env.sync`, which is read by the one-shot sync container. The always-on
+portal does not receive the source URL or credentials.
+
+Use a read-only source role where the provider offers one. The URL must be a
+normal PostgreSQL connection URL, such as `postgresql://...`, and reserved
+characters in its username or password must be percent-encoded. For example,
+the `@` separating the password from the host is not part of the password;
+an `@` inside a password must be written as `%40`.
+
+This mode uses the same `migrate-postgres --truncate` and row-by-row
+verification as tunnel mode. `sectortrace-mirror check-source` is available
+too, and compares the live managed database with this mirror without changing
+either one. No SSH key or tunnel service is installed.
 
 ## S3 to local file store
 
@@ -165,7 +184,7 @@ running says so and exits rather than starting a second.
    the mirror is refreshing, rather than a bare 502. Set
    `mirror_stop_app_during_sync: false` to leave it up and take that trade.
 4. **Warehouse**: `pipeline mirror pull` restores the newest snapshot, or
-   `migrate-postgres` copies over the tunnel. Either way the result is
+   `migrate-postgres` copies over the tunnel or from the configured URL. Either way the result is
    checked before it is called a success — `restore` re-counts every table
    against the snapshot's own manifest and rolls the whole thing back on a
    disagreement; `migrate-postgres` compares every value against the source.
@@ -309,7 +328,7 @@ sectortrace-mirror sync --force          # re-apply the snapshot already in plac
 sectortrace-mirror sync-status           # what is in place, and how stale that is
 sectortrace-mirror sync-log              # follow the journal
 sectortrace-mirror verify [--deep]       # prove this box still matches its source
-sectortrace-mirror check-source          # tunnel mode: compare both warehouses
+sectortrace-mirror check-source          # live mode: compare both warehouses
 sectortrace-mirror promote --confirm     # stop mirroring; take the source's place
 sectortrace-mirror coverage-report       # any pipeline command, in the app container
 sectortrace-mirror psql | health | ps | logs app | restart

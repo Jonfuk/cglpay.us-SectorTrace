@@ -23,6 +23,7 @@ from pipeline import db
 from pipeline.config import Settings
 
 PG_URL = "postgresql://app:secret@10.2.0.1:5433/sectortrace"
+RAILWAY_SOURCE_URL = "postgresql://postgres:source-secret@altaria.proxy.rlwy.net:20580/railway"
 
 
 def settings_for(url: str | None, tmp_path) -> Settings:
@@ -36,6 +37,14 @@ class TestBackendResolution:
 
     def test_a_url_is_postgres(self, tmp_path):
         assert settings_for(PG_URL, tmp_path).database_backend == "postgres"
+
+    def test_a_managed_postgres_source_url_is_accepted(self, tmp_path):
+        settings = Settings(
+            contact_email="t@e.com", database_url=PG_URL,
+            database_source_url=RAILWAY_SOURCE_URL,
+            database_path=tmp_path / "warehouse.db")
+        assert settings.database_backend == "postgres"
+        assert settings.database_source_url == RAILWAY_SOURCE_URL
 
     def test_an_empty_url_falls_back_to_sqlite(self, tmp_path):
         """`DATABASE_URL=` on a command line forces the file back on without

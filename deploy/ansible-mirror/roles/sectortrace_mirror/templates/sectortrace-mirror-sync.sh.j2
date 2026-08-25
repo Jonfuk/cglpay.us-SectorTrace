@@ -70,7 +70,7 @@ sectortrace-mirror-sync — refresh this mirror from its source deployment
                     snapshot would be restored, and how many archive objects
                     are missing locally. Touches no container state.
   --force           Re-apply the newest snapshot even if it is the one
-                    already in place. Snapshot mode only; tunnel mode always
+                    already in place. Snapshot mode only; live PostgreSQL modes always
                     copies, because there is no "same file" to recognise.
   --warehouse-only  Skip the raw-archive sync.
   --archive-only    Skip the warehouse step; pull archive objects only.
@@ -129,8 +129,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
     if [ "$DO_WAREHOUSE" -eq 1 ]; then
 {% if mirror_sync_mode == 'snapshot' %}
         compose_sync mirror pull --dry-run ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"} || true
-{% else %}
+{% elif mirror_sync_mode == 'tunnel' %}
         say "tunnel mode always copies the source warehouse; there is no"
+        say "snapshot to compare against. \`sectortrace-mirror check-source\`"
+        say "compares the two warehouses without changing either."
+{% else %}
+        say "URL mode always copies the source warehouse; there is no"
         say "snapshot to compare against. \`sectortrace-mirror check-source\`"
         say "compares the two warehouses without changing either."
 {% endif %}
@@ -262,11 +266,23 @@ warehouse_tunnel() {
     say "warehouse copied and verified against the source"
 }
 
+warehouse_url() {
+    stop_app
+    say "copying the source warehouse from its PostgreSQL URL"
+    # --truncate because the target holds the last copy; verification is on
+    # by default and compares every value against the live source.
+    compose_sync migrate-postgres --truncate \
+        || fail "migrate-postgres failed — this box still holds the previous copy"
+    say "warehouse copied and verified against the source"
+}
+
 if [ "$DO_WAREHOUSE" -eq 1 ]; then
     if [ "$MODE" = "snapshot" ]; then
         warehouse_snapshot
-    else
+    elif [ "$MODE" = "tunnel" ]; then
         warehouse_tunnel
+    else
+        warehouse_url
     fi
 else
     say "skipping the warehouse step (--archive-only)"

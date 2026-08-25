@@ -55,6 +55,6 @@
           - "            sectortrace-mirror sync        (run one now, in the foreground)"
           - "            sectortrace-mirror sync-log    (what the last runs did)"
           - "Source:     {{ mirror_source_label | default('(unnamed)', true) }} via
-             {{ 'nightly S3 snapshot' if mirror_sync_mode == 'snapshot' else 'a direct PostgreSQL copy over the SSH tunnel' }}"
+             {{ 'nightly S3 snapshot' if mirror_sync_mode == 'snapshot' else ('a direct PostgreSQL copy over the SSH tunnel' if mirror_sync_mode == 'tunnel' else 'a direct PostgreSQL copy from the configured URL') }}"
           - "Archive:    S3 -> local disk at {{ state_dir }}/data/raw
              ({{ 'synced nightly' if mirror_archive_sync else 'sync disabled' }})"

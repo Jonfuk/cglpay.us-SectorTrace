@@ -249,9 +249,18 @@ BANNER
     echo "     against a file. Costs: an SSH key on the source box, and a"
     echo "     tunnel to keep up."
     echo
+    echo "  3) Directly from a PostgreSQL URL"
+    echo "     For a managed database such as Railway. The complete URL is"
+    echo "     kept in the encrypted vault and used only by the sync container."
+    echo "     Use a read-only database role where the provider offers one."
+    echo
     local mode_choice sync_mode
-    mode_choice="$(ask_choice 'Choose' '1' 2)"
-    if [ "$mode_choice" = "1" ]; then sync_mode="snapshot"; else sync_mode="tunnel"; fi
+    mode_choice="$(ask_choice 'Choose' '1' 3)"
+    case "$mode_choice" in
+        1) sync_mode="snapshot" ;;
+        2) sync_mode="tunnel" ;;
+        3) sync_mode="url" ;;
+    esac
 
     # --- The source's raw archive bucket ---
     echo
@@ -310,6 +319,7 @@ BANNER
     local ssh_key="/root/.ssh/sectortrace-mirror"
     local src_pg_user="sectortrace_reader" src_pg_db="sectortrace" src_pg_pw=""
     local src_pg_host="127.0.0.1" src_pg_port="5432"
+    local src_pg_url=""
     if [ "$sync_mode" = "tunnel" ]; then
         echo
         echo "--- Reaching the source's PostgreSQL ---------------------------"
@@ -375,6 +385,21 @@ BANNER
         src_pg_user="$(ask '  Source PostgreSQL user' 'sectortrace_reader')"
         src_pg_db="$(ask '  Source database name' 'sectortrace')"
         src_pg_pw="$(ask_secret "  Password for ${src_pg_user} on the source")"
+    elif [ "$sync_mode" = "url" ]; then
+        echo
+        echo "--- Reaching the source's PostgreSQL ---------------------------"
+        echo "Paste the complete PostgreSQL URL for the managed source database."
+        echo "It is stored in the encrypted vault and passed only to the sync"
+        echo "container. Percent-encode reserved characters in the username or"
+        echo "password (especially @, :, /, # and ?)."
+        echo
+        while [ -z "$src_pg_url" ]; do
+            src_pg_url="$(ask_secret '  Source PostgreSQL URL')"
+            case "$src_pg_url" in
+                postgresql://*|postgres://*|postgresql+psycopg://*) ;;
+                *) echo "    That must start with postgresql://, postgres://, or postgresql+psycopg://." >&2; src_pg_url="" ;;
+            esac
+        done
     fi
 
     # --- When ---
@@ -471,8 +496,9 @@ vault_mirror_backup_s3_url_style: $(yaml_quote "$b_style")
 vault_mirror_backup_s3_access_key: $(yaml_quote "$b_key")
 vault_mirror_backup_s3_secret: $(yaml_quote "$b_secret")
 
-# --- Source: the warehouse itself (tunnel mode) ---
+# --- Source: the warehouse itself ---
 vault_mirror_source_pg_password: $(yaml_quote "$src_pg_pw")
+vault_mirror_source_pg_url: $(yaml_quote "$src_pg_url")
 EOF
     chmod 600 "$VAULT_FILE"
 

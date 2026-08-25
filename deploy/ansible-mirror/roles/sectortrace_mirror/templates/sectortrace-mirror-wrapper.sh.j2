@@ -130,7 +130,7 @@ EOF_PROMOTE
         exec docker compose exec -T app python -m pipeline mirror promote --confirm
         ;;
 
-{% if mirror_sync_mode == 'tunnel' %}
+{% if mirror_sync_mode in ['tunnel', 'url'] %}
     # Reads both warehouses and writes to neither — the honest answer to
     # "is this mirror actually current?", as opposed to "did last night's
     # unit exit zero?".

@@ -222,7 +222,8 @@ box itself rather than from a separate control machine. See
 `deploy/ansible-mirror/` provisions a box that runs the same stack with
 nothing collecting into it. The warehouse arrives from an existing
 deployment on a nightly timer — either its newest verified backup out of S3,
-or a direct verified copy of its PostgreSQL over an SSH tunnel — and that
+a direct verified copy of its PostgreSQL over an SSH tunnel, or a direct
+verified copy from a managed PostgreSQL URL — and that
 deployment's raw archive is pulled out of its bucket onto the mirror's local
 disk, where the mirror's own app reads it with no S3 configuration at all.
 

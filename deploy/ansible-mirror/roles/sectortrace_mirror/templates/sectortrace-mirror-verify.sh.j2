@@ -8,7 +8,7 @@
 # these are the two things that fill that gap:
 #
 #   weekly (default)  The bucket's key set against local disk, transferring
-#                     nothing, plus — in tunnel mode — a value-by-value
+#                     nothing, plus — in live PostgreSQL modes — a value-by-value
 #                     comparison of both warehouses that changes neither.
 #   monthly (--deep)  Every object in the LOCAL store re-hashed. The only
 #                     thing that proves this box's copy is byte-identical to
@@ -28,7 +28,7 @@ for arg in "$@"; do
         --deep) DEEP=1 ;;
         -h|--help)
             echo "sectortrace-mirror-verify [--deep]"
-            echo "  (no flag)  bucket key set vs local disk; warehouses compared in tunnel mode"
+            echo "  (no flag)  bucket key set vs local disk; warehouses compared in live mode"
             echo "  --deep     re-hash every object in the local archive"
             exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -69,10 +69,10 @@ docker compose -f docker-compose.sync.yml run --rm sync \
     archive-mirror --dry-run --fail-if-missing \
     || { say "FAILED: the local archive is missing objects the source's bucket holds — run a sync"; exit 1; }
 
-{% if mirror_sync_mode == 'tunnel' %}
+{% if mirror_sync_mode in ['tunnel', 'url'] %}
 # Reads both warehouses and writes to neither. This is the honest answer to
 # "is this mirror actually current?", as opposed to "did last night's unit
-# exit zero?" — and it is only available in tunnel mode, because snapshot
+# exit zero?" — and it is only available in live PostgreSQL modes, because snapshot
 # mode has no connection to the source to compare against.
 say "comparing this warehouse against the source's, value by value"
 docker compose -f docker-compose.sync.yml run --rm sync check-postgres-sync \

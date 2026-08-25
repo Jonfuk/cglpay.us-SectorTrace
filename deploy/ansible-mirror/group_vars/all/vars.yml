@@ -202,7 +202,7 @@ unattended_upgrades_reboot_time: "04:00"
 # warehouse came from.
 mirror_source_label: ""
 
-# How the warehouse gets here. Both paths are built; this chooses which one
+# How the warehouse gets here. All paths are built; this chooses which one
 # the timer runs, and ansible-mirror.sh asks for it.
 #
 #   snapshot  Read the newest verified `pipeline backup` snapshot out of the
@@ -220,6 +220,11 @@ mirror_source_label: ""
 #             and verified against the live warehouse rather than against a
 #             file. What it costs: an SSH key on the source box and a tunnel
 #             to keep up.
+#
+#   url       `pipeline migrate-postgres --truncate`, copying live from a
+#             PostgreSQL URL stored in the encrypted vault. Use this when the
+#             source is a managed database such as Railway and is reachable
+#             directly from this box; no SSH tunnel is needed.
 mirror_sync_mode: "snapshot"
 
 # Nightly, after the source's own backup (03:15) and its offsite copy have
@@ -304,7 +309,8 @@ mirror_metrics_dir: ""
 # the archive afterwards, so:
 #
 #   weekly  `archive-mirror --dry-run --fail-if-missing` compares the bucket's
-#           key set against local disk and transfers nothing. In tunnel mode
+#           key set against local disk and transfers nothing. In live PostgreSQL
+#           modes
 #           it also runs `check-postgres-sync`, which compares both warehouses
 #           value by value without changing either.
 #   monthly `archive-verify` re-hashes every object in the LOCAL store. This
@@ -356,11 +362,11 @@ mirror_min_free_gb: 10
 # place.
 mirror_backup_s3_prefix: "warehouse-backups"
 
-# --- tunnel mode: reaching the source's PostgreSQL -----------------------------
-# The source publishes PostgreSQL on its own loopback only, so there is
-# nothing to connect to from here without a tunnel. A systemd unit holds
-# `ssh -N -L` open and restarts it when it drops; the sync container reaches
-# it on this box's loopback.
+# --- live PostgreSQL mode: reaching the source's PostgreSQL --------------------
+# Tunnel mode reaches a source that publishes PostgreSQL on its own loopback:
+# a systemd unit holds `ssh -N -L` open and restarts it when it drops. URL mode
+# does not use these tunnel settings; it reads the complete source URL from
+# the encrypted vault instead.
 #
 # Use the source's read-only role (sectortrace_reader). migrate-postgres
 # only ever reads the source, and a mirror holding a credential that could

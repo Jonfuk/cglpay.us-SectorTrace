@@ -78,3 +78,10 @@ vault_mirror_backup_s3_secret: ""
 # The password for mirror_source_pg_user on the source deployment. Use its
 # read-only role: migrate-postgres only reads the source.
 vault_mirror_source_pg_password: ""
+
+# --- Source: the warehouse itself (mirror_sync_mode: url) ---------------------
+# A complete PostgreSQL URL for a directly reachable managed database, for
+# example a Railway DATABASE_PUBLIC_URL. Use a read-only role when the
+# provider offers one. Percent-encode reserved characters in the username or
+# password before putting them in the URL (notably @, :, /, # and ?).
+vault_mirror_source_pg_url: ""

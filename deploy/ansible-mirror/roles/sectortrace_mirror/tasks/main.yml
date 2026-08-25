@@ -8,11 +8,12 @@
 - name: Check the sync mode is one this playbook knows
   ansible.builtin.assert:
     that:
-      - mirror_sync_mode in ['snapshot', 'tunnel']
+      - mirror_sync_mode in ['snapshot', 'tunnel', 'url']
     fail_msg: >-
       mirror_sync_mode is "{{ mirror_sync_mode }}"; it must be "snapshot"
       (restore the source's newest verified backup out of its bucket) or
-      "tunnel" (copy the source's live PostgreSQL over an SSH tunnel).
+      "tunnel" (copy the source's live PostgreSQL over an SSH tunnel), or
+      "url" (copy from a directly reachable PostgreSQL URL).
       Re-run ./ansible-mirror.sh --reconfigure to choose again.
 
 - name: Check snapshot mode has a bucket to read
@@ -38,6 +39,17 @@
       mirror_sync_mode is "tunnel" and either mirror_ssh_host or the source
       warehouse password is empty. Re-run ./ansible-mirror.sh --reconfigure.
   when: mirror_sync_mode == 'tunnel'
+
+- name: Check URL mode has a PostgreSQL source URL
+  ansible.builtin.assert:
+    that:
+      - vault_mirror_source_pg_url | default('', true) | length > 0
+      - vault_mirror_source_pg_url is match('^(postgresql|postgres)(\+psycopg)?://')
+    fail_msg: >-
+      mirror_sync_mode is "url" but vault_mirror_source_pg_url is empty or is
+      not a PostgreSQL URL. Re-run ./ansible-mirror.sh --reconfigure and enter
+      the complete source URL in the URL mode prompt.
+  when: mirror_sync_mode == 'url'
 
 - name: Check the SSH key the tunnel will use exists
   ansible.builtin.stat:
