@@ -171,6 +171,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m27_ndtms_monthly": "ogl_v3",
     "m28_sar_reports": "authority_varies",
     "m29_rough_sleeping": "ogl_v3",
+    "m30_statutory_homelessness": "ogl_v3",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by

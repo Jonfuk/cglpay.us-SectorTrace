@@ -156,6 +156,7 @@ const MODULE_LICENCES = {
   m27_ndtms_monthly: 'ogl_v3',
   m28_sar_reports: 'authority_varies',
   m29_rough_sleeping: 'ogl_v3',
+  m30_statutory_homelessness: 'ogl_v3',
 };
 
 export function licenceFor(module) {

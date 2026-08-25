@@ -719,8 +719,8 @@ anyone using it.
   the season.** The snapshot records people seen, or believed, to be sleeping
   rough on one chosen night. It excludes people in hostels, shelters, or
   organised campsites, and it is not a measure of homelessness more broadly —
-  statutory homelessness is a separate MHCLG collection this pipeline does
-  not yet read.
+  statutory homelessness is a separate MHCLG collection, read by Module 30
+  below.
 - **`[x]` (not available), `[z]` (not applicable) and `[n]` (no data — the
   authority did not exist yet, from reorganisation) are kept verbatim in
   `count_text`/`rate_text` with the numeric column `NULL`.** None of the
@@ -740,6 +740,69 @@ anyone using it.
   republished so far — on every run. If a future edition ever narrowed that
   window, an earlier year missing here would mean the source stopped
   publishing it, not that this pipeline failed to collect it.
+
+### Statutory homelessness (Module 30)
+
+- **This is a comparator, not sector evidence, and it is never combined with
+  the sector's own evidence** — the same rule as Module 29, and for the same
+  reason (documented overlap between the homelessness and substance-misuse
+  populations). No arithmetic across evidence layers, no ratio, no
+  correlation computed by this pipeline.
+- **Only Table A1 is read** — the flagship count of households assessed and
+  what duty (if any) was owed. The workbook MHCLG publishes each quarter has
+  40+ other tables (temporary accommodation, prevention/relief outcomes by
+  type, multiple-disadvantage breakdowns); none of them are in this pipeline.
+  A figure that sounds like it should be here (e.g. "households in temporary
+  accommodation") is not, and should not be assumed derivable from what is.
+- **A quarter can be revised after this pipeline first reads it, and a later
+  run silently overwrites the earlier figures on the natural key
+  `(ons_code, quarter_start)`.** MHCLG republishes recent quarters as
+  "(revised)" editions on the same evergreen page; this module always prefers
+  a revised edition over the original where both are attached. This means a
+  figure captured today may not match the same query run again next quarter
+  — the file, at the time it was last fetched, is the truth, not a frozen
+  snapshot of what MHCLG said on a particular date. `retrieved_at` on every
+  row is when *that* fetch happened; it is not a guarantee nothing has
+  changed since.
+- **The sheet layout is not the same across the whole series.** MHCLG has
+  published Table A1 under at least two structurally different layouts (an
+  older multi-row merged-header block and a newer flat single-header-row
+  form); this module resolves columns by keyword rather than fixed position
+  to cover both, and a future layout change it cannot resolve fails safely —
+  the quarter is logged to `review_queue` as
+  `statutory_homelessness_columns_unresolved`, not guessed at or silently
+  misaligned.
+- **`[x]` (not available), `[z]` (not applicable), `[n]` (no data) and `[c]`
+  (data suppressed, usually a small-number privacy rule) are kept verbatim in
+  each field's paired `_text` column with the numeric column `NULL`.** None
+  of the four means zero, and `[c]` in particular means a real, nonzero
+  figure exists but MHCLG has withheld it — treat it as materially different
+  from "nothing happened here".
+- **`not_threatened_no_duty` means something different before and after
+  MHCLG split the "no duty owed" reason out into three columns.** Confirmed
+  by hand against real published totals from both eras: in the older table
+  layout there is only one combined "no duty owed" column (this pipeline
+  reads it into `not_threatened_no_duty`, and `withdrew_no_duty`/
+  `not_eligible_no_duty` are `NULL` for that quarter — genuinely absent from
+  the source, not a parsing gap), and it equals
+  `total_initial_assessments − total_owed_duty` exactly (72,290 − 68,520 =
+  3,770 for October–December 2019). In the newer layout the same three
+  columns are separate, additive components of that same difference (4,130 +
+  3,600 + 610 ≈ 92,200 − 83,850 for January–March 2026, the small remainder
+  being MHCLG's own published rounding). **Whether `withdrew_no_duty` is
+  `NULL` for a given quarter is how to tell which meaning
+  `not_threatened_no_duty` carries for that row** — this pipeline does not
+  add a separate flag for it, and does not compute either total itself.
+- **Pre-2017 quarters are not collected.** Those files are plain `.xls`
+  (the old binary Excel format), which this pipeline has no reader for and
+  does not add a dependency for two years of history. This is a bounded,
+  documented gap in the series' start, not a silent one — the earliest
+  quarter this module can reach depends on the earliest quarter GOV.UK still
+  attaches as ODS or XLSX.
+- **A local authority code not in this pipeline's `authorities` table is
+  logged to `review_queue` as `statutory_homelessness_unmatched_authority`,
+  not silently dropped** — the same reorganisation-reconciliation gap
+  Module 29 has, unrelated to this module's own parsing.
 
 ---
 

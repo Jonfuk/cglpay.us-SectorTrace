@@ -485,6 +485,19 @@ invisible here.
 | Rate limit | Default |
 | Notes | One evergreen page whose single file republishes the whole 2010-to-current series every edition, so one fetch captures the full history. Count and MHCLG's own rate per 100,000 population (calculated by MHCLG, never by this pipeline) are stored side by side. Methodology is not standardised between authorities — each chooses its own approach and date within the autumn window — and the caveat travels with every figure |
 
+---
+
+## Module 30 — Statutory homelessness (H-CLIC)
+
+| | |
+| --- | --- |
+| Source | MHCLG statutory homelessness detailed local authority level tables, published on GOV.UK |
+| Endpoints | `https://www.gov.uk/api/content/government/statistical-data-sets/live-tables-on-homelessness` and one attached ODS/XLSX per quarter |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | One evergreen page carrying one attachment per quarter (unlike Module 29's single ever-replaced file), so discovery is filtering the attachment list by title, not searching separate publications. Only Table A1 (households by initial assessment outcome — the flagship count) is read, out of 40+ tables in the workbook; the quarterly breakdown of temporary accommodation, prevention/relief outcomes and multiple-disadvantage figures are a possible later addition, not this module. The sheet layout is not stable across the series — an older multi-row merged-header shape and a newer flat single-row shape both appear — and columns are located by keyword, not fixed position; see the module's own docstring for how a duty total is kept from being confused with its own sub-breakdown. Pre-2017 quarters are plain `.xls`, which this pipeline has no reader for and does not read — a documented gap, not a silent one — see `docs/CAVEATS.md` |
+
 ## Viability checks
 
 Probed live on 2026-08-11 with the pipeline's own User-Agent, one request

@@ -42,8 +42,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 ## Architectural Summary
 
 Stdlib Python HTTP server (`pipeline/web/server.py`), SQLite by default with
-an optional PostgreSQL backend (`DATABASE_URL`), 28 collection modules
-(`m00`–`m28`) each writing their own tables, a public evidence portal at `/`
+an optional PostgreSQL backend (`DATABASE_URL`), 31 collection modules
+(`m00`–`m30`) each writing their own tables, a public evidence portal at `/`
 and an operator UI at `/admin`, vanilla JS front ends (no framework, no build
 step — see settled decision 6 in `CLAUDE.md`).
 
@@ -98,6 +98,120 @@ DONE
 -->
 
 ### DONE
+
+- [DONE] BETA-015 | Module 30: statutory homelessness (H-CLIC) snapshot
+  - completed: 2026-08-25T21:40:00Z
+  - commits: (pending push — see the commit immediately following this
+    entry in `git log beta`)
+  - result: BETA-014's own flagged follow-up, built this cycle. Source
+    researched directly against the live GOV.UK page
+    (`live-tables-on-homelessness`), not assumed from docs — one evergreen
+    page attaching one file per quarter (closer to m29's single-page
+    discovery than m13's per-publication search). Only Table A1 (households
+    by initial-assessment outcome — the flagship "statutory homelessness"
+    count) is read, out of 40+ tables in the workbook, the same
+    one-table-done-properly discipline m29 applied.
+  - **Found and fixed a real parsing bug while verifying against actually
+    downloaded files, before writing the parser**: the `sheet_rows()`
+    pattern this pipeline's other ODS modules (m13, m29) use walks only
+    `<table:table-cell>` elements, silently skipping
+    `<table:covered-table-cell>` elements — invisible in m13/m29's own
+    sources, which have no genuine multi-column-spanning merged cells, but
+    H-CLIC's older-era files do (merged group-header cells), and skipping
+    them shifts every later column in that row left by however many columns
+    the merge spanned. Fixed locally in the new module only — not touched in
+    m13/m29, whose own inputs never hit it.
+  - **The sheet layout is not stable across the 2017–2026 series** — an
+    older multi-row merged-header block and a newer flat single-header-row
+    form both appear. `locate_a1_columns` resolves either by keyword
+    (concatenating each column's own header text across all header rows,
+    excluding prose rows like the title by requiring ≥2 populated cells),
+    claiming fields in a specific order (relief and prevention before the
+    total, which is claimed before its own "of which" sub-breakdowns can be)
+    so a parent total's own sub-columns — which repeat the parent's
+    group-label text as a prefix in the modern shape — cannot steal its
+    claim. Verified by hand against **four real downloaded quarters**
+    spanning both shapes and both file formats (2019 Q4 ods, 2023 Q1 ods,
+    2024 Q1 xlsx, 2026 Q1 ods) before any test was written: every column
+    position resolved correctly and matched MHCLG's own published
+    England-level totals exactly.
+  - **A second real finding from that same verification, not anticipated
+    going in**: region (`E12…`) and England (`E92…`) aggregate rows in this
+    source carry genuine ONS codes in the authority-code column, unlike
+    m29's source, which marks them with a `[z]` placeholder instead. m29's
+    own `^E\d{8}$` filter would have silently mis-stored a region as if it
+    were a local authority here; tightened to the local-authority prefix set
+    only (`E06`–`E10`, m13's own `local_authority` classification) for this
+    module. A third finding, documented as its own `docs/CAVEATS.md` bullet
+    rather than silently handled: in the older table layout,
+    `not_threatened_no_duty` is the sole combined "no duty owed" total (no
+    separate withdrew/not-eligible breakdown existed yet), while in the
+    newer layout it is only the "not threatened" reason, one of three
+    additive columns — confirmed against real published totals from both
+    eras (72,290 − 68,520 = 3,770 exactly for Oct–Dec 2019; 4,130 + 3,600 +
+    610 ≈ 92,200 − 83,850 for Jan–Mar 2026, the small remainder being
+    MHCLG's own rounding).
+  - Follows the established module conventions exactly:
+    `pipeline/modules/m30_statutory_homelessness.py` (registered,
+    auto-discovered), migration `0060` (SQLite + PostgreSQL),
+    `pipeline/licences.py` + `components.js`'s mirrored copy (OGL v3.0),
+    `docs/SOURCES.md`, `README.md`'s module table and Wave 1, and a
+    `docs/CAVEATS.md` entry covering: the comparator-only rule (same as
+    m29), the single-table scope boundary, silent overwrite on revision (a
+    "(revised)" edition replaces the earlier figures on the natural-key
+    upsert `(ons_code, quarter_start)` — this pipeline always prefers a
+    revised edition where both are attached), `[x]`/`[z]`/`[n]`/`[c]`
+    placeholder handling (`[c]` — data suppression — is new; m29's source
+    does not use it), the pre-2017 `.xls` coverage gap (no reader without a
+    new dependency, a bounded and documented boundary not a silent one), and
+    the `not_threatened_no_duty` dual-meaning finding above. Also fixed the
+    now-stale line in m29's own caveat entry that said statutory
+    homelessness was "a separate MHCLG collection this pipeline does not yet
+    read" — cross-references Module 30 now.
+  - note: **Verified as thoroughly as this session safely could, including
+    against real full downloaded workbooks, not only hand-built fixtures.**
+    33 new unit tests on the pure parsing functions (fixtures built from the
+    real header/data text of both shapes, locked to the exact column
+    positions confirmed against the real files; title-regex inclusion and
+    exclusion for every distinct attachment title pattern actually seen on
+    the live page — financial-year summaries, Multiple Disadvantage tables,
+    and "- Accessible" duplicates all correctly excluded; all four
+    placeholder values null out; region/England/`-` rows correctly excluded
+    from extraction). Separately re-ran the locator directly against all
+    four downloaded real workbooks (not just fixtures) and confirmed every
+    resolved value against MHCLG's own published England totals by hand.
+    All five cross-cutting coverage guards BETA-014 found were touched again
+    here and all caught something real: `tests/test_since_handling.py`,
+    `tests/test_integration_smoke.py`, `tests/test_migration_equivalence.py`
+    (migration count), `tests/test_progress_coverage.py` (module count *and*
+    the progress-reporting/registration-correctness checks — see below),
+    `README.md`'s module table. Full suite, run clean and uninterrupted:
+    **2419 passed, 106 skipped, 32 deselected, 2 failed** — both the same
+    pre-existing `transformers`/docling `UnicodeDecodeError` BETA-014
+    already confirmed unrelated (reproduced again in isolation to be sure).
+  - **A genuine false alarm worth recording, not because it affected the
+    result but because it could confuse a future session**: an earlier full-suite
+    run (started before a comment-only docstring edit) showed two spurious
+    failures — `MODULE_REGISTRY['m30_statutory_homelessness']` appearing to
+    resolve to a helper function rather than `run`. Root cause: editing the
+    module's source file while a long-running background pytest process was
+    mid-suite shifts line numbers on disk after Python has already cached
+    the function's old `co_firstlineno` at import time; `inspect.getsource`
+    re-reads the file from disk on each call, so it briefly read the wrong
+    function's text at the old line offset. Confirmed as an artifact, not a
+    real bug, by re-running those two tests in isolation (passed) and then a
+    second full suite with no concurrent edits (clean). Lesson for future
+    sessions: do not edit a module's source while a background test run
+    covering it is still in flight.
+  - **What this session could not verify**: an actual live fetch-parse-write
+    run, for the same reason as every dataset addition this cycle — this
+    checkout's `.env` points at live Railway production (see Environment
+    Note).
+  - possible follow-up: other H-CLIC tables (temporary accommodation in
+    particular — TA1 — is arguably as substance-misuse-relevant as A1, and
+    was seen and understood during this module's own research) are a
+    plausible Module 31, not started. Not requested by the project owner;
+    flagged as a discovered opportunity only.
 
 - [DONE] BETA-014 | Module 29: rough sleeping snapshot (new dataset)
   - completed: 2026-08-25T00:00:00Z
@@ -502,6 +616,40 @@ DONE
     requiring the provider's explicit sign-off, not something to autonomously
     finish and merge.
 
+### NEXT
+
+- [NEXT] BETA-016 | Module 31: H-CLIC temporary accommodation (TA1)
+  - priority: P3
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: data
+  - depends_on: none (same infrastructure as BETA-015 — same source page,
+    same discovery/dedup logic, same `sheet_rows`/anchor-row pattern)
+  - objective: Table TA1 ("households in temporary accommodation") is on the
+    same evergreen `live-tables-on-homelessness` page BETA-015 already reads,
+    seen and understood during that module's own research but deliberately
+    not built — one table done properly beats two done fast, the same
+    discipline BETA-014/015 both applied. TA numbers are arguably as
+    substance-misuse-relevant a comparator as A1's headline duty count.
+  - rationale: Lowest-effort next dataset candidate in the queue — the
+    discovery/dedup/format-handling machinery already exists in
+    `m30_statutory_homelessness.py` (`_discover_publications`,
+    `find_anchor_row`, the ODS/XLSX dual-format reading), so this is mostly
+    a second `locate_ta1_columns`/`extract_ta1_rows` pair plus its own
+    migration — not a from-scratch research cycle. Whether TA1's own column
+    layout is as stable across the series as A1's turned out to be (it may
+    not be — this was not checked) is the first thing to verify before
+    assuming the same approach transfers cleanly.
+  - suggested_first_action: Download 2-3 real TA1 sheets spanning both
+    shapes (reuse BETA-015's already-downloaded scratch files if the
+    session recovers them, else re-download from the same content-API URL)
+    and confirm the column layout by hand before writing any code — do not
+    assume A1's column-locator keywords transfer; TA1's own header text is
+    different ("Households in TA", "B&Bs", etc., seen briefly during
+    BETA-015's own research but not verified in depth).
+
 ### BLOCKED
 
 - [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
@@ -563,8 +711,16 @@ DONE
 | P3 | Audit remaining stale branches for revivable work | 2 | 3 | 2 | DONE (BETA-004) |
 | P3 | Re-evaluate `--jobs 4` given new modules | 2 | 2 | 2 | RESEARCH (BETA-006) |
 | P4 | Delete ~45 stale/superseded branch pointers | 1 | 1 | 5 | Suggested, not queued — see BETA-004 |
+| P2 | Module 29: rough sleeping snapshot (dataset) | 4 | 3 | 5 | DONE (BETA-014) |
+| P2 | Module 30: statutory homelessness / H-CLIC (dataset) | 4 | 4 | 4 | DONE (BETA-015) |
+| P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | NEXT (BETA-016) |
 
-The Autonomous Work Queue above is authoritative; this table is for skimming.
+This table is not kept current for every cycle's smaller items — see the
+note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
+Requiring Human Input #2/BETA-002/BETA-008) for why that's a deliberate,
+disclosed gap rather than an oversight. The Autonomous Work Queue above is
+authoritative; this table is for skimming only, and BLOCKED/RESEARCH items
+in the queue are the reliable source for what's actually pending.
 
 ## Features Under Investigation
 
@@ -576,6 +732,14 @@ started.
 - BETA-001, BETA-007, BETA-009 (see DONE above).
 
 ## Dataset Additions
+
+**BETA-015: Module 30, statutory homelessness (H-CLIC, MHCLG)** — BETA-014's
+own flagged follow-up, built this cycle. Quarterly, LA-level, Table A1 only
+(the flagship "households assessed / duty owed" count). See its DONE entry
+for the full research, including a real parsing bug found and fixed
+(covered-table-cell alignment), a region/England-code filtering fix m29's
+own pattern would have gotten wrong on this source, and a documented
+dual-meaning finding in one field across the series' two table layouts.
 
 **BETA-014: Module 29, rough sleeping snapshot (MHCLG)** — requested
 directly by the project owner as a local-authority-level comparator against
@@ -616,6 +780,10 @@ not something to fall out of this default silently.
 ## Database / Migration Changes
 
 BETA-014: migration `0059` adds `rough_sleeping_snapshot` (SQLite +
+PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
+touched.
+
+BETA-015: migration `0060` adds `statutory_homelessness_snapshot` (SQLite +
 PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
 touched.
 
@@ -680,6 +848,18 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
+- BETA-015: 33 new unit tests on the pure parsing functions, using fixtures
+  built from the real header/data text of both source-file eras (not
+  invented text), plus the locator re-run directly against four full real
+  downloaded workbooks and cross-checked by hand against MHCLG's own
+  published totals — HIGH end of the brief's own §22 scale for a new
+  parser reading two genuinely different real-world file shapes. All five
+  coverage guards BETA-014 found were exercised again and each caught
+  something real for this module too. Full suite run twice: once
+  concurrently with a docstring edit (produced two spurious failures from
+  editing a file while pytest was importing it mid-run — see the DONE
+  entry's note on this), then once clean — 2419 passed, 2 pre-existing
+  unrelated failures, confirmed a fourth time now.
 - BETA-001: targeted tests (`test_portal_controls.py`, `test_web_public.py`
   — 55 tests) rather than the full suite, plus a live in-browser check —
   isolated one-line JS fix, LOW/MEDIUM risk per the brief's own §22 policy.
@@ -843,30 +1023,56 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-Seven substantive items landed this cycle (BETA-001/002/003/004/007/008/009),
-including two real features (BETA-007, BETA-009) rather than only
-documentation and infrastructure. For the next session (or the continuation
-of this one, if still running):
+*(Superseded revision — the previous version of this section, referencing a
+"relationship-explorer question," was written before BETA-010/012 built
+exactly that and before BETA-013/014/015 landed. Per §13 of the original
+brief, this section must answer five questions without conversational
+history; the version below does, as of 2026-08-25T21:40Z.)*
 
-1. **The queue is genuinely empty of ready work again** (NEXT/READY: none;
-   BLOCKED and deferred RESEARCH only). This is the third time this cycle —
-   treat it as a signal that this project is unusually complete, not as a
-   problem to solve by inventing work.
-2. **The highest-value undecided item is now the relationship-explorer
-   question** (Questions Requiring Human Input #4) — bigger than anything
-   this session decided alone, and worth raising with the project owner
-   before speculatively building toward it.
-3. **Recurring finding, now three-for-three: check `docs/upgrade-roadmap.md`
-   claims against actual code before trusting them**, even after BETA-002's
-   reconciliation — it corrected what was known-stale at the time, not what
-   became stale after. See Questions Requiring Human Input #2. Also now
-   confirmed: the register has entire subsystems (the evidence graph) it
-   never mentions at all, not just stale entries — it was never the complete
-   picture, even freshly reconciled.
-3. Do not start BETA-006 without new scheduling information; it was refused
-   twice already for a reason unrelated to code quality.
-4. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`
-   branches without asking — see BETA-004's notes.
-5. BETA-003's ansible-mirror changes still need a real VPS run — the
-   highest-value remaining infrastructure lever, and not something to
-   simulate further from a dev checkout.
+**What is currently being worked on?** Nothing — BETA-015 (Module 30) just
+completed and pushed. No `IN_PROGRESS` item.
+
+**What was the last successful change?** BETA-015: Module 30, statutory
+homelessness (H-CLIC), Table A1. See its DONE entry above for the full
+result, including two real bugs found and fixed during verification (a
+covered-cell ODS alignment bug, and a region/England-code filtering gap
+m29's own pattern would have gotten wrong on this source).
+
+**What should happen next?** BETA-016 (Module 31, H-CLIC temporary
+accommodation / TA1) is queued `NEXT` — the lowest-effort dataset candidate
+available, since BETA-015 already built the discovery/dedup/dual-format
+machinery this would reuse. Its own `suggested_first_action` says to verify
+TA1's column layout by hand before assuming A1's approach transfers. Beyond
+that, the queue is otherwise `BLOCKED`/`RESEARCH` only (see below) — per
+§58 of the original brief, that is a signal to do a fresh strategic
+reassessment (comparable-product research, technical debt scan, a look at
+whether recently-added datasets have outpaced their own discoverability),
+not a signal to stop. This session has now completed 16 queue items since
+`beta` was created; a reassessment is due either way.
+
+**What is blocked and why?**
+1. BETA-011 (AI-authored evidence promotion) — waiting on the project
+   owner to specify which candidate type it applies to first. See
+   Questions Requiring Human Input #0.
+2. BETA-005 (WDTK robots.txt exception) — time-boxed to 2026-09-10 or an
+   earlier mySociety reply. Not this project's call to make sooner.
+3. BETA-006 (`--jobs 4` re-evaluation) — refused twice already for an
+   operational/scheduling reason, not a code-quality one; do not restart
+   without new information about collection-calendar availability.
+
+**What are the highest-value upcoming items?** In rough priority order:
+BETA-016 (Module 31, ready and well-scoped); a decision from the project
+owner on BETA-011's candidate type (would unblock the single most
+sensitive item in the queue); Questions Requiring Human Input #2 (crime
+data LSOA crosswalk — a real, bigger undertaking flagged during BETA-014's
+research, not started) and #3 (document-search UI scoping) if the project
+owner has a view; BETA-003's ansible-mirror changes still have never been
+run against a real VPS, which remains the highest-value *unverifiable*
+lever in the queue — nothing further to do on it from this dev checkout.
+
+Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
+without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
+should still be checked against actual code before being trusted for
+anything not touched since BETA-002's reconciliation — BETA-008's DONE
+entry records this as a recurring pattern (three separate stale claims
+found across the session), not a one-off worth assuming fixed.

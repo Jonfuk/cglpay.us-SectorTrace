@@ -162,6 +162,7 @@ one or both.
 | `m27_ndtms_monthly` | NDTMS monthly provisional reports (`ndtms.net`) | Numbers in treatment, new presentations and exits per local authority and substance, for the current report month, adults and young people separately — service demand alongside `m07_ndtms`'s published statistics, never merged with workforce figures |
 | `m28_sar_reports` | National SAR Library (`nationalnetwork.org.uk`) | Safeguarding Adult Reviews: the commissioning board's own name for itself (read from the document, not guessed), workforce concern terms and provider mentions across the text. One national source in place of ~150 independent board websites — the board name and any excerpt are only as good as what the document states plainly; see the module's docstring |
 | `m29_rough_sleeping` | MHCLG rough sleeping snapshot | An annual, local-authority-level comparator: the estimated number of people sleeping rough on a single autumn night per authority since 2010, and MHCLG's own published rate per 100,000 population alongside it. One evergreen source page republishes the whole time series every edition, so one fetch captures the full history. Methodology is set by each authority individually, not standardised nationally — see `docs/CAVEATS.md` |
+| `m30_statutory_homelessness` | MHCLG statutory homelessness (H-CLIC) | A quarterly, local-authority-level comparator alongside Module 29: how many households a council formally assessed under the Housing Act's homelessness duties each quarter, and what was decided — owed a prevention or relief duty, or one of three no-duty outcomes. Reads only Table A1 (the flagship count) of MHCLG's much larger quarterly workbook. See `docs/CAVEATS.md` for the sheet-shape and revision caveats |
 
 ### Run order
 
@@ -214,7 +215,7 @@ the next only begins once it has finished — `m04` still never starts before
 
 | Wave | Modules | Backends |
 | --- | --- | --- |
-| 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25`, `m28`, `m29` | Independent geography, provider, workforce, pay and comparator sources |
+| 1 | `m00`, `m02`, `m03`, `m06`, `m08`, `m16`, `m17`, `m18`, `m21`, `m22`, `m25`, `m28`, `m29`, `m30` | Independent geography, provider, workforce, pay and comparator sources |
 | 2 | `m01`, `m05`, `m07`, `m11`, `m12`, `m13`, `m14`, `m15`, `m19` | Sources that use geography, provider accounts, or both |
 | 3 | `m04`, `m09`, `m10`, `m24`, `m26` | Companies House and council sites, after their identifiers and home pages exist; `m26` after `cqc_locations` exists |
 | 4 | `m20`, `m23` | Gender pay matching and sector reconciliation, after company/source evidence exists |

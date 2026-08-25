@@ -459,6 +459,27 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "for a real authority would still leave count NULL correctly "
               "while count_text proves the sheet was actually read.",
     ),
+    Smoke(
+        module="m30_statutory_homelessness",
+        produces=("statutory_homelessness_snapshot",),
+        signal=(("statutory_homelessness_snapshot", "quarter_label"),
+                ("statutory_homelessness_snapshot", "total_initial_assessments_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="One evergreen page attaches one file per quarter (unlike m29's "
+              "single ever-replaced file); --limit bounds how many recent "
+              "quarters are fetched, not how much of the attachment list is "
+              "read. total_initial_assessments_text is the signal, not the "
+              "numeric column: MHCLG's own [x]/[z]/[n]/[c] placeholders are "
+              "common and legitimate, so a run writing only placeholders for "
+              "a real authority would still leave the numeric column NULL "
+              "correctly while the _text column proves the sheet was "
+              "actually read and the column locator resolved. Not every "
+              "quarter carries every optional column (withdrew_no_duty and "
+              "not_eligible_no_duty did not exist as separate columns in "
+              "older editions of this table) -- see docs/CAVEATS.md.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`
