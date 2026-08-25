@@ -690,6 +690,57 @@ anyone using it.
   falling back to the bare name, because falling back would answer a question
   nobody has looked at with whichever code happened to sort first.
 
+### Rough sleeping snapshot (Module 29)
+
+- **This is a comparator, not sector evidence, and it is never combined with
+  the sector's own evidence.** It exists so a reader can look at rough
+  sleeping and substance-misuse figures for the same authority side by side —
+  the two are widely documented as overlapping populations — never to compute
+  a ratio, a correlation, or any other cross-layer figure. `docs/CAVEATS.md`'s
+  first rule applies here exactly as everywhere else in this pipeline: no
+  arithmetic across evidence layers.
+- **Methodology is not standardised between authorities, and that is the
+  single most important thing to carry when comparing two of them.** MHCLG's
+  own notes say each authority chooses its own approach — a count, an
+  evidence-based estimate, or an evidence-based estimate with a spotlight
+  count — and its own date within the October–November window. A difference
+  between two authorities' figures may be a difference in what was measured
+  and how, not only a difference in what exists on the street. This pipeline
+  stores no methodology field per authority because the source does not
+  publish one in the machine-readable table — only in prose — so this caveat
+  is the only place the limitation is recorded.
+- **`rate_per_100k` is MHCLG's own published figure, calculated from the
+  corresponding year's ONS population estimate — this pipeline never derives
+  a rate itself**, the same discipline as ONS ASHE and NDTMS's own published
+  rates. Do not recompute it from `count` and a different population source;
+  the two would disagree for reasons that have nothing to do with rough
+  sleeping.
+- **A single night's estimate, not a count of everyone who slept rough across
+  the season.** The snapshot records people seen, or believed, to be sleeping
+  rough on one chosen night. It excludes people in hostels, shelters, or
+  organised campsites, and it is not a measure of homelessness more broadly —
+  statutory homelessness is a separate MHCLG collection this pipeline does
+  not yet read.
+- **`[x]` (not available), `[z]` (not applicable) and `[n]` (no data — the
+  authority did not exist yet, from reorganisation) are kept verbatim in
+  `count_text`/`rate_text` with the numeric column `NULL`.** None of the
+  three means zero.
+- **A local authority code from an older edition of the time series that no
+  longer appears in this pipeline's `authorities` table is logged to
+  `review_queue` as `rough_sleeping_unmatched_authority`, not silently
+  dropped.** The 2010–2025 series spans several rounds of local government
+  reorganisation (unitary mergers, county splits); this pipeline does not yet
+  reconcile a predecessor code's history onto its successor the way Module 27
+  does for NDTMS, so a merged or split authority's older years may be under a
+  code no longer in `authorities` until that reconciliation is done.
+- **Coverage stops at what the evergreen source page currently publishes.**
+  MHCLG replaces the page's attachment each edition rather than keeping a
+  dated archive of every past one; this pipeline captures whatever the
+  current edition contains — the full 2010-to-date series it has always
+  republished so far — on every run. If a future edition ever narrowed that
+  window, an earlier year missing here would mean the source stopped
+  publishing it, not that this pipeline failed to collect it.
+
 ---
 
 ## Personal data

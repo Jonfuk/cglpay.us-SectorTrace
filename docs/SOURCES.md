@@ -474,6 +474,17 @@ invisible here.
 
 ---
 
+## Module 29 — Rough sleeping snapshot
+
+| | |
+| --- | --- |
+| Source | MHCLG rough sleeping snapshot, published on GOV.UK |
+| Endpoints | `https://www.gov.uk/api/content/government/statistical-data-sets/tables-on-rough-sleeping` and the attached ODS |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | One evergreen page whose single file republishes the whole 2010-to-current series every edition, so one fetch captures the full history. Count and MHCLG's own rate per 100,000 population (calculated by MHCLG, never by this pipeline) are stored side by side. Methodology is not standardised between authorities — each chooses its own approach and date within the autumn window — and the caveat travels with every figure |
+
 ## Viability checks
 
 Probed live on 2026-08-11 with the pipeline's own User-Agent, one request

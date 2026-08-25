@@ -99,6 +99,74 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-014 | Module 29: rough sleeping snapshot (new dataset)
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push — see the commit immediately following this
+    entry in `git log beta`)
+  - result: Project owner asked for homelessness/rough-sleeping/crime data
+    as local-authority-level comparators, given the well-documented overlap
+    with substance misuse. Researched all three properly before building
+    anything (§16 of the original brief's Dataset Expansion Authority
+    checklist): confirmed real, current, official sources —
+    - **Rough sleeping snapshot** (MHCLG): annual, LA-level, one evergreen
+      GOV.UK page whose single ODS republishes the *entire* 2010-to-current
+      series every edition (verified by downloading and parsing the real
+      file: 296 authorities × 16 years, 4,736 rows). Cleanest shape, most
+      direct substance-misuse link — **built this cycle**.
+    - **Statutory homelessness (H-CLIC)**: official, quarterly, LA-level
+      ("Live tables on homelessness") — same shape family as `m13`'s MHCLG
+      budgets. Confirmed viable, **not built this cycle** — one module per
+      cycle done properly beats two done fast; queued as a natural
+      follow-up, not started.
+    - **Crime data** (`data.police.uk`): the only real option found is
+      street-level/LSOA, not local-authority-level — using it as an LA
+      comparator would need this pipeline's own LSOA→ONS-code crosswalk, a
+      materially bigger and more sensitive undertaking (small-area crime
+      data carries its own care-in-handling questions this project hasn't
+      had to face yet). **Deliberately not built** — flagged as a real
+      finding, not a task, in Questions Requiring Human Input.
+  - **Module 29** follows the established module conventions exactly:
+    `pipeline/modules/m29_rough_sleeping.py` (registered, auto-discovered),
+    migration `0059` (SQLite + PostgreSQL), `pipeline/licences.py` +
+    `components.js`'s mirrored copy (OGL v3.0), `docs/SOURCES.md`,
+    `README.md`'s module table and Wave 1, and a `docs/CAVEATS.md` entry
+    that leads with the caveat the project owner's own framing needed most:
+    **methodology is not standardised between authorities** (each chooses
+    its own counting approach and date), so a raw comparison between two
+    authorities' figures may reflect a difference in method, not only a
+    difference on the street — and, per this project's first rule, **never
+    combined or computed against the sector's own substance-misuse
+    evidence**, comparator only, side by side.
+  - note: **Verified as thoroughly as this session safely could.** Real
+    MHCLG file downloaded and parsed directly to confirm the actual sheet
+    shape (`Table_1_Total`, `Table_5_Rates`, header row, year columns,
+    `[x]`/`[z]`/`[n]` placeholders, region/England aggregate rows correctly
+    excluded) before a line of the parser was written — not guessed at from
+    documentation. 21 new tests on the parsing functions (the same
+    "test the pure functions, not the odfpy I/O layer" convention `m13`
+    already established), all passing against realistic fixture rows.
+    Five separate offline coverage guards this addition touched (migration
+    count, README module list, per-module licence in two mirrored places,
+    the integration-smoke module-coverage spec, the progress-reporting and
+    `--since`-declaration guards) all found and fixed — each caught a real
+    doc/registration gap the way it's designed to. Full suite: 2384 passed,
+    2 pre-existing unrelated failures (confirmed for the third time now).
+  - **What this session could not verify**: an actual live fetch-parse-write
+    run. This checkout's own `.env` has `DATABASE_URL` pointing at the live
+    Railway production database (see Environment Note) — running
+    `./start.sh run m29_rough_sleeping` for real would both make a live
+    request under the project's identity and write to production without
+    explicit authorisation for either. Not done. The parsing logic is
+    verified against the real source file directly; the fetch-and-write
+    integration (HTTP client wiring, `db.upsert`, commit behaviour) is
+    exercised by the same code paths `m13`/`m18` already use in production,
+    but a first real run of *this* module specifically should be watched,
+    ideally against a local SQLite warehouse or `--dry-run`, not assumed
+    correct from unit tests alone.
+  - possible follow-up: statutory homelessness (H-CLIC) as Module 30, same
+    shape family as this one and `m13`. Crime data needs a scoping decision
+    first (see Questions Requiring Human Input) — not a next action yet.
+
 - [DONE] BETA-013 | Health tab: surface the document-analysis layer's own status
   - completed: 2026-08-25T00:00:00Z
   - commits: (pending push — see the commit immediately following this
@@ -509,13 +577,20 @@ started.
 
 ## Dataset Additions
 
-None this cycle. No new dataset was proposed: this project's existing 28
-modules and the roadmap's own "Rejected"/"Open questions" sections already
-cover the obvious candidates (Adzuna — dropped; NMW/NLW reference — done as
-`m17`), and inventing a 29th source without a specific campaign need would be
-exactly the "speculative complexity" the brief itself warns against (§54's
-own framing: "discover what is appropriate rather than mechanically
-implementing this list").
+**BETA-014: Module 29, rough sleeping snapshot (MHCLG)** — requested
+directly by the project owner as a local-authority-level comparator against
+the sector's own substance-misuse evidence, given the documented overlap
+between the two populations. Annual, 2010-to-current, one evergreen source.
+See its DONE entry for the full research (homelessness H-CLIC confirmed
+viable but not built this cycle; crime data researched and deliberately not
+built — flagged in Questions Requiring Human Input instead).
+
+Earlier in the session (before this request): no new dataset was proposed
+autonomously, on the reasoning that this project's existing modules and the
+roadmap's own "Rejected"/"Open questions" already covered the obvious
+candidates and inventing one without a specific need would be speculative.
+That reasoning held until asked directly — this entry is the difference
+between inventing a dataset and building one that was actually requested.
 
 ## Architecture Decisions
 
@@ -540,7 +615,9 @@ not something to fall out of this default silently.
 
 ## Database / Migration Changes
 
-None this cycle.
+BETA-014: migration `0059` adds `rough_sleeping_snapshot` (SQLite +
+PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
+touched.
 
 ## Deployment / Infrastructure Changes
 
@@ -724,7 +801,19 @@ should not assume otherwise, especially before testing anything that writes
    pending. See BETA-011.
 1. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
    already tracked, not this session's call.
-2. **Is a document-search UI (BETA-013's follow-up) worth building, and
+2. **Is crime data (BETA-014's research) worth pursuing given the real
+   effort involved?** `data.police.uk` is the only real public source found
+   and it is street-level/LSOA, not local-authority-level — using it as an
+   authority comparator needs this pipeline's own LSOA→ONS-code crosswalk
+   (ONS does publish an official lookup, so it's buildable, but it is a
+   materially bigger module than rough sleeping or homelessness, and
+   small-area crime data raises its own care-in-handling questions —
+   whether aggregating up to LA level is enough distance from individual
+   incidents, what a defensible comparator shape even looks like here —
+   that this project has not had to answer for any existing source. Worth
+   the project owner's view on whether the value justifies that effort
+   before any code gets written, not a default yes.
+3. **Is a document-search UI (BETA-013's follow-up) worth building, and
    where?** The backend already exists and works (`pipeline documents
    search`), but a search surface over raw parsed document text is a
    different risk shape from the relationship explorer's deterministic

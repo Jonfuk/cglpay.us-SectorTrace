@@ -37,11 +37,11 @@ def test_every_module_reports_progress():
         f"these modules report no progress and will show only a pulsing bar: {silent}")
 
 
-def test_all_twenty_modules_are_covered():
+def test_all_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 29
+    assert len(_real_modules()) == 30
 
 
 @pytest.mark.parametrize("name", [

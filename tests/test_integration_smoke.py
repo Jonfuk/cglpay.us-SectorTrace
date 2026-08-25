@@ -443,6 +443,22 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "when a document does not state its board plainly, not a sign "
               "the source changed shape.",
     ),
+    Smoke(
+        module="m29_rough_sleeping",
+        produces=("rough_sleeping_snapshot",),
+        signal=(("rough_sleeping_snapshot", "snapshot_year"),
+                ("rough_sleeping_snapshot", "count_text")),
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="One evergreen page whose single ODS republishes the whole "
+              "2010-to-current series every edition, so a single fetch (not "
+              "a paginated or --limit-bounded one) always writes every "
+              "published year for every matched authority. count_text is the "
+              "signal, not count: MHCLG's own [x]/[z]/[n] placeholders are "
+              "common and legitimate, and a run finding only placeholders "
+              "for a real authority would still leave count NULL correctly "
+              "while count_text proves the sheet was actually read.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`
