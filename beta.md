@@ -101,8 +101,7 @@ DONE
 
 - [DONE] BETA-017 | Surface Modules 29-31 as a "Comparators" section on the authority page
   - completed: 2026-08-25T22:30:00Z
-  - commits: (see the commit immediately following this entry in
-    `git log beta`)
+  - commits: `a2b4796` (`beta`)
   - result: Direct outcome of the project owner's requested strategic
     reassessment (§52) after BETA-015/016. The reassessment's first check —
     "are users able to actually discover the new functionality" — found a
@@ -1141,6 +1140,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `a2b4796` — BETA-017: surface Modules 29-31 as a Comparators section on
+  the authority page (`beta`).
 - `1336770` — BETA-016: Module 31, temporary accommodation (H-CLIC)
   snapshot (`beta`).
 - `5855ac7` — BETA-015: Module 30, statutory homelessness (H-CLIC) snapshot
