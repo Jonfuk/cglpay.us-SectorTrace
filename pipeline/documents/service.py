@@ -22,6 +22,17 @@ from pipeline.documents.parsers import (
 )
 from pipeline.documents.quality import assess
 
+# The formats whose only readers are the optional parsers (PyMuPDF, docling)
+# and so the only ones that cannot be handled at all without `uv sync --extra
+# documents`. Everything else this service accepts — DOCX, PPTX, HTML — has an
+# adapter in pipeline/documents/parsers.py built on the standard library, and
+# legacy .doc has its own already-non-fatal path through antiword.
+#
+# This exists so `process` can tell "this deployment is missing its parser"
+# from "nothing here reads this format". They want opposite answers: the first
+# must be raised, the second must be skipped and recorded.
+NEEDS_OPTIONAL_PARSER = {"application/pdf"}
+
 
 class DocumentService:
     def __init__(self, conn, settings):
@@ -68,13 +79,36 @@ class DocumentService:
                 repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, "OCR_FAILED", str(exc))
                 return {"status": "OCR_FAILED", "evidence_id": reference.evidence_id, "error": str(exc)}
         selected = parser_name or self.settings.document_parser
+        # The configured parser still gets first refusal, and only the formats
+        # it cannot take fall through to the adapters below. That order is
+        # deliberate rather than incidental: docling handles DOCX and HTML
+        # itself, so choosing an adapter by mime type first would quietly
+        # route those away from the parser the deployment asked for.
+        #
+        # Its being *unavailable* is remembered rather than raised, though,
+        # and that is the fix. A document this parser was never going to
+        # handle — a legacy .doc with no antiword, a spreadsheet — must be
+        # skipped with a recorded reason rather than abort the batch, and
+        # that is true whether or not a PDF toolchain happens to be
+        # installed. Raising here made the non-fatal skip below depend on a
+        # parser it does not use, so an environment without the `documents`
+        # extra turned every skippable document into a crash — including in
+        # CI, where the two tests covering exactly that skip have been red
+        # since the day it was written.
+        parser = None
+        unavailable: ParserUnavailable | None = None
         try:
             parser = get_parser(selected)
-        except ParserUnavailable:
-            if selected != "docling":
-                raise
-            parser = PyMuPDFParser()
-        if not parser.supports(inspection.mime_type):
+        except ParserUnavailable as exc:
+            if selected == "docling":
+                try:
+                    parser = PyMuPDFParser()
+                except ParserUnavailable as fallback:
+                    unavailable = fallback
+            else:
+                unavailable = exc
+
+        if parser is None or not parser.supports(inspection.mime_type):
             if inspection.mime_type == "text/html":
                 parser = HTMLParserAdapter()
             elif DOCXParser().supports(inspection.mime_type):
@@ -89,6 +123,14 @@ class DocumentService:
                     repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, ocr_status, error)
                     return {"status": "SKIPPED_UNSUPPORTED_FORMAT", "evidence_id": reference.evidence_id,
                             "error": error}
+            elif unavailable is not None and inspection.mime_type in NEEDS_OPTIONAL_PARSER:
+                # The document is one only the missing parser could have read,
+                # so this is a deployment without its parser rather than a
+                # document nothing can parse. Raised, not skipped: a PDF
+                # recorded as "unsupported format" reads as a bad document,
+                # and a whole batch of them could be written off that way
+                # before anyone noticed the install was incomplete.
+                raise unavailable
             else:
                 # No committed source in this pipeline produces types outside
                 # PDF/DOCX/PPTX/HTML/legacy DOC, so this is treated the same

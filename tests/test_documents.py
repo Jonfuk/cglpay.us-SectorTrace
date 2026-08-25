@@ -327,6 +327,44 @@ def test_msword_document_is_skipped_not_raised_without_antiword(conn, settings, 
     assert "antiword" in row["last_error"]
 
 
+def test_a_pdf_with_no_parser_installed_raises_rather_than_being_skipped(conn, settings, monkeypatch):
+    """The opposite answer to the two tests below, and it has to be.
+
+    Those two say an unreadable *document* must not abort a batch. This says a
+    missing *parser* must — it is a deployment that is not finished, not a
+    document nothing can read. Recording a PDF as SKIPPED_UNSUPPORTED_FORMAT
+    would read as a bad document, and a whole batch of them could be written
+    off that way before anyone noticed the install was incomplete.
+
+    Pinned because the change that stopped a missing PDF parser from crashing
+    the skip path could just as easily have turned this into a silent skip.
+    """
+    def unavailable(*args, **kwargs):
+        raise ParserUnavailable("PyMuPDF parsing needs `uv sync --extra documents`.")
+
+    # Inspection reads a PDF with PyMuPDF too, so it is stubbed rather than
+    # left to fail first and prove nothing about parser selection.
+    monkeypatch.setattr(
+        "pipeline.documents.service.inspect_bytes",
+        lambda *args, **kwargs: Inspection(
+            mime_type="application/pdf", file_size=32, status="NORMAL", page_count=1,
+            embedded_text_chars=5000, text_chars_per_page=(5000,)))
+    monkeypatch.setattr("pipeline.documents.service.get_parser", unavailable)
+    monkeypatch.setattr("pipeline.documents.service.PyMuPDFParser", unavailable)
+
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    body = b"%PDF-1.7 a report"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_path = archive.put("committee_papers", digest, "application/pdf", body)
+    doc_reference = EvidenceReference(
+        evidence_id="evidence-pdf-no-parser", source_system="committee_papers",
+        source_url="https://example.test/report.pdf", retrieved_at="2026-08-19T00:00:00+00:00",
+        http_status=200, payload_sha256=digest, raw_object_path=raw_path, mime_type="application/pdf")
+
+    with pytest.raises(ParserUnavailable):
+        DocumentService(conn, settings).process(doc_reference)
+
+
 def test_unrecognised_format_is_skipped_not_raised(conn, settings):
     archive = FilesystemArchive(settings.raw_archive_dir)
     body = b"binary spreadsheet bytes"
