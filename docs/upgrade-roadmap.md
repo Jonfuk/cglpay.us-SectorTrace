@@ -1,5 +1,17 @@
 # Upgrade roadmap
 
+**Staleness notice, added 2026-08-25.** This file's own prose was last edited
+at commit `cbf149d`, and `master` has moved 180+ commits past it since
+(Railway hosting, an S3 raw-archive backend, PostgreSQL mirroring, an
+Ansible-provisioned VPS deployment with a nightly DR mirror, `m26`–`m28`,
+dataset-completion safeguards, public evidence layers). Treat every "open"
+item below as unverified against current code before acting on it — several
+were found already delivered on checking (W-23, W-24, W-25, W-26; see their
+entries). `README.md`, `docs/CAVEATS.md` and `git log` are the current sources
+of truth; this register is a historical record of Phases 1–19 that has not
+been kept running since. Refreshing it properly (reconciling every entry
+against current code) is itself queued — see `beta.md`.
+
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 1 skipped, 18 deselected, 422s**). **All nineteen phases have been worked**:
@@ -511,7 +523,8 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
 - Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
 
-**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — filed 2026-08-14**
+**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — closed in Phase 12**
+- **Delivered:** `public_queries.py` computes `by_quarter` and `value_bands` (fixed bands, not data-derived) and the contracts page reads both — verified present in code 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: the page carries a procedure donut, a matched-provider bar and a buyer treemap. Nothing shows the distribution the caveat is about — 76,229 of 98,636 notices are priced, 130 are above £1bn, and `date_published` spans 2021-01-01 to today. The page tells the reader there is no defensible total ([contracts.js:68](pipeline/web/static/public/js/pages/contracts.js:68)) and then gives them nothing to look at instead.
 - Costs today: "why is there no total?" is answered in prose and refuted by nothing. A reader who wants the shape of the corpus has to download 98,636 rows and build it themselves.
 - Fix, three charts on the existing `/api/v1/contracts` payload, no new route:
@@ -521,7 +534,8 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Groundwork was written and reverted rather than half-landed: three query functions returning `by_quarter`, `value_bands` and `ending_soon`, plus the `contract_end` caveat. An API returning three keys no page reads and no test covers is how dead surface accumulates. Reconstructing it from this entry is an hour.
 - Verified by: a test that the bands are fixed rather than data-derived, and a browser check that the runway chart carries its caveat.
 
-**W-24 · The provider deep dive stops at four sources · M — filed 2026-08-14**
+**W-24 · The provider deep dive stops at four sources · M — closed in Phase 12**
+- **Delivered:** the provider deep dive reads `cqc_location_reports`, `company_filings` and `v_provider_disclosure_gaps` (disclosure gaps) — verified present in `public_queries.py` and `pipeline/web/static/public/js/pages/providers.js` 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: `provider_timeline` reads charity financials, tribunals, NHS adverts and contracts. Sitting unread beside them: `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180 with the `v_provider_disclosure_gaps` view already built over it, and `charity_financials` reduced to one column on the list page.
 - Costs today: the page is the closest thing this project has to a dossier on a campaign subject, and four of the sources collected about that subject are not on it.
 - Fix, four sections, each single-source and each with its own caveat:
@@ -531,14 +545,16 @@ Effort: S = under a day, M = a few days, L = a week or more.
   - **Filing history** from `company_filings`, each linking to `document_url`.
 - Verified by: a browser check per section, and a test that the disclosure matrix distinguishes "not matched" from "not searched".
 
-**W-25 · 1,539 PFD reports are collected and invisible · M — filed 2026-08-14**
+**W-25 · 1,539 PFD reports are collected and invisible · M — closed in Phase 12**
+- **Delivered:** `pipeline/web/static/public/js/pages/pfd.js` and the `pfd_reports`/`pfd_concern_terms`/`pfd_provider_mentions` queries in `public_queries.py` — verified present 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: `pfd_reports` 1,539, `pfd_concern_terms` 214, `pfd_provider_mentions` 57, `pfd_recipients` 5,788. `_public([...])` names none of them. Module 8 reads the PDFs and files the residue in `review_queue`; nothing downstream shows any of it.
 - Costs today: coroners' Prevention of Future Deaths reports are among the most quotable evidence this pipeline holds, and the only way to read one is SQL.
 - Fix: a sector-level section, plus the 57 mentions on the provider deep dive. Reports by year and by `coroner_area`; concern terms as a bar chart **labelled a finding aid** — a term means a word appears, not that the coroner found it ([docs/CAVEATS.md:165](docs/CAVEATS.md:165)). Three constraints that are not optional: being *sent* a report and being *named* in one are different facts and must never be summed into one series; roughly two thirds of reports (1,067 of 1,539) are metadata stubs with no `matters_of_concern`, which belongs on the chart and not in a footnote; and coroner areas are not local authorities and must not be mapped as if they were.
 - `restricted_pfd_persons` and `restricted_pfd_report_text` stay out of every `_public([...])`. `guard_columns` will stop it; do not look for a way around it.
 - Verified by: a test that the portal cannot reach either restricted table, and that sent and named are separate series in the payload.
 
-**W-26 · The overview shows neither the funnel nor what is stale · S — filed 2026-08-14**
+**W-26 · The overview shows neither the funnel nor what is stale · S — closed in Phase 12**
+- **Delivered:** `_evidence_funnel()` in `public_queries.py`, explicitly commented `# W-26: the overview's verification funnel` — verified present 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: 2,462 undecided candidates against 0 promotions was the finding behind U-03, and the public overview says nothing about it. Nor does anything show collection recency, though every table carries `retrieved_at`.
 - Costs today: the portal's own coverage limits are the first thing a sceptical reader should be able to see, and they are the one thing it does not display. Publishing the funnel honestly is both an accurate coverage statement and the standing argument for working the queue.
 - Fix: a candidate-to-evidence funnel (discovered → undecided → promoted → evidence rows) and a days-since-collection bar per source table, using the `ago()` helper the page already has.
