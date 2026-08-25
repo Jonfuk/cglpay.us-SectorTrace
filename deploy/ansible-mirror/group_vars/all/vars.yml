@@ -1,0 +1,378 @@
+---
+# Non-secret configuration for a *mirror* of an existing SectorTrace
+# deployment. Secrets — this box's own database passwords, and the source
+# deployment's credentials — live in vault.yml, which is ansible-vault
+# encrypted; see group_vars/all/vault.yml.example.
+#
+# Everything down to "The source deployment" is the self-host build's
+# vars.yml, because six of the seven roles are shared with it and expect
+# these names. Where a value differs from that build, the comment says why.
+
+# --- Domain -----------------------------------------------------------------
+# The A record for THIS box — the mirror's own hostname, not the source
+# deployment's. Caddy requests a Let's Encrypt certificate for it the first
+# time it starts, so the record must already resolve here.
+domain: "example.org"
+
+# The email Caddy gives Let's Encrypt for expiry notices, and CONTACT_EMAIL
+# in the container. A mirror never crawls a source, so the User-Agent half
+# of settled decision 5 does not arise here — the application still refuses
+# to start without it, and an operator contact on a public portal is right
+# either way.
+contact_email: "{{ vault_contact_email }}"
+
+# --- Where generated state lives ---------------------------------------------
+# Deliberately NOT /opt/sectortrace/state, which is where the self-host
+# build puts a source deployment. The two are different things with
+# identically-named files inside them, and a box that has been both would
+# otherwise leave you reading a .env that belongs to the other one.
+state_dir: /opt/sectortrace-mirror/state
+
+# --- The operator UI -----------------------------------------------------------
+# Served here, with the same allowlist as the source deployment, and with
+# one thing to understand that does not apply there:
+#
+#   THE WAREHOUSE IS REPLACED WHOLESALE ON EVERY SYNC.
+#
+# A review-queue decision, a promotion or a reveal made on the mirror is
+# gone at the next nightly run — not merged, not conflicted, gone. The
+# mirror is a copy; the source deployment is where evidence work happens.
+# Read the admin UI here freely. Do not work in it.
+#
+# Set admin_ui_enabled: false to close it entirely, which is the honest
+# setting if nobody needs to look.
+admin_ui_enabled: true
+expose_admin_publicly: false
+
+# Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
+# are accepted too (198.51.100.0/24). The allowlist IS the authentication —
+# the app has no login of any kind (settled decision 8) — so the self-host
+# build's warnings apply here unchanged: a home broadband address can change
+# without warning, and TLS protects this in transit but not from a wrong
+# address. An empty list leaves admin reachable only over an SSH tunnel.
+admin_allowed_ips:
+  - "154.61.155.48"
+
+# --- Resource sizing -------------------------------------------------------------
+# Derived from the host's actual RAM and CPU count, exactly as in the
+# self-host build — the shared preflight role asserts the budget fits before
+# anything is built. A mirror runs the same PostgreSQL and Neo4j as the
+# deployment it copies, so the sizing is the same question.
+#
+# To pin a value by hand, set auto_tune_memory: false and override the
+# individual variable in group_vars/all/zz-local.yml (which loads last).
+auto_tune_memory: true
+
+reserved_mb: "{{ [1024, (ansible_memtotal_mb | int * 0.15) | int] | max }}"
+
+postgres_shared_buffers_mb: "{{ [[(ansible_memtotal_mb | int * 0.25) | int, 256] | max, 8192] | min }}"
+postgres_effective_cache_mb: "{{ (ansible_memtotal_mb | int * 0.5) | int }}"
+postgres_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.00125) | int, 4] | max, 32] | min }}"
+postgres_maintenance_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.05) | int, 64] | max, 1024] | min }}"
+postgres_max_connections: 100
+postgres_shm_size_mb: 256
+
+neo4j_heap_mb: "{{ [[(ansible_memtotal_mb | int * 0.12) | int, 512] | max, 4096] | min }}"
+neo4j_pagecache_mb: "{{ [(neo4j_heap_mb | int * 0.5) | int, 256] | max }}"
+
+postgres_max_worker_processes: "{{ ansible_processor_vcpus | int }}"
+postgres_max_parallel_workers: "{{ ansible_processor_vcpus | int }}"
+postgres_max_parallel_workers_per_gather: "{{ [(ansible_processor_vcpus | int / 2) | int, 2] | max }}"
+document_worker_concurrency: "{{ [[(ansible_processor_vcpus | int / 2) | int, 1] | max, 4] | min }}"
+
+postgres_shared_buffers: "{{ postgres_shared_buffers_mb }}MB"
+postgres_effective_cache_size: "{{ postgres_effective_cache_mb }}MB"
+postgres_work_mem: "{{ postgres_work_mem_mb }}MB"
+postgres_maintenance_work_mem: "{{ postgres_maintenance_work_mem_mb }}MB"
+neo4j_heap_size: "{{ neo4j_heap_mb }}m"
+neo4j_pagecache_size: "{{ neo4j_pagecache_mb }}m"
+
+documents_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.5) | int, 1024] | max, 8192] | min }}"
+neo4j_mem_limit_mb: "{{ (neo4j_heap_mb | int) + (neo4j_pagecache_mb | int) + 768 }}"
+
+# --- Packages -------------------------------------------------------------------
+# The self-host build's list. `awscli` is load-bearing on a mirror rather
+# than optional: it is how the nightly sync reads the source's snapshot
+# bucket. Add your own preferences to extra_packages.
+base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+  - chrony
+  - tmux
+  - htop
+  - iotop
+  - ncdu
+  - tree
+  - lsof
+  - sysstat
+  - mc
+  - rsync
+  - unzip
+  - zip
+  - less
+  - vim
+  - dnsutils
+  - net-tools
+  - mtr-tiny
+  - jq
+  - bash-completion
+  # Reads the source deployment's S3 buckets on every sync. Debian's awscli
+  # talks to any S3-compatible endpoint via --endpoint-url.
+  - awscli
+extra_packages: []
+
+# --- Preflight ------------------------------------------------------------------
+skip_dns_check: false
+
+# --- Cloudflare ------------------------------------------------------------------
+# Detected, not assumed: an address inside Cloudflare's published ranges
+# means the record is proxied, which changes how the admin allowlist has to
+# be matched (client_ip rather than remote_ip). Getting this wrong in the
+# proxied direction locks everyone out of /admin, including you.
+behind_cloudflare: "auto"
+caddy_behind_cloudflare: false
+
+# From https://www.cloudflare.com/ips/ — refresh from there occasionally.
+# A security boundary when proxied: anything trusted here can claim to be
+# any client.
+cloudflare_ipv4_ranges:
+  - "173.245.48.0/20"
+  - "103.21.244.0/22"
+  - "103.22.200.0/22"
+  - "103.31.4.0/22"
+  - "141.101.64.0/18"
+  - "108.162.192.0/18"
+  - "190.93.240.0/20"
+  - "188.114.96.0/20"
+  - "197.234.240.0/22"
+  - "198.41.128.0/17"
+  - "162.158.0.0/15"
+  - "104.16.0.0/13"
+  - "104.24.0.0/14"
+  - "172.64.0.0/13"
+  - "131.0.72.0/22"
+cloudflare_ipv6_ranges:
+  - "2400:cb00::/32"
+  - "2606:4700::/32"
+  - "2803:f800::/32"
+  - "2405:b500::/32"
+  - "2405:8100::/32"
+  - "2a06:98c0::/29"
+  - "2c0f:f248::/32"
+
+caddy_use_staging_ca: false
+
+# --- OS upgrade ----------------------------------------------------------------
+apt_full_upgrade: true
+
+# --- Tuning ---------------------------------------------------------------------
+swapfile_size: "2G"
+vm_swappiness: 10
+
+# --- Hardening --------------------------------------------------------------------
+enable_fail2ban: true
+enable_unattended_upgrades: true
+ssh_port: 22
+harden_ssh: true
+fail2ban_bantime: "24h"
+fail2ban_findtime: "10m"
+fail2ban_maxretry: 4
+recidive_bantime: "1w"
+recidive_findtime: "1d"
+recidive_maxretry: 3
+fail2ban_ignoreip:
+  - "154.61.155.48"
+unattended_upgrades_reboot: false
+unattended_upgrades_reboot_time: "04:00"
+
+# =============================================================================
+#  The source deployment, and the sync
+# =============================================================================
+# Everything below here is what makes this a mirror rather than a second
+# deployment. The credentials these name live in vault.yml.
+
+# Only ever shown to a human — in the playbook's closing summary, in the
+# sync log, and in `sectortrace-mirror sync-status`. Nothing connects to it.
+# Set it to the source deployment's domain so a log line says which box a
+# warehouse came from.
+mirror_source_label: ""
+
+# How the warehouse gets here. Both paths are built; this chooses which one
+# the timer runs, and ansible-mirror.sh asks for it.
+#
+#   snapshot  Read the newest verified `pipeline backup` snapshot out of the
+#             source's offsite backup bucket and `pipeline restore` it. The
+#             source already writes those nightly (backup_offsite_enabled in
+#             its own vars.yml). Needs no inbound access to the source box
+#             at all — read-only keys on one bucket — and the snapshot has
+#             already been verified once when it was written, and is
+#             verified again by restore before it replaces anything. What it
+#             costs: freshness is "as of the source's last backup".
+#
+#   tunnel    `pipeline migrate-postgres --truncate`, copying live from the
+#             source's PostgreSQL over an SSH tunnel this box holds open,
+#             and verifying the result row by row against the source. Fresher,
+#             and verified against the live warehouse rather than against a
+#             file. What it costs: an SSH key on the source box and a tunnel
+#             to keep up.
+mirror_sync_mode: "snapshot"
+
+# Nightly, after the source's own backup (03:15) and its offsite copy have
+# had time to finish. Too early and snapshot mode restores last night's file
+# again — harmless (it is skipped as already-restored) but pointless.
+mirror_sync_time: "04:30"
+# Spreads the start so a bucket serving several mirrors is not asked for the
+# same object by all of them at the same second.
+mirror_sync_randomized_delay: "20m"
+
+# The portal is stopped for the warehouse step and started again after it.
+#
+# Not politeness: the restore truncates every table and reloads it in one
+# transaction, which takes an ACCESS EXCLUSIVE lock. Leaving the app up does
+# not avoid the outage, it just turns it into requests that hang until the
+# restore lets go — and a long-running portal query can hold the restore off
+# instead. Stopping it makes the window explicit, and Caddy answers it with
+# a 503 saying so rather than a bare 502.
+mirror_stop_app_during_sync: true
+
+# --- The raw archive: S3 -> this box's local disk ------------------------------
+# The source deployment keeps archived source bytes in an S3 bucket. The
+# mirror keeps them on its own disk, under {{ state_dir }}/data/raw, and the
+# app here is configured with no ARCHIVE_S3_* group at all so it reads them
+# from the filesystem — the archive is *on* this box, not proxied from the
+# source's bucket.
+#
+# `pipeline archive-mirror` is what moves them: it downloads every object
+# the local store is missing and never deletes a local file. It is
+# incremental after the first run, but that first run downloads the entire
+# archive, so expect one long night and check the disk before you start.
+mirror_archive_sync: true
+
+# Rebuild the evidence graph from the freshly restored warehouse, at the end
+# of each sync. Neo4j is a disposable projection either way; on a mirror it
+# is *entirely* disposable, since the warehouse it projects was replaced
+# five minutes earlier. Turn this off (and NEO4J_ENABLED with it) if the
+# mirror only needs to serve the portal.
+mirror_graph_rebuild: true
+
+# How old the newest snapshot in the source's bucket may be before this box
+# calls it stale. This is the check that catches a source whose backup timer
+# has quietly stopped — without it the mirror finds the same file it restored
+# last week, recognises it, and reports "nothing to do", which is exactly what
+# being up to date looks like. 48 hours allows one missed nightly run before
+# anybody is woken.
+#
+# The sync passes --fail-if-stale, so exceeding this fails the unit, and a
+# failed unit is what fires the alert below.
+mirror_max_snapshot_age_hours: 48
+
+# --- Knowing when it stops working -----------------------------------------
+# A sync that fails is a journal entry nobody reads, and a mirror that has
+# stopped syncing looks exactly like one that is up to date. Both the sync
+# and the verify units carry OnFailure=, so anything that fails here runs
+# sectortrace-mirror-alert.
+#
+# With neither of these set the alert still runs: it writes the failure into
+# the mirror's state file, where `sectortrace-mirror sync-status` shows it in
+# red, and logs it. That is better than nothing and worse than a webhook —
+# set one.
+mirror_alert_webhook: ""
+# Anything else you would rather run. Receives the failing unit name as $1 and
+# the last 40 journal lines on stdin.
+mirror_alert_command: ""
+
+# --- Metrics ----------------------------------------------------------------
+# Where to drop a Prometheus textfile-collector file after each sync. Empty
+# disables it. The usual node_exporter path is
+# /var/lib/node_exporter/textfile_collector.
+#
+# The metric worth alerting on is sectortrace_mirror_snapshot_timestamp_seconds
+# — how old the evidence being served actually is, as opposed to when this box
+# last did some work. A mirror that syncs perfectly every night from a source
+# that stopped producing snapshots a month ago has a perfect record and
+# month-old data.
+mirror_metrics_dir: ""
+
+# --- Proving it still matches -----------------------------------------------
+# The sync checks that what it restored is what the snapshot held (restore
+# re-counts every table and rolls back on a disagreement). Nothing re-checks
+# the archive afterwards, so:
+#
+#   weekly  `archive-mirror --dry-run --fail-if-missing` compares the bucket's
+#           key set against local disk and transfers nothing. In tunnel mode
+#           it also runs `check-postgres-sync`, which compares both warehouses
+#           value by value without changing either.
+#   monthly `archive-verify` re-hashes every object in the LOCAL store. This
+#           is the only thing that proves the local copy is byte-identical to
+#           what the source archived, and it is the audit trail, so it is
+#           worth the I/O.
+#
+# Both fail loudly, which means both alert.
+mirror_verify_enabled: true
+mirror_verify_time: "Mon *-*-* 05:30:00"
+mirror_verify_deep_time: "*-*-01 05:30:00"
+
+# Concurrent downloads during an archive sync. Each object is a separate small
+# request, so this is latency-bound rather than bandwidth-bound and 8 is a
+# large improvement over 1 without being rude to a bucket you are paying for.
+mirror_archive_workers: 8
+
+# `pipeline restore --force` snapshots the warehouse it is about to replace,
+# labelled superseded-by-restore, and a labelled backup is never pruned
+# automatically — deliberately, because on a real deployment the
+# second-commonest reason to restore is having restored the wrong thing.
+#
+# On a mirror that reasoning is weaker in one specific way: what a restore
+# replaces here is itself a copy of the source, and the source still has the
+# original. So the sync keeps the newest few and deletes the rest, rather
+# than filling the disk with nightly copies of a warehouse nobody wrote to.
+# Set to 0 to keep every one of them (and watch the disk).
+mirror_superseded_keep: 2
+
+# The subnet this box's Docker network claims. Pinned rather than left to
+# Docker's pool because tunnel mode compares the two warehouses' server
+# identities and refuses if they match — and two hosts provisioned the same
+# way both hand PostgreSQL 172.18.0.2. See docker-compose.mirror.yml.j2.
+mirror_docker_subnet: "172.29.0.0/16"
+
+# The sync refuses to start when the filesystem holding state_dir has less
+# than this free. A restore writes a superseded snapshot before it replaces
+# anything, and an archive sync writes whatever the source has added — both
+# are worse to run out of space part way through than to not start.
+mirror_min_free_gb: 10
+
+# --- snapshot mode: the source's offsite backup bucket -------------------------
+# Where the source deployment's sectortrace-backup-offsite script puts its
+# verified snapshots. Its own vars.yml calls this backup_s3_prefix, and
+# defaults it to warehouse-backups under the archive bucket.
+#
+# Read-only credentials are enough and are what to use: this box never
+# writes to the source's buckets, and a key on a mirror is a key in one more
+# place.
+mirror_backup_s3_prefix: "warehouse-backups"
+
+# --- tunnel mode: reaching the source's PostgreSQL -----------------------------
+# The source publishes PostgreSQL on its own loopback only, so there is
+# nothing to connect to from here without a tunnel. A systemd unit holds
+# `ssh -N -L` open and restarts it when it drops; the sync container reaches
+# it on this box's loopback.
+#
+# Use the source's read-only role (sectortrace_reader). migrate-postgres
+# only ever reads the source, and a mirror holding a credential that could
+# write to the authoritative warehouse is a bad trade for nothing.
+mirror_tunnel_local_port: 5433
+mirror_ssh_host: ""
+mirror_ssh_user: "root"
+mirror_ssh_port: 22
+mirror_ssh_key: "/root/.ssh/sectortrace-mirror"
+# Where the source's PostgreSQL listens *on the source box*. The tunnel's
+# far end, not this one.
+mirror_source_pg_host: "127.0.0.1"
+mirror_source_pg_port: 5432
+mirror_source_pg_database: "sectortrace"
+mirror_source_pg_user: "sectortrace_reader"

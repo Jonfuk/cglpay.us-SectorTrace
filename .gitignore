@@ -18,6 +18,15 @@ deploy/ansible/.vault-backups/
 deploy/ansible/group_vars/all/zz-local.yml
 deploy/ansible/*.retry
 
+# The mirror build's equivalents. Same rules, same reasons — and one more
+# that is specific to it: this vault holds copies of the SOURCE
+# deployment's credentials, so an unencrypted one committed here would leak
+# the authoritative deployment's keys, not only this box's.
+deploy/ansible-mirror/group_vars/all/vault.yml
+deploy/ansible-mirror/.vault-backups/
+deploy/ansible-mirror/group_vars/all/zz-local.yml
+deploy/ansible-mirror/*.retry
+
 # Data — raw archives and the canonical warehouse are local state, not source
 data/raw/
 data/warehouse.db

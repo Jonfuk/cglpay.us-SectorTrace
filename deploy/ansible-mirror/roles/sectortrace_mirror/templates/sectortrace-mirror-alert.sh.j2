@@ -1,0 +1,77 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace_mirror/templates/sectortrace-mirror-alert.sh.j2.
+#
+# Runs when a mirror unit fails, via OnFailure= on the sync and verify units.
+# Takes the failing unit's name as its only argument.
+#
+# The problem this exists for: a mirror that has stopped syncing looks exactly
+# like one that is up to date. The portal is up, the certificate is valid, the
+# figures render. Nothing is wrong except that none of it has moved for three
+# weeks, and the only evidence of that was a journal entry nobody read.
+#
+# Deliberately NOT `set -e`. This is the path that reports a failure, and a
+# reporting path that exits early on its own first hiccup has failed at the
+# one job it has. Every step below is allowed to fail without stopping the
+# next one, and the local record is written first — before the webhook, which
+# is the step most likely to be the thing that is broken.
+set -uo pipefail
+
+UNIT="${1:-sectortrace-mirror-sync.service}"
+STATE_DIR="{{ state_dir }}"
+WEBHOOK="{{ mirror_alert_webhook }}"
+COMMAND="{{ mirror_alert_command }}"
+SOURCE_LABEL="{{ mirror_source_label | default('(unnamed source)', true) }}"
+HOSTNAME_FQDN="$(hostname -f 2>/dev/null || hostname)"
+
+JOURNAL="$(journalctl -u "$UNIT" -n 40 --no-pager -o cat 2>/dev/null)"
+[ -n "$JOURNAL" ] || JOURNAL="(no journal output for $UNIT)"
+SUMMARY="$(printf '%s\n' "$JOURNAL" | grep -E '^[0-9T:-]+Z?  FAILED: ' | tail -n1)"
+[ -n "$SUMMARY" ] || SUMMARY="$UNIT failed; see journalctl -u $UNIT"
+
+# Written to stderr so it lands in the journal under this unit as well as the
+# failing one — the alert having run is itself something you want to be able
+# to confirm afterwards.
+{
+    echo "=============================================================="
+    echo " SectorTrace mirror FAILURE on $HOSTNAME_FQDN"
+    echo " unit:   $UNIT"
+    echo " source: $SOURCE_LABEL"
+    echo " what:   $SUMMARY"
+    echo "=============================================================="
+} >&2
+
+# The mirror's own record, so `sectortrace-mirror sync-status` shows the
+# failure even when nothing was watching. The sync writes this itself when it
+# fails in an orderly way; this covers the times it did not get the chance —
+# an OOM kill, a hard reboot, docker itself being down.
+cd "$STATE_DIR" 2>/dev/null && docker compose -f docker-compose.sync.yml run --rm sync \
+    mirror end --status failed --message "$UNIT: $SUMMARY" >/dev/null 2>&1
+
+{% if mirror_alert_webhook %}
+# One attempt with a short timeout. A retry loop here would delay the next
+# thing and, if the endpoint is down, achieve nothing; the local record above
+# is what survives a failed notification.
+payload="$(printf '%s' "$JOURNAL" | tail -n 20 | python3 -c '
+import json, sys
+print(json.dumps({
+    "text": sys.argv[1],
+    "host": sys.argv[2],
+    "unit": sys.argv[3],
+    "source": sys.argv[4],
+    "journal": sys.stdin.read(),
+}))' "SectorTrace mirror failure: $SUMMARY" "$HOSTNAME_FQDN" "$UNIT" "$SOURCE_LABEL" 2>/dev/null)"
+if [ -n "$payload" ]; then
+    curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
+        --data "$payload" "$WEBHOOK" >/dev/null 2>&1 \
+        || echo "alert webhook POST failed" >&2
+fi
+{% endif %}
+
+{% if mirror_alert_command %}
+# Whatever else you would rather run: the unit name as $1, the journal on
+# stdin.
+printf '%s\n' "$JOURNAL" | {{ mirror_alert_command }} "$UNIT" \
+    || echo "mirror_alert_command exited non-zero" >&2
+{% endif %}
+
+exit 0

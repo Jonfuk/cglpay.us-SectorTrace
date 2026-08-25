@@ -1,0 +1,412 @@
+---
+# The mirror's stack, and the sync that fills it. Everything above this role
+# in site.yml is the self-host build's, unchanged — the box is the same
+# Debian VPS with the same exposure, and a hardening fix belongs in one
+# place. This is the part that differs.
+
+# --- What this box is being told to be, checked before it is built ------------
+- name: Check the sync mode is one this playbook knows
+  ansible.builtin.assert:
+    that:
+      - mirror_sync_mode in ['snapshot', 'tunnel']
+    fail_msg: >-
+      mirror_sync_mode is "{{ mirror_sync_mode }}"; it must be "snapshot"
+      (restore the source's newest verified backup out of its bucket) or
+      "tunnel" (copy the source's live PostgreSQL over an SSH tunnel).
+      Re-run ./ansible-mirror.sh --reconfigure to choose again.
+
+- name: Check snapshot mode has a bucket to read
+  ansible.builtin.assert:
+    that:
+      - (vault_mirror_backup_s3_bucket | default('', true) | length > 0)
+        or (vault_mirror_archive_s3_bucket | default('', true) | length > 0)
+      - (vault_mirror_backup_s3_endpoint | default('', true) | length > 0)
+        or (vault_mirror_archive_s3_endpoint | default('', true) | length > 0)
+    fail_msg: >-
+      mirror_sync_mode is "snapshot", which reads the source deployment's
+      verified snapshots out of its offsite backup bucket — and no bucket is
+      configured. Set vault_mirror_backup_s3_* (or the archive credentials
+      it falls back to) with ./ansible-mirror.sh --reconfigure.
+  when: mirror_sync_mode == 'snapshot'
+
+- name: Check tunnel mode knows where the source is
+  ansible.builtin.assert:
+    that:
+      - mirror_ssh_host | length > 0
+      - vault_mirror_source_pg_password | default('', true) | length > 0
+    fail_msg: >-
+      mirror_sync_mode is "tunnel" and either mirror_ssh_host or the source
+      warehouse password is empty. Re-run ./ansible-mirror.sh --reconfigure.
+  when: mirror_sync_mode == 'tunnel'
+
+- name: Check the SSH key the tunnel will use exists
+  ansible.builtin.stat:
+    path: "{{ mirror_ssh_key }}"
+  register: mirror_key
+  when: mirror_sync_mode == 'tunnel'
+
+- name: Refuse tunnel mode without the key
+  ansible.builtin.assert:
+    that:
+      - mirror_key.stat.exists
+    fail_msg: >-
+      {{ mirror_ssh_key }} does not exist, and the tunnel authenticates with
+      it (BatchMode, so there is nobody to type a password). ./ansible-mirror.sh
+      offers to generate one and prints the public half to add to
+      {{ mirror_ssh_user }}@{{ mirror_ssh_host }}'s authorized_keys.
+  when: mirror_sync_mode == 'tunnel'
+
+- name: Check the archive sync has a bucket to read
+  ansible.builtin.assert:
+    that:
+      - vault_mirror_archive_s3_bucket | default('', true) | length > 0
+    fail_msg: >-
+      mirror_archive_sync is true but no source archive bucket is
+      configured. Either set vault_mirror_archive_s3_* with
+      ./ansible-mirror.sh --reconfigure, or set mirror_archive_sync: false
+      in group_vars/all/zz-local.yml — a mirror that serves figures whose
+      archived bytes it does not hold is a decision, not an accident.
+  when: mirror_archive_sync
+
+# The local copy of the source's archive is the largest thing on this box by
+# a wide margin, and the first sync writes all of it. Ten gigabytes free is
+# the shared preflight role's floor for the images and the warehouse; this
+# one is about what arrives afterwards.
+- name: Report the disk against what a first archive sync will want
+  ansible.builtin.debug:
+    msg:
+      - "{{ ((ansible_mounts | selectattr('mount', 'equalto', '/')
+             | map(attribute='size_available') | first | default(0) | int)
+             / 1024 / 1024 / 1024) | round(1) }}GB free on /."
+      - "The first sync downloads the source deployment's ENTIRE raw archive to"
+      - "{{ state_dir }}/data/raw. Nothing here can tell you how large that is —"
+      - "ask the source: `sectortrace archive-verify` reports its byte count."
+      - "It grows monotonically from then on; nothing is ever pruned, by design."
+  when: mirror_archive_sync
+
+# --- The state directory -------------------------------------------------------
+# The privacy boundary for everything below it: 0750 root-owned, so no
+# unprivileged account on the host can reach the rendered .env, .env.sync,
+# the bootstrap SQL or the downloaded snapshots. Files inside can then carry
+# whatever mode a container needs without that widening host access.
+- name: Create the state directory
+  ansible.builtin.file:
+    path: "{{ state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Create state directory tree (outside the git checkout)
+  ansible.builtin.file:
+    path: "{{ state_dir }}/{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    # /app/data is bind-mounted whole, so everything the containers write
+    # lands here rather than on a container's writable layer.
+    - data
+    # The local copy of the source's raw archive — the audit trail behind
+    # every figure this portal serves (settled decision 1). On a source
+    # deployment losing this means re-crawling every source at one request
+    # per two seconds; here it means another long night against the bucket.
+    - data/raw
+    - data/derived
+    # Where `restore --force` sets aside the warehouse it replaces.
+    - data/backups
+    # Snapshots downloaded from the source's bucket, on their way into the
+    # warehouse. Under data/ because the sync container has to read them and
+    # data/ is what is mounted into it.
+    - data/mirror-inbox
+    # Which snapshot is in place, when the last sync ran and what it found.
+    # Under data/ because it is written and read inside the containers —
+    # `pipeline mirror` owns this file, and `sectortrace-mirror sync-status`
+    # asks the app container to render it rather than parsing it on the host.
+    - data/mirror-state
+    - logs
+
+# 0755, unlike everything else here. The postgres entrypoint re-execs itself
+# as the `postgres` user before running these scripts, and that user has to
+# be able to traverse the bind-mounted directory and read the file. Host
+# secrecy comes from state_dir being 0750 above, which the container's view
+# never inherits from.
+- name: Create the Postgres init directory
+  ansible.builtin.file:
+    path: "{{ state_dir }}/postgres-init"
+    state: directory
+    mode: "0755"
+
+- name: Render .env (the always-on containers; no source credentials in it)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ state_dir }}/.env"
+    mode: "0600"
+
+# The separation is the point, not tidiness: the portal container cannot
+# reach the source deployment's bucket or its warehouse because it has never
+# been told they exist.
+- name: Render .env.sync (the sync container only; this is where the source lives)
+  ansible.builtin.template:
+    src: env.sync.j2
+    dest: "{{ state_dir }}/.env.sync"
+    mode: "0600"
+
+- name: Render Postgres role-bootstrap SQL (only applied on first init by the image)
+  ansible.builtin.template:
+    src: postgres-init-roles.sql.j2
+    dest: "{{ state_dir }}/postgres-init/01-roles.sql"
+    # Readable by the in-container postgres user, per the directory note
+    # above. Not a widening of host access: state_dir is 0750.
+    mode: "0644"
+
+- name: Render the always-on stack's docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.mirror.yml.j2
+    dest: "{{ state_dir }}/docker-compose.yml"
+    mode: "0644"
+  register: sectortrace_mirror_main_compose
+
+- name: Render the sync compose file
+  ansible.builtin.template:
+    src: docker-compose.sync.yml.j2
+    dest: "{{ state_dir }}/docker-compose.sync.yml"
+    mode: "0644"
+
+- name: Render the on-demand documents-worker compose file
+  ansible.builtin.template:
+    src: docker-compose.documents.yml.j2
+    dest: "{{ state_dir }}/docker-compose.documents.yml"
+    mode: "0644"
+
+- name: Render the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ state_dir }}/Caddyfile"
+    mode: "0644"
+  register: sectortrace_mirror_caddyfile
+
+# Installed before anything is built or started, for the reason the
+# self-host build learned: it is the tool you most want when the stack is
+# NOT up, and putting it last left a failed deploy without it.
+- name: Install a `sectortrace-mirror` command for the host
+  ansible.builtin.template:
+    src: sectortrace-mirror-wrapper.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror
+    mode: "0755"
+
+- name: Build the app image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml build app
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+- name: Build the documents-worker image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml build documents
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+# Not in the self-host build, and worth the extra half-minute here: a
+# mirror is a box nobody looks at between syncs. A Caddyfile that does not
+# parse takes the portal down at `up -d` and the first person to notice is
+# whoever tries to read it, which on this box could be days. Validating
+# first turns that into a failed playbook run in front of the operator who
+# caused it. It loads the config without starting a server or asking for a
+# certificate.
+- name: Validate the Caddyfile before anything is restarted with it
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm -v {{ state_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro
+      caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+  changed_when: false
+
+# Wrapped so a service that fails to start reports *why* here, rather than
+# "dependency failed to start: container is unhealthy" and a manual
+# `docker compose logs` to find out what actually happened.
+- name: Bring up the always-on stack
+  block:
+    - name: Start the stack
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml up -d
+        chdir: "{{ state_dir }}"
+      changed_when: true
+  rescue:
+    - name: Collect logs from the stack
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml logs --tail=60 --no-color
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report what the containers said
+      ansible.builtin.fail:
+        msg: >-
+          {{ ['The stack failed to start. Container logs follow.', '']
+             + (sectortrace_mirror_failure_logs.stdout_lines | default(['(no logs available)'])) }}
+
+- name: Reload Caddy if only its config changed
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+    chdir: "{{ state_dir }}"
+  when: sectortrace_mirror_caddyfile.changed and not sectortrace_mirror_main_compose.changed
+  changed_when: true
+  failed_when: false
+
+# The stack being "up" is not the same as the app serving. On a brand-new
+# mirror this is also the first proof that `pipeline migrate` built the
+# schema the first sync is about to load rows into.
+- name: Wait for the app to report healthy
+  ansible.builtin.uri:
+    url: http://127.0.0.1:1801/health
+    status_code: 200
+  register: sectortrace_mirror_health
+  retries: 30
+  delay: 5
+  until: sectortrace_mirror_health.status is defined and sectortrace_mirror_health.status == 200
+  failed_when: sectortrace_mirror_health.status is not defined or sectortrace_mirror_health.status != 200
+
+# --- The sync ------------------------------------------------------------------
+- name: Install the SSH tunnel unit
+  ansible.builtin.template:
+    src: sectortrace-mirror-tunnel.service.j2
+    dest: /etc/systemd/system/sectortrace-mirror-tunnel.service
+    mode: "0644"
+  notify: Reload systemd
+  when: mirror_sync_mode == 'tunnel'
+
+# Stopped and disabled before the file goes, not after: deleting a unit
+# file leaves whatever it started still running, and an SSH tunnel to the
+# source deployment left open by a mode this box no longer uses is exactly
+# the kind of thing nobody finds again.
+- name: Stop the SSH tunnel when not in tunnel mode
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-tunnel
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: mirror_sync_mode != 'tunnel'
+
+- name: Remove the SSH tunnel unit when not in tunnel mode
+  ansible.builtin.file:
+    path: /etc/systemd/system/sectortrace-mirror-tunnel.service
+    state: absent
+  notify: Reload systemd
+  when: mirror_sync_mode != 'tunnel'
+
+- name: Install the sync script
+  ansible.builtin.template:
+    src: sectortrace-mirror-sync.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-sync
+    # Carries the source deployment's bucket credentials, so it is readable
+    # only by root — the same reasoning as .env's 0600.
+    mode: "0700"
+
+# Installed before the units that reference it, so a failure during this
+# very playbook run has somewhere to be reported.
+- name: Install the failure-alert script
+  ansible.builtin.template:
+    src: sectortrace-mirror-alert.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-alert
+    # May carry a webhook URL, which is a credential in every way that
+    # matters: anyone holding it can post to wherever this notifies.
+    mode: "0700"
+
+- name: Install the verify script
+  ansible.builtin.template:
+    src: sectortrace-mirror-verify.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-verify
+    mode: "0700"
+
+- name: Install the sync, alert and verify units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-mirror-sync.service
+    - sectortrace-mirror-sync.timer
+    - sectortrace-mirror-alert@.service
+    - sectortrace-mirror-verify.service
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.service
+    - sectortrace-mirror-verify-deep.timer
+  notify: Reload systemd
+
+# Created here rather than by the sync, which runs as a container and would
+# have to be told about a host path it has no other business knowing. Empty
+# by default; nothing is written unless mirror_metrics_dir is set.
+- name: Create the metrics directory
+  ansible.builtin.file:
+    path: "{{ mirror_metrics_dir }}"
+    state: directory
+    mode: "0755"
+  when: mirror_metrics_dir | length > 0
+
+- name: Warn when nothing will be told about a failed sync
+  ansible.builtin.debug:
+    msg:
+      - "Neither mirror_alert_webhook nor mirror_alert_command is set."
+      - "A failed sync will still be recorded — `sectortrace-mirror sync-status`"
+      - "shows it, and the journal has the detail — but nothing will come and"
+      - "tell you. A mirror that has stopped syncing looks exactly like one that"
+      - "is up to date, which is the whole reason the alert exists."
+  when:
+    - mirror_alert_webhook | length == 0
+    - mirror_alert_command | length == 0
+
+# Before the timer is enabled, so an SSH key the source has not been given
+# yet fails here — where the message says so — rather than at 04:30.
+- name: Flush handlers so the units are loaded before they are started
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the SSH tunnel
+  ansible.builtin.service:
+    name: sectortrace-mirror-tunnel
+    enabled: true
+    state: started
+  when: mirror_sync_mode == 'tunnel'
+
+- name: Enable and start the sync timer
+  ansible.builtin.service:
+    name: sectortrace-mirror-sync.timer
+    enabled: true
+    state: started
+
+- name: Enable and start the verify timers
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.timer
+  when: mirror_verify_enabled
+
+- name: Stop the verify timers when verification is turned off
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  loop:
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.timer
+  when: not mirror_verify_enabled
+
+# Deliberately NOT running a sync here. The first one downloads a whole
+# warehouse and, usually, a whole archive — that is a job to start
+# deliberately, in tmux, watching it, not something a provisioning run
+# should begin on its own and then be interrupted by.
+- name: Say how to take the first sync
+  ansible.builtin.debug:
+    msg:
+      - "The stack is up and empty. Nothing has been synced yet."
+      - ""
+      - "Take the first one by hand, inside tmux — it downloads a whole warehouse"
+      - "and, on a first run, the source's entire raw archive:"
+      - ""
+      - "    tmux new -s sync"
+      - "    sectortrace-mirror sync"
+      - ""
+      - "After that the timer keeps it current: {{ mirror_sync_time }} daily."

@@ -284,6 +284,12 @@ def settings(tmp_path: Path) -> Settings:
         # once into data/derived/ before this line existed.
         backup_dir=tmp_path / "backups",
         derived_archive_dir=tmp_path / "derived",
+        # A mirror's own two: which snapshot is in place, and the snapshots
+        # on their way in. Pointed into tmp for the same reason as the rest —
+        # `pipeline mirror` writes both, and a default reaching back into the
+        # repo is exactly the mistake the comment above records three of.
+        mirror_state_dir=tmp_path / "mirror-state",
+        mirror_inbox_dir=tmp_path / "mirror-inbox",
         verified_websites_path=tmp_path / "verified_websites.json",
         # No politeness delay against mocked transports — the rate limiter is
         # exercised directly in test_http.py with its own explicit override.

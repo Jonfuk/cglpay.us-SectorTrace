@@ -1,0 +1,161 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace_mirror/templates/sectortrace-mirror-wrapper.sh.j2.
+#
+# The self-host build's `sectortrace` command, for a mirror. Deliberately a
+# different name: a box that has been both a deployment and a mirror would
+# otherwise have one command pointing at whichever state directory was
+# installed last, and the two are not interchangeable.
+#
+# `sectortrace-mirror <pipeline-command>` runs in the app container against
+# THIS box's warehouse. Anything that reaches the source deployment goes
+# through `sync`, which is the only thing here holding its credentials.
+set -euo pipefail
+
+STATE_DIR="{{ state_dir }}"
+cd "$STATE_DIR"
+
+usage() {
+    cat <<'EOF_USAGE'
+sectortrace-mirror — operate the mirror stack
+
+  sectortrace-mirror <pipeline-command> [args]  run a pipeline command in the app
+  sectortrace-mirror sync [--dry-run|--force|--warehouse-only|--archive-only]
+                                                refresh from the source now
+  sectortrace-mirror sync-status                what is in place, and how stale
+  sectortrace-mirror sync-log                   follow the sync journal
+  sectortrace-mirror verify [--deep]            prove this box still matches
+  sectortrace-mirror check-source               compare both warehouses, change neither
+  sectortrace-mirror promote --confirm          stop being a mirror; take the source's place
+  sectortrace-mirror documents <args>           run in the documents worker instead
+  sectortrace-mirror psql                       a psql shell on this box's warehouse
+  sectortrace-mirror shell                      a shell in the app container
+  sectortrace-mirror ps | logs [svc] | restart [svc] | up | down
+  sectortrace-mirror health                     what /health says
+
+Examples
+  sectortrace-mirror sync --dry-run
+  sectortrace-mirror sync --warehouse-only
+  sectortrace-mirror coverage-report
+  sectortrace-mirror logs app
+
+What NOT to do here: anything that writes evidence. Collection, promotion
+and review-queue decisions belong on the source deployment — this box's
+warehouse is replaced wholesale by the next sync, and work done here is
+discarded without a word.
+EOF_USAGE
+}
+
+[ $# -eq 0 ] && { usage; exit 0; }
+
+case "$1" in
+    -h|--help|help) usage ;;
+
+    ps)      exec docker compose ps ;;
+    up)      exec docker compose up -d ;;
+    down)    exec docker compose down ;;
+    logs)    shift; exec docker compose logs -f --tail=200 "$@" ;;
+    restart) shift; exec docker compose restart "$@" ;;
+
+    shell)   exec docker compose exec app /bin/bash ;;
+    # The container's own client, so there is never a client/server version
+    # mismatch to think about.
+    psql)    shift; exec docker compose exec postgres psql -U sectortrace_app -d sectortrace "$@" ;;
+
+    health)  exec docker compose exec -T app python -c \
+                 "import json,urllib.request;print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:1801/health')),indent=2))" ;;
+
+    # In the foreground, so you watch it rather than guess. The timer runs
+    # the same script; both take the same lock.
+    sync)       shift; exec /usr/local/bin/sectortrace-mirror-sync "$@" ;;
+    sync-log)   exec journalctl -u sectortrace-mirror-sync -f -n 200 ;;
+    verify)     shift; exec /usr/local/bin/sectortrace-mirror-verify "$@" ;;
+
+    # Answered from the app container, which holds no credential of the
+    # source's: the state file is under data/, and reporting what is in place
+    # needs nothing but that. `--check-bucket` would need the sync container
+    # and is deliberately not the default.
+    sync-status)
+        docker compose exec -T app python -m pipeline mirror status || {
+            echo "(the app container is not running — the timers below are still the truth)" >&2
+        }
+        echo
+        exec systemctl list-timers --no-pager \
+            sectortrace-mirror-sync.timer \
+            'sectortrace-mirror-verify*.timer'
+        ;;
+
+    # Stops this box being replaced from its source so it can take its place.
+    # The timers go first and the interlock last: `pipeline mirror promote`
+    # makes `mirror pull` refuse from then on, so a timer somebody re-enables
+    # by hand cannot overwrite a warehouse that has since been written to.
+    promote)
+        shift
+        if [ "${1:-}" = "--undo" ]; then
+            docker compose exec -T app python -m pipeline mirror promote --confirm --undo
+            systemctl enable --now sectortrace-mirror-sync.timer
+{% if mirror_verify_enabled %}
+            systemctl enable --now sectortrace-mirror-verify.timer sectortrace-mirror-verify-deep.timer
+{% endif %}
+{% if mirror_sync_mode == 'tunnel' %}
+            systemctl enable --now sectortrace-mirror-tunnel.service
+{% endif %}
+            echo "Back to mirroring. The next sync will replace this warehouse."
+            exit 0
+        fi
+        if [ "${1:-}" != "--confirm" ]; then
+            cat >&2 <<'EOF_PROMOTE'
+Refusing without --confirm.
+
+Promoting means this box stops being a copy. Its warehouse will no longer be
+replaced from the source, and from that moment anything written here exists
+nowhere else — including in no backup, because a mirror does not take any.
+
+  sectortrace-mirror promote --confirm
+
+What that does:      stops and disables the sync timer, the verify timers and
+                     the tunnel, then makes `pipeline mirror pull` refuse.
+What it does NOT do: point DNS at this box, give it the module API keys it
+                     deliberately does not have, decide where the raw archive
+                     is written from now on, or start taking backups. Those
+                     are yours, and the last one matters most.
+
+  sectortrace-mirror promote --undo    goes back to mirroring
+EOF_PROMOTE
+            exit 2
+        fi
+        systemctl disable --now sectortrace-mirror-sync.timer 2>/dev/null || true
+        systemctl disable --now sectortrace-mirror-verify.timer 2>/dev/null || true
+        systemctl disable --now sectortrace-mirror-verify-deep.timer 2>/dev/null || true
+        systemctl disable --now sectortrace-mirror-tunnel.service 2>/dev/null || true
+        exec docker compose exec -T app python -m pipeline mirror promote --confirm
+        ;;
+
+{% if mirror_sync_mode == 'tunnel' %}
+    # Reads both warehouses and writes to neither — the honest answer to
+    # "is this mirror actually current?", as opposed to "did last night's
+    # unit exit zero?".
+    check-source)
+        exec docker compose -f docker-compose.sync.yml run --rm sync check-postgres-sync
+        ;;
+{% else %}
+    check-source)
+        echo "check-source compares two live warehouses, and this mirror is in" >&2
+        echo "snapshot mode — there is no connection to the source to compare" >&2
+        echo "against. \`sectortrace-mirror sync-status\` says which snapshot is" >&2
+        echo "in place; the source's own backup log says when it was taken." >&2
+        exit 2
+        ;;
+{% endif %}
+
+    # The heavy image: parsers, OCR binaries, its own memory ceiling. Run
+    # rather than exec — it is not a running service. See the compose file
+    # for why running batches here is usually the wrong box.
+    documents)
+        shift
+        exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    *)
+        exec docker compose exec -T app python -m pipeline "$@"
+        ;;
+esac

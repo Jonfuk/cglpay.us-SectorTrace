@@ -22,8 +22,10 @@ from pipeline.registry import (
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
 documents_app = typer.Typer(help="Inspect, parse, validate, and search archived documents.")
+mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
+app.add_typer(mirror_app, name="mirror")
 
 
 def _document_connection():
@@ -1502,6 +1504,271 @@ def run(
         raise typer.Exit(code=1)
 
 
+# --- Mirroring ------------------------------------------------------------------
+# These run on a mirror (deploy/ansible-mirror/), where the deployment's shell
+# script orchestrates containers and these make the decisions. See
+# pipeline/mirror.py for why the split falls there.
+
+
+def _mirror_report(decision: dict) -> None:
+    if decision["action"] == "none-available":
+        ui.error(decision["reason"])
+    elif decision["stale"]:
+        ui.warn(decision["reason"])
+    else:
+        ui.muted(f"  {decision['reason']}")
+
+
+@mirror_app.command("plan")
+def mirror_plan(
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable, for a script or a check."),
+    action_only: bool = typer.Option(
+        False, "--action",
+        help="Print just the verdict — restore, up-to-date or none-available — and "
+             "nothing else. For a caller that has one decision to make and no "
+             "business parsing JSON in a shell."),
+    force: bool = typer.Option(False, "--force", help="Plan as if the snapshot in place were not."),
+) -> None:
+    """What a sync would do, without doing any of it."""
+    from pipeline import mirror
+
+    settings = get_settings()
+    try:
+        decision = mirror.plan(settings, force=force)
+    except mirror.MirrorError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    if action_only:
+        typer.echo(decision["action"])
+        return
+    if as_json:
+        typer.echo(__import__("json").dumps(decision, indent=2))
+        return
+    ui.heading(f"{decision['action']}: {decision.get('available', 0)} snapshot(s) in the bucket")
+    _mirror_report(decision)
+
+
+@mirror_app.command("pull")
+def mirror_pull(
+    force: bool = typer.Option(False, "--force", help="Restore the newest snapshot even if it is the one in place."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Say what would happen; download and restore nothing."),
+    superseded_keep: int = typer.Option(
+        2, "--superseded-keep", min=0,
+        help="Keep this many of the snapshots a restore sets aside before replacing "
+             "the warehouse. 0 keeps every one of them, and watches the disk."),
+    fail_if_stale: bool = typer.Option(
+        False, "--fail-if-stale",
+        help="Exit 3 when the newest snapshot in the bucket is older than "
+             "MIRROR_MAX_SNAPSHOT_AGE_HOURS, whether or not there was anything to "
+             "restore. 3 rather than 1 so a caller can tell 'the source has stopped "
+             "producing snapshots' from 'this restore failed' — they are different "
+             "problems and only one of them is this box's."),
+) -> None:
+    """Bring this box's warehouse up to the source's newest verified snapshot.
+
+    Staleness is a separate exit from failure on purpose. A source whose
+    backup timer has stopped produces no error here — the mirror finds the
+    same snapshot it restored last week and reports it as already in place,
+    which is exactly what being up to date looks like. --fail-if-stale is
+    what turns that silence into a failed unit, and a failed unit is what
+    raises the alarm.
+
+    It exits 3 rather than 1 for that case, and the distinction earns its
+    keep: everything this box does after the warehouse step — pulling new
+    archive objects, rebuilding the projection — is worth doing whether or
+    not the source has stopped taking backups. A caller that cannot tell the
+    two apart has to abandon all of it over a problem on another machine.
+    """
+    from pipeline import mirror
+
+    configure_logging("mirror")
+    settings = get_settings()
+    try:
+        result = mirror.pull(settings, force=force, dry_run=dry_run,
+                             superseded_keep=superseded_keep,
+                             on_step=lambda message: ui.muted(f"  {message}"))
+    except mirror.MirrorError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+
+    if result["action"] == "restored":
+        restore = result["restore"]
+        ui.success(f"restored {result['snapshot']['name']}: "
+                    f"{restore['rows']:,} rows in {restore['tables']} tables")
+        if restore.get("superseded"):
+            ui.muted(f"  what it replaced was kept at {restore['superseded']}")
+        if restore.get("migrations_ahead_of_archive"):
+            ui.muted(f"  {len(restore['migrations_ahead_of_archive'])} migration(s) here "
+                      "postdate the snapshot; anything they added is empty")
+        if result["pruned_superseded"]:
+            ui.muted(f"  pruned {len(result['pruned_superseded'])} older "
+                      "superseded-by-restore snapshot(s)")
+    elif result["action"] == "restore" and dry_run:
+        ui.heading(f"would restore {result['snapshot']['name']} "
+                    f"({result['would_download_bytes']:,} bytes to download)")
+    else:
+        ui.heading(result["action"])
+    _mirror_report(result)
+
+    if fail_if_stale and result["stale"]:
+        raise typer.Exit(code=3)
+
+
+@mirror_app.command("status")
+def mirror_status(
+    as_json: bool = typer.Option(False, "--json"),
+    check_bucket: bool = typer.Option(
+        False, "--check-bucket",
+        help="Also ask the source's bucket what it holds. Needs the credentials; the "
+             "rest of this command needs nothing but the state file."),
+) -> None:
+    """What this box holds, and how far behind the source that leaves it."""
+    from pipeline import mirror
+    from pipeline.meters import human_bytes
+
+    settings = get_settings()
+    try:
+        report = mirror.status(settings, check_bucket=check_bucket)
+    except mirror.MirrorError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    if as_json:
+        typer.echo(__import__("json").dumps(report, indent=2))
+        return
+
+    ui.heading(f"Mirror of {report['source'] or '(unnamed source)'}")
+    if report["snapshot"]:
+        ui.muted(f"  warehouse: {report['snapshot']} "
+                  f"({report['warehouse_rows'] or 0:,} rows in "
+                  f"{report['warehouse_tables'] or 0} tables)")
+        ui.muted(f"  taken:     {report['snapshot_taken_at']}")
+    elif report["data_as_of"]:
+        # Tunnel mode: the warehouse was copied from the live source and
+        # verified against it, so there is no snapshot file to name.
+        ui.muted("  warehouse: copied directly from the source and verified "
+                  "against it")
+    else:
+        ui.warn("  no warehouse has been synced onto this box yet")
+    if report["archive_objects"] is not None:
+        ui.muted(f"  archive:   {report['archive_objects']:,} objects, "
+                  f"{human_bytes(report['archive_bytes'] or 0)} on local disk "
+                  f"(checked {report['archive_checked_at']})")
+    if report["data_age_hours"] is not None:
+        # The number to read. Not "when did this box last sync" — that is the
+        # line below, and a mirror of a source that stopped taking backups a
+        # month ago scores perfectly on it.
+        line = (f"  data age:  {report['data_age_hours']}h "
+                f"(as of {report['data_as_of']})")
+        (ui.warn if report["stale"] else ui.muted)(line)
+    ui.muted(f"  last sync: {report['last_sync_finished_at'] or 'never'} "
+              f"({report['last_sync_status'] or 'unknown'})")
+    if report["last_failure"]:
+        ui.error(f"  last failure ({report['last_failure_at']}): {report['last_failure']}")
+    if report["promoted"]:
+        ui.warn(f"  PROMOTED at {report['promoted_at']} — syncing is refused "
+                 "until `mirror promote --undo`")
+    if check_bucket:
+        newest = report.get("bucket_newest")
+        ui.muted(f"  bucket:    {report['bucket_snapshots']} snapshot(s), newest "
+                  f"{newest['name'] if newest else 'none'}")
+
+
+@mirror_app.command("begin")
+def mirror_begin() -> None:
+    """Stamp the start of a sync. Called by the deployment's sync script."""
+    from datetime import datetime, timezone
+
+    from pipeline import mirror
+
+    settings = get_settings()
+    mirror.record(settings, last_sync_started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                  last_sync_status="running")
+
+
+@mirror_app.command("end")
+def mirror_end(
+    status: str = typer.Option(..., "--status", help="ok or failed."),
+    message: str = typer.Option("", "--message", help="What failed, when it did."),
+    metrics_path: str = typer.Option(
+        None, "--metrics", help="Also write Prometheus textfile metrics here."),
+) -> None:
+    """Stamp the end of a sync, and write the metrics file.
+
+    One command rather than two because the metrics are a rendering of the
+    state this writes, and a metrics file that predates the state it reports
+    is worse than none.
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from pipeline import mirror
+
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    fields = {"last_sync_finished_at": now.isoformat(timespec="seconds"),
+               "last_sync_status": status}
+    if status == "ok":
+        fields["last_success_at"] = now.isoformat(timespec="seconds")
+        fields["last_failure"] = None
+        fields["last_failure_at"] = None
+    elif message:
+        fields["last_failure"] = message
+        fields["last_failure_at"] = now.isoformat(timespec="seconds")
+    mirror.record(settings, **fields)
+    if metrics_path:
+        written = mirror.write_metrics(settings, Path(metrics_path), now=now)
+        typer.echo(f"metrics: {written}")
+
+
+@mirror_app.command("metrics")
+def mirror_metrics(
+    output: str = typer.Option(None, "--output", help="Write here instead of to stdout."),
+) -> None:
+    """Prometheus textfile-collector metrics for this mirror."""
+    from pathlib import Path
+
+    from pipeline import mirror
+
+    settings = get_settings()
+    if output:
+        typer.echo(f"metrics: {mirror.write_metrics(settings, Path(output))}")
+    else:
+        typer.echo(mirror.metrics(settings), nl=False)
+
+
+@mirror_app.command("promote")
+def mirror_promote(
+    confirm: bool = typer.Option(False, "--confirm", help="Required. This is not reversible by accident."),
+    undo: bool = typer.Option(False, "--undo", help="Go back to being a mirror."),
+) -> None:
+    """Stop this box being replaced from its source, so it can take its place.
+
+    This is the interlock, not the whole promotion: the deployment's
+    `sectortrace-mirror promote` stops the timers and the tunnel and then
+    calls this. What it changes is that `mirror pull` refuses from here on —
+    so a timer somebody re-enables by hand, or a unit already queued, cannot
+    overwrite a warehouse that has since been written to.
+    """
+    from pipeline import mirror
+
+    settings = get_settings()
+    if not confirm:
+        typer.echo(
+            "Refusing without --confirm. Promoting means this box stops being a "
+            "copy: its warehouse will no longer be replaced from the source, and "
+            "anything written here from then on exists nowhere else.", err=True)
+        raise typer.Exit(code=1)
+    result = mirror.promote(settings, undo=undo)
+    if result["promoted"]:
+        ui.success(f"promoted at {result['at']}")
+        ui.muted("  `pipeline mirror pull` now refuses. What is left to do is "
+                  "outside this command: point DNS here, add the module API keys "
+                  "this box deliberately does not have, and decide where the raw "
+                  "archive is written from now on.")
+    else:
+        ui.success("back to mirroring — the next sync will replace this warehouse")
+
+
 @app.command("archive-migrate")
 def archive_migrate(
     dry_run: bool = typer.Option(False, "--dry-run"),
@@ -1602,20 +1869,91 @@ def archive_verify() -> None:
 
 
 @app.command("archive-mirror")
-def archive_mirror() -> None:
-    """Download bucket objects missing from the local recovery mirror."""
+def archive_mirror(
+    workers: int = typer.Option(
+        8, "--workers", min=1, max=64,
+        help="Concurrent downloads. Each object is a separate small request, so "
+             "the first run of this is latency-bound, not bandwidth-bound."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what is missing locally; download nothing."),
+    fail_if_missing: bool = typer.Option(
+        False, "--fail-if-missing",
+        help="Exit non-zero if the local store is missing anything the bucket holds. "
+             "With --dry-run this is a divergence check that transfers nothing."),
+) -> None:
+    """Download bucket objects missing from the local recovery mirror.
+
+    One-way and additive: it writes what the local store does not have and
+    never deletes a local file. Which object is missing is decided by the
+    content-addressed key, so an interrupted run resumes by being run again.
+
+    Concurrency is across objects, and this is the one place in the pipeline
+    where that needs no politeness argument: the far end is the operator's own
+    bucket, not a source of evidence. `archive-migrate` has worked this way in
+    the other direction since it was written; this direction was sequential,
+    which on a first mirror sync of a large archive is the difference between
+    hours and days.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from mimetypes import guess_type
+
     from pipeline.archive import FilesystemArchive, get_archive
+
     settings = get_settings()
+    if settings.archive_backend != "s3":
+        typer.echo(
+            "archive-mirror copies a bucket onto local disk, and no ARCHIVE_S3_* "
+            "group is configured — there is nothing to copy from. On a mirror "
+            "these belong to the sync container, not to the app.", err=True)
+        raise typer.Exit(code=1)
+
     remote, local = get_archive(settings), FilesystemArchive(settings.raw_archive_dir)
-    copied = 0
-    for row in remote.inventory()["objects"]:
+    inventory = remote.inventory()
+
+    def key_parts(row: dict) -> tuple[str, str, str]:
         source, filename = row["key"].split("/")[2:4]
-        sha = filename.split(".", 1)[0]
-        if local.lookup(source, sha) is None:
-            from mimetypes import guess_type
-            local.put(source, sha, guess_type(filename)[0], remote.read(row["key"]))
-            copied += 1
+        return source, filename.split(".", 1)[0], filename
+
+    missing = [row for row in inventory["objects"]
+                if local.lookup(*key_parts(row)[:2]) is None]
+    typer.echo(f"bucket: {inventory['files']:,} objects; "
+                f"missing locally: {len(missing):,}")
+
+    if dry_run:
+        for row in missing[:20]:
+            typer.echo(f"  would fetch {row['key']} ({row['bytes']:,} bytes)")
+        if len(missing) > 20:
+            typer.echo(f"  ... and {len(missing) - 20:,} more")
+        if fail_if_missing and missing:
+            raise typer.Exit(code=1)
+        return
+
+    def fetch(row: dict) -> int:
+        source, sha, filename = key_parts(row)
+        local.put(source, sha, guess_type(filename)[0], remote.read(row["key"]))
+        return 1
+
+    copied = 0
+    if missing:
+        with ThreadPoolExecutor(max_workers=workers,
+                                 thread_name_prefix="archive-mirror") as pool:
+            copied = sum(pool.map(fetch, missing))
     typer.echo(f"mirrored: {copied:,} objects; local files are never deleted")
+
+    if settings.mirror_enabled:
+        # The mirror's own record of what it holds, so `mirror status` and the
+        # metrics can answer "how much of the archive is here" without walking
+        # millions of files to find out.
+        from datetime import datetime, timezone
+
+        from pipeline import mirror
+
+        held = local.inventory()
+        mirror.record(settings, archive_objects=held["files"], archive_bytes=held["bytes"],
+                      archive_checked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+    if fail_if_missing and copied < len(missing):
+        raise typer.Exit(code=1)
 
 
 @app.command("archive-reconcile")

@@ -1,0 +1,311 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace_mirror/templates/sectortrace-mirror-sync.sh.j2.
+#
+# One refresh of this mirror: bring the warehouse up to the source's, pull
+# whatever the source has added to its raw archive onto local disk, rebuild
+# the graph projection over the result.
+#
+# What is deliberately NOT here: which snapshot is the current one, how old
+# that makes the data, whether this box already has it, and what to prune.
+# Those are decisions, they are the ones that are subtly wrong for a month
+# before anyone notices, and they live in `pipeline/mirror.py` where the
+# offline suite reaches them (`tests/test_mirror.py`). What is left here is
+# what only a shell script on the host can do: take a lock, stop a container,
+# start it again.
+#
+# Run by sectortrace-mirror-sync.timer nightly, and by `sectortrace-mirror
+# sync` when you want one now. Output goes to stdout, which under systemd is
+# the journal: `journalctl -u sectortrace-mirror-sync`.
+#
+# 0700 and root-owned: it reaches the container that holds the source
+# deployment's credentials.
+set -euo pipefail
+
+STATE_DIR="{{ state_dir }}"
+LOCK="/var/lock/sectortrace-mirror-sync.lock"
+
+MODE="{{ mirror_sync_mode }}"
+SOURCE_LABEL="{{ mirror_source_label | default('(unnamed source)', true) }}"
+MIN_FREE_GB={{ mirror_min_free_gb }}
+SUPERSEDED_KEEP={{ mirror_superseded_keep }}
+STOP_APP={{ 1 if mirror_stop_app_during_sync else 0 }}
+ARCHIVE_SYNC={{ 1 if mirror_archive_sync else 0 }}
+ARCHIVE_WORKERS={{ mirror_archive_workers }}
+GRAPH_REBUILD={{ 1 if mirror_graph_rebuild else 0 }}
+METRICS_DIR="{{ mirror_metrics_dir }}"
+{% if mirror_sync_mode == 'tunnel' %}
+TUNNEL_UNIT="sectortrace-mirror-tunnel.service"
+TUNNEL_PORT={{ mirror_tunnel_local_port }}
+{% endif %}
+
+# Written inside the container (it is under data/, which is bind-mounted) and
+# copied out to the collector directory afterwards, so nothing has to mount a
+# path owned by node_exporter into a container.
+METRICS_IN_CONTAINER="/app/data/mirror-state/sectortrace_mirror.prom"
+METRICS_ON_HOST="$STATE_DIR/data/mirror-state/sectortrace_mirror.prom"
+
+# Built once, as arrays, because `${VAR:+--flag "$X"}` relies on word
+# splitting to become two arguments and stops being true the day a path has a
+# space in it.
+METRICS_ARGS=()
+[ -n "$METRICS_DIR" ] && METRICS_ARGS=(--metrics "$METRICS_IN_CONTAINER")
+
+FORCE=0
+FORCE_ARGS=()
+DRY_RUN=0
+# A stale source is a real failure and it is not this box's failure, so it is
+# reported at the end rather than at the point it is found. Everything after
+# the warehouse step — new archive objects, the projection — is worth doing
+# whether or not the source has stopped taking backups, and abandoning it over
+# a problem on another machine leaves this one further behind on both counts.
+DEFERRED_FAILURE=""
+DO_WAREHOUSE=1
+DO_ARCHIVE=$ARCHIVE_SYNC
+
+usage() {
+    cat <<'USAGE'
+sectortrace-mirror-sync — refresh this mirror from its source deployment
+
+  --dry-run         Say what a sync would do and change nothing: which
+                    snapshot would be restored, and how many archive objects
+                    are missing locally. Touches no container state.
+  --force           Re-apply the newest snapshot even if it is the one
+                    already in place. Snapshot mode only; tunnel mode always
+                    copies, because there is no "same file" to recognise.
+  --warehouse-only  Skip the raw-archive sync.
+  --archive-only    Skip the warehouse step; pull archive objects only.
+  -h, --help        This.
+
+With no arguments it does what the timer does: warehouse, then archive, then
+the graph projection.
+USAGE
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)        DRY_RUN=1 ;;
+        --force)          FORCE=1; FORCE_ARGS=(--force) ;;
+        --warehouse-only) DO_ARCHIVE=0 ;;
+        --archive-only)   DO_WAREHOUSE=0 ;;
+        -h|--help)        usage; exit 0 ;;
+        *) echo "unknown option: $arg" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+say() { printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+# Every exit that is not a clean finish records why, so `sectortrace-mirror
+# sync-status` can say what went wrong without anyone reading the journal —
+# and so the alert unit has something to quote.
+fail() {
+    say "FAILED: $*"
+    if [ "$DRY_RUN" -eq 0 ]; then
+        compose_sync mirror end --status failed --message "$*" \
+            ${METRICS_ARGS[@]+"${METRICS_ARGS[@]}"} >/dev/null 2>&1 || true
+        publish_metrics
+    fi
+    exit 1
+}
+
+cd "$STATE_DIR"
+
+compose_sync() {
+    docker compose -f docker-compose.sync.yml run --rm sync "$@"
+}
+
+publish_metrics() {
+    [ -n "$METRICS_DIR" ] || return 0
+    [ -f "$METRICS_ON_HOST" ] || return 0
+    mkdir -p "$METRICS_DIR"
+    # install(1) rather than cp: it writes to a temporary and renames, so
+    # node_exporter never reads a half-written file — which would be a parse
+    # error taking every other collector's output down with it.
+    install -m 0644 "$METRICS_ON_HOST" "$METRICS_DIR/sectortrace_mirror.prom"
+}
+
+# --- A dry run is a read, and takes no lock and no outage ----------------------
+if [ "$DRY_RUN" -eq 1 ]; then
+    say "dry run — source: $SOURCE_LABEL, mode: $MODE"
+    if [ "$DO_WAREHOUSE" -eq 1 ]; then
+{% if mirror_sync_mode == 'snapshot' %}
+        compose_sync mirror pull --dry-run ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"} || true
+{% else %}
+        say "tunnel mode always copies the source warehouse; there is no"
+        say "snapshot to compare against. \`sectortrace-mirror check-source\`"
+        say "compares the two warehouses without changing either."
+{% endif %}
+    fi
+    if [ "$DO_ARCHIVE" -eq 1 ]; then
+        compose_sync archive-mirror --dry-run || true
+    fi
+    say "dry run complete — nothing was changed"
+    exit 0
+fi
+
+# One sync at a time. The first archive sync downloads the source's entire
+# archive and can outlive a night, so the timer firing again while it runs is
+# expected rather than exceptional — hence a note and a clean exit rather than
+# a failure. A sync still running tomorrow says so here every night until it
+# finishes, which is the signal to go and look.
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    say "another sync is still running (lock $LOCK) — leaving it alone"
+    exit 0
+fi
+
+mkdir -p "$STATE_DIR/data/mirror-state" "$STATE_DIR/data/mirror-inbox"
+
+# A restore writes a snapshot of what it is replacing before replacing it, and
+# an archive sync writes whatever the source has added. Running either one out
+# of disk part way through is worse than not starting: check first, with a
+# number in the message so it is actionable.
+free_gb="$(df -BG --output=avail "$STATE_DIR" | tail -n1 | tr -dc '0-9')"
+[ -n "$free_gb" ] || fail "could not read free space on $STATE_DIR"
+if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+    fail "only ${free_gb}GB free on $STATE_DIR; this sync needs at least ${MIN_FREE_GB}GB (mirror_min_free_gb)"
+fi
+
+say "sync starting — source: $SOURCE_LABEL, mode: $MODE, ${free_gb}GB free"
+compose_sync mirror begin >/dev/null || fail "could not record the start of this sync"
+
+# --- The portal, while the warehouse is replaced --------------------------------
+# The warehouse step truncates every table and reloads it inside one
+# transaction, which holds an ACCESS EXCLUSIVE lock for its duration. Leaving
+# the app up does not avoid an outage — it turns it into requests that hang,
+# and lets a long-running portal query hold the restore off instead. Stopping
+# it makes the window explicit; Caddy answers it with a 503 that says what is
+# happening.
+APP_STOPPED=0
+start_app() {
+    if [ "$APP_STOPPED" -eq 1 ]; then
+        say "starting the portal again"
+        docker compose start app >/dev/null 2>&1 || say "WARNING: could not start the app container — check \`docker compose ps\`"
+        APP_STOPPED=0
+        for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null --max-time 3 http://127.0.0.1:1801/health; then
+                say "portal healthy again"
+                return 0
+            fi
+            sleep 5
+        done
+        say "WARNING: the portal did not report healthy within five minutes"
+    fi
+}
+# Runs on every exit path, including a failed restore and a Ctrl-C: a mirror
+# that is behind still serves the portal, and leaving it stopped because a
+# sync failed turns a stale copy into no copy.
+trap start_app EXIT INT TERM
+
+stop_app() {
+    if [ "$STOP_APP" -eq 1 ]; then
+        say "stopping the portal for the warehouse step"
+        docker compose stop app >/dev/null
+        APP_STOPPED=1
+    fi
+}
+
+warehouse_snapshot() {
+    # Asked first so the portal is only stopped when there is something to
+    # restore — an outage every night for a box that is already current is a
+    # bad trade. `mirror plan` is the same code path `pull` takes, and
+    # `--action` prints one word so there is no JSON being parsed in a shell.
+    local action
+    action="$(compose_sync mirror plan --action ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"} | tr -d '\r')" \
+        || fail "could not read the source's snapshot bucket — check the credentials and endpoint"
+    say "the source's bucket says: $action"
+
+    if [ "$action" = "restore" ]; then
+        stop_app
+    fi
+    # --fail-if-stale is what turns a source whose backup timer has stopped
+    # into a failed unit. Without it the mirror finds the same snapshot it
+    # restored last week, reports "nothing to do", and exits 0 — which is
+    # indistinguishable from being up to date. Silence is not success.
+    local rc=0
+    compose_sync mirror pull \
+        --superseded-keep "$SUPERSEDED_KEEP" \
+        --fail-if-stale ${FORCE_ARGS[@]+"${FORCE_ARGS[@]}"} || rc=$?
+    case "$rc" in
+        0) ;;
+        # 3 is `mirror pull` saying the newest snapshot in the source's bucket
+        # is older than MIRROR_MAX_SNAPSHOT_AGE_HOURS. Whatever it could
+        # restore, it restored; what is wrong is on the source.
+        3) DEFERRED_FAILURE="the source's newest snapshot is stale — its backup timer may have stopped" ;;
+        *) fail "the warehouse step failed — see above" ;;
+    esac
+}
+
+warehouse_tunnel() {
+    if ! systemctl is-active --quiet "$TUNNEL_UNIT"; then
+        say "$TUNNEL_UNIT is not running — starting it"
+        systemctl start "$TUNNEL_UNIT" || fail "could not start $TUNNEL_UNIT"
+    fi
+    # The unit being active is not the same as the far end answering: ssh
+    # holds the local port open from the moment it starts, before it has
+    # authenticated or forwarded anything.
+    local ready=0
+    for _ in $(seq 1 30); do
+        if timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/$TUNNEL_PORT" 2>/dev/null; then
+            ready=1; break
+        fi
+        sleep 2
+    done
+    [ "$ready" -eq 1 ] || fail "nothing is answering on 127.0.0.1:$TUNNEL_PORT — check \`journalctl -u $TUNNEL_UNIT\`"
+
+    stop_app
+    say "copying the source warehouse over the tunnel"
+    # --truncate because the target holds the last copy; verification is on by
+    # default and is the point of this path — every value is compared against
+    # the source before the copy is called a success.
+    compose_sync migrate-postgres --truncate \
+        || fail "migrate-postgres failed — this box still holds the previous copy"
+    say "warehouse copied and verified against the source"
+}
+
+if [ "$DO_WAREHOUSE" -eq 1 ]; then
+    if [ "$MODE" = "snapshot" ]; then
+        warehouse_snapshot
+    else
+        warehouse_tunnel
+    fi
+else
+    say "skipping the warehouse step (--archive-only)"
+fi
+
+# The portal can serve again from here: what follows fills the archive and
+# rebuilds a projection, and neither blocks a read of the warehouse.
+start_app
+
+if [ "$DO_ARCHIVE" -eq 1 ]; then
+    # Incremental by construction: it downloads only the objects the local
+    # store does not have, and never deletes a local file. The first run is
+    # the whole archive and can take a very long time — it is doing what a
+    # crawl would have done, at the speed of a bucket rather than one request
+    # every two seconds.
+    say "pulling raw-archive objects the local store is missing"
+    compose_sync archive-mirror --workers "$ARCHIVE_WORKERS" \
+        || fail "archive-mirror failed"
+else
+    say "skipping the raw-archive sync"
+fi
+
+if [ "$GRAPH_REBUILD" -eq 1 ] && [ "$DO_WAREHOUSE" -eq 1 ]; then
+    # After the warehouse moved, not before: the graph is a projection of it,
+    # and one projected from the previous copy is wrong in a way nothing would
+    # report. --clear because this is a replacement, not a merge.
+    say "rebuilding the evidence graph"
+    compose_sync graph rebuild --clear || fail "graph rebuild failed"
+fi
+
+if [ -n "$DEFERRED_FAILURE" ]; then
+    # Everything that could be done was done; the unit still fails, because
+    # the alert is the whole point and a mirror quietly serving month-old
+    # evidence is the failure this build exists to make impossible.
+    fail "$DEFERRED_FAILURE"
+fi
+
+compose_sync mirror end --status ok ${METRICS_ARGS[@]+"${METRICS_ARGS[@]}"} >/dev/null \
+    || say "WARNING: the sync worked but recording that it did failed"
+publish_metrics
+
+say "sync complete"

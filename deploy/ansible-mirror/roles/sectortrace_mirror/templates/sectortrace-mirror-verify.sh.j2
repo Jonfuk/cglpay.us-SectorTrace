@@ -1,0 +1,82 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace_mirror/templates/sectortrace-mirror-verify.sh.j2.
+#
+# Proof that this mirror still matches the deployment it copies. The sync
+# proves the warehouse it restored is the warehouse the snapshot held —
+# `restore` re-counts every table against the archive and rolls the whole
+# thing back on any disagreement. Nothing re-checks anything afterwards, and
+# these are the two things that fill that gap:
+#
+#   weekly (default)  The bucket's key set against local disk, transferring
+#                     nothing, plus — in tunnel mode — a value-by-value
+#                     comparison of both warehouses that changes neither.
+#   monthly (--deep)  Every object in the LOCAL store re-hashed. The only
+#                     thing that proves this box's copy is byte-identical to
+#                     what the source archived.
+#
+# Both fail loudly, and both carry OnFailure=, so a divergence is an alert
+# rather than a line in a log.
+set -euo pipefail
+
+STATE_DIR="{{ state_dir }}"
+LOCK="/var/lock/sectortrace-mirror-sync.lock"
+MODE="{{ mirror_sync_mode }}"
+DEEP=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --deep) DEEP=1 ;;
+        -h|--help)
+            echo "sectortrace-mirror-verify [--deep]"
+            echo "  (no flag)  bucket key set vs local disk; warehouses compared in tunnel mode"
+            echo "  --deep     re-hash every object in the local archive"
+            exit 0 ;;
+        *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
+
+say() { printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+cd "$STATE_DIR"
+
+# Verification and syncing must not overlap: the sync is writing into the
+# archive and replacing the warehouse, and a comparison run against a moving
+# target reports differences that are simply the sync in progress. Skipping
+# is right rather than waiting — the sync that is running will have done the
+# work this check is about, and this runs again next week.
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    say "a sync is running — skipping this check rather than comparing against a moving target"
+    exit 0
+fi
+
+if [ "$DEEP" -eq 1 ]; then
+    # In the APP container, deliberately, and this is the detail to get right:
+    # the app has no ARCHIVE_S3_* group, so `get_archive` gives it the
+    # filesystem archive and this re-hashes what is on this box's disk — which
+    # is the question. Run in the sync container it would verify the SOURCE's
+    # bucket instead: the wrong thing, and it would download the whole archive
+    # to do it.
+    say "re-hashing every object in the local archive (this is the slow one)"
+    docker compose exec -T app python -m pipeline archive-verify >/dev/null \
+        || { say "FAILED: the local archive does not verify — see the manifest in data/backups"; exit 1; }
+    say "the local archive verifies: every object's bytes match its key"
+    exit 0
+fi
+
+say "comparing the source's bucket against local disk (no transfer)"
+docker compose -f docker-compose.sync.yml run --rm sync \
+    archive-mirror --dry-run --fail-if-missing \
+    || { say "FAILED: the local archive is missing objects the source's bucket holds — run a sync"; exit 1; }
+
+{% if mirror_sync_mode == 'tunnel' %}
+# Reads both warehouses and writes to neither. This is the honest answer to
+# "is this mirror actually current?", as opposed to "did last night's unit
+# exit zero?" — and it is only available in tunnel mode, because snapshot
+# mode has no connection to the source to compare against.
+say "comparing this warehouse against the source's, value by value"
+docker compose -f docker-compose.sync.yml run --rm sync check-postgres-sync \
+    || { say "FAILED: this warehouse and the source's disagree — a sync should fix it; if it does not, say so before quoting anything from this box"; exit 1; }
+{% endif %}
+
+say "verify complete"

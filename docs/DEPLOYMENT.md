@@ -217,6 +217,31 @@ reproducible Docker Compose build on a single Debian VPS, run locally on the
 box itself rather than from a separate control machine. See
 [`deploy/ansible/README.md`](../deploy/ansible/README.md).
 
+## A second VPS: mirroring an existing deployment
+
+`deploy/ansible-mirror/` provisions a box that runs the same stack with
+nothing collecting into it. The warehouse arrives from an existing
+deployment on a nightly timer — either its newest verified backup out of S3,
+or a direct verified copy of its PostgreSQL over an SSH tunnel — and that
+deployment's raw archive is pulled out of its bucket onto the mirror's local
+disk, where the mirror's own app reads it with no S3 configuration at all.
+
+Six of its seven roles are the self-host build's, used unchanged. The thing
+to know before running it is that the warehouse is replaced wholesale on
+every sync, so review decisions and promotions made on a mirror are
+destroyed at the next one: evidence work belongs on the source deployment.
+
+The decisions a sync makes — which snapshot is current, how old that makes
+the data, whether this box already has it — are `pipeline mirror` (see
+`pipeline/mirror.py`), not the deployment's shell script, so the offline
+suite covers them. Two things follow from the failure a mirror actually has,
+which is looking perfectly healthy while serving data that stopped moving
+weeks ago: the sync fails rather than reporting "nothing to do" when the
+source's newest snapshot is stale, and a failed unit raises an alert instead
+of a journal entry. Weekly and monthly timers re-check that this box's copy
+still matches its source. See
+[`deploy/ansible-mirror/README.md`](../deploy/ansible-mirror/README.md).
+
 ## Somewhere else: Railway, or any managed PostgreSQL
 
 The repository now includes a Railway deployment path in `Dockerfile`,
