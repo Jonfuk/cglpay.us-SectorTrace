@@ -101,8 +101,7 @@ DONE
 
 - [DONE] BETA-015 | Module 30: statutory homelessness (H-CLIC) snapshot
   - completed: 2026-08-25T21:40:00Z
-  - commits: (pending push — see the commit immediately following this
-    entry in `git log beta`)
+  - commits: `071fd56` (`beta`)
   - result: BETA-014's own flagged follow-up, built this cycle. Source
     researched directly against the live GOV.UK page
     (`live-tables-on-homelessness`), not assumed from docs — one evergreen
@@ -215,8 +214,7 @@ DONE
 
 - [DONE] BETA-014 | Module 29: rough sleeping snapshot (new dataset)
   - completed: 2026-08-25T00:00:00Z
-  - commits: (pending push — see the commit immediately following this
-    entry in `git log beta`)
+  - commits: `47cf21c` (`beta`)
   - result: Project owner asked for homelessness/rough-sleeping/crime data
     as local-authority-level comparators, given the well-documented overlap
     with substance misuse. Researched all three properly before building
@@ -1004,6 +1002,13 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `071fd56` — BETA-015: Module 30, statutory homelessness (H-CLIC) snapshot
+  (`beta`).
+- `47cf21c` — BETA-014: Module 29, rough sleeping snapshot (`beta`).
+- (BETA-010–013 commits landed between `f2b727a` and `47cf21c`; see their
+  own DONE entries above for detail — this list was not kept current for
+  every intermediate commit, the same disclosed gap as the Candidate
+  Feature Backlog table above.)
 - `f2b727a` — BETA-009: surface the evidence graph's own status on the
   Health tab (`beta`).
 - `0c82267` — docs: W-15's CQC half and the API-rate-cap possible-future
