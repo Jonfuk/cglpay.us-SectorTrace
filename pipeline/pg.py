@@ -47,6 +47,7 @@ from __future__ import annotations
 import atexit
 import threading
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -341,6 +342,23 @@ def connect(url: str, *, readonly: bool = False,
         conn.close()
         raise
     return PostgresConnection(conn, readonly=readonly)
+
+
+@contextmanager
+def repeatable_read(connection: PostgresConnection):
+    """Hold one repeatable-read, read-only snapshot for a sequence of reads.
+
+    The mirror copies many tables over several minutes. Autocommit reads can
+    therefore observe different committed versions of the source while the
+    copy is in progress, making a correct copy fail its later verification.
+    psycopg's transaction context starts one transaction on the normally
+    autocommit source connection and commits or rolls it back on exit.
+    """
+    raw = connection.raw
+    with raw.transaction():
+        raw.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        raw.execute("SET TRANSACTION READ ONLY")
+        yield connection
 
 
 # --- the read pool -------------------------------------------------------------
