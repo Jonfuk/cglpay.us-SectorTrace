@@ -27,7 +27,11 @@ services:
     # Leave the database and the portal responsive while a batch runs.
     cpus: {{ [(ansible_processor_vcpus | int * 0.75) | round(1), 1.0] | max }}
     volumes:
-      - "{{ state_dir }}/data/derived:/app/data/derived"
+      # Same whole-of-/app/data mount as the app: this worker READS raw
+      # objects from the archive and writes derived artifacts beside them,
+      # so it needs the identical view. Its own logs go to /tmp by design
+      # (LOGS_DIR in deploy/Dockerfile.documents).
+      - "{{ state_dir }}/data:/app/data"
     # No `restart:` and no default command — always invoked explicitly, e.g.:
     #   docker compose -f docker-compose.documents.yml run --rm documents documents status
     #   docker compose -f docker-compose.documents.yml run --rm documents documents process --source-system committee_papers --limit 25

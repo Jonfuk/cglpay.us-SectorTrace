@@ -136,11 +136,25 @@ physically sits. `docker compose down` keeps them; only `down -v` destroys
 them.
 
 What *is* under `state_dir`: `.env`, the rendered compose and Caddyfile,
-`postgres-init/`, and `data/backups` + `data/derived` (written by the app
-container, which runs as root, and read from the host by the offsite backup
-script). `state_dir` itself is `0750` root-owned — that's the privacy
-boundary, which is why individual files inside can carry whatever mode a
-container needs without widening host access.
+`postgres-init/`, `logs/`, and the whole of `data/` — which is bind-mounted
+into the app and documents containers as `/app/data`, so everything the
+pipeline writes lands on the host rather than on a container layer.
+
+That last point matters most for **`data/raw`**. With no `ARCHIVE_S3_*`
+group configured the pipeline archives raw response bytes there, and that
+archive is the audit trail behind every figure (settled decision 1),
+rebuildable only by crawling every source again at one request per two
+seconds. An earlier revision mounted only `data/backups`, which left it on
+the container's writable layer where `docker compose up -d` would discard
+it. The parent is mounted now, so a future `data/` subdirectory is
+persistent by default rather than by remembering to add it.
+
+It grows monotonically — nothing is ever pruned, by design — so watch it,
+and move to `ARCHIVE_S3_*` if it starts crowding the disk.
+
+`state_dir` itself is `0750` root-owned — that's the privacy boundary,
+which is why individual files inside can carry whatever mode a container
+needs without widening host access.
 
 Backups go through `pipeline backup` (verified, plus the offsite copy), not
 by copying a data directory out from under a running server.
