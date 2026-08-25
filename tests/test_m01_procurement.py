@@ -503,6 +503,101 @@ def test_unflatten_release_row_reconstructs_nested_shape():
     assert release["awards"][0]["value"]["amount"] == 90000.0
 
 
+def test_unflatten_release_row_nulls_unparseable_amounts_and_reports_them():
+    """A non-numeric amount must not survive as a string.
+
+    It used to. SQLite's affinity stores 'United Kingdom' in a REAL column
+    without complaint, so the bug was invisible until the same row reached
+    PostgreSQL, which rejected it and took the module's whole transaction
+    with it -- a month of notices lost to one cell.
+    """
+    row = {
+        "releases/0/id": "abc-1",
+        "releases/0/tender/value/amount": "United Kingdom",
+        "releases/0/tender/value/currency": "GBP",
+        "releases/0/awards/0/value/amount": "90000",
+    }
+    failures: list[tuple[str, str]] = []
+    release = proc._unflatten_release_row(row, failures)
+
+    assert release["tender"]["value"]["amount"] is None
+    # The rest of the release is untouched: one bad cell is not a reason to
+    # discard the fields that did parse.
+    assert release["tender"]["value"]["currency"] == "GBP"
+    assert release["awards"][0]["value"]["amount"] == 90000.0
+    assert failures == [("tender/value/amount", "United Kingdom")]
+
+
+@pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity"])
+def test_unflatten_release_row_refuses_non_finite_amounts(raw):
+    """float() accepts these and PostgreSQL stores them; neither is a
+    contract value, so they are treated exactly like any other unparseable
+    cell."""
+    failures: list[tuple[str, str]] = []
+    release = proc._unflatten_release_row(
+        {"releases/0/id": "abc-1", "releases/0/tender/value/amount": raw}, failures)
+
+    assert release["tender"]["value"]["amount"] is None
+    assert failures == [("tender/value/amount", raw)]
+
+
+def test_unflatten_release_row_does_not_reinterpret_formatted_numbers():
+    """No separators stripped, no currency symbols removed. A figure this
+    code had to reinterpret is one nobody could defend a year later, so a
+    formatted amount is a parse failure rather than a guess."""
+    failures: list[tuple[str, str]] = []
+    release = proc._unflatten_release_row(
+        {"releases/0/id": "abc-1", "releases/0/tender/value/amount": "£1,234.56"}, failures)
+
+    assert release["tender"]["value"]["amount"] is None
+    assert failures == [("tender/value/amount", "£1,234.56")]
+
+
+def test_process_csv_release_row_records_amount_parse_failure(conn):
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+    row = {
+        "releases/0/ocid": "ocds-b5fd17-hist2",
+        "releases/0/id": "notice-with-bad-amount",
+        "releases/0/tender/title": "Substance misuse recovery service",
+        "releases/0/buyer/name": "West Northamptonshire Council",
+        "releases/0/tender/value/amount": "United Kingdom",
+    }
+
+    class _FakeResult:
+        url = "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com/Harvester-new/2016-06/x.csv"
+        retrieved_at = __import__("datetime").datetime(2026, 8, 22, tzinfo=__import__("datetime").timezone.utc)
+        status_code = 200
+        payload_sha256 = "deadbeef"
+
+    written = proc._process_csv_release_row(
+        conn, "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(),
+        proc._build_authority_lookup(conn))
+
+    # The release is still kept -- that is the point of NULL over discarding.
+    assert written == 1
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+                           (row["releases/0/id"],)).fetchone()
+    assert stored["value_core"] is None
+    assert stored["buyer_ons_code"] == "E06000061"
+
+    failure = conn.execute(
+        "SELECT * FROM parse_failures WHERE module = ? AND field_name = ?",
+        ("m01_procurement", "tender/value/amount")).fetchone()
+    assert failure is not None
+    assert failure["raw_fragment"] == "United Kingdom"
+
+
+def test_process_csv_release_row_out_of_scope_records_no_parse_failure(conn):
+    """parse_failures is a bug list about this pipeline's parsers, not a log
+    of every oddity in an archive this module is not collecting."""
+    row = {"releases/0/id": "abc-1", "releases/0/tender/title": "Playground equipment",
+           "releases/0/tender/value/amount": "United Kingdom"}
+    written = proc._process_csv_release_row(conn, "m01_procurement", proc.SOURCE_CF_CSV,
+                                             row, object(), {})
+    assert written == 0
+    assert conn.execute("SELECT * FROM parse_failures").fetchone() is None
+
+
 def test_unflatten_release_row_ignores_package_level_columns():
     row = {"uri": "https://example.com/x.json", "publisher/name": "Cabinet Office",
            "releases/0/id": "abc-1"}

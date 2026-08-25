@@ -65,6 +65,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 import zipfile
 from datetime import date, timedelta
@@ -501,7 +502,8 @@ def _walk_and_process(
 # month and does not try to infer or flag "completeness" itself.
 
 
-def _unflatten_release_row(row: dict[str, str | None]) -> dict:
+def _unflatten_release_row(row: dict[str, str | None],
+                            amount_failures: list[tuple[str, str]] | None = None) -> dict:
     """Rebuild one OCDS release dict from a flattened-CSV row.
 
     The daily archive files are the standard OCDS flattened-CSV
@@ -530,7 +532,7 @@ def _unflatten_release_row(row: dict[str, str | None]) -> dict:
         if not column or not column.startswith(prefix) or value in (None, ""):
             continue
         _assign_flattened_path(root, column[len(prefix):].split("/"), value)
-    _coerce_amount_fields(root)
+    _coerce_amount_fields(root, amount_failures)
     return _drop_none_placeholders(root)
 
 
@@ -596,19 +598,54 @@ def _drop_none_placeholders(node: object) -> object:
     return node
 
 
-def _coerce_amount_fields(node: object) -> None:
+def _coerce_amount_fields(node: object, failures: list[tuple[str, str]] | None = None,
+                           path: str = "") -> None:
+    """Make the CSV's text amounts numeric, and never pass a non-number on.
+
+    Every cell in a flattened CSV is text, so `value/amount` arrives as
+    `"90000"` where the live JSON APIs hand over a float.
+
+    The failure case is the one that matters. The archive occasionally
+    carries something that is not a number under an amount path -- a country
+    name has been seen there -- and this used to leave the string in place
+    and continue. That worked by accident: SQLite's type affinity stores
+    'United Kingdom' in a REAL column without complaint, which is the same
+    affinity trap `pipeline/pgload.py` refuses rows over. Against PostgreSQL
+    the driver rejects it, and because one bad cell aborts the transaction
+    the module ends having written nothing at all -- a whole month of
+    notices lost to one malformed field.
+
+    Neither outcome is acceptable, and settled decision 1 already says what
+    the right one is: unparseable is NULL plus a parse_failures row. So the
+    field becomes NULL, every other field on the release is still written,
+    and the caller records what was actually in the cell. Nothing is guessed
+    -- no separators stripped, no currency symbols removed -- because a
+    value this code had to reinterpret is exactly the kind of figure nobody
+    could defend a year later.
+
+    Non-finite is refused for the same reason: float() accepts 'NaN' and
+    'Infinity', PostgreSQL stores both in a double precision column, and
+    neither is a contract value.
+    """
     if isinstance(node, dict):
         for key, value in node.items():
+            child = f"{path}/{key}" if path else key
             if key in _AMOUNT_LEAF_KEYS and isinstance(value, str):
                 try:
-                    node[key] = float(value)
+                    parsed = float(value)
                 except ValueError:
-                    pass
+                    parsed = None
+                if parsed is None or not math.isfinite(parsed):
+                    node[key] = None
+                    if failures is not None:
+                        failures.append((child, value))
+                else:
+                    node[key] = parsed
             else:
-                _coerce_amount_fields(value)
+                _coerce_amount_fields(value, failures, child)
     elif isinstance(node, list):
-        for item in node:
-            _coerce_amount_fields(item)
+        for index, item in enumerate(node):
+            _coerce_amount_fields(item, failures, f"{path}/{index}")
 
 
 def _select_best_cf_csv_packages(packages: list[dict]) -> dict[tuple[int, int], dict]:
@@ -685,11 +722,22 @@ def _discover_cf_csv_months(client: PipelineHTTPClient, conn, module_name: str,
 
 def _process_csv_release_row(conn, module_name: str, source_system: str, row: dict,
                               result, authority_lookup: dict[str, str]) -> int:
-    release = _unflatten_release_row(row)
+    amount_failures: list[tuple[str, str]] = []
+    release = _unflatten_release_row(row, amount_failures)
     if not release.get("id"):
         return 0
     if not _release_matches_scope(release):
         return 0
+    # Recorded only for a release this module is actually keeping. A
+    # malformed amount on a row that fails the scope check is a fact about
+    # someone else's playground-equipment notice, and parse_failures is a
+    # bug list about this pipeline's own parsers rather than a log of every
+    # oddity in the archive.
+    for field_path, raw_value in amount_failures:
+        db.record_parse_failure(
+            conn, module_name, field_path, raw_value,
+            "amount is not a finite number; stored as NULL",
+            source_url=result.url)
     return _process_release(conn, module_name, source_system, release, result, authority_lookup)
 
 
@@ -803,9 +851,13 @@ def _kaggle_amount(row: dict, index: dict[str, str], *candidates: str) -> float 
     if raw is None:
         return None
     try:
-        return float(raw)
+        parsed = float(raw)
     except ValueError:
         return None
+    # float() accepts 'NaN' and 'Infinity' and PostgreSQL stores both in a
+    # double precision column; neither is a contract value. Same refusal as
+    # `_coerce_amount_fields` makes for the CSV-archive channel.
+    return parsed if math.isfinite(parsed) else None
 
 
 def _map_kaggle_row_to_release(row: dict, index: dict[str, str]) -> dict | None:
