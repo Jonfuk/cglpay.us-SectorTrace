@@ -21,10 +21,18 @@ services:
     environment:
       POSTGRES_USER: sectortrace_app
       POSTGRES_PASSWORD: "{{ vault_postgres_app_password }}"
-      POSTGRES_DB: sectortrace
-      # Bytewise collation so ORDER BY matches SQLite's BINARY ordering —
-      # see pipeline/migrations/postgres/README.md.
-      POSTGRES_INITDB_ARGS: "--locale-provider=builtin --builtin-locale=C.UTF-8 --encoding=UTF8"
+      # Deliberately the maintenance database, NOT sectortrace. The warehouse
+      # needs the builtin C.UTF-8 collation so ORDER BY matches SQLite's
+      # BINARY ordering (pipeline/migrations/postgres/README.md), and letting
+      # the image create it here would create it with the cluster default
+      # instead. postgres-init/01-roles.sql creates it properly, with the
+      # CREATE DATABASE ... TEMPLATE = template0 form that README documents.
+      #
+      # Doing it at CREATE DATABASE rather than initdb also avoids a conflict
+      # that is easy to miss: this image sets LANG=en_US.utf8, and initdb
+      # refuses --locale-provider=builtin when LC_CTYPE disagrees with it, so
+      # a POSTGRES_INITDB_ARGS approach fails before the server ever starts.
+      POSTGRES_DB: postgres
     command: >
       postgres
       -c shared_buffers={{ postgres_shared_buffers }}
@@ -53,11 +61,22 @@ services:
       # can't be "just re-apply the playbook" if you rotate this password;
       # see the README's password-rotation note.
       - "{{ state_dir }}/postgres-init:/docker-entrypoint-initdb.d:ro"
+    # Docker's default /dev/shm is 64MB. The main buffer pool does not live
+    # there, but parallel query workers do, and the failure mode is a query
+    # dying with "could not resize shared memory segment" long after the
+    # deployment looked fine. Sized against max_parallel_workers.
+    shm_size: {{ postgres_shm_size_mb }}m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sectortrace_app -d sectortrace"]
       interval: 10s
       timeout: 5s
       retries: 5
+      # On the very first boot the server is not listening on TCP at all
+      # while initdb runs and the init script above executes. Without a
+      # start_period the 5 retries expire during that window, the container
+      # is marked unhealthy, and every service depending on it refuses to
+      # start — which looks exactly like a database that failed.
+      start_period: 90s
     ports:
       # Loopback only — nothing outside this box can reach Postgres directly.
       - "127.0.0.1:5432:5432"
