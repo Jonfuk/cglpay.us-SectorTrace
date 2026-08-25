@@ -97,73 +97,52 @@ DEFERRED
 DONE
 -->
 
-### IN_PROGRESS
-
-- [IN_PROGRESS] BETA-010 | Public relationship explorer over the evidence graph
-  - started: 2026-08-25T00:00:00Z
-  - priority: P1
-  - impact: 5
-  - effort: 4 (L)
-  - confidence: 3
-  - risk: 3
-  - area: portal
-  - depends_on: none (BETA-009 confirmed the data source is safe)
-  - branch: beta
-  - decided: New dedicated portal section (not integrated into an existing
-    page). First version scoped to provider↔authority commissioning
-    relationships only — the deterministic data `graph backfill` already
-    produces (`SOURCE_FACT`/`DERIVED_RELATIONSHIP` from contract awards and
-    the authority/provider registries), not company/PSC ownership edges.
-    Project owner's decision, 2026-08-25 interview.
-  - objective: A public page where a reader picks a provider or authority
-    and sees who it's connected to (commissioning relationships), with the
-    same "no figure without its caveat" and "verify at source" discipline
-    as the rest of the portal — this is relationship data, not a score, and
-    must not imply more than "these two entities co-occur in a contract
-    award" says.
-  - next_action: Design the API payload shape first (new
-    `public_queries.py` function reading `entities`/`entity_relationships`
-    filtered to `derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')`
-    and the commissioner/provider edge type only — never `graph_claims` or
-    anything Neo4j-only, since the warehouse tables are the citable source
-    and Neo4j is explicitly documented as a disposable projection of them).
-    Then a new frontend page using ECharts' native `graph` series (already
-    vendored, no new dependency) for the visualization, following the
-    existing page module pattern in `pipeline/web/static/public/js/pages/`.
-  - validation_remaining: New tests for the query function and route; a
-    live-browser check of the actual rendered graph, not just that the API
-    returns data; confirm no `restricted_` table or personal data can reach
-    this payload (reuse `guard_columns()` the way every other public query
-    does).
-  - notes: `entity_relationships.derivation_type` also includes values this
-    page must never render without more thought — `EXTRACTED_CLAIM` and
-    `ANALYTICAL_SIGNAL` are reserved for a not-yet-built extraction pipeline
-    (see BETA-009's DONE entry) and nothing currently writes them, but the
-    query must filter explicitly rather than assume the absence holds
-    forever.
-
-- [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
-  - priority: P1
-  - blocked_by: Candidate type/use case — asked directly of the project
-    owner in this session, answer pending (see Questions Requiring Human
-    Input #0).
-  - resume_when: The project owner specifies which candidates this should
-    apply to.
-  - alternative_work_available: yes (BETA-010 is in progress)
-  - decided_so_far: Wire it up for real use (not remove, not
-    document-as-inactive). Review requirement: one AI pass plus the
-    existing human review-queue decision counts as the second independent
-    review — so this does *not* need two separate AI passes, just the AI
-    check plus whatever a human reviewer already decides in the normal
-    queue. Project owner's decision, 2026-08-25 interview.
-  - notes: This is the most sensitive item in the whole queue — it touches
-    `CLAUDE.md` settled decision 4 directly. Do not start implementation
-    speculatively before the candidate type is known; the predicates
-    (official source, exact identity, document type, dated, archived, no
-    conflicts) mean very different things depending on which candidate
-    table this reads from.
-
 ### DONE
+
+- [DONE] BETA-010 | Public relationship explorer over the evidence graph
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push — see the commit immediately following this
+    entry in `git log beta`)
+  - result: New dedicated portal section (`#/relationships`), scoped
+    exactly as decided in the project owner's interview: provider↔authority
+    commissioning relationships only, a one-hop neighbourhood centred on
+    whichever entity the reader picks — not a whole-corpus map, which would
+    invite exactly the size/importance/centrality reading this pipeline
+    never asserts. New `public_queries.relationships()` reads only
+    `entities`/`entity_relationships`/`evidence_records` (never Neo4j,
+    which is an explicitly disposable projection of the same rows) filtered
+    to `predicate = 'AWARDED_TO'` and `derivation_type IN ('SOURCE_FACT',
+    'DERIVED_RELATIONSHIP')` — `REGISTERED_AS` (ownership) and
+    `EXTRACTED_CLAIM`/`ANALYTICAL_SIGNAL` (BETA-009's not-yet-built
+    extraction pipeline) explicitly excluded, not by their current absence.
+    New frontend page (`relationships.js`) with typeahead pickers (reusing
+    the compare page's pattern), an ECharts `graph`-series force diagram
+    (already-vendored, no new dependency), and — because a force diagram
+    has no accessible text equivalent — a citable table beneath it with
+    per-edge provenance (source URL, retrieval date, licence), matching
+    "everything is citable" exactly as every other page does. New caveat
+    (`commissioning_relationship`) pinned above the diagram. Wired into the
+    frozen route/asset lists in `tests/test_portal_isolation.py`, the `/api`
+    documentation page, and the `<noscript>` block — also fixed that page's
+    stale "nothing here is rate-limited" line left over from before
+    BETA-007.
+  - note: **Verified against real production data end-to-end, not just
+    fixtures** — live in-browser, Nottinghamshire's real commissioning
+    relationships to Change Grow Live and Turning Point rendered correctly
+    as both the force diagram and the citable table, with real Find a
+    Tender provenance and OGL licensing, no console errors. 9 new backend
+    tests (both direction of lookup, an entity with no matched relationship
+    returns an empty neighbourhood rather than a 404, an unknown entity is
+    a clean 400, ownership and unreviewed-extraction edges are excluded
+    even when present in the data, graceful handling of a warehouse that
+    predates the graph tables). Full suite: 2358 passed, 2 pre-existing
+    failures unrelated to this change (confirmed twice now, see BETA-007's
+    entry for the first confirmation).
+  - possible follow-up: entry-point links from the provider deep dive and
+    authority pages (pre-filled into `#/relationships?...`), matching how
+    W-11's compare view is entered from those pages. Not done this cycle —
+    the standalone dedicated section was the explicit scope; cross-linking
+    is a smaller, separate addition.
 
 - [DONE] BETA-009 | Health tab: surface the evidence graph's own operational state
   - completed: 2026-08-25T00:00:00Z
@@ -404,6 +383,28 @@ DONE
     finish and merge.
 
 ### BLOCKED
+
+- [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
+  - priority: P1
+  - blocked_by: Candidate type/use case — asked directly of the project
+    owner in this session, answer pending (see Questions Requiring Human
+    Input #0).
+  - resume_when: The project owner specifies which candidates this should
+    apply to.
+  - alternative_work_available: yes (BETA-010 is done; more discovery
+    ongoing)
+  - decided_so_far: Wire it up for real use (not remove, not
+    document-as-inactive). Review requirement: one AI pass plus the
+    existing human review-queue decision counts as the second independent
+    review — so this does *not* need two separate AI passes, just the AI
+    check plus whatever a human reviewer already decides in the normal
+    queue. Project owner's decision, 2026-08-25 interview.
+  - notes: This is the most sensitive item in the whole queue — it touches
+    `CLAUDE.md` settled decision 4 directly. Do not start implementation
+    speculatively before the candidate type is known; the predicates
+    (official source, exact identity, document type, dated, archived, no
+    conflicts) mean very different things depending on which candidate
+    table this reads from.
 
 - [BLOCKED] BETA-005 | WDTK robots.txt exception review
   - priority: P1

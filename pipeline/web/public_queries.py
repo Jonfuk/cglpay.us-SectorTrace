@@ -159,6 +159,16 @@ CAVEATS = {
         "recorded — it says nothing about the sector, and everything about "
         "how much verification has been done."
     ),
+    "commissioning_relationship": (
+        "A line means a contract notice named this authority as buyer and "
+        "this provider as supplier — a commissioning relationship, not a "
+        "measure of size, value, importance or reliance. Coverage is the "
+        "same floor as the contracts page: only notices with an exact "
+        "supplier-name match are here, so an authority or provider with no "
+        "lines shown may still have unmatched notices. This is not the "
+        "whole evidence graph — ownership and corporate-group relationships "
+        "are a separate, not-yet-published view."
+    ),
     "collection_freshness": (
         "The date each source table was last written by a pipeline run. A "
         "table that never shows a date has never been collected — absence of "
@@ -2451,6 +2461,113 @@ def _provider_source_meta(conn: sqlite3.Connection, table: str,
                 SELECT alias_raw FROM supplier_aliases WHERE supplier_key IN ({in_clause})
             ) AND source_url IS NOT NULL LIMIT 6""", params)],
     }
+
+
+# --- relationship explorer -----------------------------------------------------
+#
+# One authority or provider's commissioning neighbourhood from the evidence
+# graph (docs/evidence-graph.md, migration 0050) — not the whole graph, and
+# not a force-directed map of the entire corpus. A one-hop view centred on
+# whichever entity the reader picked, the same "the reader picks the peers"
+# shape W-11's compare view already established, because a graph of
+# everything at once would invite exactly the size/importance/centrality
+# reading this pipeline never asserts.
+#
+# Reads the warehouse tables (entities, entity_relationships,
+# evidence_records), never Neo4j: Neo4j is an explicitly disposable
+# projection of these same rows (docs/evidence-graph.md — "delete
+# SectorTrace-managed Neo4j nodes and rebuild them from the warehouse
+# whenever recovery is needed"), so the citable source is here.
+#
+# predicate = 'AWARDED_TO' and derivation_type IN ('SOURCE_FACT',
+# 'DERIVED_RELATIONSHIP') only. Excluded explicitly, not by their current
+# absence:
+#   - REGISTERED_AS (provider -> company ownership) — a separate,
+#     not-yet-scoped view; this one is commissioning relationships only.
+#   - EXTRACTED_CLAIM / ANALYTICAL_SIGNAL — reserved for a not-yet-built
+#     extraction pipeline (see the graph_claims.review_status gate); nothing
+#     writes them today, but nothing here may assume that stays true.
+
+
+def relationships(conn: sqlite3.Connection, *,
+                   ons_code: str | None = None,
+                   provider_key: str | None = None) -> dict:
+    """The commissioning relationships touching one authority or provider.
+
+    Exactly one of `ons_code` or `provider_key` selects the centre entity.
+    """
+    _public(["entities", "entity_identifiers", "entity_relationships",
+              "evidence_records", "authorities", "providers"])
+
+    if bool(ons_code) == bool(provider_key):
+        raise QueryError(
+            "relationships needs exactly one of `ons_code` or `provider_key`.")
+
+    if catalog.object_type(conn, "entities") != "table":
+        # The evidence graph is optional infrastructure (migration 0050) and
+        # a warehouse that predates it, or has never run `graph backfill`,
+        # must render an empty neighbourhood rather than a 500 — the same
+        # primitive health.graph_status's own table-existence guard uses.
+        return _relationships_fallback(conn, ons_code, provider_key)
+
+    scheme, value = (("ons_code", ons_code) if ons_code
+                     else ("sectortrace_provider_key", provider_key))
+    center = _one(conn, """
+        SELECT e.entity_id, e.entity_type, e.canonical_name
+        FROM entity_identifiers i JOIN entities e ON e.entity_id = i.entity_id
+        WHERE i.identifier_scheme = :scheme AND i.identifier_value = :value
+        """, {"scheme": scheme, "value": value})
+    if not center:
+        return _relationships_fallback(conn, ons_code, provider_key)
+
+    edges = _rows(conn, """
+        SELECT r.relationship_id, r.subject_entity_id, r.object_entity_id,
+               r.valid_from, r.valid_to, r.confidence,
+               ev.source_url, ev.retrieved_at, ev.source_system
+        FROM entity_relationships r
+        LEFT JOIN evidence_records ev ON ev.evidence_id = r.evidence_id
+        WHERE (r.subject_entity_id = :id OR r.object_entity_id = :id)
+          AND r.predicate = 'AWARDED_TO'
+          AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        ORDER BY r.valid_from DESC""", {"id": center["entity_id"]})
+
+    neighbour_ids = sorted({
+        e["object_entity_id"] if e["subject_entity_id"] == center["entity_id"]
+        else e["subject_entity_id"] for e in edges})
+    neighbours = []
+    if neighbour_ids:
+        placeholders = ", ".join(f":n{n}" for n in range(len(neighbour_ids)))
+        params = {f"n{n}": v for n, v in enumerate(neighbour_ids)}
+        neighbours = _rows(conn, f"""
+            SELECT entity_id, entity_type, canonical_name FROM entities
+            WHERE entity_id IN ({placeholders})""", params)
+
+    return {"center": center, "neighbours": neighbours, "edges": edges,
+            "caveat": CAVEATS["commissioning_relationship"]}
+
+
+def _relationships_fallback(conn: sqlite3.Connection,
+                             ons_code: str | None,
+                             provider_key: str | None) -> dict:
+    """No graph entity for this authority/provider — not backfilled yet, or
+    the graph tables don't exist at all. Absence of a connection, not
+    absence of the authority or provider itself, so this still has to name
+    who was asked about rather than just failing."""
+    if ons_code:
+        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = :v",
+                   {"v": ons_code})
+        entity_type, name = "LOCAL_AUTHORITY", row.get("name")
+    else:
+        row = _one(conn, "SELECT canonical_name AS name FROM providers "
+                          "WHERE provider_key = :v", {"v": provider_key})
+        entity_type, name = "PROVIDER", row.get("name")
+    if not name:
+        raise QueryError(f"No {'authority' if ons_code else 'provider'} "
+                          f"{(ons_code or provider_key)!r}.")
+    return {"center": {"entity_id": None, "entity_type": entity_type,
+                        "canonical_name": name},
+            "neighbours": [], "edges": [],
+            "caveat": CAVEATS["commissioning_relationship"]}
 
 
 # --- geography map layers (W-19) ----------------------------------------------

@@ -228,6 +228,7 @@ const ROUTES = {
   '/pfd': () => import('/js/pages/pfd.js'),
   '/authorities': () => import('/js/pages/authority.js'),
   '/compare': () => import('/js/pages/compare.js'),
+  '/relationships': () => import('/js/pages/relationships.js'),
   '/claims': () => import('/js/pages/claims.js'),
   '/coverage': () => import('/js/pages/coverage.js'),
 };

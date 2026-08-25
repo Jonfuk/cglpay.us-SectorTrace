@@ -74,6 +74,8 @@
       <a href="#route-compare"><code>compare</code></a>,
       <a href="#route-geography"><code>geography</code></a>, and
       <a href="#route-layers"><code>layers</code></a>.</li>
+    <li><strong>See who an authority or provider commissions.</strong> Use
+      <a href="#route-relationships"><code>relationships</code></a>.</li>
     <li><strong>Explore a subject.</strong> Go to
       <a href="#route-contracts"><code>contracts</code></a>,
       <a href="#route-pay"><code>pay</code></a>,
@@ -94,8 +96,10 @@
       <code>POST</code> to one is a 404.</li>
     <li><strong>No authentication and no API key.</strong> The security model
       is the bind address: this server is meant to run on a machine or a
-      network you trust. Nothing here is rate-limited, so please be no less
-      polite than the pipeline is to its own sources.</li>
+      network you trust. A per-address rate limit answers sustained abuse
+      with <code>429</code> and <code>Retry-After</code> — generous enough
+      that ordinary use never sees it — so please be no less polite than the
+      pipeline is to its own sources regardless.</li>
     <li><strong>Same-origin.</strong> No CORS headers are ever sent, so a page
       on another site cannot read these responses from a browser. A script, a
       notebook or <code>curl</code> is unaffected.</li>
@@ -243,6 +247,39 @@
     </p>
     <p>
       <code>/api/v1/compare?ons_code=E08000025&amp;ons_code=E06000047&amp;provider_key=change_grow_live</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-relationships" data-route="relationships">
+    <h3><code>/api/v1/relationships</code></h3>
+    <p>
+      One authority or provider's commissioning neighbourhood in the evidence
+      graph — a one-hop view centred on whichever entity you ask for, not a
+      map of the whole corpus. A line means a contract notice named this
+      authority as buyer and this provider as supplier; it is not a measure
+      of size, value, importance or reliance. Only deterministic
+      relationships are returned — contract awards backed by an exact
+      supplier-name match — never an unreviewed inference.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>. Exactly one of <code>ons_code</code> or <code>provider_key</code> is required.</td></tr>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>center</code> (the entity you asked about),
+      <code>neighbours</code> (the entities it has commissioning
+      relationships with), <code>edges</code> (each with its evidence
+      source, retrieval date and any date range the relationship was valid
+      for), and <code>caveat</code>. An authority or provider that exists but
+      has no matched relationships returns an empty neighbourhood, not an
+      error — the coverage floor is the same one <code>contracts</code> and
+      <code>compare</code> already document.
+    </p>
+    <p>
+      <code>/api/v1/relationships?ons_code=E08000025</code>
     </p>
   </article>
 
