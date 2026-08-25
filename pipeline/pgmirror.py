@@ -8,9 +8,10 @@ there is no safe meaning for two independently changed evidence warehouses to
 """
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 
-from pipeline import catalog, pgload, pgverify
+from pipeline import catalog, db, pgload, pgverify
 
 
 class MirrorError(RuntimeError):
@@ -70,8 +71,45 @@ def _truncate(target, tables: set[str]) -> None:
         target.execute(f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE")
 
 
+@contextmanager
+def _stable_source(source):
+    """Keep PostgreSQL source reads on one committed database snapshot."""
+    if db.backend_of(source) == "postgres":
+        from pipeline import pg
+
+        with pg.repeatable_read(source):
+            yield
+    else:
+        # Kept for the small offline tests that exercise the comparison code
+        # with two SQLite connections.
+        yield
+
+
+@contextmanager
+def _stable_reads(*connections):
+    """Give a read-only comparison stable snapshots on both sides."""
+    with ExitStack() as stack:
+        seen: set[int] = set()
+        for connection in connections:
+            if id(connection) in seen or db.backend_of(connection) != "postgres":
+                continue
+            seen.add(id(connection))
+            from pipeline import pg
+
+            stack.enter_context(pg.repeatable_read(connection))
+        yield
+
+
 def transfer(source, target, *, truncate: bool = False, verify: bool = True,
              on_table=None) -> dict:
+    """Copy and verify one consistent view of the PostgreSQL source."""
+    with _stable_source(source):
+        return _transfer(source, target, truncate=truncate, verify=verify,
+                         on_table=on_table)
+
+
+def _transfer(source, target, *, truncate: bool = False, verify: bool = True,
+              on_table=None) -> dict:
     """Copy all data from source to target, then verify it."""
     problems = preflight(source, target)
     if problems:
@@ -112,6 +150,12 @@ def transfer(source, target, *, truncate: bool = False, verify: bool = True,
 
 def compare(source, target) -> dict:
     """Compare two PostgreSQL warehouses without changing either one."""
+    with _stable_reads(source, target):
+        return _compare(source, target)
+
+
+def _compare(source, target) -> dict:
+    """Compare two already-stabilised warehouse connections."""
     problems = preflight(source, target)
     if problems:
         return {"ok": False, "problems": problems, "checked_at": _utcnow()}
