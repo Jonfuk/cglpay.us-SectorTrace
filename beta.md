@@ -101,8 +101,7 @@ DONE
 
 - [DONE] BETA-018 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file
   - completed: 2026-08-25T23:10:00Z
-  - commits: (see the commit immediately following this entry in
-    `git log beta`)
+  - commits: `087c1c6` (`beta`)
   - result: Project owner asked directly to continue exploring frontend
     UI improvements (§27/§28 of the original brief), the area flagged as
     untouched since BETA-010 in this file's own Next Recommended Actions.
@@ -1323,6 +1322,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `087c1c6` — BETA-018: theme-aware chart colours, mobile theme switcher,
+  dead vendor file (`beta`).
 - `a2b4796` — BETA-017: surface Modules 29-31 as a Comparators section on
   the authority page (`beta`).
 - `1336770` — BETA-016: Module 31, temporary accommodation (H-CLIC)
