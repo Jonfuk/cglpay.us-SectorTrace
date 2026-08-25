@@ -17,10 +17,19 @@
     state: directory
     mode: "0750"
   loop:
-    # Written by the app container (which runs as root) and read from the
-    # host by the offsite backup script, so it has to be a real path here.
-    - data/backups
+    # /app/data is bind-mounted whole, so everything the pipeline writes
+    # lands here rather than on a container's writable layer.
+    - data
+    # The raw archive: the audit trail behind every figure, and rebuildable
+    # only by re-crawling every source at one request per two seconds. It is
+    # used whenever the ARCHIVE_S3_* group is not configured.
+    - data/raw
     - data/derived
+    # Read from the host by the offsite backup script, so it has to be a
+    # real path here rather than a Docker volume.
+    - data/backups
+    # Structured JSON logs, one file per module.
+    - logs
   # PostgreSQL, Neo4j and Caddy state are deliberately NOT here — they live
   # in named Docker volumes. See the compose template for why.
 

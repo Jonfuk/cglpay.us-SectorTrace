@@ -143,8 +143,21 @@ services:
       neo4j:
         condition: service_healthy
     volumes:
-      # Local backups only — the raw/derived archive is S3-backed per .env.
-      - "{{ state_dir }}/data/backups:/app/data/backups"
+      # The WHOLE of /app/data, not just backups. With no ARCHIVE_S3_* group
+      # configured the pipeline falls back to a filesystem archive at
+      # RAW_ARCHIVE_DIR (data/raw), and mounting only backups left that on
+      # the container's writable layer — where a `compose up -d` that
+      # recreates the container discards it. That archive is the audit trail
+      # behind every figure (settled decision 1) and is rebuildable only by
+      # crawling every source again at one request per two seconds, so it is
+      # the single most expensive thing here to lose.
+      #
+      # Mounting the parent also means a future data/ subdirectory is
+      # persistent by default rather than by remembering to add it.
+      - "{{ state_dir }}/data:/app/data"
+      # Structured JSON logs, one file per module. Not evidence, but the
+      # operational record of what ran and what it fetched.
+      - "{{ state_dir }}/logs:/app/logs"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1801/health', timeout=3)"]
       interval: 15s
