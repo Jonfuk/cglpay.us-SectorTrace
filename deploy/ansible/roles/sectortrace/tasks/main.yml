@@ -72,6 +72,37 @@
   changed_when: true
   failed_when: false
 
+# The stack being "up" is not the same as the app serving. This is the
+# check that would have caught a bad migration, a wrong DATABASE_URL, or a
+# Postgres that started and then refused connections — each of which leaves
+# `docker compose ps` looking fine.
+- name: Wait for the app to report healthy
+  ansible.builtin.uri:
+    url: http://127.0.0.1:1801/health
+    status_code: 200
+  register: sectortrace_health
+  retries: 30
+  delay: 5
+  until: sectortrace_health.status is defined and sectortrace_health.status == 200
+  failed_when: sectortrace_health.status is not defined or sectortrace_health.status != 200
+
+- name: Install a `sectortrace` command for the host
+  ansible.builtin.template:
+    src: sectortrace-wrapper.sh.j2
+    dest: /usr/local/bin/sectortrace
+    mode: "0755"
+
+- name: Install the offsite backup script
+  ansible.builtin.template:
+    src: sectortrace-backup-offsite.sh.j2
+    dest: /usr/local/bin/sectortrace-backup-offsite
+    # Carries the bucket credentials, so it is readable only by root — the
+    # same reasoning as .env's 0600.
+    mode: "0700"
+  when:
+    - backup_offsite_enabled
+    - vault_archive_s3_bucket | length > 0
+
 - name: Install the backup systemd unit and timer
   ansible.builtin.template:
     src: "{{ item }}.j2"

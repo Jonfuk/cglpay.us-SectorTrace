@@ -1,6 +1,10 @@
 ---
-# The Debian `ansible` apt package (installed by ansible-install.sh) already
-# bundles community.general, so this is normally a no-op — kept explicit so
-# the playbook doesn't silently depend on that packaging detail.
+# The Debian `ansible` apt package (installed by ansible-install.sh) bundles
+# both of these, so this is normally a no-op — kept explicit so the playbook
+# doesn't silently depend on that packaging detail.
 collections:
+  # ufw, timezone
   - name: community.general
+  # ipaddr, for deciding whether the domain resolves into Cloudflare's
+  # ranges. Needs python3-netaddr, which the preflight role installs.
+  - name: ansible.utils

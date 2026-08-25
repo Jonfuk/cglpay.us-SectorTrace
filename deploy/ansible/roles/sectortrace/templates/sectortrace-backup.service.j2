@@ -11,3 +11,14 @@ Requires=docker.service
 Type=oneshot
 WorkingDirectory={{ state_dir }}
 ExecStart=/usr/bin/docker compose -f docker-compose.yml exec -T app python -m pipeline backup --keep {{ backup_keep }}
+{% if backup_offsite_enabled and vault_archive_s3_bucket %}
+# A backup on the same disk as the thing it backs up covers operator error
+# and corruption, and nothing at all about losing the disk. This copies the
+# verified snapshots off the box afterwards, into a prefix of their own —
+# never near the raw archive's keys.
+#
+# Runs only if the backup above succeeded: systemd stops a oneshot at the
+# first failing ExecStart, so a failed snapshot is never followed by an
+# upload that would rotate a good remote copy out.
+ExecStart=/usr/local/bin/sectortrace-backup-offsite
+{% endif %}

@@ -81,12 +81,53 @@ Six roles, in this order:
 
 | Role | What it does |
 |---|---|
+| `preflight` | Sizes the host, checks DNS — fails before anything is changed |
 | `common` | Full `apt dist-upgrade`, operator toolkit, UTC + chrony, bounded journal, swapfile |
 | `tuning` | Performance sysctls, transparent hugepages off, raised `nofile` limits, I/O scheduler |
 | `hardening` | SSH drop-in, fail2ban, kernel security sysctls, automatic security updates |
 | `docker` | Engine + Compose plugin, daemon log rotation and `no-new-privileges` |
 | `firewall` | ufw: only 80/443 and SSH inbound |
 | `sectortrace` | The stack itself, `.env`, backups timer |
+
+### Sizing: it reads the host
+
+Nothing is hardcoded to the 8GB box. `preflight` reads the host's actual RAM
+and CPU count and derives everything, so the same playbook suits a 4GB
+instance or a 16GB one:
+
+| Host | `shared_buffers` | `work_mem` | Neo4j heap | Docs limit | Parse jobs |
+|---|---|---|---|---|---|
+| 4GB / 2 vCPU | 993MB | 4MB | 512MB | 1986MB | 1 |
+| 8GB / 4 vCPU | 1986MB | 9MB | 953MB | 3973MB | 2 |
+| 16GB / 8 vCPU | 3973MB | 19MB | 1907MB | 7946MB | 4 |
+
+`shared_buffers` takes the conventional 25%, capped at 8GB (past that the OS
+page cache serves this workload better). Neo4j gets a deliberately modest
+12%, floored at 512MB — it's a disposable projection, and the warehouse is
+what must never be slow. `random_page_cost` and `effective_io_concurrency`
+are set for NVMe; their defaults describe a spinning disk and make the
+planner avoid index scans it should prefer.
+
+Preflight **asserts the budget fits** before building anything, so an
+undersized box gets a clear message naming the numbers rather than the OOM
+killer explaining it at 3am. 4GB is the practical floor for the full stack;
+2GB is refused.
+
+Override any single value in `zz-local.yml`, or set `auto_tune_memory: false`
+and pin them all.
+
+### Blast radius
+
+The failure this guards against: a document batch allocates hard, the kernel
+OOM killer picks a victim host-wide, and it picks PostgreSQL.
+
+- The documents worker has a `mem_limit` and a CPU cap, so it hits its own
+  cgroup limit and is killed **alone**, recording a retryable failure.
+- Neo4j has a limit too (heap + pagecache + JVM overhead). If something must
+  die, this is the right thing — `graph rebuild --clear` puts it back.
+- PostgreSQL gets `oom_score_adj: -500`, making it the last thing the kernel
+  considers. Everything else here is restartable or rebuildable; the
+  warehouse is neither.
 
 ### Installed tooling
 
@@ -223,21 +264,90 @@ in Postgres itself first (`ALTER ROLE … PASSWORD …` via `psql`), *then*
 update `vault.yml` to match and re-run — otherwise `.env` and Postgres
 disagree and the app fails to connect.
 
+## DNS, Cloudflare, and certificates
+
+Preflight resolves the domain before anything else happens, because Caddy
+asks Let's Encrypt for a certificate the moment it starts and LE's failure
+limit (5 per hostname per hour) is low enough that a few hopeful re-runs
+lock you out for the rest of the hour.
+
+It also works out **whether the record is proxied**, by checking the
+resolved address against Cloudflare's published ranges. This is not
+cosmetic — it decides how the admin allowlist is enforced:
+
+| | Resolves to | Admin matched on |
+|---|---|---|
+| **DNS-only** (grey cloud) | this box | `remote_ip` — the connecting address |
+| **Proxied** (orange cloud) | Cloudflare | `client_ip` — the real address from `X-Forwarded-For` |
+
+Get that wrong in the proxied direction and every request appears to come
+from Cloudflare, so a `remote_ip` allowlist matches nobody and **locks you
+out of your own admin UI**. When proxied, Caddy is given Cloudflare's ranges
+as `trusted_proxies`, which is what makes `X-Forwarded-For` believable — and
+is also why that range list is a security boundary: anything trusted there
+can claim to be any client. Refresh it from
+[cloudflare.com/ips](https://www.cloudflare.com/ips/) occasionally.
+
+Detection is automatic (`behind_cloudflare: "auto"`); force it with
+`true`/`false` if you'd rather not have it inferred.
+
+If your record **is** proxied, set Cloudflare's SSL mode to **Full
+(strict)** — Caddy holds a real certificate for the origin, which is exactly
+what that mode wants. Flexible mode would talk plain HTTP to this box. If
+the ACME challenge fails, the usual cause is "Always Use HTTPS" redirecting
+`/.well-known/acme-challenge` before it arrives.
+
+Rehearsing a deploy? `caddy_use_staging_ca: true` uses Let's Encrypt's
+staging endpoint — untrusted certificates, but failures cost nothing against
+the real limit.
+
 ## Reaching the operator UI
 
-`/admin` and `/api/admin/*` are refused by Caddy on the public domain — the
-app has no authentication of its own (settled decision 8), so it isn't
-exposed there. Reach it over an SSH tunnel instead:
+The app has no authentication of its own (settled decision 8), so `/admin`
+and `/api/admin/*` are never served to the open internet. Two ways in:
+
+**1. SSH tunnel — nothing exposed, and the safer option:**
 
 ```bash
 ssh -L 1801:127.0.0.1:1801 <user>@<this-vps> -N
-# then open http://127.0.0.1:1801/admin in a browser
+# then open http://127.0.0.1:1801/admin
 ```
 
-Set `expose_admin_publicly: true` in `vars.yml` and re-run if you'd rather
-have Caddy proxy it too — you'll then want to add your own restriction
-(an IP allowlist, HTTP basic auth) to the `Caddyfile.j2` template, since
-nothing else stands between the internet and the review queue at that point.
+**2. IP allowlist** — `admin_allowed_ips` in `vars.yml`. Caddy serves
+`/admin` over HTTPS to those addresses and 403s everyone else. CIDR ranges
+work too.
+
+Understand what the second one trades. The admin UI decides review-queue
+items and can read `restricted_` tables, and it has **no login of any
+kind** — the allowlist *is* the authentication. So:
+
+- If the address is a home broadband line it can change without warning,
+  and whoever the ISP hands it to next inherits your access.
+- TLS protects it in transit. Nothing protects it if the address is wrong.
+- Whether that check even works depends on the Cloudflare question above.
+
+An empty list falls back to tunnel-only. `expose_admin_publicly: true`
+drops the restriction entirely — think hard first; at that point nothing
+stands between the internet and the review queue.
+
+## Day-to-day
+
+The playbook installs a `sectortrace` command so you don't have to remember
+which compose file and container each thing lives in:
+
+```bash
+sectortrace run all                  # a pipeline command in the app container
+sectortrace coverage-report
+sectortrace documents documents process --source-system committee_papers --limit 25
+sectortrace psql                     # psql on the warehouse (container's own client)
+sectortrace health                   # what /health says
+sectortrace logs app                 # follow logs
+sectortrace backup                   # verified snapshot now
+sectortrace ps | restart | up | down
+```
+
+`documents` routes to the heavy worker image rather than the app, because
+the app image deliberately has no parser or OCR toolchain in it.
 
 ## Running collection
 
@@ -304,6 +414,22 @@ container, writing verified, re-hashed snapshots to
 — outside both the git checkout and the Postgres data volume. That's the
 application-aware layer; the VPS provider's own daily snapshot is the
 disaster-recovery layer under it, in case this disk is lost entirely.
+
+**Snapshots are also copied off the box** (`backup_offsite_enabled`, on by
+default when an S3 bucket is configured). A backup on the same disk as the
+warehouse covers operator error and corruption and nothing whatsoever about
+losing the disk. The copy goes to a prefix of its own, never near the raw
+archive's keys, and mirrors local retention rather than growing forever. It
+runs as a second `ExecStart` in the same unit, so a *failed* snapshot is
+never followed by an upload that would rotate a good remote copy out.
+
+Better still: point `backup_s3_*` at a **different** bucket with its own
+credentials. A key that can delete the archive shouldn't also be able to
+delete the archive's backups.
+
+Restoring is the part nobody exercises — this project's own deployment doc
+says a rollback path nobody exercises is a rollback path nobody has. Worth
+doing once, deliberately, onto a scratch database.
 
 ```bash
 systemctl status sectortrace-backup.timer

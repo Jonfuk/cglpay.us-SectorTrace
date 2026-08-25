@@ -1,0 +1,189 @@
+---
+# Everything here runs before the dist-upgrade and before anything is built,
+# because each of these failures is cheap to fix now and expensive to
+# discover twenty minutes in. Nothing in this role changes the box.
+
+- name: Refuse to run on anything but Debian
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: >-
+      This playbook targets Debian (it uses apt, Debian's sshd_config.d
+      layout, and Debian's Docker repository). Detected
+      {{ ansible_distribution }} {{ ansible_distribution_version }}.
+    success_msg: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Check the domain has been set
+  ansible.builtin.assert:
+    that:
+      - domain is defined
+      - domain | length > 0
+      - domain != "example.org"
+    fail_msg: >-
+      `domain` is still the placeholder. Re-run ./ansible-install.sh
+      --reconfigure, or set it in group_vars/all/zz-local.yml.
+
+# --- Memory budget --------------------------------------------------------------
+# The auto-sizing in group_vars is proportional, so on a box that is simply
+# too small the proportions still compute — they just do not add up to
+# something that fits. Say so here rather than letting the OOM killer
+# explain it later.
+- name: Check there is enough RAM for the stack
+  ansible.builtin.assert:
+    that:
+      - (postgres_shared_buffers_mb | int) + (neo4j_heap_mb | int)
+        + (neo4j_pagecache_mb | int) + (reserved_mb | int)
+        <= (ansible_memtotal_mb | int)
+    fail_msg: >-
+      This host has {{ ansible_memtotal_mb }}MB of RAM, and the stack needs
+      about {{ (postgres_shared_buffers_mb | int) + (neo4j_heap_mb | int)
+      + (neo4j_pagecache_mb | int) + (reserved_mb | int) }}MB
+      (PostgreSQL shared_buffers {{ postgres_shared_buffers_mb }}MB,
+      Neo4j heap {{ neo4j_heap_mb }}MB + pagecache {{ neo4j_pagecache_mb }}MB,
+      {{ reserved_mb }}MB for the OS, the app and headroom).
+      Use a larger instance, or set NEO4J_ENABLED=false and size it by hand
+      with auto_tune_memory: false. 4GB is the realistic minimum for the
+      full stack.
+    success_msg: >-
+      {{ ansible_memtotal_mb }}MB RAM, {{ ansible_processor_vcpus }} vCPU —
+      PostgreSQL {{ postgres_shared_buffers }} shared_buffers,
+      Neo4j {{ neo4j_heap_size }} heap / {{ neo4j_pagecache_size }} pagecache,
+      {{ reserved_mb }}MB reserved
+
+- name: Report the derived sizing
+  ansible.builtin.debug:
+    msg:
+      - "Host:       {{ ansible_memtotal_mb }}MB RAM, {{ ansible_processor_vcpus }} vCPU"
+      - "PostgreSQL: shared_buffers={{ postgres_shared_buffers }} effective_cache={{ postgres_effective_cache_size }}"
+      - "            work_mem={{ postgres_work_mem }} maintenance_work_mem={{ postgres_maintenance_work_mem }}"
+      - "Neo4j:      heap={{ neo4j_heap_size }} pagecache={{ neo4j_pagecache_size }} (container limit {{ neo4j_mem_limit_mb }}MB)"
+      - "Documents:  concurrency={{ document_worker_concurrency }} (container limit {{ documents_mem_limit_mb }}MB)"
+      - "Reserved:   {{ reserved_mb }}MB for OS, app, Caddy and headroom"
+
+- name: Check there is enough disk for the warehouse and images
+  ansible.builtin.assert:
+    that:
+      - >-
+        (ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available')
+         | first | default(0) | int) > (10 * 1024 * 1024 * 1024)
+    fail_msg: >-
+      Less than 10GB free on /. The Docker images alone (app plus the
+      documents worker with its OCR toolchain) need several GB before the
+      warehouse stores anything.
+    success_msg: >-
+      {{ ((ansible_mounts | selectattr('mount', 'equalto', '/')
+      | map(attribute='size_available') | first | default(0) | int)
+      / 1024 / 1024 / 1024) | round(1) }}GB free on /
+
+# --- DNS -------------------------------------------------------------------------
+# Caddy asks Let's Encrypt for a certificate as soon as it starts. If the
+# record does not point here the challenge fails, and Let's Encrypt's
+# failure limits are low enough (5 per hostname per hour) that a few
+# hopeful re-runs lock you out for the rest of the hour. Checking first
+# costs a second.
+#
+# getent rather than dig: it needs no package, so this role can run before
+# `common` installs anything.
+- name: Resolve the domain
+  ansible.builtin.command: "getent ahostsv4 {{ domain }}"
+  register: preflight_dns
+  changed_when: false
+  failed_when: false
+  when: not skip_dns_check
+
+- name: Check the domain resolves at all
+  ansible.builtin.assert:
+    that:
+      - preflight_dns.rc == 0
+      - preflight_dns.stdout | length > 0
+    fail_msg: >-
+      {{ domain }} does not resolve. Create the A record pointing at this
+      box first — Caddy's certificate request will fail without it, and
+      Let's Encrypt rate-limits failures. Set skip_dns_check: true to
+      proceed anyway (for example if you are terminating TLS elsewhere).
+  when: not skip_dns_check
+
+- name: Collect the resolved addresses
+  ansible.builtin.set_fact:
+    preflight_resolved_ips: >-
+      {{ preflight_dns.stdout_lines | map('split') | map('first') | unique | list }}
+  when: not skip_dns_check
+
+# netaddr is what ansible.utils.ipaddr needs to answer "is this address
+# inside that CIDR". The one package this role installs, and only because
+# getting the proxy question wrong silently breaks the admin allowlist.
+- name: Install netaddr for CIDR matching
+  ansible.builtin.apt:
+    name: python3-netaddr
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - not skip_dns_check
+    - behind_cloudflare == "auto"
+
+# Deliberately not preflight_-prefixed: this is consumed by the sectortrace
+# role's Caddyfile, so naming it after the role that happens to compute it
+# would misdescribe what it is. It has a matching default in group_vars.
+- name: Decide whether the record is proxied through Cloudflare  # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    caddy_behind_cloudflare: >-
+      {{
+        (preflight_resolved_ips | ansible.utils.ipaddr(cloudflare_ipv4_ranges) | length > 0)
+        if (behind_cloudflare == "auto" and not skip_dns_check)
+        else (behind_cloudflare | bool if behind_cloudflare != "auto" else false)
+      }}
+
+- name: Report the DNS and proxy situation
+  ansible.builtin.debug:
+    msg: >-
+      {{ domain }} resolves to {{ preflight_resolved_ips | join(', ') }} —
+      {{ 'PROXIED through Cloudflare. Caddy will trust the Cloudflare ranges
+      and match admin_allowed_ips against the real client address from
+      X-Forwarded-For.'
+      if (caddy_behind_cloudflare | bool)
+      else 'reaching this box directly (DNS-only). Caddy will match
+      admin_allowed_ips against the connecting address.' }}
+  when: not skip_dns_check
+
+# Only meaningful when traffic is direct. Proxied, the record is *supposed*
+# to resolve somewhere else, so comparing it against this host would be
+# wrong.
+- name: Check the domain resolves to this host
+  ansible.builtin.assert:
+    that:
+      - preflight_dns.stdout is search(ansible_default_ipv4.address)
+    fail_msg: >-
+      {{ domain }} resolves to {{ preflight_resolved_ips | join(', ') }},
+      which is neither this host ({{ ansible_default_ipv4.address }}) nor a
+      Cloudflare address. Caddy's HTTP-01 challenge is answered by whichever
+      machine the record points at, so it would fail here. Update the A
+      record and wait for the TTL, or set skip_dns_check: true if this is
+      deliberate.
+    success_msg: "{{ domain }} -> {{ ansible_default_ipv4.address }} (direct)"
+  when:
+    - not skip_dns_check
+    - not (caddy_behind_cloudflare | bool)
+    - ansible_default_ipv4.address is defined
+
+- name: Note what a proxied record means for certificates
+  ansible.builtin.debug:
+    msg:
+      - "The record is proxied, so Cloudflare presents its own certificate to visitors."
+      - "Caddy still gets a real Let's Encrypt certificate for the origin, which is what"
+      - "Cloudflare's Full (strict) SSL mode requires — set that in the Cloudflare"
+      - "dashboard. Flexible mode would talk plain HTTP to this box and is worth avoiding."
+      - "If the ACME challenge fails, it is usually 'Always Use HTTPS' redirecting"
+      - "/.well-known/acme-challenge before it reaches here."
+  when:
+    - not skip_dns_check
+    - caddy_behind_cloudflare | bool
+
+- name: Warn when the Let's Encrypt staging CA is selected
+  ansible.builtin.debug:
+    msg: >-
+      caddy_use_staging_ca is true, so Caddy will use Let's Encrypt's
+      staging endpoint. Certificates will NOT be trusted by browsers — this
+      is for rehearsing a deployment without spending the real rate limit.
+      Set it back to false and re-run for a real certificate.
+  when: caddy_use_staging_ca

@@ -23,28 +23,97 @@ contact_email: "{{ vault_contact_email }}"
 # local backups all live here instead.
 state_dir: /opt/sectortrace/state
 
-# --- Feature flags ------------------------------------------------------------
-# The operator UI has no authentication of its own (settled decision 8), so
-# it is not exposed on the public domain — Caddy 403s /admin and
-# /api/admin/*. Reach it by SSH-tunnelling to the app's loopback-only
-# published port instead:
-#   ssh -L 1801:127.0.0.1:1801 <user>@<this-vps> -N
-#   open http://127.0.0.1:1801/admin
-# Set expose_admin_publicly: true and re-run if you'd rather have Caddy
-# proxy it too (e.g. behind your own IP allowlist added to Caddyfile.j2).
+# --- The operator UI -----------------------------------------------------------
+# The app has no authentication of its own (settled decision 8), so /admin
+# and /api/admin/* are not served to the open internet. Two ways to reach
+# them, in increasing order of exposure:
+#
+#  1. An SSH tunnel to the app's loopback-only port. Nothing is exposed:
+#       ssh -L 1801:127.0.0.1:1801 <user>@<this-vps> -N
+#       open http://127.0.0.1:1801/admin
+#
+#  2. admin_allowed_ips below — Caddy serves /admin over HTTPS to these
+#     source addresses and 403s everyone else.
+#
+# Anything not in the list still gets 403. Set expose_admin_publicly: true
+# to drop the restriction entirely; think hard before you do.
 admin_ui_enabled: true
 expose_admin_publicly: false
 
-# PostgreSQL tuned for the 8GB/4vCPU VM6 "UK AMD G8" plan: Neo4j gets a
-# fixed ~1.5GB, the app process is light, and this leaves headroom for OS
-# cache and an occasional document-processing batch. Adjust if you resize.
-postgres_shared_buffers: "2GB"
-postgres_effective_cache_size: "6GB"
-postgres_max_connections: 100
-postgres_work_mem: "10MB"
+# Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
+# are accepted too (198.51.100.0/24).
+#
+# Understand what this trades before adding to it. The admin UI decides
+# review-queue items and can read restricted_ tables, and it has no login of
+# any kind — the allowlist IS the authentication. So:
+#   * If this address is a home broadband line, it can change without
+#     warning, and whoever the ISP gives it to next inherits your access.
+#   * TLS protects it in transit; nothing protects it if the address is
+#     wrong.
+# An empty list means admin is reachable only through the SSH tunnel, which
+# remains the safer option.
+admin_allowed_ips:
+  - "154.61.155.48"
 
-neo4j_heap_size: "1g"
-neo4j_pagecache_size: "512m"
+# --- Resource sizing -------------------------------------------------------------
+# Derived from the host's actual RAM and CPU count, so the same playbook
+# suits a 4GB box and a 16GB one without editing. The preflight role asserts
+# the resulting budget fits before anything is built.
+#
+# To pin a value by hand, set auto_tune_memory: false and fill in the
+# explicit block below, or just override the individual variable in
+# group_vars/all/zz-local.yml (which loads last and wins).
+auto_tune_memory: true
+
+# What the OS, the app process, Caddy and a document batch need left over.
+# The larger of 1GB or 15% of RAM: a percentage alone starves a small box,
+# a fixed figure alone wastes a large one.
+reserved_mb: "{{ [1024, (ansible_memtotal_mb | int * 0.15) | int] | max }}"
+
+# PostgreSQL. shared_buffers at the conventional 25%, floored so a small box
+# still gets a usable cache and capped because past ~8GB the OS page cache
+# serves this workload better than more shared_buffers would.
+postgres_shared_buffers_mb: "{{ [[(ansible_memtotal_mb | int * 0.25) | int, 256] | max, 8192] | min }}"
+# Not an allocation — it tells the planner how much cache it can assume
+# exists, counting the OS page cache.
+postgres_effective_cache_mb: "{{ (ansible_memtotal_mb | int * 0.5) | int }}"
+# Per sort/hash node, not per connection, so a complex query can use several
+# times this. Kept deliberately small: max_connections of these at once is
+# the number that has to fit.
+postgres_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.00125) | int, 4] | max, 32] | min }}"
+# VACUUM and index builds. Few run at once, so this can be generous.
+postgres_maintenance_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.05) | int, 64] | max, 1024] | min }}"
+postgres_max_connections: 100
+
+# Neo4j is a disposable projection rebuilt from the warehouse, so it gets a
+# deliberately modest share: the warehouse is what must never be slow.
+neo4j_heap_mb: "{{ [[(ansible_memtotal_mb | int * 0.12) | int, 512] | max, 4096] | min }}"
+neo4j_pagecache_mb: "{{ [(neo4j_heap_mb | int * 0.5) | int, 256] | max }}"
+
+# Parallelism from the CPU count.
+postgres_max_worker_processes: "{{ ansible_processor_vcpus | int }}"
+postgres_max_parallel_workers: "{{ ansible_processor_vcpus | int }}"
+postgres_max_parallel_workers_per_gather: "{{ [(ansible_processor_vcpus | int / 2) | int, 2] | max }}"
+# Document parsing is CPU-bound; half the cores leaves the box responsive
+# and the database served while a batch runs.
+document_worker_concurrency: "{{ [[(ansible_processor_vcpus | int / 2) | int, 1] | max, 4] | min }}"
+
+# The strings the templates actually use. Override these directly if you set
+# auto_tune_memory: false.
+postgres_shared_buffers: "{{ postgres_shared_buffers_mb }}MB"
+postgres_effective_cache_size: "{{ postgres_effective_cache_mb }}MB"
+postgres_work_mem: "{{ postgres_work_mem_mb }}MB"
+postgres_maintenance_work_mem: "{{ postgres_maintenance_work_mem_mb }}MB"
+neo4j_heap_size: "{{ neo4j_heap_mb }}m"
+neo4j_pagecache_size: "{{ neo4j_pagecache_mb }}m"
+
+# Container memory ceilings. Not a performance setting — a blast radius one.
+# A document batch that runs away hits its own cgroup limit and is killed
+# alone, instead of the kernel's OOM killer picking a victim host-wide and
+# possibly choosing PostgreSQL. Postgres additionally gets a negative
+# oom_score_adj so it is the last thing the kernel considers.
+documents_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.5) | int, 1024] | max, 8192] | min }}"
+neo4j_mem_limit_mb: "{{ (neo4j_heap_mb | int) + (neo4j_pagecache_mb | int) + 768 }}"
 
 # --- Packages -------------------------------------------------------------------
 # Everything the roles below assume, plus the standard operator toolkit.
@@ -96,8 +165,73 @@ base_packages:
 
   - bash-completion
 
+  # Copies verified snapshots off the box after each backup. Debian's
+  # awscli talks to any S3-compatible endpoint via --endpoint-url.
+  - awscli
+
 # Yours. Empty by default.
 extra_packages: []
+
+# --- Preflight ------------------------------------------------------------------
+# The preflight role refuses to continue if the domain doesn't resolve to
+# this box (and isn't explained by a proxy — see behind_cloudflare below).
+skip_dns_check: false
+
+# --- Cloudflare ------------------------------------------------------------------
+# "auto" resolves the domain and decides: an address inside Cloudflare's
+# published ranges means the record is proxied (orange cloud); anything else
+# means DNS-only (grey cloud) and traffic reaches this box directly.
+# Force it with true/false if you'd rather not have it inferred.
+#
+# This is not cosmetic. With the record proxied, every connection arrives
+# from a Cloudflare address, so a `remote_ip` allowlist matches Cloudflare
+# rather than you — admin_allowed_ips would lock *everyone* out of /admin,
+# including you. When proxied, Caddy is instead told to trust these ranges
+# and match on `client_ip`, which reads the real address out of
+# X-Forwarded-For. Trusting them is what makes that header believable, and
+# is why the range list has to be right: any address allowed to set
+# X-Forwarded-For can claim to be any client.
+behind_cloudflare: "auto"
+
+# What the templates actually read. The preflight role overrides this with
+# set_fact (which outranks group_vars); this default exists so the
+# sectortrace role still renders if you run it alone with --tags.
+caddy_behind_cloudflare: false
+
+# From https://www.cloudflare.com/ips/ — refresh from there occasionally.
+# Rarely changed, but this list is a security boundary when proxied, so it
+# is written out rather than fetched at run time from a source that could
+# be intercepted.
+cloudflare_ipv4_ranges:
+  - "173.245.48.0/20"
+  - "103.21.244.0/22"
+  - "103.22.200.0/22"
+  - "103.31.4.0/22"
+  - "141.101.64.0/18"
+  - "108.162.192.0/18"
+  - "190.93.240.0/20"
+  - "188.114.96.0/20"
+  - "197.234.240.0/22"
+  - "198.41.128.0/17"
+  - "162.158.0.0/15"
+  - "104.16.0.0/13"
+  - "104.24.0.0/14"
+  - "172.64.0.0/13"
+  - "131.0.72.0/22"
+cloudflare_ipv6_ranges:
+  - "2400:cb00::/32"
+  - "2606:4700::/32"
+  - "2803:f800::/32"
+  - "2405:b500::/32"
+  - "2405:8100::/32"
+  - "2a06:98c0::/29"
+  - "2c0f:f248::/32"
+
+# Rehearse a deployment against Let's Encrypt's staging endpoint. The
+# certificate will not be trusted by browsers, but failures cost nothing
+# against the real rate limit (5 per hostname per hour, which a couple of
+# hopeful re-runs can exhaust).
+caddy_use_staging_ca: false
 
 # --- OS upgrade ----------------------------------------------------------------
 # Full `apt-get dist-upgrade` on every run. A fresh VPS image is usually
@@ -155,3 +289,21 @@ unattended_upgrades_reboot_time: "04:00"
 # the Postgres data volume.
 backup_keep: 7
 backup_time: "03:15"
+
+# Copy each verified snapshot off the box after it is taken. A backup on the
+# same disk as the warehouse covers operator error and corruption, and
+# nothing at all about losing the disk — the provider's own snapshots are
+# the other half of that, but they are not application-consistent and this
+# one is verified.
+#
+# Reuses the archive bucket's credentials by default, under a prefix of its
+# own; set the backup_s3_* overrides to use a different bucket, which is
+# better still (a credential leak that can delete the archive should not
+# also be able to delete its backups).
+backup_offsite_enabled: true
+backup_s3_prefix: "warehouse-backups"
+backup_s3_bucket: ""
+backup_s3_endpoint: ""
+backup_s3_region: ""
+backup_s3_access_key: ""
+backup_s3_secret: ""

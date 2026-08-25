@@ -17,6 +17,15 @@ services:
       dockerfile: deploy/Dockerfile.documents
     env_file:
       - "{{ state_dir }}/.env"
+    # The blast-radius limit. Parsing and OCR are the spiky part of this
+    # deployment — a large scanned PDF, or Docling's torch-based layout
+    # models if you switch DOCUMENT_PARSER, can allocate hard. Hitting a
+    # cgroup limit kills this container alone and records a retryable
+    # failure; without it the kernel's OOM killer chooses host-wide and may
+    # well pick PostgreSQL.
+    mem_limit: {{ documents_mem_limit_mb }}m
+    # Leave the database and the portal responsive while a batch runs.
+    cpus: {{ [(ansible_processor_vcpus | int * 0.75) | round(1), 1.0] | max }}
     volumes:
       - "{{ state_dir }}/data/derived:/app/data/derived"
     # No `restart:` and no default command — always invoked explicitly, e.g.:
