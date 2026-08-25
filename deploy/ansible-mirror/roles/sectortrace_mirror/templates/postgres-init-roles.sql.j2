@@ -4,17 +4,21 @@
 -- sectortrace_app superuser from POSTGRES_USER/POSTGRES_PASSWORD before this
 -- runs; everything else is here.
 --
--- Identical to the self-host build's. A mirror that created its warehouse
--- differently from the deployment it copies would fail the comparison every
--- sync performs, and the collation below is the reason why.
+-- A mirror that created its warehouse differently from the deployment it
+-- copies would fail the comparison every sync, and the collation below is
+-- the reason why. URL mode follows the managed PostgreSQL source's
+-- libc/en_US.utf8 collation; snapshot and tunnel modes keep the bytewise
+-- builtin collation used by the SQLite-compatible warehouse.
 
--- The collation is the load-bearing part. `builtin` + C.UTF-8 gives bytewise
--- ordering, so `ORDER BY name` matches SQLite's BINARY ordering and the
--- row-by-row verification agrees across both engines. The builtin provider
--- is version-stable in a way a libc locale is not: a glibc upgrade can change
--- collation ordering underneath an existing index, and a project whose whole
--- point is a figure that reproduces in a year cannot have its sort order
--- depend on the host's libc.
+{% if mirror_sync_mode == 'url' %}
+-- Railway's managed PostgreSQL source uses libc/en_US.utf8. Matching that
+-- provider and locale keeps MIN/MAX and primary-key ordering identical
+-- during PostgreSQL-to-PostgreSQL verification.
+{% else %}
+-- `builtin` + C.UTF-8 gives bytewise ordering, so `ORDER BY name` matches
+-- SQLite's BINARY ordering. The builtin provider is version-stable in a way
+-- a libc locale is not.
+{% endif %}
 --
 -- On this box it decides something more immediate as well. Every sync either
 -- restores a snapshot taken from the source or copies the source's rows
@@ -25,10 +29,18 @@
 --
 -- TEMPLATE = template0 is required to use a locale that differs from the
 -- cluster's. See pipeline/migrations/postgres/README.md.
+{% if mirror_sync_mode == 'url' %}
+CREATE DATABASE sectortrace
+    LOCALE_PROVIDER = libc
+    LC_COLLATE = 'en_US.utf8'
+    LC_CTYPE = 'en_US.utf8'
+    TEMPLATE = template0;
+{% else %}
 CREATE DATABASE sectortrace
     LOCALE_PROVIDER = builtin
     BUILTIN_LOCALE = 'C.UTF-8'
     TEMPLATE = template0;
+{% endif %}
 
 -- The read-only role DATABASE_RO_URL points at. See
 -- pipeline/migrations/postgres/README.md for why the split exists: a role

@@ -190,6 +190,10 @@ characters in its username or password must be percent-encoded. For example,
 the `@` separating the password from the host is not part of the password;
 an `@` inside a password must be written as `%40`.
 
+For this mode the local warehouse is initialized with the managed source's
+`libc/en_US.utf8` collation, so a fresh beta box does not need a manual
+database recreation before its first import.
+
 This mode uses the same `migrate-postgres --truncate` and row-by-row
 verification as tunnel mode. `sectortrace-mirror check-source` is available
 too, and compares the live managed database with this mirror without changing
