@@ -1,10 +1,10 @@
 ---
-- name: restart journald
+- name: Restart journald
   ansible.builtin.service:
     name: systemd-journald
     state: restarted
 
-- name: restart sysstat
+- name: Restart sysstat
   ansible.builtin.service:
     name: sysstat
     state: restarted

@@ -139,9 +139,9 @@ fail2ban_maxretry: 4
 recidive_bantime: "1w"
 recidive_findtime: "1d"
 recidive_maxretry: 3
-# Add your own static IP here if you have one, so a fat-fingered password
-# can never lock you out of your own box.
-fail2ban_ignoreip: []
+# Never banned, so a mistyped password can't lock you out of your own box.
+fail2ban_ignoreip:
+  - "154.61.155.48"
 
 # Security updates install automatically either way; this decides whether
 # the box may reboot itself to finish one. Off by default: a reboot mid-run

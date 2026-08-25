@@ -71,7 +71,7 @@
     path: /etc/default/sysstat
     regexp: '^ENABLED='
     line: 'ENABLED="true"'
-  notify: restart sysstat
+  notify: Restart sysstat
 
 # Every row in this warehouse records when it was fetched, and a backup
 # manifest is stamped with the time it was taken. A box whose clock has
@@ -105,20 +105,24 @@
       SystemKeepFree=2G
       MaxRetentionSec=1month
     mode: "0644"
-  notify: restart journald
+  notify: Restart journald
 
 - name: Add swapfile
+  # Insurance against an occasional document-processing spike, not a
+  # working-memory strategy — vm.swappiness in the tuning role keeps the
+  # kernel off it under normal load. See the README's RAM budget.
+  when: swapfile_size | length > 0
   block:
     - name: Check for an existing swapfile
       ansible.builtin.stat:
         path: /swapfile
-      register: swapfile_stat
+      register: common_swapfile_stat
 
     - name: Allocate the swapfile
       ansible.builtin.command: "fallocate -l {{ swapfile_size }} /swapfile"
       args:
         creates: /swapfile
-      when: not swapfile_stat.stat.exists
+      when: not common_swapfile_stat.stat.exists
 
     - name: Secure swapfile permissions
       ansible.builtin.file:
@@ -127,12 +131,12 @@
 
     - name: Format the swapfile
       ansible.builtin.command: mkswap /swapfile
-      when: not swapfile_stat.stat.exists
+      when: not common_swapfile_stat.stat.exists
       changed_when: true
 
     - name: Enable the swapfile
       ansible.builtin.command: swapon /swapfile
-      when: not swapfile_stat.stat.exists
+      when: not common_swapfile_stat.stat.exists
       changed_when: true
 
     - name: Persist the swapfile in fstab
@@ -140,7 +144,3 @@
         path: /etc/fstab
         line: "/swapfile none swap sw 0 0"
         state: present
-  when: swapfile_size | length > 0
-  # Insurance against an occasional document-processing spike, not a
-  # working-memory strategy — vm.swappiness in the tuning role keeps the
-  # kernel off it under normal load. See the README's RAM budget.

@@ -17,7 +17,7 @@
     # more SSH.
     validate: /usr/sbin/sshd -t -f %s
   when: harden_ssh
-  notify: restart ssh
+  notify: Restart ssh
 
 # --- fail2ban -----------------------------------------------------------------
 # Debian 12+ minimal images often have no rsyslog, so /var/log/auth.log
@@ -29,7 +29,7 @@
     dest: /etc/fail2ban/jail.local
     mode: "0644"
   when: enable_fail2ban
-  notify: restart fail2ban
+  notify: Restart fail2ban
 
 - name: Enable and start fail2ban
   ansible.builtin.service:
@@ -44,7 +44,7 @@
     src: sysctl-hardening.conf.j2
     dest: /etc/sysctl.d/70-sectortrace-hardening.conf
     mode: "0644"
-  notify: reload sysctl
+  notify: Reload sysctl
 
 # --- Automatic security updates -------------------------------------------------
 - name: Enable the unattended-upgrades schedule

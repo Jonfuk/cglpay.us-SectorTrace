@@ -1,5 +1,10 @@
 ---
-# Copy this file to vault.yml, fill in real values, then encrypt it in
+# Reference copy of every value the vault holds.
+#
+# You do NOT normally need this file: ./ansible-install.sh asks for these
+# interactively on a first run and writes an encrypted vault.yml itself.
+# It is here for reference, and for anyone who would rather write the file
+# by hand. To do that: copy it to vault.yml, fill it in, then encrypt it in
 # place before the first run:
 #
 #   cp group_vars/all/vault.yml.example group_vars/all/vault.yml
@@ -8,7 +13,13 @@
 #
 # To edit it again later: ansible-vault edit group_vars/all/vault.yml
 #
-# Generate strong passwords with, e.g.: openssl rand -base64 24
+# If you are writing the passwords yourself, keep them alphanumeric. They
+# are interpolated into postgresql://user:PASSWORD@host URLs, and an @ / : #
+# or ? splits the URL somewhere it should not — which surfaces as a
+# connection error that names anything except the password. Not
+# `openssl rand -base64`, whose alphabet includes / and +:
+#
+#   LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32; echo
 
 vault_contact_email: ""
 

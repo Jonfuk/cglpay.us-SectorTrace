@@ -6,13 +6,15 @@
 # being reachable — note that Docker manipulates iptables directly for
 # published ports, which is exactly why every port that isn't meant to be
 # public is bound to loopback rather than left to ufw alone.
-- name: Set ufw default policies
+- name: Deny inbound traffic by default
   community.general.ufw:
-    direction: "{{ item.direction }}"
-    policy: "{{ item.policy }}"
-  loop:
-    - { direction: incoming, policy: deny }
-    - { direction: outgoing, policy: allow }
+    direction: incoming
+    policy: deny
+
+- name: Allow outbound traffic by default
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
 
 - name: Allow SSH (rate-limited against brute force)
   community.general.ufw:
