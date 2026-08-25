@@ -99,6 +99,56 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-009 | Health tab: surface the evidence graph's own operational state
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push; see commit immediately after this entry)
+  - result: Did the comparable-product research (§3 of the original brief)
+    this session had skipped in favour of internal code archaeology —
+    looked at OCCRP Aleph and LittleSis for OSINT-platform patterns. Found
+    something more useful than either's specific feature: `pipeline/graph/`,
+    `pipeline/analytics/{graph_builder,networks}.py`, `evidence_graph.py`
+    and migration `0050` are a mature, carefully-caveated entity/relationship
+    graph subsystem (Neo4j projection + NetworkX structural metrics,
+    documented in `docs/evidence-graph.md`) that's real, merged, and
+    apparently in active use (this checkout's own warehouse shows a real
+    364-entity run from 5 days ago) — but has **zero exposure anywhere in
+    the UI**, not even admin-only. `docs/upgrade-roadmap.md` never mentions
+    it at all; it was built entirely outside that register's phase system.
+    Checked whether a fuller relationship-explorer UI was safe to build:
+    confirmed `graph_claims.review_status` (a claims-review gate mirroring
+    the existing Claims tab pattern) exists in the schema but nothing
+    currently writes an `EXTRACTED_CLAIM`/`ANALYTICAL_SIGNAL` relationship —
+    only the deterministic `graph backfill` path, using `SOURCE_FACT`/
+    `DERIVED_RELATIONSHIP` from already-verified warehouse data. So the
+    *data* is safe to surface; a full visual explorer is still a separately-
+    scoped, bigger effort (new API endpoint, new frontend page, a rendering
+    approach — ECharts' native `graph` series is already vendored and would
+    need no new dependency, but that's a real design decision, not an
+    obvious one to make unilaterally).
+  - **Scoped down to the safe, valuable, small slice**: a Health tab
+    addition, not a graph explorer. `pipeline/web/health.py` gained
+    `graph_status()` — last projection run (status, entity/relationship/
+    claim counts, error detail if failed) and pending sync-queue depth, both
+    single cheap indexed-table reads, so (unlike storage/freshness) this
+    lives in the fast `health()` bundle rather than its own route. Two new
+    cards in `pipeline/web/static/js/health.js`. Handles a warehouse that
+    predates migration `0050` gracefully (via the existing `_table_exists`
+    pattern already used for `http_cache`).
+  - note: **Verified against real data, not just fixtures** — this dev
+    checkout's own warehouse (2.4 GB, real ONS/CQC/court data) rendered
+    "5d ago / evidence graph" and "364 / graph entities (last run)"
+    correctly in-browser, no console errors. 6 new tests in
+    `tests/test_web_health.py` (never-run, most-recent-run selection, a
+    failed run, queue counting, and graceful handling of a pre-migration
+    warehouse) plus a broader regression pass (83 tests: health, security
+    headers, portal isolation) all green.
+  - possible follow-up: a real relationship-explorer UI is a legitimate,
+    well-motivated next feature (this is exactly the LittleSis/Aleph
+    comparable-product pattern the original brief's §3 asks to look for),
+    but it's a bigger scoping decision than this session should make
+    unilaterally — queued as a question, not a task, in Questions Requiring
+    Human Input.
+
 - [DONE] BETA-008 | Fix two more stale roadmap entries found while scoping BETA-007's follow-up
   - completed: 2026-08-25T00:00:00Z
   - commits: `0c82267` (`beta`)
@@ -336,7 +386,7 @@ started.
 
 ## Implemented Features
 
-- BETA-001 (see DONE above).
+- BETA-001, BETA-007, BETA-009 (see DONE above).
 
 ## Dataset Additions
 
@@ -381,14 +431,23 @@ Not yet run against a real VPS.
 
 ## UI / UX Changes
 
-BETA-001: portal tables no longer crash with `RangeError` under Tabulator's
-"fill" renderer when their holder has no intrinsic size (the provider deep
-dive was the reproducing case; the fix applies to every table via the shared
-`table()` component).
+- BETA-001: portal tables no longer crash with `RangeError` under Tabulator's
+  "fill" renderer when their holder has no intrinsic size (the provider deep
+  dive was the reproducing case; the fix applies to every table via the
+  shared `table()` component).
+- BETA-009: two new Health tab cards (evidence-graph last-run status, graph
+  entity count).
 
 ## Performance Improvements
 
 None this cycle.
+
+## Observability
+
+BETA-009: the evidence graph subsystem (`docs/evidence-graph.md`, migration
+`0050`) had no answer anywhere in the UI to "has this ever run, how stale is
+it" before a CLI-only `pipeline graph status`. Now on the Health tab. See its
+DONE entry.
 
 ## Security Improvements
 
@@ -488,9 +547,21 @@ documents pre-Phase-4). Nothing new rejected this cycle.
    this session's.
 3. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
    already tracked, not this session's call.
+4. **Is a relationship-explorer UI over the evidence graph (BETA-009's
+   follow-up) worth building, and public or admin-only?** The data is
+   confirmed safe to surface (deterministic `SOURCE_FACT`/
+   `DERIVED_RELATIONSHIP` only, no unreviewed extraction currently feeds it —
+   see BETA-009), and it's the single most direct match this session found
+   to what comparable OSINT platforms (Aleph, LittleSis) treat as their
+   signature feature. But it's real new-surface work (an API endpoint, a
+   frontend page, a visualization approach) and a public/admin-only decision
+   has real stakes for a union campaign's investigative-relationship data —
+   worth the project owner's product judgement, not an autonomous default.
 
 ## Recent Commits
 
+- (pending) — BETA-009: Health tab evidence-graph status cards (`beta`) —
+  see the commit immediately after this file's own next commit.
 - `0c82267` — docs: W-15's CQC half and the API-rate-cap possible-future
   were already delivered (BETA-008; `beta`).
 - `e2c6766` — BETA-007: per-IP token-bucket rate limit on the public API
@@ -508,21 +579,26 @@ documents pre-Phase-4). Nothing new rejected this cycle.
 
 ## Next Recommended Actions
 
-Six substantive items landed this cycle (BETA-001/002/003/004/007/008),
-including one real feature (BETA-007) rather than only documentation and
-infrastructure. For the next session (or the continuation of this one, if
-still running):
+Seven substantive items landed this cycle (BETA-001/002/003/004/007/008/009),
+including two real features (BETA-007, BETA-009) rather than only
+documentation and infrastructure. For the next session (or the continuation
+of this one, if still running):
 
 1. **The queue is genuinely empty of ready work again** (NEXT/READY: none;
-   BLOCKED and deferred RESEARCH only). This is the second time this cycle —
+   BLOCKED and deferred RESEARCH only). This is the third time this cycle —
    treat it as a signal that this project is unusually complete, not as a
-   problem to solve by inventing work. Re-read §3 and §8 of the original
-   brief (comparable-product research, feature selection framework) before
-   grabbing anything low-value.
-2. **Recurring finding, now three-for-three: check `docs/upgrade-roadmap.md`
+   problem to solve by inventing work.
+2. **The highest-value undecided item is now the relationship-explorer
+   question** (Questions Requiring Human Input #4) — bigger than anything
+   this session decided alone, and worth raising with the project owner
+   before speculatively building toward it.
+3. **Recurring finding, now three-for-three: check `docs/upgrade-roadmap.md`
    claims against actual code before trusting them**, even after BETA-002's
    reconciliation — it corrected what was known-stale at the time, not what
-   became stale after. See Questions Requiring Human Input #2.
+   became stale after. See Questions Requiring Human Input #2. Also now
+   confirmed: the register has entire subsystems (the evidence graph) it
+   never mentions at all, not just stale entries — it was never the complete
+   picture, even freshly reconciled.
 3. Do not start BETA-006 without new scheduling information; it was refused
    twice already for a reason unrelated to code quality.
 4. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`

@@ -48,6 +48,19 @@ function when(iso) {
   return el('time', { datetime: parsed.toISOString(), title: iso, text });
 }
 
+/** A compact summary for the evidence-graph card: the card's `card()` helper
+ *  takes a single short string, unlike the tables below that can use
+ *  `when()`'s full `<time>` element. */
+function graphRunLabel(run) {
+  if (run.status === 'running') return 'running now';
+  if (!run.completed_at) return run.status || 'unknown';
+  const parsed = new Date(run.completed_at);
+  if (isNaN(parsed)) return run.status || 'unknown';
+  const days = Math.round((Date.now() - parsed.getTime()) / 86_400_000);
+  const label = days <= 0 ? 'today' : (days === 1 ? 'yesterday' : `${days}d ago`);
+  return run.status === 'failed' ? `failed ${label}` : label;
+}
+
 // --- warehouse cards -----------------------------------------------------------
 
 async function loadHealth() {
@@ -58,6 +71,8 @@ async function loadHealth() {
 
   const w = data.warehouse;
   const schemaOff = w.unapplied.length || w.applied_without_file.length;
+  const graph = data.graph || { last_run: null, pending_queue: 0 };
+  const run = graph.last_run;
 
   $('health-cards').replaceChildren(
     card(bytes(w.bytes), 'warehouse on disk'),
@@ -65,6 +80,9 @@ async function loadHealth() {
     card(num(w.applied_migrations.length), 'migrations applied'),
     card(schemaOff ? 'behind' : 'current', 'schema', schemaOff ? 'bad' : 'good'),
     card(num(data.hosts.length), 'source hosts'),
+    card(run ? graphRunLabel(run) : 'never run', 'evidence graph',
+      run && run.status === 'failed' ? 'bad' : null),
+    card(num(run ? run.entity_count : null), 'graph entities (last run)'),
     el('div', { class: 'card' },
       el('button', { class: 'btn', id: 'integrity-run' }, 'Check integrity'),
       el('div', { class: 'label', id: 'integrity-result',

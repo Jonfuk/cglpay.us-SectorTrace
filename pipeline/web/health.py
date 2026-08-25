@@ -232,6 +232,39 @@ def hosts(conn: db.Connection) -> list[dict]:
         "FROM http_cache GROUP BY host ORDER BY urls DESC")]
 
 
+def graph_status(conn: db.Connection) -> dict:
+    """The evidence graph's own operational state — not its content.
+
+    `docs/evidence-graph.md` documents a whole subsystem (migration `0050`:
+    entities, relationships, claims, a Neo4j projection, NetworkX metrics)
+    that until now had no answer anywhere in the UI to "has this ever been
+    run, and how stale is it" — a CLI-only `pipeline graph status` was the
+    only way to know. Cheap, unlike `storage()` and `freshness()`: one row
+    from `graph_projection_runs` (indexed, tiny) and one count from
+    `graph_projection_queue`, so unlike those two this belongs in the cheap
+    half of the tab.
+
+    `_table_exists` first because the graph tables are optional-extra
+    territory (`uv sync --extra graph`) applied by migration `0050` like any
+    other — a warehouse that predates it, or one where nobody has ever
+    touched the graph, must not fail the whole Health tab over it.
+    """
+    if not _table_exists(conn, "graph_projection_runs"):
+        return {"last_run": None, "pending_queue": 0}
+
+    last_run = conn.execute(
+        "SELECT run_id, started_at, completed_at, status, entity_count, "
+        "relationship_count, claim_count, error_detail "
+        "FROM graph_projection_runs ORDER BY started_at DESC LIMIT 1").fetchone()
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM graph_projection_queue "
+        "WHERE processed_at IS NULL").fetchone()[0]
+    return {
+        "last_run": dict(last_run) if last_run else None,
+        "pending_queue": int(pending),
+    }
+
+
 def freshness(conn: db.Connection) -> list[dict]:
     """Newest `retrieved_at` per table that records one.
 
@@ -377,6 +410,7 @@ def health(conn: db.Connection, settings) -> dict:
     return {
         "warehouse": warehouse(conn, settings),
         "hosts": hosts(conn),
+        "graph": graph_status(conn),
     }
 
 

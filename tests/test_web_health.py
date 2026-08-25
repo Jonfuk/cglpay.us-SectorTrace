@@ -324,6 +324,89 @@ def test_hosts_report_when_each_source_was_last_asked(client, conn):
     assert hosts["a.example"]["oldest"] == "2026-08-01T00:00:00Z"
 
 
+# --- evidence graph status ---------------------------------------------------------
+#
+# docs/evidence-graph.md documents a whole subsystem (migration 0050) that had
+# no answer anywhere in the UI to "has this ever run, and how stale is it" --
+# a CLI-only `pipeline graph status` was the only way to know.
+
+
+def _run(conn, run_id, started_at, *, completed_at=None, status="completed",
+          entity_count=0, relationship_count=0, claim_count=0, error_detail=None):
+    conn.execute(
+        "INSERT INTO graph_projection_runs (run_id, started_at, completed_at, "
+        " status, schema_version, projector_version, entity_count, "
+        " relationship_count, claim_count, error_detail) "
+        "VALUES (?, ?, ?, ?, '0050', '1', ?, ?, ?, ?)",
+        (run_id, started_at, completed_at, status, entity_count,
+         relationship_count, claim_count, error_detail))
+
+
+def test_graph_status_reports_never_run_when_nothing_has_projected(client):
+    payload = client.get("/api/admin/health").json()["graph"]
+    assert payload == {"last_run": None, "pending_queue": 0}
+
+
+def test_graph_status_reports_the_most_recent_run(conn, client):
+    _run(conn, "run-1", "2026-08-01T00:00:00Z", completed_at="2026-08-01T00:05:00Z",
+         entity_count=10)
+    _run(conn, "run-2", "2026-08-10T00:00:00Z", completed_at="2026-08-10T00:05:00Z",
+         entity_count=25, relationship_count=40, claim_count=3)
+    conn.commit()
+
+    last_run = client.get("/api/admin/health").json()["graph"]["last_run"]
+    assert last_run["run_id"] == "run-2", "the newer run, not insertion order"
+    assert last_run["entity_count"] == 25
+
+
+def test_graph_status_surfaces_a_failed_run(conn, client):
+    _run(conn, "run-1", "2026-08-01T00:00:00Z", completed_at="2026-08-01T00:05:00Z",
+         status="failed", error_detail="Neo4j connection refused")
+    conn.commit()
+
+    last_run = client.get("/api/admin/health").json()["graph"]["last_run"]
+    assert last_run["status"] == "failed"
+    assert last_run["error_detail"] == "Neo4j connection refused"
+
+
+def test_graph_status_counts_only_unprocessed_queue_items(conn, client):
+    conn.execute(
+        "INSERT INTO graph_projection_queue "
+        "(object_type, object_id, operation, created_at, processed_at) "
+        "VALUES ('entity', 'e1', 'UPSERT_ENTITY', '2026-08-01T00:00:00Z', NULL)")
+    conn.execute(
+        "INSERT INTO graph_projection_queue "
+        "(object_type, object_id, operation, created_at, processed_at) "
+        "VALUES ('entity', 'e2', 'UPSERT_ENTITY', '2026-08-01T00:00:00Z', NULL)")
+    conn.execute(
+        "INSERT INTO graph_projection_queue "
+        "(object_type, object_id, operation, created_at, processed_at) "
+        "VALUES ('entity', 'e3', 'UPSERT_ENTITY', '2026-08-01T00:00:00Z', "
+        "'2026-08-01T00:01:00Z')")
+    conn.commit()
+
+    assert client.get("/api/admin/health").json()["graph"]["pending_queue"] == 2
+
+
+def test_graph_status_survives_a_warehouse_that_predates_the_graph_tables(
+        conn, settings):
+    conn.execute("DROP TABLE graph_projection_runs")
+    conn.execute("DROP TABLE graph_projection_queue")
+    conn.commit()
+
+    ro = queries.readonly_connection(settings)
+    try:
+        assert health.graph_status(ro) == {"last_run": None, "pending_queue": 0}
+    finally:
+        ro.close()
+
+
+def test_graph_status_is_in_the_cheap_half_not_a_separate_route(client):
+    """Unlike storage/freshness, one indexed row and one count is cheap enough
+    to belong in /api/admin/health directly."""
+    assert "graph" in client.get("/api/admin/health").json()
+
+
 # --- parse failures ----------------------------------------------------------------
 
 
