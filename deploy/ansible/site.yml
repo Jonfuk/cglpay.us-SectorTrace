@@ -10,7 +10,38 @@
   vars:
     repo_root: "{{ (playbook_dir + '/../..') | realpath }}"
   roles:
-    - common
-    - docker
-    - firewall
-    - sectortrace
+    - common      # OS upgrade, base packages, time, journal, swap
+    - tuning      # sysctls, transparent hugepages, ulimits, I/O scheduler
+    - hardening   # SSH, fail2ban, kernel security sysctls, auto security updates
+    - docker      # engine, compose plugin, daemon config
+    - firewall    # ufw
+    - sectortrace # the stack itself
+
+  post_tasks:
+    # Ansible refuses to run its reboot module over a local connection (it
+    # would be rebooting its own control node), and rebooting the box out
+    # from under a running play is not something to do silently anyway. So:
+    # report it, and let the operator choose the moment. Re-running the
+    # playbook afterwards is safe and is how you confirm a clean state.
+    - name: Check whether the upgrade left a reboot pending
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Report a pending reboot
+      ansible.builtin.debug:
+        msg:
+          - "A reboot is pending — usually a kernel update from the dist-upgrade."
+          - "Nothing is broken; the running kernel is simply not the newest installed one."
+          - "Reboot when convenient: `systemctl reboot`. Containers come back on their own"
+          - "(every service is `restart: unless-stopped`), and re-running this playbook"
+          - "afterwards is safe."
+      when: reboot_required.stat.exists
+
+    - name: Report where things are
+      ansible.builtin.debug:
+        msg:
+          - "Portal:     https://{{ domain }}/"
+          - "Admin UI:   ssh -L 1801:127.0.0.1:1801 <user>@{{ domain }} -N, then http://127.0.0.1:1801/admin"
+          - "Stack:      cd {{ state_dir }} && docker compose ps"
+          - "Backups:    systemctl status sectortrace-backup.timer"

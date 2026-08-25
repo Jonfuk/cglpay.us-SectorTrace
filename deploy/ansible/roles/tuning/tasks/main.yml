@@ -1,0 +1,94 @@
+---
+- name: Apply performance sysctls
+  ansible.builtin.template:
+    src: sysctl-tuning.conf.j2
+    dest: /etc/sysctl.d/60-sectortrace-tuning.conf
+    mode: "0644"
+  notify: reload sysctl
+
+# Both PostgreSQL and Neo4j document transparent hugepages as something to
+# turn off: THP's background defragmentation causes latency spikes in
+# processes with large, sparsely-touched mappings, which is exactly what a
+# shared_buffers pool and a JVM heap look like. The kernel exposes it only
+# through /sys, so a boot-time unit is the way to make it stick.
+- name: Install the transparent-hugepage disable unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/disable-thp.service
+    mode: "0644"
+    content: |
+      # Managed by Ansible — see roles/tuning/tasks/main.yml
+      [Unit]
+      Description=Disable transparent hugepages (PostgreSQL/Neo4j both want this)
+      DefaultDependencies=no
+      After=sysinit.target local-fs.target
+      Before=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled'
+      ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag'
+
+      [Install]
+      WantedBy=basic.target
+  notify: reload systemd
+
+- name: Enable and start the transparent-hugepage disable unit
+  ansible.builtin.systemd:
+    name: disable-thp
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# Postgres, Neo4j and Docker between them open a lot of files. The kernel
+# default soft limit (1024) is the one that bites first, and it bites as a
+# confusing "too many open files" in an application log rather than as
+# anything that names the limit.
+- name: Raise file-descriptor limits for login sessions
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-sectortrace.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible — see roles/tuning/tasks/main.yml
+      *  soft  nofile  65535
+      *  hard  nofile  65535
+      *  soft  nproc   32768
+      *  hard  nproc   32768
+
+# limits.conf only covers PAM login sessions — systemd services (which is
+# what actually runs here) take theirs from the manager config instead.
+- name: Ensure the systemd manager drop-in directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/systemd/system.conf.d
+    - /etc/systemd/user.conf.d
+
+- name: Raise file-descriptor limits for systemd services
+  ansible.builtin.copy:
+    dest: "{{ item }}/99-sectortrace.conf"
+    mode: "0644"
+    content: |
+      # Managed by Ansible — see roles/tuning/tasks/main.yml
+      [Manager]
+      DefaultLimitNOFILE=65535
+  loop:
+    - /etc/systemd/system.conf.d
+    - /etc/systemd/user.conf.d
+  notify: reload systemd
+
+# Modern kernels already pick `none` for NVMe (the device does its own
+# queueing and an extra scheduler only adds latency), so this is usually
+# confirming the default rather than changing it. It matters if this ever
+# runs on a box whose image ships a different default.
+- name: Set the I/O scheduler per device class
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/60-sectortrace-scheduler.rules
+    mode: "0644"
+    content: |
+      # Managed by Ansible — see roles/tuning/tasks/main.yml
+      ACTION=="add|change", KERNEL=="nvme[0-9]*n[0-9]*", ATTR{queue/scheduler}="none"
+      ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+  notify: reload udev

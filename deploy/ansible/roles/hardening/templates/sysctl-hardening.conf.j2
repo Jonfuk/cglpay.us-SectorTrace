@@ -1,0 +1,60 @@
+# Managed by Ansible — see roles/hardening/templates/sysctl-hardening.conf.j2.
+#
+# As in the tuning file: net.ipv4.ip_forward is NOT set here. Docker owns it
+# and needs it at 1. A hardening template that zeroes it breaks every
+# published port on this box.
+
+# --- Spoofing and routing ------------------------------------------------------
+# Loose mode (2) rather than strict (1). Strict reverse-path filtering drops
+# packets whose reply route doesn't match the receiving interface, which is a
+# real risk on a host with Docker's bridge interfaces and multiple routes.
+# Loose still rejects genuinely unroutable source addresses.
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# --- Flood and scan resistance --------------------------------------------------
+net.ipv4.tcp_syncookies = 1
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+
+# --- IPv6 -----------------------------------------------------------------------
+# IPv6 stays enabled — this VPS comes with a /64 and turning it off would
+# discard addressing you're paying for. Router advertisements are refused
+# instead: a server has a static address and has no business reconfiguring
+# its own routing because something on the network said so.
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
+
+# --- Kernel information disclosure ----------------------------------------------
+kernel.randomize_va_space = 2
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+# Restrict ptrace to direct children — stops one compromised process reading
+# another's memory (an attached debugger can still be used deliberately).
+kernel.yama.ptrace_scope = 1
+
+# Core dumps from setuid binaries can contain secrets and are of no use here.
+fs.suid_dumpable = 0
+
+# Follow-symlink protections in world-writable directories (/tmp).
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2

@@ -38,6 +38,131 @@ HTTP-01 challenge needs that to already resolve.
 images from this checkout, brings up `postgres` + `neo4j` + `app` + `caddy`,
 and installs a daily `sectortrace-backup.timer`.
 
+## What it does to the box
+
+Six roles, in this order:
+
+| Role | What it does |
+|---|---|
+| `common` | Full `apt dist-upgrade`, operator toolkit, UTC + chrony, bounded journal, swapfile |
+| `tuning` | Performance sysctls, transparent hugepages off, raised `nofile` limits, I/O scheduler |
+| `hardening` | SSH drop-in, fail2ban, kernel security sysctls, automatic security updates |
+| `docker` | Engine + Compose plugin, daemon log rotation and `no-new-privileges` |
+| `firewall` | ufw: only 80/443 and SSH inbound |
+| `sectortrace` | The stack itself, `.env`, backups timer |
+
+### Installed tooling
+
+`base_packages` in `vars.yml` carries the standard operator toolkit —
+`tmux`, `htop`, `iotop`, `ncdu`, `sysstat`, `mc`, `rsync`, `jq`,
+`dnsutils`, `mtr-tiny`, `tree`, `lsof`, `vim`, `bash-completion` and the
+rest. Add your own to `extra_packages` rather than editing the base list, so
+a `git pull` doesn't conflict.
+
+Three of those are load-bearing rather than taste:
+
+- **`tmux`** — a collection run or a document batch outlives an SSH
+  session. Start one inside `tmux` or a dropped connection kills it. A
+  default `/etc/tmux.conf` is installed with a 50k-line scrollback and mouse
+  support.
+- **`sysstat`** — Debian ships it with collection *disabled*, so `sar`
+  reports nothing. The playbook enables it, because the moment you want
+  performance history is always after the incident.
+- **`dnsutils`** — `dig <your-domain>` is how you confirm the A record
+  points here before Caddy's first Let's Encrypt request depends on it.
+
+No PostgreSQL client is installed on the host: the container already has
+one, so use `docker compose exec postgres psql -U sectortrace_app
+sectortrace` and avoid a client/server version mismatch.
+
+### fail2ban
+
+Configured in `roles/hardening/templates/fail2ban-jail.local.j2`, with two
+jails:
+
+| Jail | Trigger | Ban |
+|---|---|---|
+| `sshd` | 4 failures in 10 minutes | 24 hours |
+| `recidive` | 3 bans in a day | 1 week |
+
+Two details that make the difference between this working and only looking
+like it works: the backend is **`systemd`** (a minimal Debian image may have
+no `rsyslog`, so the stock jail watches a `/var/log/auth.log` that never
+appears and bans nobody while reporting healthy), and the ban action is
+**`ufw`**, so bans land in the firewall this box actually uses rather than
+in a parallel iptables chain ufw doesn't know about.
+
+Put your own static IP in `fail2ban_ignoreip` if you have one.
+
+There is deliberately **no Caddy jail**: the portal is public, read-only and
+unauthenticated, so there are no failed logins to count, and a filter
+banning on HTTP status codes would mostly catch crawlers and people
+reloading a slow page. The admin UI — the part with something worth guessing
+at — isn't reachable from the internet at all.
+
+```bash
+fail2ban-client status
+fail2ban-client status sshd
+fail2ban-client set sshd unbanip 203.0.113.7
+```
+
+### Upgrades and reboots
+
+`apt_full_upgrade: true` runs a full `dist-upgrade` on every run — a fresh
+VPS image is usually weeks behind. That's the one task that can pull a new
+kernel, so the play **checks `/var/run/reboot-required` at the end and tells
+you** rather than rebooting: Ansible can't reboot a box over a local
+connection anyway, and taking one silently mid-provision is unpleasant.
+Reboot when convenient (`systemctl reboot`); containers come back on their
+own and re-running the playbook afterwards is safe.
+
+Ongoing, `unattended-upgrades` installs **security updates only** — a
+full dist-upgrade stays a deliberate act you take by re-running the
+playbook, because an unattended major-version bump of Docker or Postgres is
+not something to learn about from a monitoring alert. Set
+`unattended_upgrades_reboot: true` if you want the box to reboot itself to
+finish one; it's off by default because a reboot mid-run loses an in-flight
+collection.
+
+### SSH
+
+**Password authentication stays enabled, by explicit decision.** The
+playbook does not turn it off and should not be "improved" to — this box
+must stay reachable without a key on it. Two settings most hardening guides
+change are therefore deliberately left alone, both marked as such in
+`roles/hardening/templates/sshd-hardening.conf.j2`:
+
+- `PasswordAuthentication yes` — see above.
+- `AllowTcpForwarding yes` — the admin-UI tunnel below depends on it.
+
+What hardens SSH here instead: `MaxAuthTries 3`, a 30-second
+`LoginGraceTime`, modern ciphers/KEX/MACs only, no X11 or agent forwarding,
+ufw's rate-limited SSH rule, and a fail2ban jail that bans for 24h after 4
+failures in 10 minutes. That combination makes password guessing
+impractical without removing your way in. **Use a long password**, and put
+your own static IP in `fail2ban_ignoreip` if you have one, so a mistyped
+password can't lock you out.
+
+The config is validated with `sshd -t` before it's written, so a syntax
+error can't cost you the ability to log in.
+
+### Tuning, and one thing deliberately not tuned
+
+Transparent hugepages are turned off (both PostgreSQL and Neo4j document
+that), `vm.max_map_count` is raised to Neo4j's documented 262144,
+`vm.swappiness` is dropped to 10, writeback ratios are lowered to suit NVMe,
+and `nofile` limits are raised for both PAM sessions and systemd services.
+
+`vm.overcommit_memory` is **left at the kernel default**. The PostgreSQL
+docs suggest `2` to keep the OOM killer away from the postmaster, but on an
+8GB box that computes a commit limit a JVM's large virtual reservation blows
+straight through — Neo4j would fail to start. `1` is Redis's recommendation
+and buys nothing here.
+
+Neither sysctl file touches `net.ipv4.ip_forward`. Docker owns it and needs
+it at `1`; hardening templates that blanket-zero it break every published
+port on the box.
+
 ## Redeploying / updating
 
 ```bash
