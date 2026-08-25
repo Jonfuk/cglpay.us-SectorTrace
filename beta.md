@@ -99,6 +99,25 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-012 | Entry-point links into the relationship explorer
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push — see the commit immediately following this
+    entry in `git log beta`)
+  - result: BETA-010's own follow-up note, done same cycle rather than
+    deferred. The authority page's hero now links "Who it commissions →" to
+    `#/relationships?ons_code=...`; the provider deep dive's hero links
+    "Who commissions it →" to `#/relationships?provider_key=...` — the same
+    entry-point pattern W-11's compare view already uses from both pages
+    (`#/compare?ons_code=...` / `#/compare?provider_key=...`), placed
+    directly alongside it.
+  - note: Verified live against real production data (this checkout's
+    `DATABASE_URL`, see Environment Note) — both links carry the correct
+    query parameter (`ons_code=E08000025`, `provider_key=change_grow_live`),
+    and a direct navigation to each resulting URL renders "Showing:
+    Birmingham" / the relationships page centred correctly. 76 existing
+    tests (authority, public, portal isolation) unaffected — no test pins
+    the exact entry-point link text, so none needed updating.
+
 - [DONE] BETA-010 | Public relationship explorer over the evidence graph
   - completed: 2026-08-25T00:00:00Z
   - commits: (pending push — see the commit immediately following this
@@ -138,11 +157,7 @@ DONE
     predates the graph tables). Full suite: 2358 passed, 2 pre-existing
     failures unrelated to this change (confirmed twice now, see BETA-007's
     entry for the first confirmation).
-  - possible follow-up: entry-point links from the provider deep dive and
-    authority pages (pre-filled into `#/relationships?...`), matching how
-    W-11's compare view is entered from those pages. Not done this cycle —
-    the standalone dedicated section was the explicit scope; cross-linking
-    is a smaller, separate addition.
+  - follow-up delivered same cycle: see BETA-012.
 
 - [DONE] BETA-009 | Health tab: surface the evidence graph's own operational state
   - completed: 2026-08-25T00:00:00Z
