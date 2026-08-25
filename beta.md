@@ -101,8 +101,7 @@ DONE
 
 - [DONE] BETA-016 | Module 31: H-CLIC temporary accommodation (TA1)
   - completed: 2026-08-25T22:05:00Z
-  - commits: (see the commit immediately following this entry in
-    `git log beta`)
+  - commits: `1336770` (`beta`)
   - result: BETA-015's own flagged follow-up, built this cycle. Reads Table
     TA1 (households in temporary accommodation) from the same quarterly
     workbook Module 30 already reads Table A1 from. **Deliberately shares
@@ -1075,6 +1074,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `1336770` — BETA-016: Module 31, temporary accommodation (H-CLIC)
+  snapshot (`beta`).
 - `5855ac7` — BETA-015: Module 30, statutory homelessness (H-CLIC) snapshot
   (`beta`).
 - `47cf21c` — BETA-014: Module 29, rough sleeping snapshot (`beta`).
