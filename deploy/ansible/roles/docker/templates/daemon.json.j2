@@ -1,6 +1,5 @@
+{# Docker's daemon.json accepts configuration keys only; JSON has no comments. #}
 {
-  "_comment": "Managed by Ansible — see roles/docker/templates/daemon.json.j2",
-
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "50m",
@@ -9,7 +8,6 @@
 
   "live-restore": true,
 
-  "_comment_nnp": "Blocks a container process gaining privileges through a setuid binary. None of the images here need that (the postgres/neo4j entrypoints DROP privileges, which is unaffected), but if some future container fails to start in a way that mentions permissions, this is the first setting to try turning off.",
   "no-new-privileges": true,
 
   "default-ulimits": {

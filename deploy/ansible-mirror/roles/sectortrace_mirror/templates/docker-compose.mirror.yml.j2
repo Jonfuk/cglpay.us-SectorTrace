@@ -69,10 +69,10 @@ services:
       POSTGRES_USER: sectortrace_app
       POSTGRES_PASSWORD: "{{ vault_postgres_app_password }}"
       # Deliberately the maintenance database, NOT sectortrace. The warehouse
-      # needs the builtin C.UTF-8 collation so ORDER BY matches SQLite's
-      # BINARY ordering (pipeline/migrations/postgres/README.md), and letting
-      # the image create it here would create it with the cluster default
-      # instead. postgres-init/01-roles.sql creates it properly.
+      # needs the collation selected by postgres-init/01-roles.sql: builtin
+      # C.UTF-8 for snapshot/tunnel modes, or libc en_US.utf8 for URL mode so
+      # the local warehouse sorts like the managed PostgreSQL source. Letting
+      # the image create it here would use the cluster default instead.
       #
       # On a mirror there is a second reason it has to be right: every sync
       # verifies this warehouse against the source's, value by value. Two
