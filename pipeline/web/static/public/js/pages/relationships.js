@@ -28,10 +28,10 @@ export async function render(main, { params = null } = {}) {
 
   const page = el('div', {},
     el('div', { class: 'hero' },
-      el('h1', { text: 'Relationships' }),
-      el('p', { class: 'lede', text: 'Who a council has awarded contracts '
-        + 'to, or who a provider has been awarded contracts by — one '
-        + 'relationship at a time, never a map of the whole sector.' }),
+      el('h1', { text: 'Who commissions whom' }),
+      el('p', { class: 'lede', text: 'Pick a council or a provider and see '
+        + 'who it has a matched contract award with — one relationship at '
+        + 'a time, never a map of the whole sector.' }),
       el('div', { class: 'hero-actions' },
         shareButton({
           title: 'SectorTrace relationships',

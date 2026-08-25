@@ -496,6 +496,30 @@ BETA-003: `deploy/ansible-mirror/` now builds a beta deployment as well as a
 disaster-recovery mirror. See its DONE entry and Architectural Summary above.
 Not yet run against a real VPS.
 
+## Wording Pass (per project owner's mid-session request)
+
+Asked to explore front-end wording, taking inspiration from comparable
+projects while researching BETA-010/BETA-009. Findings:
+
+- **Comparable products' copy was not a source of improvement.** LittleSis
+  is bot-blocked from automated fetching; OpenSanctions' actual page copy is
+  thin on caveats and sourcing detail compared to what this portal already
+  does on every page. Adopting their tone would be a downgrade, not an
+  upgrade — this portal's existing caveat/citation discipline is already
+  more rigorous than either comparator's public-facing language.
+- **A systematic scan for typos and repeated words across all public JS
+  pages and `index.html` found none.** The existing copy is already clean.
+- **One genuine, concrete inconsistency found and fixed**: every other
+  page's `<h1>` is a descriptive phrase ("Where public money is going",
+  "Find provider evidence", "Understand treatment data") — the new
+  relationships page's was a bare single word, "Relationships". Retitled to
+  "Who commissions whom", matching house style, plus a tightened lede.
+- No broader rewording done. The existing copy's caveat language is
+  precisely calibrated (several lines exist because of a specific incident
+  — see `docs/CAVEATS.md` and multiple roadmap entries) and a wholesale
+  pass risks introducing an error into wording that has been deliberately
+  refined, for a return this scan did not find evidence of needing.
+
 ## UI / UX Changes
 
 - BETA-001: portal tables no longer crash with `RangeError` under Tabulator's
@@ -567,6 +591,22 @@ Deferring to `docs/upgrade-roadmap.md`'s own "6. Rejected" table (auth on
 for the job log, a `retrieved_at` freshness index, `parse_failures`
 mark-as-noted, an ORM/non-SQLite engine, full-text search over archived
 documents pre-Phase-4). Nothing new rejected this cycle.
+
+## Environment Note
+
+**This dev checkout's `.env` has `DATABASE_URL` pointing at the live Railway
+production PostgreSQL database**, not a local sample warehouse — discovered
+incidentally from `./start.sh web`'s own startup log ("warehouse:
+postgresql://postgres:***@altaria.proxy.rlwy.net:20580/railway") while
+verifying BETA-010 in-browser. Every live-browser check this session
+(BETA-001, BETA-009, BETA-010) therefore ran against real production data,
+not a fixture — which is *why* it looked so real (Nottinghamshire, CGL,
+Turning Point are genuine). All requests made were `GET` (public portal
+pages, admin health reads) — nothing this session wrote to it. Flagged
+because it changes the risk profile of "start the dev server and click
+around" for any future session: it is not a sandbox, and a future session
+should not assume otherwise, especially before testing anything that writes
+(a POST route, a review-queue decision, a module run).
 
 ## Known Issues
 
