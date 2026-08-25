@@ -260,6 +260,68 @@ mirror_archive_sync: true
 # mirror only needs to serve the portal.
 mirror_graph_rebuild: true
 
+# How old the newest snapshot in the source's bucket may be before this box
+# calls it stale. This is the check that catches a source whose backup timer
+# has quietly stopped — without it the mirror finds the same file it restored
+# last week, recognises it, and reports "nothing to do", which is exactly what
+# being up to date looks like. 48 hours allows one missed nightly run before
+# anybody is woken.
+#
+# The sync passes --fail-if-stale, so exceeding this fails the unit, and a
+# failed unit is what fires the alert below.
+mirror_max_snapshot_age_hours: 48
+
+# --- Knowing when it stops working -----------------------------------------
+# A sync that fails is a journal entry nobody reads, and a mirror that has
+# stopped syncing looks exactly like one that is up to date. Both the sync
+# and the verify units carry OnFailure=, so anything that fails here runs
+# sectortrace-mirror-alert.
+#
+# With neither of these set the alert still runs: it writes the failure into
+# the mirror's state file, where `sectortrace-mirror sync-status` shows it in
+# red, and logs it. That is better than nothing and worse than a webhook —
+# set one.
+mirror_alert_webhook: ""
+# Anything else you would rather run. Receives the failing unit name as $1 and
+# the last 40 journal lines on stdin.
+mirror_alert_command: ""
+
+# --- Metrics ----------------------------------------------------------------
+# Where to drop a Prometheus textfile-collector file after each sync. Empty
+# disables it. The usual node_exporter path is
+# /var/lib/node_exporter/textfile_collector.
+#
+# The metric worth alerting on is sectortrace_mirror_snapshot_timestamp_seconds
+# — how old the evidence being served actually is, as opposed to when this box
+# last did some work. A mirror that syncs perfectly every night from a source
+# that stopped producing snapshots a month ago has a perfect record and
+# month-old data.
+mirror_metrics_dir: ""
+
+# --- Proving it still matches -----------------------------------------------
+# The sync checks that what it restored is what the snapshot held (restore
+# re-counts every table and rolls back on a disagreement). Nothing re-checks
+# the archive afterwards, so:
+#
+#   weekly  `archive-mirror --dry-run --fail-if-missing` compares the bucket's
+#           key set against local disk and transfers nothing. In tunnel mode
+#           it also runs `check-postgres-sync`, which compares both warehouses
+#           value by value without changing either.
+#   monthly `archive-verify` re-hashes every object in the LOCAL store. This
+#           is the only thing that proves the local copy is byte-identical to
+#           what the source archived, and it is the audit trail, so it is
+#           worth the I/O.
+#
+# Both fail loudly, which means both alert.
+mirror_verify_enabled: true
+mirror_verify_time: "Mon *-*-* 05:30:00"
+mirror_verify_deep_time: "*-*-01 05:30:00"
+
+# Concurrent downloads during an archive sync. Each object is a separate small
+# request, so this is latency-bound rather than bandwidth-bound and 8 is a
+# large improvement over 1 without being rude to a bucket you are paying for.
+mirror_archive_workers: 8
+
 # `pipeline restore --force` snapshots the warehouse it is about to replace,
 # labelled superseded-by-restore, and a labelled backup is never pruned
 # automatically — deliberately, because on a real deployment the

@@ -118,10 +118,11 @@
     # warehouse. Under data/ because the sync container has to read them and
     # data/ is what is mounted into it.
     - data/mirror-inbox
-    # Which snapshot is in place, and when the last sync finished. Host-side
-    # only: nothing in a container needs it, and it is what
-    # `sectortrace-mirror sync-status` reads.
-    - mirror-state
+    # Which snapshot is in place, when the last sync ran and what it found.
+    # Under data/ because it is written and read inside the containers —
+    # `pipeline mirror` owns this file, and `sectortrace-mirror sync-status`
+    # asks the app container to render it rather than parsing it on the host.
+    - data/mirror-state
     - logs
 
 # 0755, unlike everything else here. The postgres entrypoint re-execs itself
@@ -301,7 +302,23 @@
     # only by root — the same reasoning as .env's 0600.
     mode: "0700"
 
-- name: Install the sync unit and timer
+# Installed before the units that reference it, so a failure during this
+# very playbook run has somewhere to be reported.
+- name: Install the failure-alert script
+  ansible.builtin.template:
+    src: sectortrace-mirror-alert.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-alert
+    # May carry a webhook URL, which is a credential in every way that
+    # matters: anyone holding it can post to wherever this notifies.
+    mode: "0700"
+
+- name: Install the verify script
+  ansible.builtin.template:
+    src: sectortrace-mirror-verify.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-verify
+    mode: "0700"
+
+- name: Install the sync, alert and verify units
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "/etc/systemd/system/{{ item }}"
@@ -309,7 +326,34 @@
   loop:
     - sectortrace-mirror-sync.service
     - sectortrace-mirror-sync.timer
+    - sectortrace-mirror-alert@.service
+    - sectortrace-mirror-verify.service
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.service
+    - sectortrace-mirror-verify-deep.timer
   notify: Reload systemd
+
+# Created here rather than by the sync, which runs as a container and would
+# have to be told about a host path it has no other business knowing. Empty
+# by default; nothing is written unless mirror_metrics_dir is set.
+- name: Create the metrics directory
+  ansible.builtin.file:
+    path: "{{ mirror_metrics_dir }}"
+    state: directory
+    mode: "0755"
+  when: mirror_metrics_dir | length > 0
+
+- name: Warn when nothing will be told about a failed sync
+  ansible.builtin.debug:
+    msg:
+      - "Neither mirror_alert_webhook nor mirror_alert_command is set."
+      - "A failed sync will still be recorded — `sectortrace-mirror sync-status`"
+      - "shows it, and the journal has the detail — but nothing will come and"
+      - "tell you. A mirror that has stopped syncing looks exactly like one that"
+      - "is up to date, which is the whole reason the alert exists."
+  when:
+    - mirror_alert_webhook | length == 0
+    - mirror_alert_command | length == 0
 
 # Before the timer is enabled, so an SSH key the source has not been given
 # yet fails here — where the message says so — rather than at 04:30.
@@ -328,6 +372,27 @@
     name: sectortrace-mirror-sync.timer
     enabled: true
     state: started
+
+- name: Enable and start the verify timers
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.timer
+  when: mirror_verify_enabled
+
+- name: Stop the verify timers when verification is turned off
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  loop:
+    - sectortrace-mirror-verify.timer
+    - sectortrace-mirror-verify-deep.timer
+  when: not mirror_verify_enabled
 
 # Deliberately NOT running a sync here. The first one downloads a whole
 # warehouse and, usually, a whole archive — that is a job to start

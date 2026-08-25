@@ -387,6 +387,34 @@ BANNER
     local sync_time
     sync_time="$(ask 'Sync time (HH:MM, UTC)' '04:30')"
 
+    # --- Being told when it stops ---
+    echo
+    echo "--- Being told when it stops -----------------------------------"
+    echo "A mirror that has stopped syncing looks exactly like one that is"
+    echo "up to date: the portal is up, the certificate is valid, the figures"
+    echo "render. Nothing is wrong except that none of it has moved for three"
+    echo "weeks."
+    echo
+    echo "A failed sync — and a source whose own backup timer has stopped,"
+    echo "which is the quieter version of the same thing — is reported here."
+    echo "Leave it blank and the failure is still recorded on the box; it just"
+    echo "waits for somebody to look."
+    echo
+    local alert_webhook
+    alert_webhook="$(ask 'Webhook URL for failures (blank for none)' '')"
+
+    echo
+    echo "--- Metrics ----------------------------------------------------"
+    echo "A Prometheus textfile-collector drop after each sync, if you scrape"
+    echo "this box. The metric worth alerting on is"
+    echo "sectortrace_mirror_snapshot_timestamp_seconds — how old the evidence"
+    echo "being served actually is, rather than when this box last did work."
+    echo
+    local metrics_dir=""
+    if ask_yes_no "Write node_exporter metrics after each sync?" "n"; then
+        metrics_dir="$(ask '  Textfile collector directory' '/var/lib/node_exporter/textfile_collector')"
+    fi
+
     # --- Vault password ---
     echo
     echo "--- Vault password ---------------------------------------------"
@@ -460,6 +488,9 @@ mirror_sync_mode: $(yaml_quote "$sync_mode")
 mirror_sync_time: $(yaml_quote "$sync_time")
 mirror_archive_sync: $archive_sync
 mirror_backup_s3_prefix: $(yaml_quote "$b_prefix")
+
+mirror_alert_webhook: $(yaml_quote "$alert_webhook")
+mirror_metrics_dir: $(yaml_quote "$metrics_dir")
 
 mirror_ssh_host: $(yaml_quote "$ssh_host")
 mirror_ssh_user: $(yaml_quote "$ssh_user")

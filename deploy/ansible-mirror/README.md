@@ -155,22 +155,52 @@ running says so and exits rather than starting a second.
 1. **Refuses to start** if less than `mirror_min_free_gb` is free. A restore
    writes a snapshot of what it replaces before replacing it, and running
    out of disk part way through is worse than not starting.
-2. **Stops the portal** for the warehouse step. Not politeness: the restore
+2. **Asks what needs doing** — `pipeline mirror plan` — so the portal is only
+   stopped when there is actually a snapshot to restore.
+3. **Stops the portal** for the warehouse step. Not politeness: the restore
    truncates every table and reloads it in one transaction, holding an
    `ACCESS EXCLUSIVE` lock. Leaving the app up does not avoid the outage —
    it turns it into requests that hang, and lets a long-running portal query
    hold the restore off instead. Caddy answers the window with a 503 saying
    the mirror is refreshing, rather than a bare 502. Set
    `mirror_stop_app_during_sync: false` to leave it up and take that trade.
-3. **Warehouse**: restore the newest snapshot, or copy over the tunnel.
-4. **Starts the portal again** — including when a step above failed. A
+4. **Warehouse**: `pipeline mirror pull` restores the newest snapshot, or
+   `migrate-postgres` copies over the tunnel. Either way the result is
+   checked before it is called a success — `restore` re-counts every table
+   against the snapshot's own manifest and rolls the whole thing back on a
+   disagreement; `migrate-postgres` compares every value against the source.
+5. **Starts the portal again** — including when a step above failed. A
    mirror that is behind still serves; leaving it stopped because a sync
    failed turns a stale copy into no copy.
-5. **Raw archive**: download the objects the local store is missing.
-6. **Graph**: `graph rebuild --clear` over the warehouse that just arrived.
+6. **Raw archive**: download the objects the local store is missing,
+   `mirror_archive_workers` at a time.
+7. **Graph**: `graph rebuild --clear` over the warehouse that just arrived.
    After it moved, never before — a projection built from the previous copy
    is wrong in a way nothing would report.
-7. **Prunes superseded snapshots**, keeping `mirror_superseded_keep`.
+8. **Prunes superseded snapshots**, keeping `mirror_superseded_keep`, and
+   **writes the metrics file**.
+
+`sectortrace-mirror sync --dry-run` runs the same decisions and changes
+nothing: which snapshot would be restored, and how many archive objects are
+missing locally. It takes no lock and stops nothing, so it is safe at any
+time.
+
+### Where the decisions live
+
+The steps above are a shell script's; the judgement in them is not. Which
+snapshot is current, how old that makes the data, whether this box already
+has it, and what may be pruned are all `pipeline/mirror.py`, under
+`tests/test_mirror.py`. That split is deliberate: those are exactly the
+decisions that are subtly wrong for a month before anyone notices, and in a
+templated shell script the project's offline suite could not reach them. What
+is left in bash is what only bash can do — take a lock, stop a container,
+start it again.
+
+```bash
+pipeline mirror plan --json     # what a sync would do
+pipeline mirror status          # what is in place, and how stale
+pipeline mirror pull --dry-run  # the same decision, changing nothing
+```
 
 That last one is a deliberate departure from the project's own rule that a
 labelled backup is never deleted automatically. `restore --force` sets aside
@@ -192,15 +222,95 @@ tmux new -s sync
 sectortrace-mirror sync
 ```
 
+## Knowing when it stops
+
+Two failures matter here and only one of them looks like a failure.
+
+**A sync that fails** exits non-zero, and both the sync and verify units carry
+`OnFailure=sectortrace-mirror-alert@%n.service`. That records the failure in
+the mirror's own state — where `sectortrace-mirror sync-status` shows it — and
+then POSTs to `mirror_alert_webhook`, and/or pipes the journal to
+`mirror_alert_command`. With neither set the local record still happens; it
+just waits for somebody to look, and the playbook says so on every run.
+
+**A source that has quietly stopped producing snapshots** does not fail
+anything. The bucket answers, the snapshot in it still verifies, the mirror
+still holds it — so the sync finds nothing to do and exits 0, which is
+exactly what being up to date looks like. Silence is not success. The mirror
+therefore checks the *age* of the newest snapshot in the bucket whether or not
+there is anything to restore, and `--fail-if-stale` (which the sync always
+passes) turns anything older than `mirror_max_snapshot_age_hours` — 48 by
+default, one missed nightly run — into a failed unit, and so into an alert.
+
+That case exits 3 rather than 1, and the sync treats it differently for it:
+the archive sync and the graph rebuild still run, and the unit fails at the
+end. A source that has stopped taking backups is a real problem and it is not
+this box's problem, and abandoning everything else over it would leave the
+mirror further behind on two counts instead of one.
+
+If you scrape this box, set `mirror_metrics_dir` and alert on
+`sectortrace_mirror_snapshot_timestamp_seconds`. That is the age of the
+evidence being served, which is the question anyone quoting a figure from a
+mirror is really asking — as opposed to when this box last did some work, on
+which a mirror of a dead source has a spotless record.
+
+## Proving it still matches
+
+The sync proves that what it restored is what the snapshot held. Nothing
+re-checks anything afterwards, so two timers do:
+
+| | | |
+|---|---|---|
+| `sectortrace-mirror-verify.timer` | weekly | The bucket's key set against local disk, transferring nothing (`archive-mirror --dry-run --fail-if-missing`). In tunnel mode, also `check-postgres-sync` — both warehouses compared value by value, changing neither |
+| `sectortrace-mirror-verify-deep.timer` | monthly | Every object in the **local** store re-hashed against its own content-addressed key |
+
+Run either by hand with `sectortrace-mirror verify` / `verify --deep`. Both
+take the sync's lock and skip rather than compare against a warehouse that is
+being replaced underneath them, and both alert on failure.
+
+The deep one runs `archive-verify` in the **app** container, and that detail is
+load-bearing: the app has no `ARCHIVE_S3_*` group, so it verifies the archive
+on this box's disk. Run in the sync container the same command would verify
+the *source's bucket* instead — the wrong question, and it would download the
+whole archive to answer it.
+
+## Taking the source's place
+
+A mirror is also the box you would fall back to. `sectortrace-mirror promote`
+is that path, written down so it is not improvised on the day:
+
+```bash
+sectortrace-mirror promote --confirm   # stops the timers, then locks syncing off
+sectortrace-mirror promote --undo      # back to mirroring
+```
+
+It stops and disables the sync timer, both verify timers and the tunnel, then
+sets an interlock in the mirror's state that makes `pipeline mirror pull`
+refuse. The interlock is the part that matters: a timer somebody re-enables by
+hand, or a unit already queued, must not be able to overwrite a warehouse that
+has since been written to.
+
+What it deliberately does **not** do, because none of it can be guessed:
+point DNS at this box, give it the module API keys it was never issued,
+decide where the raw archive is written from now on, or start taking backups.
+That last one is the one people forget — a mirror takes none, because until
+this moment it was a copy of something that did.
+
+Worth rehearsing once, deliberately, before you need it. A rollback path
+nobody exercises is a rollback path nobody has.
+
 ## Day-to-day
 
 ```bash
 sectortrace-mirror sync                  # refresh now, in the foreground
+sectortrace-mirror sync --dry-run        # what it would do; changes nothing
 sectortrace-mirror sync --warehouse-only # skip the archive
 sectortrace-mirror sync --force          # re-apply the snapshot already in place
-sectortrace-mirror sync-status           # what is in place, and when the timer next fires
+sectortrace-mirror sync-status           # what is in place, and how stale that is
 sectortrace-mirror sync-log              # follow the journal
+sectortrace-mirror verify [--deep]       # prove this box still matches its source
 sectortrace-mirror check-source          # tunnel mode: compare both warehouses
+sectortrace-mirror promote --confirm     # stop mirroring; take the source's place
 sectortrace-mirror coverage-report       # any pipeline command, in the app container
 sectortrace-mirror psql | health | ps | logs app | restart
 ```
@@ -239,7 +349,8 @@ Same as the self-host build — `ALTER ROLE` first, then update the vault.
   are written to `.env`: a key that cannot be used is a key that should not
   be on the box.
 - **No backup timer.** The mirror is a copy of something that is already
-  backed up, and its restore path is "sync again".
+  backed up, and its restore path is "sync again". Note what that means the
+  moment you promote it: from then on nothing here is backed up by anything.
 - **A documents-worker image, built but pointless to run here.** Derived
   output goes into the warehouse, and the warehouse is replaced at the next
   sync. It is built because a mirror is also the box you take a source

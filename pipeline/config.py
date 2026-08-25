@@ -246,6 +246,61 @@ class Settings(BaseSettings):
     archive_s3_url_style: str | None = None
     archive_s3_access_key: str | None = None
     archive_s3_secret: str | None = None
+    # --- Mirroring an existing deployment -------------------------------------
+    # A mirror is a second deployment that collects nothing: its warehouse is
+    # replaced wholesale from the deployment it copies, and its raw archive is
+    # pulled out of that deployment's bucket onto local disk. See
+    # deploy/ansible-mirror/ and pipeline/mirror.py.
+    #
+    # Off by default, and it has to be, because every command that reads it
+    # behaves differently on a mirror: `mirror pull` replaces the warehouse
+    # without being asked twice, and `archive-mirror` records what it did into
+    # the mirror's own state. Neither is something a collecting deployment
+    # should do because a variable happened to be set.
+    mirror_enabled: bool = False
+
+    # The deployment this box copies, for the record. Nothing connects to it:
+    # it names the source in the sync log, the status output and the metrics,
+    # so a figure taken from a mirror can be traced back to the box it came
+    # from.
+    mirror_source_label: str | None = None
+
+    # Which snapshot is in place, when the last sync ran, and what it found.
+    # Small JSON, rewritten atomically; the operator-facing half of it is
+    # `pipeline mirror status`.
+    mirror_state_dir: Path = REPO_ROOT / "data" / "mirror-state"
+    # Snapshots downloaded from the source's bucket, on their way into the
+    # warehouse. Deliberately not backup_dir: that holds snapshots this box
+    # took, including the one `restore --force` sets aside, and mixing "what
+    # we made" with "what we fetched from somewhere else" is how a retention
+    # rule deletes the wrong one.
+    mirror_inbox_dir: Path = REPO_ROOT / "data" / "mirror-inbox"
+
+    # How old the newest snapshot in the source's bucket may be before the
+    # mirror calls it stale. This is the check that catches a source whose
+    # backup timer has quietly stopped: without it the mirror finds the same
+    # file it restored last week, recognises it, and reports "nothing to do"
+    # — which is indistinguishable from being up to date. 48 hours allows one
+    # missed nightly run before anyone is woken.
+    mirror_max_snapshot_age_hours: int = 48
+
+    # The source deployment's offsite backup bucket — where its
+    # sectortrace-backup-offsite script puts verified `pipeline backup`
+    # snapshots. Read-only credentials are enough and are what to use: a
+    # mirror reads this bucket and never writes to it.
+    #
+    # Separate from the ARCHIVE_S3_* group even when it is the same bucket
+    # under a different prefix, because on a mirror those two are read by
+    # different containers with different credentials, and collapsing them
+    # would put the archive keys in the portal's environment.
+    mirror_backup_s3_bucket: str | None = None
+    mirror_backup_s3_endpoint: str | None = None
+    mirror_backup_s3_region: str | None = None
+    mirror_backup_s3_url_style: str | None = None
+    mirror_backup_s3_access_key: str | None = None
+    mirror_backup_s3_secret: str | None = None
+    mirror_backup_s3_prefix: str = "warehouse-backups"
+
     migrations_dir: Path = REPO_ROOT / "pipeline" / "migrations"
     keywords_path: Path = REPO_ROOT / "pipeline" / "keywords.py"
     logs_dir: Path = REPO_ROOT / "logs"
@@ -399,6 +454,28 @@ class Settings(BaseSettings):
                              "and SECRET must be set together")
         if self.derived_archive_s3_url_style and self.derived_archive_s3_url_style not in {"virtual", "path"}:
             raise ValueError("DERIVED_ARCHIVE_S3_URL_STYLE must be 'virtual' or 'path'")
+        return self
+
+    @model_validator(mode="after")
+    def _mirror_configuration(self) -> Settings:
+        """The snapshot bucket is all-or-nothing, like the archive one.
+
+        Same argument as `_archive_configuration`: a partially configured
+        bucket is refused here rather than falling back to something that
+        looks like it worked. On a mirror the fallback would be worse than
+        usual — a sync that silently finds no snapshots reports "nothing to
+        do", which is what being up to date also looks like.
+        """
+        values = (self.mirror_backup_s3_bucket, self.mirror_backup_s3_endpoint,
+                  self.mirror_backup_s3_region, self.mirror_backup_s3_url_style,
+                  self.mirror_backup_s3_access_key, self.mirror_backup_s3_secret)
+        if any(values) and not all(values):
+            raise ValueError("MIRROR_BACKUP_S3_BUCKET, ENDPOINT, REGION, URL_STYLE, "
+                             "ACCESS_KEY, and SECRET must be set together")
+        if self.mirror_backup_s3_url_style and self.mirror_backup_s3_url_style not in {"virtual", "path"}:
+            raise ValueError("MIRROR_BACKUP_S3_URL_STYLE must be 'virtual' or 'path'")
+        if self.mirror_max_snapshot_age_hours < 1:
+            raise ValueError("MIRROR_MAX_SNAPSHOT_AGE_HOURS must be a positive number of hours")
         return self
 
     @model_validator(mode="after")

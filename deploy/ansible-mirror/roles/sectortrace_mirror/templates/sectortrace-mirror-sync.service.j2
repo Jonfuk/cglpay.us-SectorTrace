@@ -10,6 +10,10 @@ Description=SectorTrace mirror sync ({{ mirror_sync_mode }} from {{ mirror_sourc
 After=docker.service{% if mirror_sync_mode == 'tunnel' %} sectortrace-mirror-tunnel.service{% endif %}
 
 Requires=docker.service
+# A failed sync used to be a journal entry nobody read, on a box whose whole
+# failure mode is looking healthy while serving data that stopped moving three
+# weeks ago. This is what makes it say so.
+OnFailure=sectortrace-mirror-alert@%n.service
 {% if mirror_sync_mode == 'tunnel' %}
 # Wants, not Requires: the script starts the tunnel itself if it is down and
 # says so plainly if it cannot. A hard dependency here would turn "the
