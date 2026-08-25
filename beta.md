@@ -99,6 +99,43 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-013 | Health tab: surface the document-analysis layer's own status
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push — see the commit immediately following this
+    entry in `git log beta`)
+  - result: The "CLI-only capability with no UI" pattern that found the
+    evidence graph (BETA-009) found a second, larger subsystem on the same
+    scan: `pipeline/documents/` — inspection, OCR (OCRmyPDF), parsing
+    (Docling), classification and quality scoring, documented in
+    `docs/document-analysis.md` (migration `0053`) — with a working
+    `pipeline documents search` command and zero UI exposure anywhere,
+    public or admin. Explicitly scoped in its own doc as *not* creating
+    claims, promoting evidence, or calling an AI service — a genuinely safe
+    subsystem to surface status for, unlike the AI-promotion question.
+  - **Scoped to the same safe slice as BETA-009, deliberately not more**:
+    a Health tab card (`health.document_status()` — registered, parsed,
+    failed, and total document counts, all cheap `COUNT(*)` reads), not a
+    document search UI. **Explicitly did not build search exposure this
+    cycle**: `pipeline documents search` reads parsed text from raw archived
+    documents, which can include PFD reports and other sources with
+    `restricted_` personal-data counterparts — unlike the relationship
+    explorer's deterministic contract-award data, a search surface here
+    needs its own careful check of what a search result could reveal before
+    any UI is built around it, admin or public. Flagged as a discovered
+    opportunity, not built.
+  - note: **Verified against real production data** — this checkout's own
+    warehouse shows "13,248 documents parsed of 13,283" (99.7% success),
+    confirming the subsystem is in heavy real use, not dormant. 3 new tests
+    (empty state, counts by parse outcome, graceful handling of a
+    pre-migration warehouse); 86-test regression pass (health, security
+    headers, portal isolation) green; live-browser confirmation, no console
+    errors beyond the same unrelated environmental noise seen throughout
+    this session.
+  - possible follow-up: a document-search UI (admin first) is plausible and
+    the backend already exists, but needs an explicit answer to "what could
+    a search result surface" before any UI work — queued as a question, not
+    a task, in Questions Requiring Human Input.
+
 - [DONE] BETA-012 | Entry-point links into the relationship explorer
   - completed: 2026-08-25T00:00:00Z
   - commits: (pending push — see the commit immediately following this
@@ -550,10 +587,13 @@ None this cycle.
 
 ## Observability
 
-BETA-009: the evidence graph subsystem (`docs/evidence-graph.md`, migration
-`0050`) had no answer anywhere in the UI to "has this ever run, how stale is
-it" before a CLI-only `pipeline graph status`. Now on the Health tab. See its
-DONE entry.
+- BETA-009: the evidence graph subsystem (`docs/evidence-graph.md`,
+  migration `0050`) had no answer anywhere in the UI to "has this ever run,
+  how stale is it" before a CLI-only `pipeline graph status`. Now on the
+  Health tab.
+- BETA-013: same pattern, the document-analysis subsystem
+  (`docs/document-analysis.md`, migration `0053`). Now on the Health tab
+  too — 13,248 of 13,283 documents parsed in this checkout's real warehouse.
 
 ## Security Improvements
 
@@ -684,6 +724,14 @@ should not assume otherwise, especially before testing anything that writes
    pending. See BETA-011.
 1. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
    already tracked, not this session's call.
+2. **Is a document-search UI (BETA-013's follow-up) worth building, and
+   where?** The backend already exists and works (`pipeline documents
+   search`), but a search surface over raw parsed document text is a
+   different risk shape from the relationship explorer's deterministic
+   contract data — some sources it covers (PFD reports) have
+   `restricted_`-table personal-data counterparts, so "what could a search
+   result reveal" needs answering before any UI, admin or public. Not
+   investigated further this cycle; flagged rather than guessed at.
 
 ## Recent Commits
 

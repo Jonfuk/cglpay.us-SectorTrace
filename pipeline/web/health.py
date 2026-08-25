@@ -265,6 +265,36 @@ def graph_status(conn: db.Connection) -> dict:
     }
 
 
+def document_status(conn: db.Connection) -> dict:
+    """The document-analysis layer's own operational state — registered,
+    parsed and searchable documents, not their content.
+
+    `docs/document-analysis.md` documents a whole subsystem (migration
+    `0053`: inspection, OCR, parsing, classification, quality) that until
+    now had no answer anywhere in the UI to "how much has been processed" —
+    `pipeline documents stats` on the CLI was the only way to know, the same
+    shape `graph_status` closed for the evidence graph.
+
+    Cheap: a handful of `COUNT(*)` over tables that only grow as documents
+    are processed, not a per-document or per-page scan — so, like
+    `graph_status`, this belongs in the cheap `health()` bundle.
+    """
+    if not _table_exists(conn, "document_processing_states"):
+        return {"registered": 0, "parsed": 0, "failed": 0, "documents": 0}
+
+    registered = conn.execute(
+        "SELECT COUNT(*) FROM document_processing_states").fetchone()[0]
+    parsed = conn.execute(
+        "SELECT COUNT(*) FROM document_processing_states "
+        "WHERE parse_status = 'SUCCESS'").fetchone()[0]
+    failed = conn.execute(
+        "SELECT COUNT(*) FROM document_processing_states "
+        "WHERE parse_status = 'FAILED'").fetchone()[0]
+    documents = conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0]
+    return {"registered": int(registered), "parsed": int(parsed),
+            "failed": int(failed), "documents": int(documents)}
+
+
 def freshness(conn: db.Connection) -> list[dict]:
     """Newest `retrieved_at` per table that records one.
 
@@ -411,6 +441,7 @@ def health(conn: db.Connection, settings) -> dict:
         "warehouse": warehouse(conn, settings),
         "hosts": hosts(conn),
         "graph": graph_status(conn),
+        "documents": document_status(conn),
     }
 
 

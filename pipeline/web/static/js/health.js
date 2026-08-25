@@ -73,6 +73,7 @@ async function loadHealth() {
   const schemaOff = w.unapplied.length || w.applied_without_file.length;
   const graph = data.graph || { last_run: null, pending_queue: 0 };
   const run = graph.last_run;
+  const docs = data.documents || { registered: 0, parsed: 0, failed: 0, documents: 0 };
 
   $('health-cards').replaceChildren(
     card(bytes(w.bytes), 'warehouse on disk'),
@@ -83,6 +84,8 @@ async function loadHealth() {
     card(run ? graphRunLabel(run) : 'never run', 'evidence graph',
       run && run.status === 'failed' ? 'bad' : null),
     card(num(run ? run.entity_count : null), 'graph entities (last run)'),
+    card(num(docs.parsed), `documents parsed${docs.registered ? ` of ${num(docs.registered)}` : ''}`,
+      docs.failed ? 'bad' : null),
     el('div', { class: 'card' },
       el('button', { class: 'btn', id: 'integrity-run' }, 'Check integrity'),
       el('div', { class: 'label', id: 'integrity-result',

@@ -407,6 +407,74 @@ def test_graph_status_is_in_the_cheap_half_not_a_separate_route(client):
     assert "graph" in client.get("/api/admin/health").json()
 
 
+# --- document-analysis status -------------------------------------------------
+#
+# docs/document-analysis.md documents a whole subsystem (migration 0053:
+# inspection, OCR, parsing, classification, quality) that had no answer
+# anywhere in the UI to "how much has been processed" -- a CLI-only
+# `pipeline documents stats` was the only way to know, the same gap
+# graph_status closed for the evidence graph.
+
+
+def _evidence(conn, evidence_id, *, source_system="m09_cdp_documents"):
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
+        " retrieved_at, payload_sha256, created_at) "
+        "VALUES (?, ?, 'https://example.test/doc.pdf', '2026-08-01T00:00:00Z', "
+        " ?, '2026-08-01T00:00:00Z')",
+        (evidence_id, source_system, f"hash-{evidence_id}"))
+
+
+def _document(conn, document_id, evidence_id):
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, document_type, "
+        " created_at, updated_at) "
+        "VALUES (?, ?, 'UNKNOWN', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+        (document_id, evidence_id))
+
+
+def _processing_state(conn, evidence_id, parse_status):
+    conn.execute(
+        "INSERT INTO document_processing_states (evidence_id, parse_status) "
+        "VALUES (?, ?)", (evidence_id, parse_status))
+
+
+def test_document_status_reports_nothing_registered_when_empty(client):
+    payload = client.get("/api/admin/health").json()["documents"]
+    assert payload == {"registered": 0, "parsed": 0, "failed": 0, "documents": 0}
+
+
+def test_document_status_counts_by_parse_outcome(conn, client):
+    for i, status in enumerate(["SUCCESS", "SUCCESS", "FAILED", "PENDING"]):
+        evidence_id, document_id = f"evidence:{i}", f"document:{i}"
+        _evidence(conn, evidence_id)
+        _document(conn, document_id, evidence_id)
+        _processing_state(conn, evidence_id, status)
+    conn.commit()
+
+    payload = client.get("/api/admin/health").json()["documents"]
+    assert payload["registered"] == 4
+    assert payload["parsed"] == 2
+    assert payload["failed"] == 1
+    assert payload["documents"] == 4
+
+
+def test_document_status_survives_a_warehouse_that_predates_document_analysis(
+        conn, settings):
+    for table in ("document_processing_states", "document_topics",
+                  "document_parse_runs", "document_versions",
+                  "derived_artifacts", "document_records"):
+        conn.execute(f"DROP TABLE {table}")
+    conn.commit()
+
+    ro = queries.readonly_connection(settings)
+    try:
+        assert health.document_status(ro) == {
+            "registered": 0, "parsed": 0, "failed": 0, "documents": 0}
+    finally:
+        ro.close()
+
+
 # --- parse failures ----------------------------------------------------------------
 
 
