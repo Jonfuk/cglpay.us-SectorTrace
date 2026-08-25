@@ -99,6 +99,27 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-008 | Fix two more stale roadmap entries found while scoping BETA-007's follow-up
+  - completed: 2026-08-25T00:00:00Z
+  - commits: `0c82267` (`beta`)
+  - result: While checking whether W-15's remaining open half (CQC location
+    links) was a viable next item, found it was already shipped 2026-08-21
+    (`86ef103`, four days before this session started) — by a different,
+    better-fitting mechanism than the finding envisioned (per-location badge
+    links from CQC's own bulk-export URL column, not the generic
+    company/charity `REGISTERS` map, because a provider has many CQC
+    locations rather than one). Independently reconfirmed live in-browser:
+    the URL resolves cleanly, no bot-block. Corrected W-15's entry and a
+    matching stale comment in `components.js`. Also marked §3J's "API rate
+    cap" delivered (BETA-007), rather than leaving it as a note-to-self.
+  - note: **This is the third time this session found the roadmap claiming
+    "not yet done" for something already shipped** (W-23–26, then §8's
+    B/C/F/G items, now W-15). Each time the actual code was correct and the
+    register was behind. Raised explicitly in Questions Requiring Human
+    Input — this is now a pattern, not a one-off, and worth the project
+    owner's judgement on whether the register is worth keeping current going
+    forward.
+
 - [DONE] BETA-007 | Per-IP rate limit on the public API (/api/v1/*)
   - completed: 2026-08-25T00:00:00Z
   - commits: (pending push — see this file's own commit immediately after
@@ -455,13 +476,27 @@ documents pre-Phase-4). Nothing new rejected this cycle.
    investing further deployment-adjacent effort there).
 2. **Should new work keep being filed through `docs/upgrade-roadmap.md`'s
    F/D/P/U/W/O numbering, or is `git log` + `README.md` + `docs/` enough now
-   that it's caught up?** BETA-002 corrected it but did not decide this —
-   see that entry's note.
+   that it's caught up?** BETA-002 corrected it but did not decide this — see
+   that entry's note. **Stronger signal after BETA-008: this session found
+   the register claiming "not yet done" for already-shipped work three
+   separate times** (W-23–26 in §3, B1–B3/F1–F3/G1/G3/G4/G6/G7 in §8, W-15's
+   CQC half) — not because any single person got it wrong, but because a
+   document this detailed costs real discipline to keep in sync with fast,
+   organic development, and that discipline visibly lapsed for months. That
+   is evidence for retiring it in favour of lighter-weight tracking, not
+   just an open question — but it is still the project owner's call, not
+   this session's.
 3. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
    already tracked, not this session's call.
 
 ## Recent Commits
 
+- `0c82267` — docs: W-15's CQC half and the API-rate-cap possible-future
+  were already delivered (BETA-008; `beta`).
+- `e2c6766` — BETA-007: per-IP token-bucket rate limit on the public API
+  (`beta`).
+- `8e59063` — beta.md, roadmap: BETA-004 complete; fix §8 staleness
+  (`beta`).
 - `f879e1b` — beta.md: close out BETA-002 and BETA-003, promote BETA-004
   (`beta`).
 - `29d07c9` — deploy: teach ansible-mirror to build a beta deployment, not
@@ -470,30 +505,28 @@ documents pre-Phase-4). Nothing new rejected this cycle.
   entries (BETA-002 pass 1 + initial queue setup; `beta`).
 - `c1c3ecd` — Fix Tabulator recursive call-stack overflow on every table
   (BETA-001; on `master`).
-- (pending) — docs/upgrade-roadmap.md §8 reconciliation, BETA-002 pass 2 +
-  BETA-004 completion — this cycle, not yet committed as this file is
-  written; see the commit immediately following this one in `git log beta`.
 
 ## Next Recommended Actions
 
-Four substantive items landed this cycle (BETA-001/002/003/004) — per the
-brief's own §52, this is a natural point for a strategic reassessment rather
-than mechanically grabbing the next backlog row. For the next session (or
-the continuation of this one, if still running):
+Six substantive items landed this cycle (BETA-001/002/003/004/007/008),
+including one real feature (BETA-007) rather than only documentation and
+infrastructure. For the next session (or the continuation of this one, if
+still running):
 
-1. **The queue is now genuinely empty of ready work** (NEXT/READY: none;
-   only BLOCKED and explicitly-deferred RESEARCH remain). Per §58, this does
-   not mean stop — it means discover the next thing. This session's own
-   read: the highest-value remaining lever is probably *exercising* BETA-003
-   for real (an actual VPS run) rather than more static/docs work, but that
-   needs a real box and is not something to simulate further from here.
-2. Do not start BETA-006 without new scheduling information; it was refused
+1. **The queue is genuinely empty of ready work again** (NEXT/READY: none;
+   BLOCKED and deferred RESEARCH only). This is the second time this cycle —
+   treat it as a signal that this project is unusually complete, not as a
+   problem to solve by inventing work. Re-read §3 and §8 of the original
+   brief (comparable-product research, feature selection framework) before
+   grabbing anything low-value.
+2. **Recurring finding, now three-for-three: check `docs/upgrade-roadmap.md`
+   claims against actual code before trusting them**, even after BETA-002's
+   reconciliation — it corrected what was known-stale at the time, not what
+   became stale after. See Questions Requiring Human Input #2.
+3. Do not start BETA-006 without new scheduling information; it was refused
    twice already for a reason unrelated to code quality.
-3. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`
+4. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`
    branches without asking — see BETA-004's notes.
-4. If asked to keep going with no obvious next code change, prefer genuine
-   product/architecture discovery (re-reading `README.md`'s module table
-   against what a comparable evidence platform offers, per the original
-   brief's §3) over inventing busywork — this project is unusually mature
-   and complete, and low-value churn is a worse outcome than an honest "I
-   looked and didn't find something worth doing yet."
+5. BETA-003's ansible-mirror changes still need a real VPS run — the
+   highest-value remaining infrastructure lever, and not something to
+   simulate further from a dev checkout.
