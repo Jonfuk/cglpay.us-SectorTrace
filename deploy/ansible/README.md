@@ -19,24 +19,61 @@ On the fresh VPS, as root:
 ```bash
 git clone <this-repo-url> /opt/sectortrace/app
 cd /opt/sectortrace/app/deploy/ansible
-
-cp group_vars/all/vault.yml.example group_vars/all/vault.yml
-$EDITOR group_vars/all/vault.yml       # passwords, S3 creds, module API keys
-ansible-vault encrypt group_vars/all/vault.yml
-
-$EDITOR group_vars/all/vars.yml        # at minimum, set `domain`
-
 ./ansible-install.sh
 ```
 
-Point the domain's **A record at this VPS's IP before running it** —
-Caddy requests a Let's Encrypt certificate on first start and the ACME
-HTTP-01 challenge needs that to already resolve.
+That's the whole thing. On a first run the script installs Ansible if it's
+missing, then **asks for what it can't guess** and writes an encrypted
+vault itself — there's no file to hand-edit first:
 
-`ansible-install.sh` installs Ansible itself if it's missing, then runs
-`site.yml` with `--ask-vault-pass`. It builds the `app` and `documents`
-images from this checkout, brings up `postgres` + `neo4j` + `app` + `caddy`,
-and installs a daily `sectortrace-backup.timer`.
+| It asks for | Notes |
+|---|---|
+| Domain | Written to `group_vars/all/zz-local.yml` |
+| Contact email | `User-Agent` on every request, and Let's Encrypt notices |
+| Database passwords | **Offers to generate them** — say yes |
+| S3 archive | Optional; skip to use local disk |
+| Module API keys | All optional, all skippable |
+| Vault password | Encrypts the rest. Save it in your password manager |
+
+The generated passwords are 32 alphanumeric characters. That's deliberate
+rather than lazy: they're interpolated into `postgresql://user:PASS@host`
+URLs, and a generated `@`, `/`, `:`, `#` or `?` would split the URL
+somewhere it shouldn't, surfacing as a confusing connection error that names
+nothing. 32 alphanumerics is ~190 bits, far more than punctuation variety
+would buy.
+
+Point the domain's **A record at this VPS's IP before running it** — Caddy
+requests a Let's Encrypt certificate on first start and the ACME HTTP-01
+challenge needs it to already resolve. The script tells you to check with
+`dig +short <domain>`.
+
+Then it builds the `app` and `documents` images, brings up `postgres` +
+`neo4j` + `app` + `caddy`, and installs a daily `sectortrace-backup.timer`.
+
+### Later runs
+
+```bash
+./ansible-install.sh                 # finds the vault configured, goes straight to the playbook
+./ansible-install.sh --check         # dry run; any other args pass through to ansible-playbook
+./ansible-install.sh --reconfigure   # ask all the questions again
+```
+
+`--reconfigure` keeps the previous vault under `.vault-backups/` (gitignored,
+`0600`, still encrypted with its **old** password) rather than beside the
+original, where a stray `git add` could commit it.
+
+Two files the wizard writes are gitignored, so `git pull` never conflicts
+with your answers: `group_vars/all/vault.yml` and
+`group_vars/all/zz-local.yml`. The latter loads *after* `vars.yml` —
+`group_vars/all/*` is read alphabetically and later files win — so it
+overrides the tracked defaults without making the tracked file dirty. Put
+any other local override in there too.
+
+To edit the vault by hand later:
+
+```bash
+ansible-vault edit group_vars/all/vault.yml
+```
 
 ## What it does to the box
 

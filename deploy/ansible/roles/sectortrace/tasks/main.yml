@@ -31,7 +31,7 @@
     src: docker-compose.selfhost.yml.j2
     dest: "{{ state_dir }}/docker-compose.yml"
     mode: "0644"
-  register: main_compose
+  register: sectortrace_main_compose
 
 - name: Render the on-demand documents-worker compose file
   ansible.builtin.template:
@@ -44,7 +44,7 @@
     src: Caddyfile.j2
     dest: "{{ state_dir }}/Caddyfile"
     mode: "0644"
-  register: caddyfile
+  register: sectortrace_caddyfile
 
 - name: Build the app image
   ansible.builtin.command:
@@ -68,7 +68,7 @@
   ansible.builtin.command:
     cmd: docker compose -f docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
     chdir: "{{ state_dir }}"
-  when: caddyfile.changed and not main_compose.changed
+  when: sectortrace_caddyfile.changed and not sectortrace_main_compose.changed
   changed_when: true
   failed_when: false
 
@@ -80,7 +80,7 @@
   loop:
     - sectortrace-backup.service
     - sectortrace-backup.timer
-  notify: reload systemd
+  notify: Reload systemd
 
 - name: Enable and start the backup timer
   ansible.builtin.service:

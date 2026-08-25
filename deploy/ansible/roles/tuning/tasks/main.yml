@@ -4,7 +4,7 @@
     src: sysctl-tuning.conf.j2
     dest: /etc/sysctl.d/60-sectortrace-tuning.conf
     mode: "0644"
-  notify: reload sysctl
+  notify: Reload sysctl
 
 # Both PostgreSQL and Neo4j document transparent hugepages as something to
 # turn off: THP's background defragmentation causes latency spikes in
@@ -31,7 +31,7 @@
 
       [Install]
       WantedBy=basic.target
-  notify: reload systemd
+  notify: Reload systemd
 
 - name: Enable and start the transparent-hugepage disable unit
   ansible.builtin.systemd:
@@ -77,7 +77,7 @@
   loop:
     - /etc/systemd/system.conf.d
     - /etc/systemd/user.conf.d
-  notify: reload systemd
+  notify: Reload systemd
 
 # Modern kernels already pick `none` for NVMe (the device does its own
 # queueing and an extra scheduler only adds latency), so this is usually
@@ -91,4 +91,4 @@
       # Managed by Ansible — see roles/tuning/tasks/main.yml
       ACTION=="add|change", KERNEL=="nvme[0-9]*n[0-9]*", ATTR{queue/scheduler}="none"
       ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
-  notify: reload udev
+  notify: Reload udev

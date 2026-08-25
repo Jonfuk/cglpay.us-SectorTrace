@@ -9,6 +9,13 @@ secrets/
 # this is a safety net against committing it unencrypted by mistake, not a
 # statement that an encrypted vault.yml can't be checked in.
 deploy/ansible/group_vars/all/vault.yml
+# Superseded vaults kept by `ansible-install.sh --reconfigure`. Encrypted,
+# but still secrets, and each one is named for when it was replaced.
+deploy/ansible/.vault-backups/
+# Written by the setup wizard: this box's domain and any other local
+# override. Loads after vars.yml and wins, so the tracked defaults stay
+# clean and `git pull` never conflicts with a local answer.
+deploy/ansible/group_vars/all/zz-local.yml
 deploy/ansible/*.retry
 
 # Data — raw archives and the canonical warehouse are local state, not source
