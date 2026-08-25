@@ -93,6 +93,38 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-004 | Audit the ~45 stale agent/codex/claude branches for anything else worth reviving
+  - completed: 2026-08-25T00:00:00Z
+  - commits: none (audit found nothing to merge)
+  - result: **Complete, not partial** — every non-master, non-beta branch is
+    now accounted for. Of ~45 total, only 11 (per `origin/*`) plus 6
+    local-only branches ever had commits not in `master`; every other branch
+    (~35, including all the `claude/phase-N-*` and `claude/sectortrace-*`
+    ones) has zero commits ahead of `master` and needs no check — its content
+    already landed. Of the 17 with real diffs:
+    - 1 was BETA-001 (already merged).
+    - 6 are WDTK bot-bypass branches, out of scope by policy (unchanged from
+      the first pass).
+    - 2 (`sectortrace-plan-review-d43b72`, `provider-research-pipeline`) are
+      badly diverged, forked before ~15 later modules existed — confirmed
+      again, still not worth reconciling.
+    - 1 (`codex/dataset-completion-2021-2026`) is live-collection Railway
+      worker operations — out of scope for an autonomous merge regardless of
+      staleness (running real backfill tranches against production).
+    - **7 are local-only, never pushed to origin, and every one of them
+      turned out to be a stale leftover pointer whose content is already
+      merged into `master` under a *different* commit hash** — confirmed by
+      diffing the actual files, not just comparing commit messages (e.g.
+      `archive-processor`'s `pipeline/archive_process.py` diffs empty
+      against `master`'s copy). Normal residue of a PR-based workflow
+      (rebase/squash-merge changes the hash; the local branch pointer is
+      never cleaned up). Nothing here was unpushed original work.
+  - note: The project has ~45 stale local+remote branch pointers that could
+    be deleted as housekeeping. **Not done here** — branch deletion is
+    visible/semi-reversible and this session was not asked to clean up, only
+    to check for revivable work. Flagged as a suggestion, not an action; see
+    Known Issues.
+
 - [DONE] BETA-003 | Teach ansible-mirror to build a beta deployment, not just mirror
   - completed: 2026-08-25T00:00:00Z
   - commits: 29d07c9 (`beta`)
@@ -120,24 +152,29 @@ DONE
 
 - [DONE] BETA-002 | Reconcile docs/upgrade-roadmap.md against current code
   - completed: 2026-08-25T00:00:00Z
-  - commits: (docs-only edit, folded into the beta-003 commit's branch
-    history as a separate prior commit — see `81dd9d9` for the W-23–W-26 fix
-    and this entry's banner rewrite)
-  - result: Checked **every** F/D/P/U/W/O/S/T entry in the register against
-    current code, not just the four this session had already caught. Outcome:
-    every entry's own disposition was already accurate — closed, no-action,
-    declined/refused, or (P-03 alone) correctly still open — except the four
-    already fixed. Rewrote the staleness banner to say precisely that, and to
-    state explicitly what reconciliation deliberately did *not* do: file the
-    180 commits since `cbf149d` as new numbered findings. That work mostly
-    isn't "findings" in this register's sense (it's delivered features,
-    documented elsewhere) and writing it up after the fact would be
-    re-enactment, not reconciliation.
-  - note: **Did not retire the register** — chose "keep, corrected" over
-    "retire" because reconciliation showed it was already 95% trustworthy,
-    not rotten. Whether to keep filing new work through it going forward is
-    the project owner's call, not resolved here (see Questions Requiring
-    Human Input).
+  - commits: `81dd9d9` (§3: W-23–W-26), plus a second pass (§8: B1, B2, B3,
+    F1, F2, F3, G1, G3, G4, G6, G7 — see below)
+  - result: Two passes, because the first was incomplete. Pass 1 checked
+    every F/D/P/U/W/O/S/T entry in §3 (the numbered findings register)
+    against current code — all accurate except the four already caught.
+    **Pass 2, found while starting BETA-004:** §8 ("Proposed workstreams",
+    a *separate* B/C/F/G numbering scheme) had the exact same drift — its
+    own top-of-file summary already said Phases 15/16/18 delivered
+    B1–B3/F1–F3/G1/G3/G4/G6/G7, but every individual entry below still read
+    as an open proposal. Confirmed each against the actual module/table
+    (`m17`–`m23`, `eat_cases`, `company_psc`) and tagged all eleven
+    `DELIVERED` in place, plus a correction note on §8's own header. §3J
+    (possible futures) and §4 (quick wins) were also checked and needed no
+    changes — both were already internally consistent.
+  - note: **Did not retire the register** — reconciliation (both passes)
+    showed it was already ~95% trustworthy in its own terms, not rotten; it
+    just wasn't being kept in sync with work that landed outside its phase
+    system. Whether to keep filing new work through it going forward is the
+    project owner's call, not resolved here (see Questions Requiring Human
+    Input). **Lesson for future sessions:** a big structured doc with more
+    than one numbering scheme can be stale in one scheme and not the other —
+    checking "the findings register" is not the same as checking the whole
+    file, however much it looks like it at a glance.
 
 - [DONE] BETA-001 | Fix Tabulator recursive call-stack overflow on every portal table
   - completed: 2026-08-25T00:00:00Z
@@ -163,26 +200,6 @@ DONE
     beta review cycle it does not need. Flagged in this session's summary to
     the project owner rather than assumed silently correct.
 
-### IN_PROGRESS
-
-- [IN_PROGRESS] BETA-004 | Audit the ~45 stale agent/codex/claude branches for anything else worth reviving
-  - started: 2026-08-25T00:00:00Z
-  - priority: P3
-  - impact: 2
-  - effort: 3 (M)
-  - confidence: 2
-  - risk: 2
-  - area: repo-hygiene
-  - depends_on: none
-  - branch: beta
-  - current_state: 5 of ~45 branches checked previously (BETA-001 cycle).
-  - next_action: Continue through the remaining ~40 branches with
-    `git log --oneline master..<branch>` + `git diff master <branch> --stat`,
-    skipping the WDTK bot-bypass branches entirely (see notes) and skipping
-    anything whose diff is dominated by unrelated deletions (staleness
-    signature established in BETA-001's cycle).
-  - validation_remaining: For any branch found worth reviving, the same
-    check BETA-001 got: tests, and in-browser verification if it's frontend.
   - objective: This session checked 5 of ~45 non-master branches. One
     (`elated-torvalds-b5bed9`) was a clean, valuable, ready fix (BETA-001).
     Two (`sectortrace-plan-review-d43b72`, `provider-research-pipeline`) were
@@ -237,8 +254,9 @@ DONE
 | P1 | WDTK robots.txt exception review | — | — | — | BLOCKED (BETA-005) |
 | P2 | Reconcile upgrade-roadmap.md against code | 3 | 3 | 4 | DONE (BETA-002) |
 | P2 | Beta deployment via ansible-mirror, Railway confirmed as prod | 3 | 3 | 4 | DONE (BETA-003) |
-| P3 | Audit remaining stale branches for revivable work | 2 | 3 | 2 | NEXT (BETA-004) |
+| P3 | Audit remaining stale branches for revivable work | 2 | 3 | 2 | DONE (BETA-004) |
 | P3 | Re-evaluate `--jobs 4` given new modules | 2 | 2 | 2 | RESEARCH (BETA-006) |
+| P4 | Delete ~45 stale/superseded branch pointers | 1 | 1 | 5 | Suggested, not queued — see BETA-004 |
 
 The Autonomous Work Queue above is authoritative; this table is for skimming.
 
@@ -351,10 +369,11 @@ documents pre-Phase-4). Nothing new rejected this cycle.
 
 - BETA-003's ansible-mirror changes are unverified against a real VPS —
   static checks only. First real run should be watched.
-- ~40 of ~45 non-master branches are unaudited — see BETA-004.
 - `deploy/ansible/`'s status relative to Railway (live fallback? unused?
   something else?) is still genuinely unknown — not asked about, since the
   question that was asked (is Railway production) is now answered.
+- ~45 stale branch pointers (local and remote) whose content is already in
+  `master` — safe to delete, not done here. See BETA-004.
 
 ## Risks
 
@@ -387,23 +406,38 @@ documents pre-Phase-4). Nothing new rejected this cycle.
 
 ## Recent Commits
 
+- `f879e1b` — beta.md: close out BETA-002 and BETA-003, promote BETA-004
+  (`beta`).
 - `29d07c9` — deploy: teach ansible-mirror to build a beta deployment, not
   just mirror (BETA-003; `beta`).
 - `81dd9d9` — beta: set up autonomous work queue; correct stale roadmap
-  entries (BETA-002 partial + initial queue setup; `beta`).
+  entries (BETA-002 pass 1 + initial queue setup; `beta`).
 - `c1c3ecd` — Fix Tabulator recursive call-stack overflow on every table
   (BETA-001; on `master`).
+- (pending) — docs/upgrade-roadmap.md §8 reconciliation, BETA-002 pass 2 +
+  BETA-004 completion — this cycle, not yet committed as this file is
+  written; see the commit immediately following this one in `git log beta`.
 
 ## Next Recommended Actions
 
-For the next session (or the continuation of this one, if still running):
+Four substantive items landed this cycle (BETA-001/002/003/004) — per the
+brief's own §52, this is a natural point for a strategic reassessment rather
+than mechanically grabbing the next backlog row. For the next session (or
+the continuation of this one, if still running):
 
-1. BETA-004 (branch audit) is next in the queue — cheap to check per branch,
-   occasionally valuable, as BETA-001 showed.
-2. If nothing else is queued after BETA-004, this is a natural point for the
-   brief's own "periodic strategic reassessment" (§52) — three substantive
-   items landed this cycle (BETA-001/002/003).
-3. Do not start BETA-006 without new scheduling information; it was refused
+1. **The queue is now genuinely empty of ready work** (NEXT/READY: none;
+   only BLOCKED and explicitly-deferred RESEARCH remain). Per §58, this does
+   not mean stop — it means discover the next thing. This session's own
+   read: the highest-value remaining lever is probably *exercising* BETA-003
+   for real (an actual VPS run) rather than more static/docs work, but that
+   needs a real box and is not something to simulate further from here.
+2. Do not start BETA-006 without new scheduling information; it was refused
    twice already for a reason unrelated to code quality.
-4. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`
+3. Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback`
    branches without asking — see BETA-004's notes.
+4. If asked to keep going with no obvious next code change, prefer genuine
+   product/architecture discovery (re-reading `README.md`'s module table
+   against what a comparable evidence platform offers, per the original
+   brief's §3) over inventing busywork — this project is unusually mature
+   and complete, and low-value churn is a worse outcome than an honest "I
+   looked and didn't find something worth doing yet."

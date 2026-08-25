@@ -2486,7 +2486,18 @@ question.
 6. **Should a review resolution write to the codebase as well as the warehouse (D-05)?** Recommendation: yes. The UI already confirms a URL responds before storing it, which is the same standard `authority_websites.py` sets — so the answer is registry-quality at the moment it is given, and only its filing is not. Losing 86 of them proved the point.
 7. **How often should `pipeline backup` run, and who deletes old ones (D-06)?** Recommendation: before every `run all` and on a daily schedule, keeping the last seven plus any labelled one. The failure was not that backups did not work; it was that the only one on disk had been taken after the damage.
 
-## 8. Proposed workstreams — filed 2026-08-14, not yet started
+## 8. Proposed workstreams — filed 2026-08-14; every item delivered except G8 (dropped) — corrected 2026-08-25
+
+**Correction, 2026-08-25:** this section's own header said "not yet started"
+even though §2's summary at the top of this file already recorded every one
+of these delivered in Phases 15, 16 or 18 — the individual entries below
+were simply never updated to match, the same drift W-23–W-26 had in §3.
+B1, B2, B3, F1, F2, F3, G1, G3, G4, G6 and G7 are now tagged `DELIVERED`
+in place, against the module or table that ships each one, checked
+2026-08-25. Only B4, C1, C2, G2, G5 (already correctly tagged) and G8
+(correctly dropped) needed no change. This was caught while starting on
+BETA-004 in `beta.md` — a reminder that "reconciled" (BETA-002) meant §3
+only; §8 was missed the first time.
 
 **Sequenced as Phases 15–19** at the end of §5; this section keeps the
 reasoning for each item, that one keeps the order and what each unlocks. Two
@@ -2515,7 +2526,7 @@ legible as claims.
 Three sources, all public, all pay-relevant, each filed with the shape of the
 claim it would support.
 
-**B1. Gender pay gap reports · M** — mandatory annual public filings by
+**B1. Gender pay gap reports · M — DELIVERED Phase 16 (m20)** — mandatory annual public filings by
 employers with 250+ staff. A new module over the government filing site, each
 filing archived like every other source. Claim shape: "of the tracked
 providers that must file, X report a mean gender pay gap of Y%". Depends on
@@ -2523,12 +2534,12 @@ the provider → employer mapping m04 already builds; needs a decision on the
 scope rule — a provider under 250 staff is outside the law's reach, so its
 absence must read as out-of-scope, not as a zero.
 
-**B2. Living Wage Foundation registrations · S** — one public lookup per
+**B2. Living Wage Foundation registrations · S — DELIVERED Phase 15 (m18)** — one public lookup per
 provider, binary, citable. Claim shape: "N of 13 tracked providers are
 accredited living wage employers". Fetch, archive, record accreditation date
 and status like any other source.
 
-**B3. Provider career and reward pages, and a sustained m16 crawl · M–L** —
+**B3. Provider career and reward pages, and a sustained m16 crawl · M–L — DELIVERED Phase 16 (m22)** —
 `nhs_job_adverts` holds 35 rows **[live]**: the "only direct pay evidence"
 ([README.md:144](README.md:144)) is a sliver. A provider-side module over
 career and reward pages — advertised bands, "rewards package" pages, listed
@@ -2581,7 +2592,7 @@ The universe is the upstream condition for W-12's matrix meaning anything
 beyond the 347, for Workstream C's sector-level claims, and for any sentence
 of the form "we track N of the sector's ~M".
 
-**F1. The universe build · L** — reconstruct the complete provider and funder
+**F1. The universe build · L — DELIVERED Phase 18 (m23)** — reconstruct the complete provider and funder
 population from sources the pipeline already reads: CQC registrations, the
 charity register, Companies House, and the awardees in the 98,636 notices.
 The work is reconciliation, not new collection: hundreds of organisations
@@ -2590,14 +2601,14 @@ they do not — the same labour `unmatched_buyer_name` and
 `possible_group_company` (D-04, still pending) already represent, done
 systematically once rather than one review item at a time.
 
-**F2. Coverage denominators · M** — with the universe in place, every
+**F2. Coverage denominators · M — DELIVERED Phase 18** — with the universe in place, every
 coverage statement gains a denominator: "we track N of the sector's ~M
 providers", "contracts are observed for X of M". Universe membership must
 keep the match-basis discipline m04 already sets — name-only matches stay
 name-only, unconfirmed matches stay unconfirmed — or the universe becomes a
 larger, unverifiable version of the problem it solves.
 
-**F3. Sector shape as a publication · M** — the universe is itself an
+**F3. Sector shape as a publication · M — DELIVERED Phase 18** — the universe is itself an
 evidence product: sizes, funder→provider relationships, concentration. An
 export with its own provenance and match-basis columns gives the campaign its
 first whole-sector figure.
@@ -2617,7 +2628,7 @@ the claim each would support; each passes the same filter as every module —
 public licence, robots respected, process-wide rate limit, provenance or
 NULL.
 
-**G1. ONS Data Explorer API (ASHE) · M** — the Annual Survey of Hours and
+**G1. ONS Data Explorer API (ASHE) · M — DELIVERED Phase 16 (m21)** — the Annual Survey of Hours and
 Earnings, via the ONS developer hub ([developer.ons.gov.uk](https://developer.ons.gov.uk/)):
 median pay by industry (SIC) and occupation, public and OGL. Claim shape:
 "median pay for [occupation] in England is £X, against which the sector's
@@ -2635,13 +2646,13 @@ task, not the module**: the intelligence service publishes reports, and its
 machine-readable access is partial — verify what is fetchable and at what
 terms before committing to a module.
 
-**G3. Companies House PSC register · S** — People of Significant Control,
+**G3. Companies House PSC register · S — DELIVERED Phase 15** — People of Significant Control,
 the same API family and key m04 already holds. Claim shape: ownership edges
 for the entity graph — "who owns whom" for the 13 providers and, later, for
 the universe (F1). No new politeness surface, no new key; the same fetch,
 archive and match-basis disciplines as m04.
 
-**G4. GOV.UK content API · S** — expand m02 to Employment Appeal Tribunal
+**G4. GOV.UK content API · S — DELIVERED Phase 15 (`eat_cases`)** — expand m02 to Employment Appeal Tribunal
 decisions alongside the current tribunal feed. Same host, same client,
 incremental. Claim shape: appeals and their outcomes deepen the tribunal
 evidence layer — a decision affirmed or overturned is a materially different
@@ -2658,7 +2669,7 @@ real work here: an unreadable file is a `parse_failures` row and a review
 item, not a zero. Also feeds F1 (awardees from spend) and C (claims about
 real payments).
 
-**G6. data.gov.uk CKAN API · M** — the central open-data catalogue: datasets
+**G6. data.gov.uk CKAN API · M — DELIVERED Phase 15 (m19)** — the central open-data catalogue: datasets
 searchable by organisation and keyword, with resource URLs, for every council
 and department. Claim shape: discovery — which public datasets exist for an
 authority and where their resources live. Why it earns its place here: one
@@ -2668,7 +2679,7 @@ authority publishes) and the sector universe (F1). Public, no key,
 documented, OGL.
 
 **G7. National Living Wage and National Minimum Wage reference · S —
-deliberately not an API** — the statutory floor as a small annual reference
+deliberately not an API — DELIVERED Phase 15 (m17)** — the statutory floor as a small annual reference
 table from the gov.uk rates pages: one row per year, updated once a year,
 citable. Claim shape: the anchor for every "advertised band versus the
 floor" statement the campaign will draft. The gate G1 flagged applies here
