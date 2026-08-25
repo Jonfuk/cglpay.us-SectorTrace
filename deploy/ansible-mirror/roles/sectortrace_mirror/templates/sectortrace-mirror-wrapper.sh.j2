@@ -1,0 +1,106 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace_mirror/templates/sectortrace-mirror-wrapper.sh.j2.
+#
+# The self-host build's `sectortrace` command, for a mirror. Deliberately a
+# different name: a box that has been both a deployment and a mirror would
+# otherwise have one command pointing at whichever state directory was
+# installed last, and the two are not interchangeable.
+#
+# `sectortrace-mirror <pipeline-command>` runs in the app container against
+# THIS box's warehouse. Anything that reaches the source deployment goes
+# through `sync`, which is the only thing here holding its credentials.
+set -euo pipefail
+
+STATE_DIR="{{ state_dir }}"
+cd "$STATE_DIR"
+
+usage() {
+    cat <<'EOF_USAGE'
+sectortrace-mirror — operate the mirror stack
+
+  sectortrace-mirror <pipeline-command> [args]  run a pipeline command in the app
+  sectortrace-mirror sync [--force|--warehouse-only|--archive-only]
+                                                refresh from the source now
+  sectortrace-mirror sync-status                what the last sync did
+  sectortrace-mirror sync-log                   follow the sync journal
+  sectortrace-mirror check-source               compare both warehouses, change neither
+  sectortrace-mirror documents <args>           run in the documents worker instead
+  sectortrace-mirror psql                       a psql shell on this box's warehouse
+  sectortrace-mirror shell                      a shell in the app container
+  sectortrace-mirror ps | logs [svc] | restart [svc] | up | down
+  sectortrace-mirror health                     what /health says
+
+Examples
+  sectortrace-mirror sync --warehouse-only
+  sectortrace-mirror coverage-report
+  sectortrace-mirror logs app
+
+What NOT to do here: anything that writes evidence. Collection, promotion
+and review-queue decisions belong on the source deployment — this box's
+warehouse is replaced wholesale by the next sync, and work done here is
+discarded without a word.
+EOF_USAGE
+}
+
+[ $# -eq 0 ] && { usage; exit 0; }
+
+case "$1" in
+    -h|--help|help) usage ;;
+
+    ps)      exec docker compose ps ;;
+    up)      exec docker compose up -d ;;
+    down)    exec docker compose down ;;
+    logs)    shift; exec docker compose logs -f --tail=200 "$@" ;;
+    restart) shift; exec docker compose restart "$@" ;;
+
+    shell)   exec docker compose exec app /bin/bash ;;
+    # The container's own client, so there is never a client/server version
+    # mismatch to think about.
+    psql)    shift; exec docker compose exec postgres psql -U sectortrace_app -d sectortrace "$@" ;;
+
+    health)  exec docker compose exec -T app python -c \
+                 "import json,urllib.request;print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:1801/health')),indent=2))" ;;
+
+    # In the foreground, so you watch it rather than guess. The timer runs
+    # the same script; both take the same lock.
+    sync)       shift; exec /usr/local/bin/sectortrace-mirror-sync "$@" ;;
+    sync-log)   exec journalctl -u sectortrace-mirror-sync -f -n 200 ;;
+    sync-status)
+        if [ -f "$STATE_DIR/mirror-state/last-sync" ]; then
+            cat "$STATE_DIR/mirror-state/last-sync"
+        else
+            echo "no sync has finished on this box yet"
+        fi
+        echo
+        exec systemctl list-timers sectortrace-mirror-sync.timer --no-pager
+        ;;
+
+{% if mirror_sync_mode == 'tunnel' %}
+    # Reads both warehouses and writes to neither — the honest answer to
+    # "is this mirror actually current?", as opposed to "did last night's
+    # unit exit zero?".
+    check-source)
+        exec docker compose -f docker-compose.sync.yml run --rm sync check-postgres-sync
+        ;;
+{% else %}
+    check-source)
+        echo "check-source compares two live warehouses, and this mirror is in" >&2
+        echo "snapshot mode — there is no connection to the source to compare" >&2
+        echo "against. \`sectortrace-mirror sync-status\` says which snapshot is" >&2
+        echo "in place; the source's own backup log says when it was taken." >&2
+        exit 2
+        ;;
+{% endif %}
+
+    # The heavy image: parsers, OCR binaries, its own memory ceiling. Run
+    # rather than exec — it is not a running service. See the compose file
+    # for why running batches here is usually the wrong box.
+    documents)
+        shift
+        exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    *)
+        exec docker compose exec -T app python -m pipeline "$@"
+        ;;
+esac

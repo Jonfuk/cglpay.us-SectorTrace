@@ -1,0 +1,111 @@
+# Managed by Ansible — see roles/sectortrace_mirror/templates/Caddyfile.j2.
+# Caddy terminates TLS (automatic Let's Encrypt) and fronts the mirror's app.
+
+{
+{% if contact_email %}
+	email {{ contact_email }}
+{% endif %}
+{% if caddy_use_staging_ca %}
+	# Staging CA: untrusted certificates, but failures cost nothing against
+	# the real rate limit. Set caddy_use_staging_ca: false for a real one.
+	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+{% endif %}
+	# Caddy's own admin API, off for the same reason as on a source
+	# deployment: left on its default it listens on localhost:2019 with no
+	# authentication, which on a box whose whole point is that /admin is not
+	# casually reachable is a needless second door.
+	admin off
+{% if caddy_behind_cloudflare | bool %}
+
+	# The record is proxied, so every connection arrives from Cloudflare and
+	# the real client address is in X-Forwarded-For. Naming these ranges
+	# trusted is what lets `client_ip` below believe that header — and is
+	# also why the list must stay accurate: any address trusted here can
+	# claim to be any client.
+	servers {
+		trusted_proxies static{% for r in cloudflare_ipv4_ranges + cloudflare_ipv6_ranges %} {{ r }}{% endfor %}
+
+	}
+{% endif %}
+}
+
+{{ domain }} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+{% if mirror_source_label %}
+		# Says out loud what this box is. Someone who fetches a figure from
+		# here and later needs to say where it came from should not have to
+		# work out that this hostname is a copy of another one — and a
+		# mirror that looks exactly like its source is a provenance problem
+		# wearing a convenience costume.
+		X-SectorTrace-Mirror-Of "{{ mirror_source_label }}"
+{% endif %}
+		# Deliberately NOT setting Content-Security-Policy here. The
+		# application sets its own, with hashes it computes for its inline
+		# assets, and a second CSP from the proxy would be intersected with
+		# it — silently breaking the portal in a way that looks like a
+		# front-end bug. Same reason nothing here rewrites response bodies.
+		-Server
+	}
+
+{% if expose_admin_publicly %}
+	# expose_admin_publicly is true: /admin is served to anyone who asks.
+	# The app has no authentication of its own, so this is only sane behind
+	# something else that does.
+{% elif admin_allowed_ips %}
+	# /admin and /api/admin/* are served only to these addresses; everyone
+	# else gets 403. This allowlist is the *only* thing in front of an
+	# interface that can read restricted_ tables — the app itself has no
+	# login (settled decision 8). The mirror holds the same restricted rows
+	# the source does, because it holds the same warehouse.
+	@admin_denied {
+		path /admin* /api/admin*
+{% if caddy_behind_cloudflare | bool %}
+		# client_ip, not remote_ip: proxied, remote_ip is Cloudflare's
+		# address for every request, so a remote_ip allowlist would match
+		# nobody and lock you out of your own admin UI.
+		not client_ip {{ admin_allowed_ips | join(' ') }}
+{% else %}
+		not remote_ip {{ admin_allowed_ips | join(' ') }}
+{% endif %}
+	}
+	respond @admin_denied 403
+{% else %}
+	# No allowlist configured: admin is reachable only over an SSH tunnel to
+	# the app's loopback port. See the README.
+	@admin path /admin* /api/admin*
+	respond @admin 403
+{% endif %}
+
+	reverse_proxy app:1801 {
+		# The app logs the client address; without this it would log
+		# Caddy's container address for every request.
+		header_up X-Real-IP {% if caddy_behind_cloudflare | bool %}{client_ip}{% else %}{remote_host}{% endif %}
+
+	}
+
+{% if mirror_stop_app_during_sync %}
+	# The sync stops the app for the warehouse step (see
+	# sectortrace-mirror-sync), so for a few minutes a night there is
+	# nothing behind this proxy. Without this, Caddy answers that with a
+	# bare 502 and no explanation — which reads like a broken deployment
+	# rather than a scheduled one.
+	#
+	# Only proxy-level errors reach here; anything the app itself returns is
+	# its own response and passes through untouched.
+	# A blanket respond is right here rather than a matcher on the status
+	# code: with a reverse proxy the only errors that reach handle_errors
+	# are Caddy's own (the upstream refused the connection, or timed out).
+	# An app response — a 404, a 500 the app chose — is not an error at this
+	# level and passes through untouched.
+	handle_errors {
+		header Retry-After "600"
+		respond "This mirror is refreshing from its source deployment. It will be back in a few minutes." 503
+	}
+{% endif %}
+}

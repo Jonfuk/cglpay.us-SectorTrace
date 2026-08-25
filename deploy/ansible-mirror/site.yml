@@ -1,0 +1,60 @@
+---
+# Provisions the box this playbook runs on as a *mirror* of an existing
+# SectorTrace deployment: the same PostgreSQL + Neo4j + app + Caddy stack,
+# with nothing collecting into it. The warehouse arrives from the source
+# deployment and the raw archive is pulled out of the source's S3 bucket
+# onto this box's local disk, both on a nightly timer.
+#
+# Six of the seven roles are the self-host build's, used unchanged from
+# ../ansible/roles (see ansible.cfg's roles_path) — this box has the same
+# operating system, the same public exposure and the same hardening needs.
+# Only the last role differs.
+#
+# Re-run after `git pull` to apply playbook or compose changes; every task
+# is idempotent.
+- name: SectorTrace mirror
+  hosts: localhost
+  become: true
+  vars:
+    repo_root: "{{ (playbook_dir + '/../..') | realpath }}"
+  roles:
+    - preflight          # size the host, check DNS — fails before anything changes
+    - common             # OS upgrade, base packages, time, journal, swap
+    - tuning             # sysctls, transparent hugepages, ulimits, I/O scheduler
+    - hardening          # SSH, fail2ban, kernel security sysctls, auto security updates
+    - docker             # engine, compose plugin, daemon config
+    - firewall           # ufw
+    - sectortrace_mirror # the stack, and the sync that fills it
+
+  post_tasks:
+    # Same reasoning as the self-host build: Ansible will not reboot its own
+    # control node, and taking one out from under a running play is not
+    # something to do silently.
+    - name: Check whether the upgrade left a reboot pending
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Report a pending reboot
+      ansible.builtin.debug:
+        msg:
+          - "A reboot is pending — usually a kernel update from the dist-upgrade."
+          - "Nothing is broken; the running kernel is simply not the newest installed one."
+          - "Reboot when convenient: `systemctl reboot`. Containers come back on their own"
+          - "(every service is `restart: unless-stopped`), and re-running this playbook"
+          - "afterwards is safe."
+      when: reboot_required.stat.exists
+
+    - name: Report where things are
+      ansible.builtin.debug:
+        msg:
+          - "Portal:     https://{{ domain }}/"
+          - "Admin UI:   ssh -L 1801:127.0.0.1:1801 <user>@{{ domain }} -N, then http://127.0.0.1:1801/admin"
+          - "Stack:      cd {{ state_dir }} && docker compose ps"
+          - "Sync:       systemctl status sectortrace-mirror-sync.timer"
+          - "            sectortrace-mirror sync        (run one now, in the foreground)"
+          - "            sectortrace-mirror sync-log    (what the last runs did)"
+          - "Source:     {{ mirror_source_label | default('(unnamed)', true) }} via
+             {{ 'nightly S3 snapshot' if mirror_sync_mode == 'snapshot' else 'a direct PostgreSQL copy over the SSH tunnel' }}"
+          - "Archive:    S3 -> local disk at {{ state_dir }}/data/raw
+             ({{ 'synced nightly' if mirror_archive_sync else 'sync disabled' }})"

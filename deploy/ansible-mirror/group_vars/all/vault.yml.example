@@ -1,0 +1,80 @@
+---
+# Reference copy of every value the mirror's vault holds.
+#
+# You do NOT normally need this file: ./ansible-mirror.sh asks for these
+# interactively on a first run and writes an encrypted vault.yml itself. It
+# is here for reference, and for anyone who would rather write the file by
+# hand. To do that: copy it to vault.yml, fill it in, then encrypt it in
+# place before the first run:
+#
+#   cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#   $EDITOR group_vars/all/vault.yml
+#   ansible-vault encrypt group_vars/all/vault.yml
+#
+# To edit it again later: ansible-vault edit group_vars/all/vault.yml
+#
+# Two kinds of secret are in here and they are worth keeping straight:
+#
+#   * THIS box's own database passwords, which nothing else knows and which
+#     ansible-mirror.sh generates;
+#   * the SOURCE deployment's credentials, which are copies of secrets that
+#     already exist somewhere else. Every one of them should be read-only.
+#     A mirror needs to read a bucket and read a warehouse; it never needs
+#     to write to either, and a key that could is a key that could damage
+#     the authoritative deployment from the disposable copy of it.
+#
+# If you are writing this box's passwords yourself, keep them alphanumeric.
+# They are interpolated into postgresql://user:PASSWORD@host URLs, and an
+# @ / : # or ? splits the URL somewhere it should not:
+#
+#   LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32; echo
+
+vault_contact_email: ""
+
+# --- This box's PostgreSQL ----------------------------------------------------
+# Same two roles as a source deployment: sectortrace_app owns the schema and
+# is what DATABASE_URL points at; sectortrace_reader holds SELECT and
+# nothing else and is what the portal reads through. Both are created on
+# this box's first Postgres boot by postgres-init/01-roles.sql.
+vault_postgres_app_password: ""
+vault_postgres_reader_password: ""
+
+# --- This box's Neo4j ---------------------------------------------------------
+vault_neo4j_password: ""
+
+# --- Source: the raw archive bucket (S3 -> this box's local disk) -------------
+# The bucket the source deployment archives into — its ARCHIVE_S3_* group.
+# `pipeline archive-mirror` reads it and writes what is missing into
+# {{ state_dir }}/data/raw.
+#
+# Note where these are NOT used: the always-on app container on this box is
+# given no ARCHIVE_S3_* group at all, so it reads the archive from local
+# disk. Only the sync container ever sees these values.
+#
+# Leave the group blank to run with mirror_archive_sync: false — a mirror
+# whose portal serves figures it holds no archived bytes for.
+vault_mirror_archive_s3_bucket: ""
+vault_mirror_archive_s3_endpoint: ""
+vault_mirror_archive_s3_region: "ams"
+vault_mirror_archive_s3_url_style: "virtual"
+vault_mirror_archive_s3_access_key: ""
+vault_mirror_archive_s3_secret: ""
+
+# --- Source: the offsite backup bucket (mirror_sync_mode: snapshot) -----------
+# Where the source's sectortrace-backup-offsite script puts verified
+# `pipeline backup` snapshots. Often the same bucket as the archive above
+# under a different prefix (mirror_backup_s3_prefix), and better as a
+# separate one — that is the source deployment's own advice to itself.
+#
+# Leave blank to reuse the archive credentials above.
+vault_mirror_backup_s3_bucket: ""
+vault_mirror_backup_s3_endpoint: ""
+vault_mirror_backup_s3_region: ""
+vault_mirror_backup_s3_url_style: ""
+vault_mirror_backup_s3_access_key: ""
+vault_mirror_backup_s3_secret: ""
+
+# --- Source: the warehouse itself (mirror_sync_mode: tunnel) ------------------
+# The password for mirror_source_pg_user on the source deployment. Use its
+# read-only role: migrate-postgres only reads the source.
+vault_mirror_source_pg_password: ""

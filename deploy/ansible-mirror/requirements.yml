@@ -1,0 +1,9 @@
+---
+# Identical to the self-host build's: the shared roles under ../ansible/roles
+# are what need these, and the Debian `ansible` apt package bundles both.
+collections:
+  # ufw, timezone
+  - name: community.general
+  # ipaddr, for deciding whether the domain resolves into Cloudflare's
+  # ranges. Needs python3-netaddr, which the preflight role installs.
+  - name: ansible.utils
