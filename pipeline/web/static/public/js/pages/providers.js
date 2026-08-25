@@ -16,6 +16,7 @@ import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
           findingBlock, evidenceMeta } from '/js/components.js';
+import { chartLabelColor } from '/js/theme.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
@@ -341,7 +342,7 @@ function renderGraph(container, data, charts, key) {
       draggable: true,
       categories,
       force: { repulsion: 260, edgeLength: 130 },
-      label: { show: true, color: '#e6edf3', position: 'right', fontSize: 11 },
+      label: { show: true, color: chartLabelColor(), position: 'right', fontSize: 11 },
       edgeLabel: { show: false },
       data: [...nodes.values()].map((n) => ({
         ...n, category: categories.findIndex((c) => c.name === n.category),

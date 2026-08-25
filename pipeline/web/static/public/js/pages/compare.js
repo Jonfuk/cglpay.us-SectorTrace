@@ -482,7 +482,7 @@ function renderTreatment(container, data, charts) {
     charts.push(mountChart(chartHolder, {
       title: {
         text: indicator.indicator_name, subtext: indicator.unit || '',
-        left: 0, top: 0, textStyle: { fontSize: 15, color: '#e6edf3' },
+        left: 0, top: 0, textStyle: { fontSize: 15 },
         subtextStyle: { color: '#8b949e' },
       },
       grid: { top: 76 },

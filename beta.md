@@ -99,6 +99,104 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-018 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file
+  - completed: 2026-08-25T23:10:00Z
+  - commits: (see the commit immediately following this entry in
+    `git log beta`)
+  - result: Project owner asked directly to continue exploring frontend
+    UI improvements (§27/§28 of the original brief), the area flagged as
+    untouched since BETA-010 in this file's own Next Recommended Actions.
+    Surveyed all 12 portal pages plus `styles.css` for concrete, evidenced
+    gaps (not a speculative wishlist) and found two real bugs, verified and
+    fixed, plus one piece of confirmed dead code:
+  - **Bug 1 — five ECharts titles and one graph-node label hardcoded
+    `color: '#e6edf3'` (a near-white), which overrides the registered
+    per-theme colour entirely.** In light mode this made chart titles on
+    `authority.js` (3), `compare.js` (1) and `treatment.js` (1), plus
+    `providers.js`'s entity-relationship graph node labels, render pale
+    grey on a white background. Confirmed by reading `mountChart`'s theme
+    selection in `components.js` and `theme.js`'s `sectorTraceLight`
+    registration (title colour `#132238`, correctly dark-on-light) — an
+    inline option colour always wins over a registered theme's default, so
+    these titles never picked it up. Fixed by removing the hardcoded
+    colour from title `textStyle` objects (letting the theme supply it)
+    and adding a new exported `chartLabelColor()` helper in `theme.js` for
+    the one case (the graph label) that sets colour on something other
+    than a title, so future series-label colours have a theme-aware helper
+    to reach for instead of a literal. **Two similar-looking occurrences
+    were deliberately left alone** after checking their context: a
+    treemap segment label (`contracts.js`) and a heatmap emphasis border
+    (`providers.js`) both sit on saturated fill colours from the shared
+    palette, not the page background, so their contrast requirement is
+    against the fill, not the theme — not the same bug, and "fixing" them
+    blind without a visual check would have been a guess, not a fix.
+  - **Bug 2 — the theme switcher was completely unreachable below 900px
+    viewport width, with nothing replacing it.** `.theme-control` was a
+    topbar-level sibling of the nav, so the mobile offcanvas (which
+    relocates only nav items) never carried it, and `styles.css` set
+    `.theme-control { display: none; }` outright in both sub-900px media
+    queries. A phone reader had no way to override "system" theme at all.
+    **First fix attempt (moving the single control into the nav) surfaced
+    a second, genuinely pre-existing bug while verifying live in-browser**:
+    `.mainnav`'s base rule (`flex-wrap: wrap`, unconditional) was never
+    reset to `nowrap` for the mobile `flex-direction: column` layout, so
+    once the offcanvas nav's vertical content got tall enough it wrapped
+    into a second *column* instead of scrolling — pushing the last item
+    far off-screen to the right (confirmed via `getBoundingClientRect()`
+    showing x≈1309 in a 375px viewport). This is not new — it was latent
+    before this session and would affect any sufficiently long nav list —
+    my own addition was just enough content to trigger it for the first
+    time. Fixed at the root (`flex-wrap: nowrap` added to both mobile
+    `.portal-nav .mainnav` rules) independently of the theme-control fix,
+    since it's a correctness issue in its own right. **Final theme-switcher
+    design, after reconsidering the first attempt's desktop side-effect**
+    (embedding the control in the wrapping nav-links row pushed the whole
+    row over the topbar's available width at common desktop sizes,
+    wrapping the nav onto two visual rows — caught by comparing
+    `getBoundingClientRect()` y-coordinates before and after, not by eye):
+    a second, mobile-only duplicate control (`#theme-select-mobile`,
+    class `.theme-select` shared with the original) inside the offcanvas
+    nav, hidden on desktop; the original stays exactly where and how it
+    was. `theme.js` now applies a theme choice and binds change listeners
+    to every `.theme-select` element rather than one hardcoded id, so both
+    stay in sync regardless of which one a reader used — verified live by
+    changing theme from the mobile control and confirming the desktop
+    control's value, `<html data-bs-theme>`, and both charts' rendered
+    colours all updated together.
+  - **Dead code**: `vendor/leaflet.js` and `vendor/leaflet.css` (162 KB)
+    were committed but referenced nowhere in any HTML or JS file, and were
+    never listed in `vendor/README.md`'s own table — which the README
+    itself calls "the only record of what is actually in the tree,"
+    meaning their absence from it was itself evidence they didn't belong.
+    Confirmed via grep across the whole frontend before deleting; likely a
+    leftover from before the map moved to MapLibre. Also removed the
+    matching dead `.nav-tools`/`.nav-tools a` CSS rules found while fixing
+    the theme switcher — styled a class that appeared nowhere in
+    `index.html` at all.
+  - note: **Verified every change live in-browser, not from source reading
+    alone** — this cycle hit two bugs (the desktop nav-wrap regression, the
+    pre-existing flex-wrap column bug) that source inspection alone would
+    not have caught, both found by checking actual computed
+    `getBoundingClientRect()`/`getComputedStyle()` values against expected
+    viewport bounds after the Browser pane's screenshot tool turned out to
+    be unavailable in this environment (no visual compositing) — every
+    check in this entry substitutes an equivalent programmatic assertion
+    for what would normally be a screenshot comparison. Confirmed: desktop
+    nav layout unchanged from before this session (topbar row order and
+    y-coordinates match); mobile and tablet (375px, 800px) theme switcher
+    reachable, functional, and correctly positioned within the viewport;
+    both ECharts fixes produce the theme-correct colour in both light and
+    dark mode via `chart.getOption()`, not just source inspection; no
+    console errors on any of the five pages touched. No Python changed, so
+    the offline suite (`test_portal_isolation.py`, `test_portal_controls.py`,
+    `test_web_public.py`, `test_web_authority.py`, docs-coverage tests —
+    111 tests) served only as a regression check that nothing server-side
+    was affected; it was not expected to catch frontend-only bugs and did
+    not need to.
+  - possible follow-up: three further findings from the same audit were
+    scoped and deliberately deferred rather than rushed — see BETA-019 and
+    the two smaller notes in Questions/Deferred below.
+
 - [DONE] BETA-017 | Surface Modules 29-31 as a "Comparators" section on the authority page
   - completed: 2026-08-25T22:30:00Z
   - commits: `a2b4796` (`beta`)
@@ -743,6 +841,47 @@ DONE
     requiring the provider's explicit sign-off, not something to autonomously
     finish and merge.
 
+### NEXT
+
+- [NEXT] BETA-019 | Complete-corpus CSV export for PFD reports (and scope SAR separately)
+  - priority: P3
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: ui/api
+  - depends_on: none
+  - objective: `pfd.js`'s "Latest reports" table has no CSV export, unlike
+    every comparable "recent records" table elsewhere in the portal
+    (`contracts.js`, `treatment.js`, `pay.js`). Found during BETA-018's
+    frontend audit.
+  - rationale: **Not a simple oversight — checked and it's a real backend
+    gap.** `pfd()`'s `recent` array is `LIMIT 50` (matching `contracts`'
+    own `notices` cap), and `pipeline/web/public_export.py`'s `EXPORTABLE`
+    registry has no `"pfd"` entry at all. Naively adding one keyed to
+    `recent` would silently export only the 50 newest reports as if it
+    were the whole corpus — exactly the failure `WINDOWED = {"contracts"}`
+    exists to refuse (see `public_export.py`'s own comment on why
+    `contracts` was added there: a capped export that doesn't say so is
+    worse than no export). The correct fix mirrors `contracts`': a new
+    `public_queries.all_pfd_reports(conn, ...)` streaming query reading
+    all 1,539+ rows unlimited, `"pfd"` added to both `EXPORTABLE` and
+    `WINDOWED`, and a new branch in `server.py`'s `_export_complete`
+    (currently a hardcoded `if endpoint != "contracts": raise` — see line
+    ~807). Test coverage should mirror whatever `test_web_public.py`/
+    `test_portal_isolation.py` already assert for the contracts complete-
+    export path.
+  - suggested_first_action: Read `_export_complete` and
+    `all_contract_notices` end to end first — the pattern to copy is
+    already fully worked out there, this is "do it again for a second
+    endpoint," not new design. **SAR's "Latest SAR documents" table is a
+    separate, harder question**: it shares the same `/api/v1/pfd` endpoint
+    but is a different sub-array (`data.sar.recent`), and `EXPORTABLE`'s
+    one-key-per-endpoint design has no natural slot for a second exportable
+    table under one endpoint — decide whether that's worth a design change
+    or whether SAR export is out of scope, rather than bending the PFD fix
+    to also cover it.
+
 ### BLOCKED
 
 - [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
@@ -808,6 +947,8 @@ DONE
 | P2 | Module 30: statutory homelessness / H-CLIC (dataset) | 4 | 4 | 4 | DONE (BETA-015) |
 | P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | DONE (BETA-016) |
 | P2 | Surface Modules 29-31 as a Comparators section on the authority page | 4 | 2 | 5 | DONE (BETA-017) |
+| P2 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file | 4 | 3 | 5 | DONE (BETA-018) |
+| P3 | Complete-corpus CSV export for PFD reports | 3 | 3 | 4 | NEXT (BETA-019) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -946,6 +1087,12 @@ projects while researching BETA-010/BETA-009. Findings:
   small tables (rough sleeping, statutory homelessness, temporary
   accommodation), each with its own pinned caveat and provenance line,
   surfacing Modules 29-31's data for the first time anywhere in the portal.
+- BETA-018: chart titles/labels now correctly follow the light/dark theme
+  instead of hardcoding a colour that only worked in dark mode; the theme
+  switcher is reachable on mobile/tablet for the first time (a second,
+  synced control inside the offcanvas nav); a pre-existing flex-wrap bug
+  that could push the last offcanvas nav item off-screen is fixed at the
+  root, independent of the theme-switcher fix that surfaced it.
 
 ## Performance Improvements
 
@@ -969,6 +1116,15 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
+- BETA-018: no Python changed, so the offline suite served only as a
+  regression check (111 tests across portal isolation/controls/public/
+  authority/docs-coverage — it could not have caught any of this cycle's
+  actual bugs, which were frontend-only). All real verification was live
+  in-browser: computed `getBoundingClientRect()`/`getComputedStyle()` and
+  `chart.getOption()` assertions substituting for screenshot comparison,
+  since the Browser pane's screenshot tool was unavailable in this
+  environment (no visual compositing). Checked both light and dark theme,
+  and three viewport widths (375px, 800px, desktop), for every change.
 - BETA-017: 4 new backend tests plus a full live-browser check in both the
   empty and populated states — the populated state needed a throwaway local
   SQLite warehouse since production has never run Modules 29-31 for real
@@ -1031,6 +1187,33 @@ trust / bind address), which is unchanged and out of scope here.
   concrete need for one, and the roadmap's own §3J/§8 sections (still
   possibly stale — see BETA-002) may already cover this ground better than a
   fresh pass would.
+- **From BETA-018's frontend audit, found but not fixed this cycle** (lower
+  confidence or bigger scope than the two bugs that were fixed and
+  verified; a future session should re-check each against current code
+  before acting, the same discipline this file applies everywhere else):
+  - The Compare page (`compare.js`) draws charts with no accompanying data
+    table for any of its three chart-bearing sections, unlike every other
+    chart-bearing page in the portal. Reasonable next UI feature if
+    revisited — reuse the existing `tableCard` pattern, do not invent a
+    new one.
+  - The Claims page (`claims.js`) has no search/filter/sort control,
+    unlike the Tabulator-backed directory tables elsewhere; only a concern
+    if the claims registry is expected to grow past what browser
+    find-in-page comfortably handles.
+  - The typeahead widgets (top-bar council search, filter-bar provider
+    search, the authority/provider pickers on `treatment.js`/`compare.js`)
+    declare full `role="combobox"`/`role="listbox"` ARIA but only
+    implement "Enter selects the first match" — no arrow-key navigation,
+    `aria-selected` never set. `app.js` has a comment explaining the
+    Enter-only choice was deliberate for its own control; whether the
+    ARIA roles overpromise relative to what's delivered across all three
+    instances is worth a screen-reader-user's actual judgement, not
+    guessed at from source alone.
+  - Some map/graph JS (`geography.js`'s MapLibre layer paints,
+    `providers.js`'s entity-graph colours) uses inline hex literals rather
+    than the `--accent-*` CSS custom properties the rest of the stylesheet
+    disciplines itself to. Functionally harmless today (the literals match
+    the palette); a maintainability nit, not a bug.
 
 ## Rejected Ideas
 
@@ -1170,40 +1353,40 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-017 landed since the previous version. Per §13
-of the original brief, this section must answer five questions without
-conversational history; the version below does, as of 2026-08-25T22:30Z.)*
+*(Superseded revision — BETA-018 landed since the previous version, at the
+project owner's own direct request to continue exploring the frontend.
+Per §13 of the original brief, this section must answer five questions
+without conversational history; the version below does, as of
+2026-08-25T23:10Z.)*
 
-**What is currently being worked on?** Nothing — BETA-017 just completed
-and pushed. No `IN_PROGRESS` item.
+**What is currently being worked on?** Nothing — BETA-018 just completed.
+No `IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-017: a "Comparators" section
-on the authority page surfacing Modules 29/30/31's data for the first time
-anywhere in the portal. This was the direct, concrete output of the
-project owner's own explicitly-requested strategic reassessment (§52) —
-asking "are users able to actually discover the new functionality" found
-that three real, requested-as-comparator datasets built this cycle
-(BETA-014/015/016) had zero portal exposure, the same failure mode
-BETA-009/013 found and fixed for the evidence graph and document-analysis
-subsystems earlier in this branch's life. See its DONE entry for the full
-result, including how the populated-state UI was verified against a
-throwaway local SQLite warehouse since production has never run these
-modules for real.
+**What was the last successful change?** BETA-018: a frontend UI audit
+(the project owner asked directly to continue exploring UI/UX
+improvements) that found and fixed two real, verified bugs — chart
+titles/labels hardcoding a colour that only worked in dark theme, and the
+theme switcher being completely unreachable below 900px viewport width
+with nothing replacing it — plus one pre-existing bug the fix attempt
+surfaced along the way (a flex-wrap column-overflow in the mobile nav),
+and removed one piece of confirmed dead code (162 KB of unused Leaflet
+vendor files, orphaned since the map moved to MapLibre). See its DONE
+entry for the full verification detail — everything was checked live
+in-browser via computed layout/style assertions, not just source reading,
+since the Browser pane's screenshot tool is unavailable in this
+environment.
 
-**What should happen next?** The queue is genuinely `NEXT`/`READY` empty
-again (`BLOCKED`/`RESEARCH` only, below) — the same signal as after
-BETA-016, and per §58 still not a stopping point. The reassessment that
-produced BETA-017 was necessarily partial (one question asked and
-answered, not all of §52's); a future session should finish it: is the
-roadmap still sensible; has the m30/m31 code-sharing decision exposed a
-pattern worth checking elsewhere in the module list; does §28's
-search/discovery list (full-text search, faceted search, saved queries —
-none built yet) contain the next real gap the way "surface what's already
-collected" did twice now; have comparable-product platforms revealed
-anything new since BETA-009's own pass. This session has now completed 17
-queue items since `beta` was created — a good point for a human to look at
-the branch before a further autonomous cycle invents its own next
-priority.
+**What should happen next?** BETA-019 (complete-corpus CSV export for PFD
+reports) is queued `NEXT` — a real, well-scoped gap found during the same
+audit, deliberately not rushed this cycle because it turned out to need a
+genuine backend feature (mirroring `contracts`' own windowed-export
+pattern), not a one-line frontend fix. Beyond that, three smaller frontend
+findings from the same audit are recorded under Deferred Ideas
+(Compare-page tables/export, Claims-page search, typeahead ARIA
+completeness) for whoever picks up the frontend thread next — lower
+confidence or bigger scope than what was fixed this cycle, so flagged
+rather than guessed at. This session has now completed 18 queue items
+since `beta` was created.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1215,18 +1398,17 @@ priority.
    operational/scheduling reason, not a code-quality one; do not restart
    without new information about collection-calendar availability.
 
-**What are the highest-value upcoming items?** A decision from the project
-owner on BETA-011's candidate type would unblock the single most sensitive
-item in the queue. Questions Requiring Human Input #2 (crime data LSOA
-crosswalk — a real, bigger undertaking flagged during BETA-014's research,
-not started) and #3 (document-search UI scoping) are both real if the
-project owner has a view. The H-CLIC B&B breakdown (flagged in both
-BETA-015 and BETA-016's DONE entries, not queued) is a small, low-risk
-addition to an existing module rather than a new one, if wanted. §28's
-search/discovery list is untouched territory worth a proper look next.
-BETA-003's ansible-mirror changes still have never been run against a real
-VPS, which remains the highest-value *unverifiable* lever in the queue —
-nothing further to do on it from this dev checkout.
+**What are the highest-value upcoming items?** BETA-019 (PFD export,
+ready and well-scoped). A decision from the project owner on BETA-011's
+candidate type would unblock the single most sensitive item in the queue.
+Questions Requiring Human Input #2 (crime data LSOA crosswalk) and #3
+(document-search UI scoping) are both real if the project owner has a
+view. The H-CLIC B&B breakdown and the three smaller frontend findings
+(Deferred Ideas) are all small, low-risk additions to existing work rather
+than new initiatives, if wanted. BETA-003's ansible-mirror changes still
+have never been run against a real VPS, which remains the highest-value
+*unverifiable* lever in the queue — nothing further to do on it from this
+dev checkout.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims

@@ -188,7 +188,7 @@ function renderGrantBudget(container, data, charts) {
     charts.push(mountChart(container.querySelector('#grant-chart'), {
       grid: { left: 8, right: 24, top: 60, bottom: 8, containLabel: true },
       title: { text: 'Public health grant', left: 0, top: 0,
-        textStyle: { fontSize: 15, color: '#e6edf3' } },
+        textStyle: { fontSize: 15 } },
       legend: { top: 30, type: 'scroll' },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -232,7 +232,7 @@ function renderGrantBudget(container, data, charts) {
     charts.push(mountChart(container.querySelector('#budget-chart'), {
       grid: { left: 8, right: 24, top: 60, bottom: 8, containLabel: true },
       title: { text: 'Budgeted public health spend', left: 0, top: 0,
-        textStyle: { fontSize: 15, color: '#e6edf3' } },
+        textStyle: { fontSize: 15 } },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: budget.map((r) => r.financial_year) },
       yAxis: { type: 'value', axisLabel: { formatter: (v) => gbp(v) } },
@@ -384,7 +384,7 @@ function drawIndicator(container, indicator, rows, england, charts) {
   charts.push(mountChart(container, {
     title: {
       text: indicator.indicator_name, subtext: indicator.unit || '',
-      left: 0, top: 0, textStyle: { fontSize: 15, color: '#e6edf3' },
+      left: 0, top: 0, textStyle: { fontSize: 15 },
       subtextStyle: { color: '#8b949e' },
     },
     grid: { top: 76 },

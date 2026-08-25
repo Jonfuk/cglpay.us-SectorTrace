@@ -63,6 +63,21 @@
           <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="/api">Downloads &amp; API</a></div>
         </div>
       </details>
+      <!--
+        A second theme control, mobile-only (see .theme-control-mobile in
+        styles.css). The primary #theme-select below sits in the topbar
+        proper and was simply `display: none` under 900px with nothing
+        taking its place -- a reader on a phone had no way to override
+        "system" theme at all. Putting a duplicate inside the offcanvas nav
+        (rather than moving the original in here) keeps the desktop topbar
+        layout, which shares one flex row with the wrapping nav links,
+        untouched; theme.js keeps both controls' values in sync.
+      -->
+      <label class="theme-control theme-control-mobile" for="theme-select-mobile">Theme
+        <select id="theme-select-mobile" class="theme-select" aria-label="Colour theme">
+          <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+        </select>
+      </label>
     </nav>
   </div>
   <!--
@@ -81,7 +96,7 @@
     <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
   </div>
   <label class="theme-control" for="theme-select">Theme
-    <select id="theme-select" aria-label="Colour theme">
+    <select id="theme-select" class="theme-select" aria-label="Colour theme">
       <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
     </select>
   </label>
