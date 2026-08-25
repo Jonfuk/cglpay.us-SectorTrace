@@ -1,16 +1,29 @@
 # Upgrade roadmap
 
-**Staleness notice, added 2026-08-25.** This file's own prose was last edited
-at commit `cbf149d`, and `master` has moved 180+ commits past it since
-(Railway hosting, an S3 raw-archive backend, PostgreSQL mirroring, an
-Ansible-provisioned VPS deployment with a nightly DR mirror, `m26`–`m28`,
-dataset-completion safeguards, public evidence layers). Treat every "open"
-item below as unverified against current code before acting on it — several
-were found already delivered on checking (W-23, W-24, W-25, W-26; see their
-entries). `README.md`, `docs/CAVEATS.md` and `git log` are the current sources
-of truth; this register is a historical record of Phases 1–19 that has not
-been kept running since. Refreshing it properly (reconciling every entry
-against current code) is itself queued — see `beta.md`.
+**Staleness notice, added and reconciled 2026-08-25.** This file's own prose
+was last edited at commit `cbf149d`, and `master` has moved 180+ commits past
+it since (Railway hosting, an S3 raw-archive backend, PostgreSQL mirroring,
+an Ansible-provisioned VPS deployment with a nightly DR mirror and now a beta
+deployment mode, `m26`–`m28`, dataset-completion safeguards, public evidence
+layers). A full pass on 2026-08-25 checked **every** F/D/P/U/W/O/S/T entry in
+§3 against current code, one by one. The result: **every entry's own
+disposition (closed/no action/declined/refused/decided) was already
+accurate**, except four (W-23, W-24, W-25, W-26) whose header still read
+"filed" when the code showed they had shipped in Phase 12 — corrected in
+place, in their own entries below. P-03 is correctly the one genuinely open
+item; S-04 is correctly marked fixed; nothing else needed a change.
+
+**What this reconciliation deliberately does not do:** retroactively write up
+the 180 commits of work since `cbf149d` as new numbered findings. That work
+(listed above) never went through this register's phase system and mostly
+isn't "findings" in this register's sense — it's delivered features and
+infrastructure, most already documented in `README.md` and `docs/`. Filing it
+here after the fact would be historical re-enactment, not reconciliation.
+Going forward, either keep this register running for new work (file as you
+go) or let `git log` + `README.md` + `docs/` be the sources of truth and treat
+this file as the closed history of Phases 1–19 that it has, in practice,
+already become. Whichever the project owner prefers — not this session's
+call to make unilaterally.
 
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
