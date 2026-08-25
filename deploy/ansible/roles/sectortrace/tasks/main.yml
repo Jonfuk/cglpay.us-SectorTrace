@@ -58,11 +58,30 @@
     chdir: "{{ state_dir }}"
   changed_when: true
 
+# Wrapped so a service that fails to start reports *why* here, rather than
+# "dependency failed to start: container is unhealthy" and a manual
+# `docker compose logs` to find out what actually happened.
 - name: Bring up the always-on stack (postgres, neo4j, app, caddy)
-  ansible.builtin.command:
-    cmd: docker compose -f docker-compose.yml up -d
-    chdir: "{{ state_dir }}"
-  changed_when: true
+  block:
+    - name: Start the stack
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml up -d
+        chdir: "{{ state_dir }}"
+      changed_when: true
+  rescue:
+    - name: Collect logs from the stack
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml logs --tail=60 --no-color
+        chdir: "{{ state_dir }}"
+      register: sectortrace_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report what the containers said
+      ansible.builtin.fail:
+        msg: >-
+          {{ ['The stack failed to start. Container logs follow.', '']
+             + (sectortrace_failure_logs.stdout_lines | default(['(no logs available)'])) }}
 
 - name: Reload Caddy if only its config changed
   ansible.builtin.command:

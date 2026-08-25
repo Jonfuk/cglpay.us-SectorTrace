@@ -84,6 +84,9 @@ postgres_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.00125) | int, 4] | ma
 # VACUUM and index builds. Few run at once, so this can be generous.
 postgres_maintenance_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.05) | int, 64] | max, 1024] | min }}"
 postgres_max_connections: 100
+# /dev/shm for parallel query workers — not the buffer pool, which is
+# anonymous mmap. Docker's 64MB default is what bites; 256MB is ample here.
+postgres_shm_size_mb: 256
 
 # Neo4j is a disposable projection rebuilt from the warehouse, so it gets a
 # deliberately modest share: the warehouse is what must never be slow.
