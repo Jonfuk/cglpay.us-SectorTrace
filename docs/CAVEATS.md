@@ -692,6 +692,9 @@ anyone using it.
 
 ### Rough sleeping snapshot (Module 29)
 
+*Surfaced on the public authority page (BETA-017) as one of three
+"Comparators" tables, alongside Modules 30/31, below their own caveat.*
+
 - **This is a comparator, not sector evidence, and it is never combined with
   the sector's own evidence.** It exists so a reader can look at rough
   sleeping and substance-misuse figures for the same authority side by side —
@@ -742,6 +745,9 @@ anyone using it.
   publishing it, not that this pipeline failed to collect it.
 
 ### Statutory homelessness (Module 30)
+
+*Surfaced on the public authority page (BETA-017) alongside Modules 29/31 —
+see that section for how.*
 
 - **This is a comparator, not sector evidence, and it is never combined with
   the sector's own evidence** — the same rule as Module 29, and for the same
@@ -805,6 +811,14 @@ anyone using it.
   Module 29 has, unrelated to this module's own parsing.
 
 ### Temporary accommodation (Module 31)
+
+*Surfaced on the public authority page (BETA-017): a "Comparators" section
+lower on every authority page holds one small table each for this module
+and Modules 29/30, each carrying its own caveat text (`public_queries.py`'s
+`CAVEATS["rough_sleeping_comparator"]` etc. — condensed from the fuller
+prose in this file, not a substitute for it). An authority with none of
+this data gets an honest "no comparators yet" message, the same convention
+every other section on the page already uses, not a missing section.*
 
 - **This is a comparator, not sector evidence, and it is never combined
   with the sector's own evidence** — the same rule as Modules 29 and 30.

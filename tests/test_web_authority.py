@@ -200,6 +200,34 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         " '2026-08-01T00:00:00Z', 200, 'm15', 'q')",
         (BIRMINGHAM,))
 
+    conn.execute(
+        "INSERT INTO rough_sleeping_snapshot (ons_code, snapshot_year, count, "
+        " count_text, rate_per_100k, rate_text, source_url, retrieved_at, "
+        " http_status, source_system, payload_sha256) "
+        "VALUES (?, 2025, 12, '12', 1.4, '1.4', 'https://gov.example/rs', "
+        " '2026-08-01T00:00:00Z', 200, 'mhclg_rough_sleeping', 'r')",
+        (BIRMINGHAM,))
+    conn.execute(
+        "INSERT INTO statutory_homelessness_snapshot (ons_code, quarter_start, "
+        " quarter_label, total_initial_assessments, "
+        " total_initial_assessments_text, total_owed_duty, total_owed_duty_text, "
+        " prevention_duty_owed, prevention_duty_owed_text, relief_duty_owed, "
+        " relief_duty_owed_text, source_url, retrieved_at, http_status, "
+        " source_system, payload_sha256) "
+        "VALUES (?, '2026-01-01', 'January to March 2026', 300, '300', 260, "
+        " '260', 120, '120', 140, '140', 'https://gov.example/hclic', "
+        " '2026-08-01T00:00:00Z', 200, 'mhclg_statutory_homelessness', 's')",
+        (BIRMINGHAM,))
+    conn.execute(
+        "INSERT INTO temporary_accommodation_snapshot (ons_code, quarter_start, "
+        " quarter_label, total_households_ta, total_households_ta_text, "
+        " households_ta_with_children, children_in_ta, source_url, "
+        " retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, '2026-01-01', 'January to March 2026', 180, '180', 90, "
+        " 160, 'https://gov.example/hclic-ta', '2026-08-01T00:00:00Z', 200, "
+        " 'mhclg_temporary_accommodation', 't')",
+        (BIRMINGHAM,))
+
     conn.commit()
     return conn
 
@@ -261,6 +289,48 @@ def test_authority_payload_agrees_with_the_existing_endpoints(ro):
     # Contracts: the count is the contracts endpoint's count.
     assert payload["contracts"]["total"] == public_queries.contracts(
         ro, buyer_ons_code=BIRMINGHAM)["total"]
+
+
+# --- comparators (Modules 29-31) ---------------------------------------------
+
+def test_comparators_are_present_and_carry_their_own_caveats(ro):
+    payload = public_queries.authority(ro, BIRMINGHAM)
+    comparators = payload["comparators"]
+
+    rough_sleeping = comparators["rough_sleeping"]
+    assert rough_sleeping["rows"][0]["snapshot_year"] == 2025
+    assert rough_sleeping["rows"][0]["count_text"] == "12"
+    assert "comparator" in rough_sleeping["caveat"].lower()
+
+    homelessness = comparators["statutory_homelessness"]
+    assert homelessness["rows"][0]["quarter_label"] == "January to March 2026"
+    assert homelessness["rows"][0]["total_owed_duty"] == 260
+    assert "comparator" in homelessness["caveat"].lower()
+
+    ta = comparators["temporary_accommodation"]
+    assert ta["rows"][0]["total_households_ta_text"] == "180"
+    assert ta["rows"][0]["children_in_ta"] == 160
+    assert "comparator" in ta["caveat"].lower()
+
+
+def test_comparators_never_combined_or_scored_against_other_evidence():
+    """The three comparator caveats must say, in words, that these figures
+    are not combined with the authority's own evidence — the entire reason
+    Modules 29-31 exist as separate tables rather than joined columns."""
+    for key in ("rough_sleeping_comparator", "statutory_homelessness_comparator",
+                "temporary_accommodation_comparator"):
+        text = public_queries.CAVEATS[key].lower()
+        assert "never" in text or "not" in text
+
+
+def test_an_authority_with_no_comparator_data_gets_empty_rows_not_an_error(ro):
+    """Staffordshire has no rough sleeping/homelessness rows in the fixture
+    — absence must read as an empty list, not a missing key or an error."""
+    payload = public_queries.authority(ro, "E10000028")
+    comparators = payload["comparators"]
+    assert comparators["rough_sleeping"]["rows"] == []
+    assert comparators["statutory_homelessness"]["rows"] == []
+    assert comparators["temporary_accommodation"]["rows"] == []
 
 
 def test_an_authority_with_nothing_returns_the_same_empty_shapes(ro):

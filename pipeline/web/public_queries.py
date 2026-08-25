@@ -305,6 +305,28 @@ CAVEATS = {
         "name exactly matches a known provider name variant. Unmatched rows are "
         "not evidence that no tracked provider was paid."
     ),
+    "rough_sleeping_comparator": (
+        "This is a comparator, shown here because rough sleeping and substance "
+        "misuse are widely documented as overlapping populations — never "
+        "combined, ratioed or correlated with this authority's own evidence "
+        "above. Methodology is not standardised between authorities: each "
+        "chooses its own counting approach and date within the autumn window, "
+        "so a difference between two authorities may reflect a difference in "
+        "method, not only on the street."
+    ),
+    "statutory_homelessness_comparator": (
+        "This is a comparator, shown for the same reason as the rough sleeping "
+        "figures above — never combined, ratioed or correlated with this "
+        "authority's own evidence. Only the flagship duty-assessment count "
+        "(Table A1) is read; a quarter can later be revised, and this figure "
+        "reflects whichever edition was most recently fetched."
+    ),
+    "temporary_accommodation_comparator": (
+        "This is a comparator, shown for the same reason as the homelessness "
+        "figures above — never combined, ratioed or correlated with this "
+        "authority's own evidence. Only the top-level totals are read; the "
+        "bed-and-breakfast breakdown is not."
+    ),
 }
 
 
@@ -2175,7 +2197,9 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "contracts", "supplier_aliases", "providers", "cqc_locations",
               "cdp_documents", "cdp_document_candidates", "committee_papers",
               "committee_paper_candidates", "foi_requests",
-              "foi_request_candidates"])
+              "foi_request_candidates", "rough_sleeping_snapshot",
+              "statutory_homelessness_snapshot",
+              "temporary_accommodation_snapshot"])
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
@@ -2228,6 +2252,32 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "caveats": contract_payload["caveats"],
     }
 
+    # Comparators (Modules 29-31): rough sleeping, statutory homelessness and
+    # temporary accommodation, requested and built specifically to sit beside
+    # this authority's own substance-misuse evidence — never combined with
+    # it, never a ratio, never a score. Each carries its own caveat rather
+    # than sharing one, because each source's own limitations differ (an
+    # unstandardised annual methodology; a quarterly figure that can be
+    # revised; a table that reads only the top-level totals).
+    rough_sleeping = _rows(conn, """
+        SELECT snapshot_year, count, count_text, rate_per_100k, rate_text,
+               source_url, retrieved_at, payload_sha256
+        FROM rough_sleeping_snapshot WHERE ons_code = ?
+        ORDER BY snapshot_year""", (ons_code,))
+    statutory_homelessness = _rows(conn, """
+        SELECT quarter_start, quarter_label, total_initial_assessments,
+               total_initial_assessments_text, total_owed_duty,
+               total_owed_duty_text, prevention_duty_owed, relief_duty_owed,
+               source_url, retrieved_at, payload_sha256
+        FROM statutory_homelessness_snapshot WHERE ons_code = ?
+        ORDER BY quarter_start""", (ons_code,))
+    temporary_accommodation = _rows(conn, """
+        SELECT quarter_start, quarter_label, total_households_ta,
+               total_households_ta_text, households_ta_with_children,
+               children_in_ta, source_url, retrieved_at, payload_sha256
+        FROM temporary_accommodation_snapshot WHERE ons_code = ?
+        ORDER BY quarter_start""", (ons_code,))
+
     return {
         "authority": authority_row,
         "coverage": {
@@ -2240,6 +2290,16 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "budget_detail": {"rows": budget_detail},
         "treatment": treatment,
         "contracts": contracts_held,
+        "comparators": {
+            "rough_sleeping": {"rows": rough_sleeping,
+                                "caveat": CAVEATS["rough_sleeping_comparator"]},
+            "statutory_homelessness": {
+                "rows": statutory_homelessness,
+                "caveat": CAVEATS["statutory_homelessness_comparator"]},
+            "temporary_accommodation": {
+                "rows": temporary_accommodation,
+                "caveat": CAVEATS["temporary_accommodation_comparator"]},
+        },
         "caveats": {
             "grant_not_budget": CAVEATS["grant_not_budget"],
             "budget_detail": CAVEATS["budget_detail"],

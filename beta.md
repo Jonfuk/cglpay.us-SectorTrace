@@ -99,6 +99,61 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-017 | Surface Modules 29-31 as a "Comparators" section on the authority page
+  - completed: 2026-08-25T22:30:00Z
+  - commits: (see the commit immediately following this entry in
+    `git log beta`)
+  - result: Direct outcome of the project owner's requested strategic
+    reassessment (§52) after BETA-015/016. The reassessment's first check —
+    "are users able to actually discover the new functionality" — found a
+    real gap immediately: `grep`-ing `pipeline/web/` for the three tables
+    Modules 29-31 built this cycle (`rough_sleeping_snapshot`,
+    `statutory_homelessness_snapshot`, `temporary_accommodation_snapshot`)
+    returned nothing. Three real, requested-as-comparator datasets existed
+    only in the database with no way for a portal reader to ever see them —
+    exactly the "data additions have outpaced the ability to understand the
+    data" failure mode §52 asks a reassessment to check for, and exactly
+    the same pattern BETA-009/013 found and fixed for the evidence graph
+    and document-analysis subsystems (built, working, entirely invisible).
+  - **Scoped to the natural home for a comparator**: the per-authority page
+    (`#/authorities/<code>`), where a reader already sees that authority's
+    own substance-misuse evidence — adding the comparator datasets there,
+    not a new standalone page, keeps the "look at them side by side"
+    framing the project owner originally requested these datasets for.
+    `public_queries.authority()` gained three new row-fetches (filtered by
+    `ons_code`, one per comparator table) and a `comparators` payload key;
+    three new `CAVEATS` entries (one per dataset, each independently
+    stating the never-combine rule — not one shared caveat, because a
+    reader should not have to infer that three differently-limited
+    datasets share one limitation). `authority.js` gained a `Comparators`
+    section with one small table per dataset, each with its own pinned
+    caveat and provenance line, following the exact existing pattern every
+    other section on the page already uses (`section`/`pinnedCaveat`/
+    `tableCard`/`provenanceFromRows`) — no new component, no new pattern.
+  - note: **Verified live in-browser in both states**, not only via tests.
+    Against this checkout's real production data (Birmingham, via the
+    normal dev server), the empty state renders correctly — an honest "no
+    comparators yet" message naming all three modules to run, the same
+    convention every other section on this page already uses for absent
+    data, since production has never actually run these modules (writing
+    to it was never authorised — see the Environment Note). To verify the
+    **populated** path, which production cannot currently exercise, built a
+    throwaway local SQLite warehouse (`DATABASE_URL= DATABASE_RO_URL=
+    DATABASE_SOURCE_URL= DATABASE_PATH=<scratch> pipeline migrate`, the
+    override pattern `pipeline/config.py` itself documents), seeded one
+    authority and one row per comparator table, and confirmed all three
+    tables render correctly with real figures, correct captions, correct
+    provenance links, and no console errors — then stopped that server and
+    discarded the scratch database. 4 new backend tests (`pytest tests/
+    test_web_authority.py`): payload correctness, that all three caveats
+    say "never"/"not" in words (not just in code comments — the actual
+    reader-facing text), and that an authority with none of this data gets
+    an empty list rather than a missing key or an error. Existing authority
+    tests (14 total) all still pass.
+  - possible follow-up: none identified — this closes the specific gap the
+    reassessment found. A future reassessment should check the same
+    question again once more datasets accumulate.
+
 - [DONE] BETA-016 | Module 31: H-CLIC temporary accommodation (TA1)
   - completed: 2026-08-25T22:05:00Z
   - commits: `1336770` (`beta`)
@@ -753,6 +808,7 @@ DONE
 | P2 | Module 29: rough sleeping snapshot (dataset) | 4 | 3 | 5 | DONE (BETA-014) |
 | P2 | Module 30: statutory homelessness / H-CLIC (dataset) | 4 | 4 | 4 | DONE (BETA-015) |
 | P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | DONE (BETA-016) |
+| P2 | Surface Modules 29-31 as a Comparators section on the authority page | 4 | 2 | 5 | DONE (BETA-017) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -768,7 +824,7 @@ started.
 
 ## Implemented Features
 
-- BETA-001, BETA-007, BETA-009 (see DONE above).
+- BETA-001, BETA-007, BETA-009, BETA-017 (see DONE above).
 
 ## Dataset Additions
 
@@ -887,6 +943,10 @@ projects while researching BETA-010/BETA-009. Findings:
   shared `table()` component).
 - BETA-009: two new Health tab cards (evidence-graph last-run status, graph
   entity count).
+- BETA-017: a new "Comparators" section on every authority page — three
+  small tables (rough sleeping, statutory homelessness, temporary
+  accommodation), each with its own pinned caveat and provenance line,
+  surfacing Modules 29-31's data for the first time anywhere in the portal.
 
 ## Performance Improvements
 
@@ -910,6 +970,13 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
+- BETA-017: 4 new backend tests plus a full live-browser check in both the
+  empty and populated states — the populated state needed a throwaway local
+  SQLite warehouse since production has never run Modules 29-31 for real
+  (see its DONE entry for the exact override commands). MEDIUM risk per
+  the brief's own §22 scale: new public API payload fields and a new portal
+  section, but reusing existing, already-tested components rather than a
+  new rendering pattern.
 - BETA-016: 10 new unit tests, two of them regression tests for real bugs
   caught during verification (a regex word-boundary bug, a real misnamed
   sheet). Both m30 and m31's test files run together (43 tests) to catch
@@ -1102,40 +1169,40 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — the previous version referenced BETA-016 as still
-`NEXT`; it is now `DONE`. Per §13 of the original brief, this section must
-answer five questions without conversational history; the version below
-does, as of 2026-08-25T22:05Z.)*
+*(Superseded revision — BETA-017 landed since the previous version. Per §13
+of the original brief, this section must answer five questions without
+conversational history; the version below does, as of 2026-08-25T22:30Z.)*
 
-**What is currently being worked on?** Nothing — BETA-016 (Module 31) just
-completed and (per its own commit, pushed same as BETA-015). No
-`IN_PROGRESS` item.
+**What is currently being worked on?** Nothing — BETA-017 just completed
+and pushed. No `IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-016: Module 31, temporary
-accommodation (H-CLIC), Table TA1 — sharing Module 30's discovery code by
-direct import. See its DONE entry above for the full result, including two
-real bugs found and fixed during verification (a regex word-boundary bug
-that let a rate column win a total's claim, and a real MHCLG edition that
-misnames the sheet `TA1_`).
+**What was the last successful change?** BETA-017: a "Comparators" section
+on the authority page surfacing Modules 29/30/31's data for the first time
+anywhere in the portal. This was the direct, concrete output of the
+project owner's own explicitly-requested strategic reassessment (§52) —
+asking "are users able to actually discover the new functionality" found
+that three real, requested-as-comparator datasets built this cycle
+(BETA-014/015/016) had zero portal exposure, the same failure mode
+BETA-009/013 found and fixed for the evidence graph and document-analysis
+subsystems earlier in this branch's life. See its DONE entry for the full
+result, including how the populated-state UI was verified against a
+throwaway local SQLite warehouse since production has never run these
+modules for real.
 
-**What should happen next?** The queue is now genuinely `NEXT`/`READY`
-empty — `BLOCKED`/`RESEARCH` only (see below). Per §58 of the original
-brief, this is the signal to do a fresh strategic reassessment, not to
-stop: two dataset cycles (BETA-014/015/016, three modules) have now landed
-back to back, all discovered opportunistically from research rather than
-requested up front except the original rough-sleeping ask. A future
-session should explicitly ask §52's reassessment questions before
-inventing a fourth: is the roadmap still sensible; has recent work exposed
-new architectural constraints (the m30/m31 sharing decision is the first
-time this project has had two modules read one source — worth checking
-whether that pattern recurs elsewhere in the module list); is there a
-neglected part of the product (§27's UI/UX list and §28's search/discovery
-list have had no session attention since BETA-010's relationship
-explorer); have comparable-product platforms revealed anything new. This
-was not done here — BETA-015/016 already used this session's remaining
-budget for a coherent, tested, documented pair of features rather than
-starting a research cycle on top.
-This session has now completed 16 queue items since `beta` was created.
+**What should happen next?** The queue is genuinely `NEXT`/`READY` empty
+again (`BLOCKED`/`RESEARCH` only, below) — the same signal as after
+BETA-016, and per §58 still not a stopping point. The reassessment that
+produced BETA-017 was necessarily partial (one question asked and
+answered, not all of §52's); a future session should finish it: is the
+roadmap still sensible; has the m30/m31 code-sharing decision exposed a
+pattern worth checking elsewhere in the module list; does §28's
+search/discovery list (full-text search, faceted search, saved queries —
+none built yet) contain the next real gap the way "surface what's already
+collected" did twice now; have comparable-product platforms revealed
+anything new since BETA-009's own pass. This session has now completed 17
+queue items since `beta` was created — a good point for a human to look at
+the branch before a further autonomous cycle invents its own next
+priority.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1154,7 +1221,8 @@ crosswalk — a real, bigger undertaking flagged during BETA-014's research,
 not started) and #3 (document-search UI scoping) are both real if the
 project owner has a view. The H-CLIC B&B breakdown (flagged in both
 BETA-015 and BETA-016's DONE entries, not queued) is a small, low-risk
-addition to an existing module rather than a new one, if wanted.
+addition to an existing module rather than a new one, if wanted. §28's
+search/discovery list is untouched territory worth a proper look next.
 BETA-003's ansible-mirror changes still have never been run against a real
 VPS, which remains the highest-value *unverifiable* lever in the queue —
 nothing further to do on it from this dev checkout.

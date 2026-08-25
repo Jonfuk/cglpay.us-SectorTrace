@@ -100,7 +100,8 @@ async function renderOne(main, code) {
     el('div', { id: 'grant-budget' }),
     el('div', { id: 'drilldown' }),
     el('div', { id: 'treatment' }),
-    el('div', { id: 'contracts' }));
+    el('div', { id: 'contracts' }),
+    el('div', { id: 'comparators' }));
   replace(main, page);
 
   renderCoverage(page.querySelector('#coverage'), data);
@@ -108,6 +109,7 @@ async function renderOne(main, code) {
   renderDrillDown(page.querySelector('#drilldown'), data);
   renderTreatment(page.querySelector('#treatment'), data, charts);
   renderContracts(page.querySelector('#contracts'), data, code);
+  renderComparators(page.querySelector('#comparators'), data);
 
   return () => disposeCharts(charts);
 }
@@ -515,4 +517,92 @@ function renderContracts(container, data, code) {
       provenanceFromRows(notices, {
         module: 'm01_procurement', tables: ['contracts', 'supplier_aliases'],
       }) || el('span', {}))));
+}
+
+// --- comparators (Modules 29-31) ---------------------------------------------
+
+/* Rough sleeping, statutory homelessness and temporary accommodation —
+ * requested and built specifically to sit beside this authority's own
+ * substance-misuse evidence, because the two are widely documented as
+ * overlapping populations. Three separate tables, three separate caveats,
+ * never a combined figure: the whole point of a comparator is that the
+ * reader draws the inference, not this page. */
+function renderComparators(container, data) {
+  const comparators = data.comparators || {};
+  const roughSleeping = comparators.rough_sleeping?.rows || [];
+  const statutoryHomelessness = comparators.statutory_homelessness?.rows || [];
+  const temporaryAccommodation = comparators.temporary_accommodation?.rows || [];
+
+  if (!roughSleeping.length && !statutoryHomelessness.length
+    && !temporaryAccommodation.length) {
+    replace(container, section(
+      'Comparators',
+      'Rough sleeping and homelessness figures for this authority, shown '
+      + 'beside its substance-misuse evidence because the two populations '
+      + 'are widely documented to overlap.',
+      noData('rough sleeping and homelessness comparators',
+        './start.sh run m29_rough_sleeping m30_statutory_homelessness m31_temporary_accommodation')));
+    return;
+  }
+
+  replace(container, section(
+    'Comparators',
+    'Rough sleeping and homelessness figures for this authority, shown '
+    + 'beside its substance-misuse evidence above because the two '
+    + 'populations are widely documented to overlap — never combined, '
+    + 'ratioed or scored against it.',
+    el('div', { class: 'panel' },
+      renderRoughSleeping(roughSleeping, comparators.rough_sleeping?.caveat),
+      renderStatutoryHomelessness(statutoryHomelessness,
+        comparators.statutory_homelessness?.caveat),
+      renderTemporaryAccommodation(temporaryAccommodation,
+        comparators.temporary_accommodation?.caveat))));
+}
+
+function renderRoughSleeping(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', { style: 'margin-bottom:20px;' },
+    el('h3', { class: 'small muted', text: 'Rough sleeping (MHCLG annual snapshot)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Rough sleeping', [
+      { title: 'Year', field: 'snapshot_year', width: 90 },
+      { title: 'Estimated count', field: 'count_text', width: 140 },
+      { title: 'Rate per 100k', field: 'rate_text', width: 130 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm29_rough_sleeping', tables: ['rough_sleeping_snapshot'],
+    }) || el('span', {}));
+}
+
+function renderStatutoryHomelessness(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', { style: 'margin-bottom:20px;' },
+    el('h3', { class: 'small muted', text: 'Statutory homelessness (MHCLG H-CLIC, quarterly)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Statutory homelessness', [
+      { title: 'Quarter', field: 'quarter_label', width: 200 },
+      { title: 'Households assessed', field: 'total_initial_assessments_text', width: 160 },
+      { title: 'Owed a duty', field: 'total_owed_duty', width: 120 },
+      { title: 'Prevention duty', field: 'prevention_duty_owed', width: 130 },
+      { title: 'Relief duty', field: 'relief_duty_owed', width: 110 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm30_statutory_homelessness', tables: ['statutory_homelessness_snapshot'],
+    }) || el('span', {}));
+}
+
+function renderTemporaryAccommodation(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', {},
+    el('h3', { class: 'small muted', text: 'Temporary accommodation (MHCLG H-CLIC, quarterly)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Temporary accommodation', [
+      { title: 'Quarter', field: 'quarter_label', width: 200 },
+      { title: 'Households in TA', field: 'total_households_ta_text', width: 150 },
+      { title: 'With children', field: 'households_ta_with_children', width: 130 },
+      { title: 'Children in TA', field: 'children_in_ta', width: 130 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm31_temporary_accommodation', tables: ['temporary_accommodation_snapshot'],
+    }) || el('span', {}));
 }
