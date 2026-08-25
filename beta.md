@@ -101,7 +101,7 @@ DONE
 
 - [DONE] BETA-009 | Health tab: surface the evidence graph's own operational state
   - completed: 2026-08-25T00:00:00Z
-  - commits: (pending push; see commit immediately after this entry)
+  - commits: `f2b727a` (`beta`)
   - result: Did the comparable-product research (§3 of the original brief)
     this session had skipped in favour of internal code archaeology —
     looked at OCCRP Aleph and LittleSis for OSINT-platform patterns. Found
@@ -560,8 +560,8 @@ documents pre-Phase-4). Nothing new rejected this cycle.
 
 ## Recent Commits
 
-- (pending) — BETA-009: Health tab evidence-graph status cards (`beta`) —
-  see the commit immediately after this file's own next commit.
+- `f2b727a` — BETA-009: surface the evidence graph's own status on the
+  Health tab (`beta`).
 - `0c82267` — docs: W-15's CQC half and the API-rate-cap possible-future
   were already delivered (BETA-008; `beta`).
 - `e2c6766` — BETA-007: per-IP token-bucket rate limit on the public API
