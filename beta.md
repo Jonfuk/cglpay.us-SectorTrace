@@ -99,6 +99,82 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-016 | Module 31: H-CLIC temporary accommodation (TA1)
+  - completed: 2026-08-25T22:05:00Z
+  - commits: (see the commit immediately following this entry in
+    `git log beta`)
+  - result: BETA-015's own flagged follow-up, built this cycle. Reads Table
+    TA1 (households in temporary accommodation) from the same quarterly
+    workbook Module 30 already reads Table A1 from. **Deliberately shares
+    Module 30's discovery and file-reading code by direct import rather
+    than duplicating it** — both modules read the same evergreen page, the
+    same per-quarter attachment list, and the same revision-preference
+    rule, which is a genuinely different situation from Modules 13/29's own
+    independent `sheet_rows` copies (unrelated sources, coincidentally
+    similar code). To make that sharing clean, three of Module 30's
+    previously-private helpers (`_to_int`, `_to_float`,
+    `_discover_publications`) and one already-touched function
+    (`_read_sheet`, renamed `read_workbook_sheet` and parametrised by sheet
+    name) were made module-public — a deliberate, documented API surface
+    change to an already-shipped module, not an accidental one.
+  - **v1 scoped to the top-level figures only**: total households in TA,
+    households with children, children in TA, households in area —
+    dropping the bed-and-breakfast sub-breakdown (and its own further
+    "6 weeks"/"pending review"/"16-17yo" nesting within that), the same
+    smallest-coherent-slice discipline Modules 29 and 30 both applied.
+  - **Two real bugs found and fixed while verifying against the real
+    downloaded workbooks, before either was written into a test**:
+    1. A column-matching regex required a word boundary immediately after
+       "ta" (`households? in ta\b`). The real source appends footnote
+       digits directly with no separating space ("...in TA1,2,3,4"), and
+       `\b` does not fire between two word characters — a letter and a
+       digit both count. This silently failed to match the true total
+       column and let the per-1,000 rate column (whose header text also
+       contains "households in ta", just further right) win the claim
+       instead — caught only by checking the resolved value (3.78, a rate)
+       against the real published England total (88,310), not by the
+       regex looking wrong in isolation. Fixed by dropping the trailing
+       `\b` from both affected patterns.
+    2. A real edition (January–March 2023) publishes Table TA1 under the
+       sheet name `TA1_` (trailing underscore) while every other sheet in
+       the same workbook, including Table A1, is named normally —
+       `read_workbook_sheet` (the shared function) now resolves a single
+       unambiguous trailing-underscore variant when the exact name isn't
+       found, and still refuses to guess if more than one candidate would
+       match after stripping.
+  - Follows the established conventions: migration `0061` (SQLite +
+    PostgreSQL), licence registration (OGL v3.0, two places), README's
+    module table and Wave 1 (alongside Module 30, same `m00` dependency),
+    `docs/SOURCES.md`, and a `docs/CAVEATS.md` entry that cross-references
+    Module 30's revision/placeholder caveats rather than restating them,
+    plus its own notes on the B&B scope boundary and the misnamed-sheet
+    fix. Also corrected a line in Module 30's own caveat entry that had
+    become stale the moment this module started existing ("temporary
+    accommodation ... none of them are in this pipeline").
+  - note: **Verified against five real downloaded workbooks directly**,
+    not only hand-built fixtures — all five source-file eras/formats this
+    cycle has now collected (2019 Q4 ods, 2023 Q1 ods with the misnamed
+    sheet, 2023 Q4 ods, 2024 Q1 xlsx, 2026 Q1 ods) resolved every column
+    correctly and matched MHCLG's own published England totals exactly
+    after both bugs were fixed. 10 new unit tests, including regression
+    tests for both bugs found (one exercises `read_workbook_sheet`'s
+    fallback directly via an in-memory ODS document built with odfpy, not
+    a downloaded file, so it doesn't depend on the scratch directory
+    surviving a session boundary). 43 tests across both m30 and m31 pass
+    together (the shared-function rename required updating two of m30's
+    own existing tests, caught immediately by running them together rather
+    than assuming the rename was safe). All five cross-cutting coverage
+    guards updated again. Full suite, run clean and uninterrupted (no
+    concurrent file edits this time — see BETA-015's own note on why that
+    matters): **2434 passed, 106 skipped, 33 deselected, 2 failed** — the
+    same pre-existing `transformers`/docling issue, confirmed a fifth time.
+  - **What this session could not verify**: an actual live fetch-parse-
+    write run, same constraint as every dataset addition this cycle
+    (`.env` points at live Railway production).
+  - possible follow-up: the B&B breakdown (Modules 30/31 both dropped
+    sub-breakdowns this cycle) is a plausible smaller addition to this
+    same module later, not a new module — flagged, not queued.
+
 - [DONE] BETA-015 | Module 30: statutory homelessness (H-CLIC) snapshot
   - completed: 2026-08-25T21:40:00Z
   - commits: `5855ac7` (`beta`)
@@ -614,40 +690,6 @@ DONE
     requiring the provider's explicit sign-off, not something to autonomously
     finish and merge.
 
-### NEXT
-
-- [NEXT] BETA-016 | Module 31: H-CLIC temporary accommodation (TA1)
-  - priority: P3
-  - impact: 3
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: data
-  - depends_on: none (same infrastructure as BETA-015 — same source page,
-    same discovery/dedup logic, same `sheet_rows`/anchor-row pattern)
-  - objective: Table TA1 ("households in temporary accommodation") is on the
-    same evergreen `live-tables-on-homelessness` page BETA-015 already reads,
-    seen and understood during that module's own research but deliberately
-    not built — one table done properly beats two done fast, the same
-    discipline BETA-014/015 both applied. TA numbers are arguably as
-    substance-misuse-relevant a comparator as A1's headline duty count.
-  - rationale: Lowest-effort next dataset candidate in the queue — the
-    discovery/dedup/format-handling machinery already exists in
-    `m30_statutory_homelessness.py` (`_discover_publications`,
-    `find_anchor_row`, the ODS/XLSX dual-format reading), so this is mostly
-    a second `locate_ta1_columns`/`extract_ta1_rows` pair plus its own
-    migration — not a from-scratch research cycle. Whether TA1's own column
-    layout is as stable across the series as A1's turned out to be (it may
-    not be — this was not checked) is the first thing to verify before
-    assuming the same approach transfers cleanly.
-  - suggested_first_action: Download 2-3 real TA1 sheets spanning both
-    shapes (reuse BETA-015's already-downloaded scratch files if the
-    session recovers them, else re-download from the same content-API URL)
-    and confirm the column layout by hand before writing any code — do not
-    assume A1's column-locator keywords transfer; TA1's own header text is
-    different ("Households in TA", "B&Bs", etc., seen briefly during
-    BETA-015's own research but not verified in depth).
-
 ### BLOCKED
 
 - [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
@@ -711,7 +753,7 @@ DONE
 | P4 | Delete ~45 stale/superseded branch pointers | 1 | 1 | 5 | Suggested, not queued — see BETA-004 |
 | P2 | Module 29: rough sleeping snapshot (dataset) | 4 | 3 | 5 | DONE (BETA-014) |
 | P2 | Module 30: statutory homelessness / H-CLIC (dataset) | 4 | 4 | 4 | DONE (BETA-015) |
-| P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | NEXT (BETA-016) |
+| P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | DONE (BETA-016) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -730,6 +772,13 @@ started.
 - BETA-001, BETA-007, BETA-009 (see DONE above).
 
 ## Dataset Additions
+
+**BETA-016: Module 31, temporary accommodation (H-CLIC, MHCLG)** —
+BETA-015's own flagged follow-up, built this cycle. Table TA1 from the same
+quarterly workbook Module 30 reads, sharing that module's discovery/file-
+reading code by direct import. See its DONE entry for the full research,
+including two real bugs found and fixed (a regex word-boundary bug, and a
+real edition's misnamed `TA1_` sheet).
 
 **BETA-015: Module 30, statutory homelessness (H-CLIC, MHCLG)** — BETA-014's
 own flagged follow-up, built this cycle. Quarterly, LA-level, Table A1 only
@@ -775,6 +824,18 @@ exercise collection-module changes against real sources, that needs its own
 explicit decision (rate-limit coordination, whether it's polite at all) —
 not something to fall out of this default silently.
 
+**Decision: Module 31 imports Module 30's discovery/parsing helpers
+directly rather than duplicating them, and four of Module 30's functions
+were made module-public (renamed off their leading underscore) to support
+that.** Reasoning: unlike Modules 13/29's `sheet_rows` copies — genuinely
+independent code that happens to look similar because both read ODS files
+— Modules 30 and 31 read the *same* evergreen page, the *same* per-quarter
+attachment, and need the *same* revision-preference rule; duplicating that
+would create two copies that must be kept in sync by hand, which is a real
+maintenance and correctness risk this project's house style (`CLAUDE.md`:
+"don't add abstractions beyond what the task requires") doesn't actually
+argue against — the task here *is* one shared source. See BETA-016.
+
 ## Database / Migration Changes
 
 BETA-014: migration `0059` adds `rough_sleeping_snapshot` (SQLite +
@@ -782,6 +843,10 @@ PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
 touched.
 
 BETA-015: migration `0060` adds `statutory_homelessness_snapshot` (SQLite +
+PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
+touched.
+
+BETA-016: migration `0061` adds `temporary_accommodation_snapshot` (SQLite +
 PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
 touched.
 
@@ -846,6 +911,14 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
+- BETA-016: 10 new unit tests, two of them regression tests for real bugs
+  caught during verification (a regex word-boundary bug, a real misnamed
+  sheet). Both m30 and m31's test files run together (43 tests) to catch
+  the cross-module breakage the shared-function rename could otherwise have
+  caused silently — and did, once, before the two affected m30 tests were
+  updated to the new names. Full suite run clean and uninterrupted (no
+  concurrent edits, learning from BETA-015's own race artifact): 2434
+  passed, 2 pre-existing unrelated failures, confirmed a fifth time.
 - BETA-015: 33 new unit tests on the pure parsing functions, using fixtures
   built from the real header/data text of both source-file eras (not
   invented text), plus the locator re-run directly against four full real
@@ -1028,32 +1101,40 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — the previous version of this section, referencing a
-"relationship-explorer question," was written before BETA-010/012 built
-exactly that and before BETA-013/014/015 landed. Per §13 of the original
-brief, this section must answer five questions without conversational
-history; the version below does, as of 2026-08-25T21:40Z.)*
+*(Superseded revision — the previous version referenced BETA-016 as still
+`NEXT`; it is now `DONE`. Per §13 of the original brief, this section must
+answer five questions without conversational history; the version below
+does, as of 2026-08-25T22:05Z.)*
 
-**What is currently being worked on?** Nothing — BETA-015 (Module 30) just
-completed and pushed. No `IN_PROGRESS` item.
+**What is currently being worked on?** Nothing — BETA-016 (Module 31) just
+completed and (per its own commit, pushed same as BETA-015). No
+`IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-015: Module 30, statutory
-homelessness (H-CLIC), Table A1. See its DONE entry above for the full
-result, including two real bugs found and fixed during verification (a
-covered-cell ODS alignment bug, and a region/England-code filtering gap
-m29's own pattern would have gotten wrong on this source).
+**What was the last successful change?** BETA-016: Module 31, temporary
+accommodation (H-CLIC), Table TA1 — sharing Module 30's discovery code by
+direct import. See its DONE entry above for the full result, including two
+real bugs found and fixed during verification (a regex word-boundary bug
+that let a rate column win a total's claim, and a real MHCLG edition that
+misnames the sheet `TA1_`).
 
-**What should happen next?** BETA-016 (Module 31, H-CLIC temporary
-accommodation / TA1) is queued `NEXT` — the lowest-effort dataset candidate
-available, since BETA-015 already built the discovery/dedup/dual-format
-machinery this would reuse. Its own `suggested_first_action` says to verify
-TA1's column layout by hand before assuming A1's approach transfers. Beyond
-that, the queue is otherwise `BLOCKED`/`RESEARCH` only (see below) — per
-§58 of the original brief, that is a signal to do a fresh strategic
-reassessment (comparable-product research, technical debt scan, a look at
-whether recently-added datasets have outpaced their own discoverability),
-not a signal to stop. This session has now completed 16 queue items since
-`beta` was created; a reassessment is due either way.
+**What should happen next?** The queue is now genuinely `NEXT`/`READY`
+empty — `BLOCKED`/`RESEARCH` only (see below). Per §58 of the original
+brief, this is the signal to do a fresh strategic reassessment, not to
+stop: two dataset cycles (BETA-014/015/016, three modules) have now landed
+back to back, all discovered opportunistically from research rather than
+requested up front except the original rough-sleeping ask. A future
+session should explicitly ask §52's reassessment questions before
+inventing a fourth: is the roadmap still sensible; has recent work exposed
+new architectural constraints (the m30/m31 sharing decision is the first
+time this project has had two modules read one source — worth checking
+whether that pattern recurs elsewhere in the module list); is there a
+neglected part of the product (§27's UI/UX list and §28's search/discovery
+list have had no session attention since BETA-010's relationship
+explorer); have comparable-product platforms revealed anything new. This
+was not done here — BETA-015/016 already used this session's remaining
+budget for a coherent, tested, documented pair of features rather than
+starting a research cycle on top.
+This session has now completed 16 queue items since `beta` was created.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1065,15 +1146,17 @@ not a signal to stop. This session has now completed 16 queue items since
    operational/scheduling reason, not a code-quality one; do not restart
    without new information about collection-calendar availability.
 
-**What are the highest-value upcoming items?** In rough priority order:
-BETA-016 (Module 31, ready and well-scoped); a decision from the project
-owner on BETA-011's candidate type (would unblock the single most
-sensitive item in the queue); Questions Requiring Human Input #2 (crime
-data LSOA crosswalk — a real, bigger undertaking flagged during BETA-014's
-research, not started) and #3 (document-search UI scoping) if the project
-owner has a view; BETA-003's ansible-mirror changes still have never been
-run against a real VPS, which remains the highest-value *unverifiable*
-lever in the queue — nothing further to do on it from this dev checkout.
+**What are the highest-value upcoming items?** A decision from the project
+owner on BETA-011's candidate type would unblock the single most sensitive
+item in the queue. Questions Requiring Human Input #2 (crime data LSOA
+crosswalk — a real, bigger undertaking flagged during BETA-014's research,
+not started) and #3 (document-search UI scoping) are both real if the
+project owner has a view. The H-CLIC B&B breakdown (flagged in both
+BETA-015 and BETA-016's DONE entries, not queued) is a small, low-risk
+addition to an existing module rather than a new one, if wanted.
+BETA-003's ansible-mirror changes still have never been run against a real
+VPS, which remains the highest-value *unverifiable* lever in the queue —
+nothing further to do on it from this dev checkout.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims

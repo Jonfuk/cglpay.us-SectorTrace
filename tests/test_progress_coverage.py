@@ -41,7 +41,7 @@ def test_all_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 31
+    assert len(_real_modules()) == 32
 
 
 @pytest.mark.parametrize("name", [

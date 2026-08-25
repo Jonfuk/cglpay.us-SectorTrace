@@ -480,6 +480,22 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "not_eligible_no_duty did not exist as separate columns in "
               "older editions of this table) -- see docs/CAVEATS.md.",
     ),
+    Smoke(
+        module="m31_temporary_accommodation",
+        produces=("temporary_accommodation_snapshot",),
+        signal=(("temporary_accommodation_snapshot", "quarter_label"),
+                ("temporary_accommodation_snapshot", "total_households_ta_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="Reads Table TA1 from the same quarterly workbook m30 reads "
+              "Table A1 from -- discovery is shared code (imported from "
+              "m30_statutory_homelessness), not a separate implementation, "
+              "so this smoke test also indirectly exercises that sharing. "
+              "total_households_ta_text is the signal, not the numeric "
+              "column, for the same placeholder reason as m30's own smoke "
+              "spec above.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

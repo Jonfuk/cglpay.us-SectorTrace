@@ -750,10 +750,10 @@ anyone using it.
   correlation computed by this pipeline.
 - **Only Table A1 is read** — the flagship count of households assessed and
   what duty (if any) was owed. The workbook MHCLG publishes each quarter has
-  40+ other tables (temporary accommodation, prevention/relief outcomes by
-  type, multiple-disadvantage breakdowns); none of them are in this pipeline.
-  A figure that sounds like it should be here (e.g. "households in temporary
-  accommodation") is not, and should not be assumed derivable from what is.
+  40+ other tables (prevention/relief outcomes by type, multiple-disadvantage
+  breakdowns); none of the rest are in this pipeline. Temporary accommodation
+  (Table TA1) is read separately by Module 31, below — do not assume it can
+  be derived from anything in this module's own table.
 - **A quarter can be revised after this pipeline first reads it, and a later
   run silently overwrites the earlier figures on the natural key
   `(ons_code, quarter_start)`.** MHCLG republishes recent quarters as
@@ -803,6 +803,31 @@ anyone using it.
   logged to `review_queue` as `statutory_homelessness_unmatched_authority`,
   not silently dropped** — the same reorganisation-reconciliation gap
   Module 29 has, unrelated to this module's own parsing.
+
+### Temporary accommodation (Module 31)
+
+- **This is a comparator, not sector evidence, and it is never combined
+  with the sector's own evidence** — the same rule as Modules 29 and 30.
+- **Reads Table TA1 from the same quarterly workbook Module 30 reads Table
+  A1 from.** Discovery, per-quarter attachment selection and the
+  revision-preference rule are shared code, not independently maintained
+  copies — the revision, placeholder (`[x]`/`[z]`/`[n]`/`[c]`) and
+  pre-2017-`.xls`-gap caveats in Module 30's entry above apply here
+  identically and are not restated in full.
+- **v1 reads only the top-level totals and drops the bed-and-breakfast
+  breakdown.** `total_households_ta`, `households_ta_with_children` and
+  `children_in_ta` are read; how many of those households are in a B&B, and
+  the further "6 weeks", "pending review" and "16/17-year-old applicant"
+  breakdowns within that, are not — the same smallest-coherent-slice
+  discipline as Module 30 (which drops the Section 21 subset) and
+  Module 29 (which drops demographic breakdowns).
+- **One real edition published this table under a misnamed sheet.**
+  January–March 2023's workbook names the sheet `TA1_` rather than `TA1`
+  while every other sheet in the same file, including Table A1, is named
+  normally. `read_workbook_sheet` (shared with Module 30) resolves a
+  single unambiguous trailing-underscore variant; a workbook where more
+  than one sheet name would match after stripping is refused rather than
+  guessed at.
 
 ---
 

@@ -498,6 +498,19 @@ invisible here.
 | Rate limit | Default |
 | Notes | One evergreen page carrying one attachment per quarter (unlike Module 29's single ever-replaced file), so discovery is filtering the attachment list by title, not searching separate publications. Only Table A1 (households by initial assessment outcome — the flagship count) is read, out of 40+ tables in the workbook; the quarterly breakdown of temporary accommodation, prevention/relief outcomes and multiple-disadvantage figures are a possible later addition, not this module. The sheet layout is not stable across the series — an older multi-row merged-header shape and a newer flat single-row shape both appear — and columns are located by keyword, not fixed position; see the module's own docstring for how a duty total is kept from being confused with its own sub-breakdown. Pre-2017 quarters are plain `.xls`, which this pipeline has no reader for and does not read — a documented gap, not a silent one — see `docs/CAVEATS.md` |
 
+---
+
+## Module 31 — Temporary accommodation (H-CLIC)
+
+| | |
+| --- | --- |
+| Source | MHCLG statutory homelessness detailed local authority level tables, published on GOV.UK — the same workbook Module 30 reads |
+| Endpoints | Same as Module 30: `https://www.gov.uk/api/content/government/statistical-data-sets/live-tables-on-homelessness`, Table TA1 rather than A1 |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | Shares Module 30's discovery and file-reading code directly (imported, not duplicated — the two modules read the same evergreen page, the same per-quarter attachment and the same revision-preference rule; see Module 30's `read_workbook_sheet` docstring for why this is a genuinely different situation from Modules 13/29's independent, coincidentally-similar `sheet_rows` copies). v1 reads only the top-level totals (households in TA, with children, children in TA) and deliberately drops the bed-and-breakfast breakdown — the same smallest-coherent-slice discipline as Modules 29/30. A real edition (January–March 2023) published Table TA1 under the misnamed sheet `TA1_`; `read_workbook_sheet` resolves a single unambiguous trailing-underscore variant rather than failing that whole quarter |
+
 ## Viability checks
 
 Probed live on 2026-08-11 with the pipeline's own User-Agent, one request

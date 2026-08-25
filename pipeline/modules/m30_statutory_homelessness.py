@@ -277,7 +277,7 @@ def extract_a1_rows(rows: list[list[str]], anchor: int,
     return out
 
 
-def _to_int(raw: str) -> int | None:
+def to_int(raw: str) -> int | None:
     text = (raw or "").replace(",", "").strip()
     if text in _PLACEHOLDER_TEXT:
         return None
@@ -287,7 +287,7 @@ def _to_int(raw: str) -> int | None:
         return None
 
 
-def _to_float(raw: str) -> float | None:
+def to_float(raw: str) -> float | None:
     text = (raw or "").replace(",", "").strip()
     if text in _PLACEHOLDER_TEXT:
         return None
@@ -314,7 +314,7 @@ def parse_quarter_title(title: str) -> tuple[str, int, str] | None:
     return quarter_start, year, quarter_label
 
 
-def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
+def discover_publications(client: PipelineHTTPClient) -> list[dict]:
     """Every quarterly LA-level attachment on the one evergreen page,
     deduplicated to one file per quarter (a "(revised)" edition wins over
     the original where both exist)."""
@@ -343,17 +343,40 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
     return sorted(by_quarter.values(), key=lambda p: p["quarter_start"])
 
 
-def _read_sheet(body: bytes, content_type: str) -> list[list[str]]:
+def read_workbook_sheet(body: bytes, content_type: str, sheet_name: str) -> list[list[str]]:
+    """One named sheet from an H-CLIC quarterly workbook, ODS or XLSX.
+
+    Not module-private: Module 31 (temporary accommodation) reads the same
+    quarterly attachments this module discovers, just a different sheet
+    (`TA1` rather than `A1`), and imports this directly rather than
+    duplicating it — the two modules share one source, one attachment list
+    and one dedup rule, which is a different situation from m13/m29's
+    deliberately-separate `sheet_rows` copies (unrelated sources that just
+    happen to both be ODS).
+
+    A sheet name is looked up exactly first; if that fails, a single
+    trailing underscore is tried too (`"TA1_"` as well as `"TA1"`) before
+    giving up — confirmed against a real edition (January-March 2023) that
+    published Table TA1 under exactly that misnamed sheet, alongside every
+    other sheet in the same workbook named normally. Never resolved when
+    more than one sheet would match after stripping, so a genuinely
+    ambiguous workbook still fails rather than guessing.
+    """
     if content_type == ODS_MIME:
         doc = load_ods(io.BytesIO(body))
         tables = {t.getAttribute("name"): t
                   for t in doc.spreadsheet.getElementsByType(Table)}
-        if A1_SHEET not in tables:
-            raise StatutoryHomelessnessParseError(
-                f"no {A1_SHEET!r} sheet in this workbook")
-        return sheet_rows(tables[A1_SHEET])
+        if sheet_name not in tables:
+            candidates = [name for name in tables
+                          if name.rstrip("_") == sheet_name and name != sheet_name]
+            if len(candidates) == 1:
+                sheet_name = candidates[0]
+            else:
+                raise StatutoryHomelessnessParseError(
+                    f"no {sheet_name!r} sheet in this workbook")
+        return sheet_rows(tables[sheet_name])
     if content_type == XLSX_MIME:
-        return pipeline_xlsx.read_sheet(body, A1_SHEET)
+        return pipeline_xlsx.read_sheet(body, sheet_name)
     raise StatutoryHomelessnessParseError(f"unsupported content type {content_type!r}")
 
 
@@ -377,7 +400,7 @@ def run(ctx: ModuleContext) -> None:
     quarters_processed = 0
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
-        publications = _discover_publications(client)
+        publications = discover_publications(client)
         if not publications:
             raise StatutoryHomelessnessParseError(
                 "No quarterly local-authority-level H-CLIC files found — the "
@@ -413,7 +436,7 @@ def run(ctx: ModuleContext) -> None:
                 continue
 
             try:
-                rows = _read_sheet(file_result.body, content_type)
+                rows = read_workbook_sheet(file_result.body, content_type, A1_SHEET)
             except Exception as exc:
                 db.record_review_item(
                     conn, module_name, "statutory_homelessness_file_unreadable",
@@ -471,10 +494,10 @@ def run(ctx: ModuleContext) -> None:
                               "not_threatened_no_duty", "withdrew_no_duty",
                               "not_eligible_no_duty"):
                     raw = entry.get(field, "")
-                    record[field] = _to_int(raw)
+                    record[field] = to_int(raw)
                     record[f"{field}_text"] = raw or None
                 raw_area = entry.get("households_in_area_thousands", "")
-                record["households_in_area_thousands"] = _to_float(raw_area)
+                record["households_in_area_thousands"] = to_float(raw_area)
                 record["households_in_area_thousands_text"] = raw_area or None
 
                 db.upsert(conn, "statutory_homelessness_snapshot", record,

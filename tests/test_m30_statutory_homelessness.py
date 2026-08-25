@@ -187,14 +187,14 @@ def test_extracted_values_match_the_real_published_england_row_by_position():
     ("", None), ("-", None),
 ])
 def test_to_int_handles_commas_and_all_four_placeholders(raw, expected):
-    assert hclic._to_int(raw) == expected
+    assert hclic.to_int(raw) == expected
 
 
 @pytest.mark.parametrize("raw,expected", [
     ("24,209.0", 24209.0), ("0", 0.0), ("[c]", None), ("", None),
 ])
 def test_to_float_handles_placeholders(raw, expected):
-    assert hclic._to_float(raw) == expected
+    assert hclic.to_float(raw) == expected
 
 
 # --- title / publication discovery -------------------------------------------
