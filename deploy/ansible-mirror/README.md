@@ -1,16 +1,32 @@
-# Mirroring an existing deployment onto a second VPS
+# A second box off `deploy/ansible/`: mirror, or beta
 
-Provisions a box that runs the same stack as a SectorTrace deployment —
-PostgreSQL, Neo4j, the app, Caddy for TLS — with **nothing collecting into
-it**. The warehouse arrives from an existing deployment on a nightly timer,
-and that deployment's raw archive is pulled out of its S3 bucket onto this
-box's **local disk**.
+This role provisions a box that runs the same stack as a SectorTrace
+deployment — PostgreSQL, Neo4j, the app, Caddy for TLS — seeded from an
+existing deployment's data. `ansible-mirror.sh` asks which of two things
+you want, up front, because everything else here is shared between them:
+
+- **A disaster-recovery mirror** (`mirror_role: dr_mirror`, the default).
+  **Nothing collects into it.** The warehouse is replaced wholesale from the
+  source deployment on a nightly timer, and that deployment's raw archive is
+  pulled out of its S3 bucket onto this box's **local disk**. This is the
+  original, and everything below that talks about nightly syncing, staleness
+  alerts and "read it, do not work in it" describes this mode.
+- **A beta deployment** (`mirror_role: beta`). Builds a chosen git branch —
+  the app image is built from **this box's own checkout**, which the
+  playbook itself resets to `origin/<deploy_git_branch>` on every run, not
+  from whatever happened to be checked out — and seeds its database from an
+  existing deployment **once**, by hand, rather than nightly. After that
+  seed this is an ordinary writable database: work in it, test the branch's
+  changes against realistic data, and re-seed whenever you want fresh data
+  instead of on a timer that would otherwise discard what you just wrote.
+  See "Beta deployments" below.
 
 It is `deploy/ansible/` with one role swapped. Six of the seven roles
 (`preflight`, `common`, `tuning`, `hardening`, `docker`, `firewall`) are
 used unchanged from `../ansible/roles` — same Debian box, same exposure,
 same hardening, and a fix to any of them belongs in one place. Only
-`sectortrace_mirror` differs from `sectortrace`.
+`sectortrace_mirror` differs from `sectortrace`, and it is one role for
+both modes above — see `mirror_role` in `group_vars/all/vars.yml`.
 
 ```bash
 git clone <this-repo-url> /opt/sectortrace/app
@@ -33,6 +49,45 @@ a copy of the warehouse, not a copy of the public export. The same
 protections apply here — `guard_columns()`, the reveal gate, the admin
 allowlist — because it is the same application, and the same care applies to
 the box. A mirror is not a lower-security tier of the thing it copies.
+
+*(Both paragraphs above describe `mirror_role: dr_mirror`. A beta deployment
+keeps the second one — same data, same care — and inverts the first: see
+below.)*
+
+## Beta deployments
+
+Choose "Beta deployment" in the wizard's first question and it asks two more
+things a mirror never does:
+
+- **Which branch to build.** Every time you re-run `./ansible-mirror.sh` —
+  a normal redeploy, not just first setup — the playbook fetches
+  `origin/<branch>` and resets this box's checkout to it before building the
+  app image, discarding any change made directly on the box. This box always
+  runs the tip of the branch you named; there is no separate `git pull` step
+  to remember, unlike a `dr_mirror`'s "Redeploying" section below.
+- **Whether to reseed nightly too.** Default no. The three "how does the
+  warehouse get here" sync paths below (snapshot / tunnel / URL) still apply
+  — a beta box seeds from the same sources a mirror would — but by default
+  that happens **once**, when you run `sectortrace-mirror sync` yourself, and
+  never again on its own. Say yes and it behaves exactly like a `dr_mirror`'s
+  nightly sync instead, wholesale-replacing the warehouse on the timer —
+  useful if you want beta to track production data closely, but then it
+  inherits the same rule: work in the source deployment, not here.
+
+**If your production database is a managed service such as Railway, that is
+sync path 3 ("Directly from a PostgreSQL URL") below** — paste its
+PostgreSQL connection URL when asked, ideally a read-only role if the
+provider offers one. Nothing else about the wizard changes: the raw-archive
+question, the vault password and everything after it are identical for both
+roles.
+
+**What running the app normally on this box does *not* do on its own:**
+collect. `mirror_role: beta` does not add module API keys or a collection
+schedule — it inherits the mirror's "no collection" property (see below)
+regardless of role, on purpose, so a beta box testing a portal or query
+change does not also start crawling live public sources a second time from a
+second box. If a queue item specifically needs to exercise collection, that
+is a deliberate follow-up decision, not this role's default.
 
 ## What the wizard asks
 
@@ -351,6 +406,14 @@ git pull
 cd deploy/ansible-mirror
 ./ansible-mirror.sh
 ```
+
+**A beta deployment does not need the `git pull` above** — the playbook's
+own pre-task fetches and resets to `origin/<deploy_git_branch>` before
+building, every run, specifically so redeploying beta is just re-running
+`./ansible-mirror.sh`. Run it anyway if you like; it is a no-op once the
+playbook has already fetched the same commit. A `dr_mirror` still needs it:
+`deploy_git_branch` is empty by default in that mode, and the playbook
+touches nothing about this box's checkout.
 
 **Keep this checkout at or ahead of the source's.** The schema comes from
 `pipeline/migrations/postgres/`, not from the snapshot, and `restore` refuses

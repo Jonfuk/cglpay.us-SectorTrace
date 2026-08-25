@@ -202,6 +202,37 @@ unattended_upgrades_reboot_time: "04:00"
 # warehouse came from.
 mirror_source_label: ""
 
+# --- What this box is for -----------------------------------------------------
+# "dr_mirror" (default) is everything below this point as originally
+# written: a disaster-recovery copy, wiped and replaced wholesale on every
+# sync, tracking whatever branch happens to be checked out.
+#
+# "beta" is the other thing this role can build: a box that pins a git
+# branch (deploy_git_branch below) and re-fetches/resets to its tip on every
+# playbook run, seeds its database from a source ONCE using the same three
+# sync paths as a dr_mirror, and then — unlike a dr_mirror — is left alone.
+# mirror_recurring_sync_enabled defaults to false in that case specifically
+# so that testing writes on this box survive until you choose to reseed by
+# hand (`sectortrace-mirror sync`), not until 04:30 the next morning.
+# ansible-mirror.sh asks which of the two this box is; see its "What is this
+# box for?" question.
+mirror_role: "dr_mirror"   # "dr_mirror" or "beta"
+
+# The branch this box builds and runs. Empty (the dr_mirror default) means
+# "whatever is checked out here" — the historical behaviour, unchanged: a
+# human runs `git pull` before re-running the playbook, as the README's
+# "Redeploying" section describes. A beta deployment sets this so the
+# playbook itself keeps the box's checkout pinned to the branch's tip on
+# every run, discarding any local modifications on the box on purpose — see
+# the "Pin this box's checkout" task in site.yml.
+deploy_git_branch: ""
+
+# Whether the sync timer fires nightly (dr_mirror's historical default,
+# true) or the source is seeded once, by hand, and left alone (beta's
+# default, set by the wizard). A database testing writes can't survive
+# without vanishing at the next timer firing is not a testing database.
+mirror_recurring_sync_enabled: "{{ mirror_role != 'beta' }}"
+
 # How the warehouse gets here. All paths are built; this chooses which one
 # the timer runs, and ansible-mirror.sh asks for it.
 #
@@ -319,7 +350,11 @@ mirror_metrics_dir: ""
 #           worth the I/O.
 #
 # Both fail loudly, which means both alert.
-mirror_verify_enabled: true
+# Ties to whether recurring sync runs at all: "does this box still match the
+# source" is a meaningless question to keep asking about a beta box whose
+# whole point is to be written to and diverge from the source between
+# deliberate reseeds. A dr_mirror keeps its historical default (true).
+mirror_verify_enabled: "{{ mirror_recurring_sync_enabled }}"
 mirror_verify_time: "Mon *-*-* 05:30:00"
 mirror_verify_deep_time: "*-*-01 05:30:00"
 

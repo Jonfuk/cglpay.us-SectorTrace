@@ -17,6 +17,43 @@
   become: true
   vars:
     repo_root: "{{ (playbook_dir + '/../..') | realpath }}"
+
+  pre_tasks:
+    # Only a beta deployment sets deploy_git_branch (see group_vars/all/vars.yml).
+    # A dr_mirror leaves this empty and keeps the historical behaviour: a
+    # human runs `git pull` before re-running the playbook.
+    - name: Pin this box's checkout to deploy_git_branch
+      when: deploy_git_branch | length > 0
+      block:
+        - name: Fetch the target branch
+          ansible.builtin.command:
+            cmd: git fetch origin {{ deploy_git_branch }}
+            chdir: "{{ repo_root }}"
+          changed_when: true
+
+        # -B creates-or-resets in one idempotent step, whether or not
+        # deploy_git_branch already exists as a local branch on this box —
+        # and resets hard to origin's tip either way. Deliberate: this box
+        # always tracks the branch exactly, and any local edit made directly
+        # on the box (a hotfix typed over SSH, say) is discarded on the next
+        # run rather than silently blocking a fast-forward.
+        - name: Check out and reset to origin/{{ deploy_git_branch }}
+          ansible.builtin.command:
+            cmd: git checkout -B {{ deploy_git_branch }} origin/{{ deploy_git_branch }}
+            chdir: "{{ repo_root }}"
+          changed_when: true
+
+        - name: Read the commit this box is about to build
+          ansible.builtin.command:
+            cmd: git rev-parse --short HEAD
+            chdir: "{{ repo_root }}"
+          register: deploy_git_commit
+          changed_when: false
+
+        - name: Report it
+          ansible.builtin.debug:
+            msg: "Building {{ deploy_git_branch }} at {{ deploy_git_commit.stdout }}"
+
   roles:
     - preflight          # size the host, check DNS — fails before anything changes
     - common             # OS upgrade, base packages, time, journal, swap
@@ -48,10 +85,11 @@
     - name: Report where things are
       ansible.builtin.debug:
         msg:
+          - "Role:       {{ 'BETA deployment, branch ' + deploy_git_branch if mirror_role == 'beta' else 'disaster-recovery mirror' }}"
           - "Portal:     https://{{ domain }}/"
           - "Admin UI:   ssh -L 1801:127.0.0.1:1801 <user>@{{ domain }} -N, then http://127.0.0.1:1801/admin"
           - "Stack:      cd {{ state_dir }} && docker compose ps"
-          - "Sync:       systemctl status sectortrace-mirror-sync.timer"
+          - "Sync:       {{ 'systemctl status sectortrace-mirror-sync.timer' if mirror_recurring_sync_enabled else 'no timer — this box is seeded once, by hand, and left alone' }}"
           - "            sectortrace-mirror sync        (run one now, in the foreground)"
           - "            sectortrace-mirror sync-log    (what the last runs did)"
           - "Source:     {{ mirror_source_label | default('(unnamed)', true) }} via

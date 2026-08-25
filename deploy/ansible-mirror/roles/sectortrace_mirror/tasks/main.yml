@@ -384,6 +384,20 @@
     name: sectortrace-mirror-sync.timer
     enabled: true
     state: started
+  when: mirror_recurring_sync_enabled
+
+# Stopped and disabled before this box's checkout is even asked about it on
+# a --reconfigure from dr_mirror to beta — same reasoning as the tunnel
+# unit above: a timer left running under a mode that no longer wants it is
+# exactly the kind of thing that overwrites a beta box's test data at
+# 04:30 with nobody having asked it to.
+- name: Stop and disable the sync timer when recurring sync is off
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-sync.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not mirror_recurring_sync_enabled
 
 - name: Enable and start the verify timers
   ansible.builtin.service:
@@ -421,4 +435,9 @@
       - "    tmux new -s sync"
       - "    sectortrace-mirror sync"
       - ""
-      - "After that the timer keeps it current: {{ mirror_sync_time }} daily."
+      - "{{ 'After that the timer keeps it current: ' + mirror_sync_time + ' daily.'
+           if mirror_recurring_sync_enabled else
+           'No timer is running. That sync is the only one that happens '
+           + 'automatically — after it, this database is yours: write to it, '
+           + 'test against it, and re-run `sectortrace-mirror sync` by hand '
+           + 'whenever you want fresh data from the source instead.' }}"

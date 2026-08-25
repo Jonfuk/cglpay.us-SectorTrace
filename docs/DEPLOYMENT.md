@@ -217,15 +217,26 @@ reproducible Docker Compose build on a single Debian VPS, run locally on the
 box itself rather than from a separate control machine. See
 [`deploy/ansible/README.md`](../deploy/ansible/README.md).
 
-## A second VPS: mirroring an existing deployment
+## A second VPS: mirroring an existing deployment, or a beta box
 
-`deploy/ansible-mirror/` provisions a box that runs the same stack with
-nothing collecting into it. The warehouse arrives from an existing
-deployment on a nightly timer — either its newest verified backup out of S3,
-a direct verified copy of its PostgreSQL over an SSH tunnel, or a direct
-verified copy from a managed PostgreSQL URL — and that
-deployment's raw archive is pulled out of its bucket onto the mirror's local
-disk, where the mirror's own app reads it with no S3 configuration at all.
+`deploy/ansible-mirror/` provisions a box that runs the same stack, seeded
+from an existing deployment's data — including a managed one such as
+Railway (see below), over the "directly from a PostgreSQL URL" sync path.
+Its wizard asks up front which of two things to build:
+
+- **A disaster-recovery mirror** (the default): nothing collects into it,
+  and the warehouse arrives on a nightly timer — either the source's newest
+  verified backup out of S3, a direct verified copy of its PostgreSQL over an
+  SSH tunnel, or a direct verified copy from a managed PostgreSQL URL — and
+  that deployment's raw archive is pulled out of its bucket onto the
+  mirror's local disk, where the mirror's own app reads it with no S3
+  configuration at all.
+- **A beta deployment**: builds a chosen git branch (the box's own checkout
+  is reset to `origin/<branch>` on every run, not whatever was checked out),
+  seeds from the same sync paths **once** rather than nightly, and is then
+  left as an ordinary writable database — for testing that branch's changes
+  against realistic data without the next nightly sync discarding what
+  testing wrote, and without touching production.
 
 Six of its seven roles are the self-host build's, used unchanged. The thing
 to know before running it is that the warehouse is replaced wholesale on
