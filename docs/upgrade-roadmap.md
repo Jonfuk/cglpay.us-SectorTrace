@@ -436,7 +436,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: clicking an authority opens its page (W-13) or a contracts view filtered to that buyer. Depends on W-13 or a lighter filtered-lists route.
 - Verified by: a browser check of the click, and a test that the click target URL carries the ONS code.
 
-**W-15 · Providers are not linked to their registers · S — mostly closed in Phase 9; CQC still open**
+**W-15 · Providers are not linked to their registers · S — closed in Phase 9; CQC closed 2026-08-21**
 - **Fix:** `company_number` → Companies House and `charity_number` → the
   Charity Commission, on the providers list and under a provider's name on the
   deep dive, labelled *verify at source*. The deep-dive links are built from
@@ -446,12 +446,22 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - The charity link is the register's **search** on the registered number, not
   the charity-details page: that page is keyed by an internal organisation
   number this pipeline does not store.
-- **CQC is not linked and this is the open half.** The public API publishes no
-  profile URL — 520 archived payloads contain no `cqc.org.uk` address — and
-  the conventional shape could not be verified without working around a bot
-  block. A test asserts none is built. One manual check of
-  `www.cqc.org.uk/location/{location_id}` against a real location id would
-  settle it; until then a link that 404s is worse than a name.
+- **CQC closed 2026-08-21 (`86ef103`), by a different route than this entry
+  expected.** Not the generic `registerLink`/`REGISTERS` mechanism company
+  and charity numbers use — a provider has *one* company number but *many*
+  CQC locations, so a single "verify at source" line under the provider's
+  name does not fit the same shape. Instead, every CQC badge on the provider
+  deep dive (one per location) now links to `cqc.org.uk/location/{id}`,
+  confirmed present as a URL column in both CQC bulk export files this
+  pipeline already reads (`m26_cqc_directory`) — not the live API this entry
+  was waiting on, and not the bot-block workaround it explicitly refused.
+  Independently reconfirmed 2026-08-25: the URL loads a real, full profile
+  (ratings, registered manager, nominated individual) with no bot-block, for
+  a real CGL location. The "test asserts none is built" this entry
+  described no longer describes the code — `cqcLocationHref` in
+  `pipeline/web/static/public/js/pages/providers.js` is exactly that link,
+  shipped and covered by its own commit's manual verification against
+  production data.
 
 - Evidence: zero references to Companies House, the Charity Commission or CQC in the public JS (verified by search); providers carry `company_number` ([pipeline/exports/schema.py:97](pipeline/exports/schema.py:97)) and charities carry `charity_number`, and neither is rendered as a link.
 - Costs today: the cheapest verification affordance — checking the register — requires a manual search. All three registers run public lookups by exactly these identifiers.
@@ -731,9 +741,10 @@ somewhere it survives.
 - What: ▲▼ "direction of travel" per row against the previous period, as Fingertips' England view shows.
 - Why it is here rather than in the register: every row-level change marker invites the differencing `docs/CAVEATS.md` forbids for the census, and the marker must know per row which layers it may appear on. The rule exists; a marker needs it encoded, and which layers carry it and what the caveat next to it says is a decision to settle before the button is. Filed so that decision is remembered.
 
-**API rate cap · S**
+**API rate cap · S — DELIVERED 2026-08-25 (`pipeline/web/ratelimit.py`)**
 - What: a per-IP token bucket on the `/api/v1/*` read routes — a 429 with `Retry-After` rather than silence.
 - Why it is here rather than in the register: it is small, and its answer depends on a standing decision — the bind address is the control, and a cap only earns its place once the portal is reachable by readers the operator does not trust, which is the same exposure the README's security section already governs. Filed so the limit exists when the exposure does. Every public data API answers overload with a limit.
+- **Delivered:** production confirmed live on Railway (a public host) settled the standing decision this entry was waiting on. Implemented exactly as specified — a `TokenBucketLimiter`, `/api/v1/*` only, `429` + `Retry-After`, generous defaults (120/min, burst 40) so ordinary interactive use never sees it. See `beta.md`'s BETA-007.
 
 **Table-browser CSV · S**
 - What: a "download current view" on the admin table browser, alongside the SQL box's existing CSV.

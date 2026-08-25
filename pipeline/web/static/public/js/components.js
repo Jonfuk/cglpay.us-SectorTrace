@@ -254,11 +254,14 @@ export function provenanceFromRows(rows, { module = null, tables = [] } = {}) {
  * exactly one match for a valid number. One click further and honest about
  * what it is, rather than a details URL built from an id we do not hold.
  *
- * CQC is deliberately absent. The public API publishes no profile URL for a
- * location (checked against 520 archived payloads, which contain no
- * cqc.org.uk address at all), and the shape could not be verified without
- * working around a bot block, which this project does not do. See
- * docs/upgrade-roadmap.md, W-15.
+ * CQC is deliberately absent from this map specifically — not from the
+ * portal. A provider has one company number and one charity number, but
+ * *many* CQC locations, so a single link under the provider's name does not
+ * fit the shape this function and REGISTERS are for. Each CQC location gets
+ * its own link instead, on the provider deep dive's CQC badges
+ * (`cqcLocationHref` in pages/providers.js), built from a URL column CQC's
+ * own bulk export files carry — confirmed live, no bot-block, 2026-08-21 and
+ * reconfirmed 2026-08-25. See docs/upgrade-roadmap.md, W-15.
  */
 const REGISTERS = {
   company_number: {
