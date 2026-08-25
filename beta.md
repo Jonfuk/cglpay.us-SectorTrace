@@ -101,8 +101,7 @@ DONE
 
 - [DONE] BETA-019 | Complete-corpus CSV/JSON export for PFD reports
   - completed: 2026-08-26T00:35:00Z
-  - commits: (see the commit immediately following this entry in
-    `git log beta`)
+  - commits: `ece19ae` (`beta`)
   - result: BETA-018's own flagged follow-up, built this cycle. `pfd.js`'s
     "Latest reports" table had no CSV export, unlike every comparable
     "recent records" table elsewhere in the portal — confirmed as a real
@@ -1347,6 +1346,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `ece19ae` — BETA-019: complete-corpus CSV/JSON export for PFD reports
+  (`beta`).
 - `087c1c6` — BETA-018: theme-aware chart colours, mobile theme switcher,
   dead vendor file (`beta`).
 - `a2b4796` — BETA-017: surface Modules 29-31 as a Comparators section on
