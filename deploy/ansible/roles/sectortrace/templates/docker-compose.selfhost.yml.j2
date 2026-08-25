@@ -10,7 +10,28 @@ networks:
   default:
     name: sectortrace_net
 
+# Named volumes for the two databases rather than bind mounts into
+# state_dir, which is what the earlier revisions did. Two reasons, both
+# learned the hard way on a real box:
+#
+#  * PostgreSQL 18+ images store data in a major-version subdirectory and
+#    declare the volume at /var/lib/postgresql, not .../data. A bind mount
+#    one level too deep is reported as an "unused mount/volume" and the
+#    container refuses to start if anything is in it.
+#  * Both entrypoints drop from root to their own service user, and neither
+#    chowns the *parent* of its data directory. A root-owned bind mount is
+#    then untraversable by the very user that needs it. Docker seeds a fresh
+#    named volume from the image, ownership included, so the question never
+#    arises.
+#
+# The warehouse is still backed up by `pipeline backup` (verified, plus the
+# offsite copy), which is the supported path — not by copying a data
+# directory out from under a running server. `docker volume inspect
+# sectortrace_postgres-data` says where it physically lives.
 volumes:
+  postgres-data:
+  neo4j-data:
+  neo4j-logs:
   caddy-data:
   caddy-config:
 
@@ -55,7 +76,11 @@ services:
     # rebuildable, and the warehouse is neither.
     oom_score_adj: -500
     volumes:
-      - "{{ state_dir }}/data/postgres:/var/lib/postgresql/data"
+      # The whole /var/lib/postgresql, which is what the 18+ image declares
+      # as its VOLUME; PGDATA is /var/lib/postgresql/18/docker inside it.
+      # Mounting .../data instead leaves PGDATA on the container's writable
+      # layer and the image refuses to start.
+      - postgres-data:/var/lib/postgresql
       # Only runs against an empty data directory — a fresh init, never a
       # re-run against an existing volume. That's also why role creation
       # can't be "just re-apply the playbook" if you rotate this password;
@@ -94,8 +119,8 @@ services:
     # should be this, and `graph rebuild --clear` puts it back.
     mem_limit: {{ neo4j_mem_limit_mb }}m
     volumes:
-      - "{{ state_dir }}/data/neo4j/data:/data"
-      - "{{ state_dir }}/data/neo4j/logs:/logs"
+      - neo4j-data:/data
+      - neo4j-logs:/logs
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/7687'"]
       interval: 10s
