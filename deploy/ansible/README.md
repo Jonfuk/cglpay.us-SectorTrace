@@ -116,6 +116,35 @@ killer explaining it at 3am. 4GB is the practical floor for the full stack;
 Override any single value in `zz-local.yml`, or set `auto_tune_memory: false`
 and pin them all.
 
+### Where the data lives
+
+PostgreSQL, Neo4j and Caddy state are in **named Docker volumes**
+(`sectortrace_postgres-data`, `sectortrace_neo4j-data`, …), not bind mounts
+under `state_dir`. Two reasons, both found on a real box:
+
+- PostgreSQL 18+ images store data in a major-version subdirectory and
+  declare their volume at `/var/lib/postgresql`, not `.../data`. A bind
+  mount one level too deep is reported as an "unused mount/volume" and the
+  container refuses to start if anything is in it.
+- Both entrypoints drop from root to their own service user and neither
+  chowns the *parent* of its data directory, so a root-owned bind mount is
+  untraversable by the user that needs it. Docker seeds a fresh named volume
+  from the image, ownership included, so the question never arises.
+
+`docker volume inspect sectortrace_postgres-data` says where a volume
+physically sits. `docker compose down` keeps them; only `down -v` destroys
+them.
+
+What *is* under `state_dir`: `.env`, the rendered compose and Caddyfile,
+`postgres-init/`, and `data/backups` + `data/derived` (written by the app
+container, which runs as root, and read from the host by the offsite backup
+script). `state_dir` itself is `0750` root-owned — that's the privacy
+boundary, which is why individual files inside can carry whatever mode a
+container needs without widening host access.
+
+Backups go through `pipeline backup` (verified, plus the offsite copy), not
+by copying a data directory out from under a running server.
+
 ### Blast radius
 
 The failure this guards against: a document batch allocates hard, the kernel

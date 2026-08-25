@@ -1,18 +1,39 @@
 ---
+# This is the privacy boundary for everything below it: 0750 root-owned, so
+# no unprivileged account on the host can reach the rendered .env, the
+# bootstrap SQL or the backups. Files inside can then carry whatever mode a
+# container needs without that widening host access.
+- name: Create the state directory
+  ansible.builtin.file:
+    path: "{{ state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
 - name: Create state directory tree (outside the git checkout)
   ansible.builtin.file:
     path: "{{ state_dir }}/{{ item }}"
     state: directory
     mode: "0750"
   loop:
-    - postgres-init
-    - data/postgres
-    - data/neo4j/data
-    - data/neo4j/logs
+    # Written by the app container (which runs as root) and read from the
+    # host by the offsite backup script, so it has to be a real path here.
     - data/backups
     - data/derived
-    - data/caddy
-    - data/caddy-config
+  # PostgreSQL, Neo4j and Caddy state are deliberately NOT here — they live
+  # in named Docker volumes. See the compose template for why.
+
+# 0755, unlike everything else here. The postgres entrypoint re-execs itself
+# as the `postgres` user before running these scripts, and that user has to
+# be able to traverse the bind-mounted directory and read the file. Host
+# secrecy comes from state_dir being 0750 above, which the container's view
+# never inherits from.
+- name: Create the Postgres init directory
+  ansible.builtin.file:
+    path: "{{ state_dir }}/postgres-init"
+    state: directory
+    mode: "0755"
 
 - name: Render .env
   ansible.builtin.template:
@@ -24,7 +45,9 @@
   ansible.builtin.template:
     src: postgres-init-roles.sql.j2
     dest: "{{ state_dir }}/postgres-init/01-roles.sql"
-    mode: "0600"
+    # Readable by the in-container postgres user, per the directory note
+    # above. Not a widening of host access: state_dir is 0750.
+    mode: "0644"
 
 - name: Render the always-on stack's docker-compose.yml
   ansible.builtin.template:
