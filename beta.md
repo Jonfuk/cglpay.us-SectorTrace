@@ -97,6 +97,72 @@ DEFERRED
 DONE
 -->
 
+### IN_PROGRESS
+
+- [IN_PROGRESS] BETA-010 | Public relationship explorer over the evidence graph
+  - started: 2026-08-25T00:00:00Z
+  - priority: P1
+  - impact: 5
+  - effort: 4 (L)
+  - confidence: 3
+  - risk: 3
+  - area: portal
+  - depends_on: none (BETA-009 confirmed the data source is safe)
+  - branch: beta
+  - decided: New dedicated portal section (not integrated into an existing
+    page). First version scoped to provider↔authority commissioning
+    relationships only — the deterministic data `graph backfill` already
+    produces (`SOURCE_FACT`/`DERIVED_RELATIONSHIP` from contract awards and
+    the authority/provider registries), not company/PSC ownership edges.
+    Project owner's decision, 2026-08-25 interview.
+  - objective: A public page where a reader picks a provider or authority
+    and sees who it's connected to (commissioning relationships), with the
+    same "no figure without its caveat" and "verify at source" discipline
+    as the rest of the portal — this is relationship data, not a score, and
+    must not imply more than "these two entities co-occur in a contract
+    award" says.
+  - next_action: Design the API payload shape first (new
+    `public_queries.py` function reading `entities`/`entity_relationships`
+    filtered to `derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')`
+    and the commissioner/provider edge type only — never `graph_claims` or
+    anything Neo4j-only, since the warehouse tables are the citable source
+    and Neo4j is explicitly documented as a disposable projection of them).
+    Then a new frontend page using ECharts' native `graph` series (already
+    vendored, no new dependency) for the visualization, following the
+    existing page module pattern in `pipeline/web/static/public/js/pages/`.
+  - validation_remaining: New tests for the query function and route; a
+    live-browser check of the actual rendered graph, not just that the API
+    returns data; confirm no `restricted_` table or personal data can reach
+    this payload (reuse `guard_columns()` the way every other public query
+    does).
+  - notes: `entity_relationships.derivation_type` also includes values this
+    page must never render without more thought — `EXTRACTED_CLAIM` and
+    `ANALYTICAL_SIGNAL` are reserved for a not-yet-built extraction pipeline
+    (see BETA-009's DONE entry) and nothing currently writes them, but the
+    query must filter explicitly rather than assume the absence holds
+    forever.
+
+- [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
+  - priority: P1
+  - blocked_by: Candidate type/use case — asked directly of the project
+    owner in this session, answer pending (see Questions Requiring Human
+    Input #0).
+  - resume_when: The project owner specifies which candidates this should
+    apply to.
+  - alternative_work_available: yes (BETA-010 is in progress)
+  - decided_so_far: Wire it up for real use (not remove, not
+    document-as-inactive). Review requirement: one AI pass plus the
+    existing human review-queue decision counts as the second independent
+    review — so this does *not* need two separate AI passes, just the AI
+    check plus whatever a human reviewer already decides in the normal
+    queue. Project owner's decision, 2026-08-25 interview.
+  - notes: This is the most sensitive item in the whole queue — it touches
+    `CLAUDE.md` settled decision 4 directly. Do not start implementation
+    speculatively before the candidate type is known; the predicates
+    (official source, exact identity, document type, dated, archived, no
+    conflicts) mean very different things depending on which candidate
+    table this reads from.
+
 ### DONE
 
 - [DONE] BETA-009 | Health tab: surface the evidence graph's own operational state
@@ -526,63 +592,42 @@ documents pre-Phase-4). Nothing new rejected this cycle.
   in this session's work weakens that; flagged so it stays front-of-mind for
   whoever runs the wizard for real.
 
+## Decisions (from the project owner's interview, 2026-08-25)
+
+- **`deploy/ansible/` is the maintained DR/host-migration path** — kept and
+  maintained going forward, confirming BETA-003's approach was correct in
+  spirit. **`deploy/ansible-mirror` is specifically for building beta and
+  mirror environments away from production** — exactly BETA-003's design.
+  No code change needed; this closes former Question 1.
+- **`docs/upgrade-roadmap.md` stays, but only for major work.** Lighter
+  discipline than the F/D/P/U/W/O-for-everything approach that visibly
+  lapsed — file findings/phases for significant initiatives, not every
+  small fix. This closes former Question 2. (Not yet written down as an
+  explicit rule anywhere else — worth a one-line note at the top of the
+  roadmap itself if a future session has a spare minute.)
+- **Relationship explorer: yes, public-facing.** New dedicated portal
+  section. First version scoped to provider↔authority commissioning
+  relationships only (the deterministic data `graph backfill` already
+  produces) — not company/PSC ownership edges yet. See BETA-010 below.
+- **AI-authored promotion: yes, wire it up.** Review requirement: one AI
+  pass plus the existing human review-queue decision as the second
+  independent review. Candidate type/use case: **awaiting the project
+  owner's explanation** — asked directly rather than via multiple choice,
+  since this is a "let me explain" case, not a pick-from-a-list one.
+
 ## Questions Requiring Human Input
 
-0. **`pipeline/ai_promotion.py` and `docs/AI_PROMOTION_POLICY.md` exist,
-   describe a real narrow-but-real path for AI-authored evidence promotion,
-   and are currently wired to nothing.** Found while scanning for more
-   dormant capability after BETA-009's graph-subsystem discovery. It is
-   carefully designed — a distinct `actor_type = 'ai'` so an AI can never be
-   written into `review_decisions.decided_by` as if it were a person,
-   objective predicates (official source, exact identity, dated, archived,
-   no conflicts), two independent reviews required, 10% sampling review, a
-   quarantine-on-false-promotion circuit breaker — and it landed via the
-   same commit as dataset-completion safeguards (`1ccbe6f`), suggesting it
-   was built for a specific bounded backfill effort rather than as a general
-   policy change. But nothing in `pipeline/cli.py` or the web server calls
-   `pipeline.ai_promotion.validate()` or constructs a `Recommendation` —
-   it's schema and policy with no caller. **This sits in real tension with
-   `CLAUDE.md`'s settled decision 4** ("Nothing is promoted to evidence
-   without a person. Database triggers enforce it") — not necessarily a
-   contradiction (a well-guarded, sampled, human-supervised exception is a
-   different thing from no promotion gate at all), but not obviously
-   reconciled either, and it's exactly the kind of "two choices imply
-   fundamentally different directions" case §49 of the original brief says
-   to surface rather than resolve autonomously. **Not touched, not wired
-   up, not extended — flagged only.** Worth knowing: is this meant to be
-   activated for something specific, or is it dead code from an experiment
-   that should either be finished, documented as inactive-by-design, or
-   removed?
-
-1. **Is `deploy/ansible/`'s self-host build a live fallback, deliberately
-   kept, or dead?** Not asked this cycle — Railway-as-production was the
-   question in front of the session, and answering it didn't require also
-   resolving this one. Worth asking only if it starts to matter (e.g. before
-   investing further deployment-adjacent effort there).
-2. **Should new work keep being filed through `docs/upgrade-roadmap.md`'s
-   F/D/P/U/W/O numbering, or is `git log` + `README.md` + `docs/` enough now
-   that it's caught up?** BETA-002 corrected it but did not decide this — see
-   that entry's note. **Stronger signal after BETA-008: this session found
-   the register claiming "not yet done" for already-shipped work three
-   separate times** (W-23–26 in §3, B1–B3/F1–F3/G1/G3/G4/G6/G7 in §8, W-15's
-   CQC half) — not because any single person got it wrong, but because a
-   document this detailed costs real discipline to keep in sync with fast,
-   organic development, and that discipline visibly lapsed for months. That
-   is evidence for retiring it in favour of lighter-weight tracking, not
-   just an open question — but it is still the project owner's call, not
-   this session's.
-3. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
+0. **Which candidates should AI-authored promotion apply to first?**
+   `pipeline/ai_promotion.py`/`docs/AI_PROMOTION_POLICY.md` exist, are
+   carefully guarded (objective predicates, sampling audits, a
+   quarantine-on-false-promotion breaker), and the project owner has
+   confirmed: wire it up, with one AI pass plus the existing human
+   review-queue decision as the second independent review. What's still
+   needed before implementation starts: which candidate type/backlog this
+   should actually apply to — asked directly of the project owner, answer
+   pending. See BETA-011.
+1. **WDTK robots.txt exception** (BETA-005) — time-boxed to 2026-09-10,
    already tracked, not this session's call.
-4. **Is a relationship-explorer UI over the evidence graph (BETA-009's
-   follow-up) worth building, and public or admin-only?** The data is
-   confirmed safe to surface (deterministic `SOURCE_FACT`/
-   `DERIVED_RELATIONSHIP` only, no unreviewed extraction currently feeds it —
-   see BETA-009), and it's the single most direct match this session found
-   to what comparable OSINT platforms (Aleph, LittleSis) treat as their
-   signature feature. But it's real new-surface work (an API endpoint, a
-   frontend page, a visualization approach) and a public/admin-only decision
-   has real stakes for a union campaign's investigative-relationship data —
-   worth the project owner's product judgement, not an autonomous default.
 
 ## Recent Commits
 
