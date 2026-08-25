@@ -361,8 +361,28 @@ stands between the internet and the review queue.
 
 ## Day-to-day
 
-The playbook installs a `sectortrace` command so you don't have to remember
-which compose file and container each thing lives in:
+### Don't use `./start.sh` on this box
+
+`./start.sh` and `start.cmd` are the **local-development** path. They expect
+`uv` and a Python environment on the host, and they read the checkout's own
+`.env`. This deployment has neither by design: the pipeline's Python lives
+inside the app container, and its configuration is
+`/opt/sectortrace/state/.env`, not the one in the checkout.
+
+Running it here gets you `error: uv is not on PATH`. Installing `uv` to make
+that go away would give you a second, unrelated environment pointing at no
+database — don't. If it already created `data/raw`, `logs` and a stray
+`.env` inside the checkout, those are inert (nothing mounts them) and can be
+deleted.
+
+Use `sectortrace` instead. It is installed early in the playbook —
+before the images are built — precisely so it exists even when the stack
+is not up.
+
+### The `sectortrace` command
+
+You don't have to remember which compose file and container each thing
+lives in:
 
 ```bash
 sectortrace run all                  # a pipeline command in the app container
