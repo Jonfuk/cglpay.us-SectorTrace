@@ -35,14 +35,26 @@ def _server_identity(conn) -> tuple:
 
 
 def preflight(source, target) -> list[str]:
-    """Return schema differences before any target rows are written."""
+    """Return schema differences before any target rows are written.
+
+    A beta branch can contain a new, empty table before the source deployment
+    has run the migration that introduces it. That table has no source rows to
+    copy and is safe to leave empty; a populated target-only table is still a
+    hard error because the mirror cannot prove what should happen to its data.
+    """
     problems: list[str] = []
     source_tables = _tables(source)
     target_tables = _tables(target)
     if missing := sorted(source_tables - target_tables):
         problems.append(f"target is missing table(s): {', '.join(missing)}")
     if extra := sorted(target_tables - source_tables):
-        problems.append(f"target has unexpected table(s): {', '.join(extra)}")
+        counts = catalog.row_counts(target, extra)
+        populated = [f"{table} ({counts[table]:,} rows)"
+                     for table in extra if counts[table]]
+        if populated:
+            problems.append(
+                "target has unexpected populated table(s): "
+                + ", ".join(populated))
 
     for table in sorted(source_tables & target_tables):
         source_columns = [c["name"] for c in catalog.columns_of(source, table)]
