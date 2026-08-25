@@ -1,0 +1,40 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace/templates/sectortrace-backup-offsite.sh.j2.
+#
+# Copies the verified snapshots written by `pipeline backup` to an
+# S3-compatible bucket. Deliberately a *copy*, not a move: the local set
+# stays the fast restore path, and this is the one that survives losing the
+# disk.
+set -euo pipefail
+
+BACKUP_DIR="{{ state_dir }}/data/backups"
+BUCKET="{{ backup_s3_bucket | default(vault_archive_s3_bucket, true) }}"
+PREFIX="{{ backup_s3_prefix }}"
+ENDPOINT="{{ backup_s3_endpoint | default(vault_archive_s3_endpoint, true) }}"
+
+export AWS_ACCESS_KEY_ID="{{ backup_s3_access_key | default(vault_archive_s3_access_key, true) }}"
+export AWS_SECRET_ACCESS_KEY="{{ backup_s3_secret | default(vault_archive_s3_secret, true) }}"
+export AWS_DEFAULT_REGION="{{ backup_s3_region | default(vault_archive_s3_region, true) }}"
+
+if [ ! -d "$BACKUP_DIR" ]; then
+    echo "No backup directory at $BACKUP_DIR — nothing to copy." >&2
+    exit 0
+fi
+
+# --delete makes the remote mirror local retention (backup_keep), rather
+# than growing forever. The local directory is the source of truth for what
+# should exist; `pipeline backup --keep N` is what prunes it.
+#
+# Snapshots and their manifests only. Never the raw archive: it is already
+# in S3, it is orders of magnitude larger, and `pipeline backup`
+# deliberately inventories it rather than copying it.
+aws --endpoint-url "https://${ENDPOINT}" \
+    s3 sync "$BACKUP_DIR" "s3://${BUCKET}/${PREFIX}" \
+    --delete \
+    --exclude "*" \
+    --include "warehouse-*.sql.gz" \
+    --include "warehouse-*.db" \
+    --include "warehouse-*.manifest.json" \
+    --only-show-errors
+
+echo "Offsite copy complete: s3://${BUCKET}/${PREFIX}"

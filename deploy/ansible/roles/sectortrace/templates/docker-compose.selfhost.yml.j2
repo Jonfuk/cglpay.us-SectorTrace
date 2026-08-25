@@ -31,6 +31,21 @@ services:
       -c effective_cache_size={{ postgres_effective_cache_size }}
       -c max_connections={{ postgres_max_connections }}
       -c work_mem={{ postgres_work_mem }}
+      -c maintenance_work_mem={{ postgres_maintenance_work_mem }}
+      -c max_worker_processes={{ postgres_max_worker_processes }}
+      -c max_parallel_workers={{ postgres_max_parallel_workers }}
+      -c max_parallel_workers_per_gather={{ postgres_max_parallel_workers_per_gather }}
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+    # random_page_cost/effective_io_concurrency above are the NVMe part: the
+    # defaults (4.0 and 1) describe a spinning disk, and leaving them makes
+    # the planner avoid index scans it should prefer.
+    #
+    # Deliberately last in the kernel's OOM shortlist. If a document batch
+    # or a runaway query exhausts memory, killing the database is the worst
+    # available outcome — everything else here is restartable or
+    # rebuildable, and the warehouse is neither.
+    oom_score_adj: -500
     volumes:
       - "{{ state_dir }}/data/postgres:/var/lib/postgresql/data"
       # Only runs against an empty data directory — a fresh init, never a
@@ -55,6 +70,10 @@ services:
       NEO4J_server_memory_heap_initial__size: "{{ neo4j_heap_size }}"
       NEO4J_server_memory_heap_max__size: "{{ neo4j_heap_size }}"
       NEO4J_server_memory_pagecache_size: "{{ neo4j_pagecache_size }}"
+    # Heap + pagecache + JVM overhead. A ceiling rather than a reservation:
+    # Neo4j is a disposable projection, so if anything here has to die it
+    # should be this, and `graph rebuild --clear` puts it back.
+    mem_limit: {{ neo4j_mem_limit_mb }}m
     volumes:
       - "{{ state_dir }}/data/neo4j/data:/data"
       - "{{ state_dir }}/data/neo4j/logs:/logs"

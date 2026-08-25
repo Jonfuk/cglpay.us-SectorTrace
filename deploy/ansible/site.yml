@@ -10,6 +10,7 @@
   vars:
     repo_root: "{{ (playbook_dir + '/../..') | realpath }}"
   roles:
+    - preflight   # size the host, check DNS — fails before anything changes
     - common      # OS upgrade, base packages, time, journal, swap
     - tuning      # sysctls, transparent hugepages, ulimits, I/O scheduler
     - hardening   # SSH, fail2ban, kernel security sysctls, auto security updates

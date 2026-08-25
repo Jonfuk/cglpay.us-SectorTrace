@@ -1,0 +1,64 @@
+#!/bin/bash
+# Managed by Ansible — see roles/sectortrace/templates/sectortrace-wrapper.sh.j2.
+#
+# Saves remembering which compose file and which container each thing lives
+# in. `sectortrace run all` is `pipeline run all` in the app container;
+# `sectortrace documents process ...` goes to the documents worker instead,
+# because the app image deliberately has no parser or OCR toolchain in it.
+set -euo pipefail
+
+STATE_DIR="{{ state_dir }}"
+cd "$STATE_DIR"
+
+usage() {
+    cat <<'EOF'
+sectortrace — operate the self-hosted stack
+
+  sectortrace <pipeline-command> [args]   run a pipeline command in the app
+  sectortrace documents <args>            run in the documents worker instead
+  sectortrace psql                        a psql shell on the warehouse
+  sectortrace shell                       a shell in the app container
+  sectortrace ps | logs [svc] | restart [svc] | up | down
+  sectortrace backup                      take a verified snapshot now
+  sectortrace health                      what /health says
+
+Examples
+  sectortrace run all
+  sectortrace coverage-report
+  sectortrace documents documents process --source-system committee_papers --limit 25
+  sectortrace logs app
+EOF
+}
+
+[ $# -eq 0 ] && { usage; exit 0; }
+
+case "$1" in
+    -h|--help|help) usage ;;
+
+    ps)      exec docker compose ps ;;
+    up)      exec docker compose up -d ;;
+    down)    exec docker compose down ;;
+    logs)    shift; exec docker compose logs -f --tail=200 "$@" ;;
+    restart) shift; exec docker compose restart "$@" ;;
+
+    shell)   exec docker compose exec app /bin/bash ;;
+    # The container's own client, so there is never a client/server version
+    # mismatch to think about.
+    psql)    shift; exec docker compose exec postgres psql -U sectortrace_app -d sectortrace "$@" ;;
+
+    health)  exec docker compose exec -T app python -c \
+                 "import json,urllib.request;print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:1801/health')),indent=2))" ;;
+
+    backup)  shift; exec docker compose exec -T app python -m pipeline backup --keep {{ backup_keep }} "$@" ;;
+
+    # The heavy image: parsers, OCR binaries, its own memory ceiling. Run
+    # rather than exec — it is not a running service.
+    documents)
+        shift
+        exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    *)
+        exec docker compose exec -T app python -m pipeline "$@"
+        ;;
+esac
