@@ -46,10 +46,108 @@ postgres_work_mem: "10MB"
 neo4j_heap_size: "1g"
 neo4j_pagecache_size: "512m"
 
-# Hardening toggles in the common/firewall roles.
+# --- Packages -------------------------------------------------------------------
+# Everything the roles below assume, plus the standard operator toolkit.
+# Add your own preferences to extra_packages rather than editing this list,
+# so a `git pull` doesn't conflict with your changes.
+base_packages:
+  # Required by the roles in this playbook
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+  - chrony
+
+  # Session persistence. A collection run or a document batch outlives an
+  # SSH connection; without this, a dropped link kills it.
+  - tmux
+
+  # What's running, what's eating RAM, what's eating disk
+  - htop
+  - iotop
+  - ncdu
+  - tree
+  - lsof
+  # sar/iostat: performance *history*, so "it was slow an hour ago" is a
+  # question with an answer rather than a shrug.
+  - sysstat
+
+  # Files and transfers
+  - mc
+  - rsync
+  - unzip
+  - zip
+  - less
+  - vim
+
+  # Network diagnosis. dnsutils earns its place on this box specifically:
+  # `dig {{ domain }}` is how you confirm the A record actually points here
+  # before Caddy's first Let's Encrypt request depends on it.
+  - dnsutils
+  - net-tools
+  - mtr-tiny
+
+  # jq: the exports, provenance sidecars and health endpoints in this
+  # project are all JSON.
+  - jq
+
+  - bash-completion
+
+# Yours. Empty by default.
+extra_packages: []
+
+# --- OS upgrade ----------------------------------------------------------------
+# Full `apt-get dist-upgrade` on every run. A fresh VPS image is usually
+# weeks behind, and this is the only task that can pull a new kernel — the
+# play reports a pending reboot at the end rather than taking one itself.
+apt_full_upgrade: true
+
+# --- Tuning ---------------------------------------------------------------------
+# Swap is insurance against a document-processing spike, not working memory.
+# Set to "" to skip creating one entirely.
+swapfile_size: "2G"
+# Low, not zero: keep the kernel off swap under normal load while leaving it
+# able to page out genuinely cold memory instead of invoking the OOM killer.
+vm_swappiness: 10
+
+# --- Hardening --------------------------------------------------------------------
 enable_fail2ban: true
 enable_unattended_upgrades: true
 ssh_port: 22
+
+# Applies the SSH drop-in: modern ciphers/KEX/MACs, MaxAuthTries 3, short
+# login grace, no X11 or agent forwarding.
+#
+# It does NOT disable password authentication — that is deliberate and the
+# template says so. TCP forwarding also stays on, because the admin-UI
+# tunnel depends on it.
+harden_ssh: true
+
+# These carry real weight given password login stays enabled. A day-long ban
+# after 4 tries in 10 minutes costs a legitimate typo-ing operator very
+# little (add your IP to fail2ban_ignoreip) and makes password guessing
+# impractical.
+fail2ban_bantime: "24h"
+fail2ban_findtime: "10m"
+fail2ban_maxretry: 4
+
+# The recidive jail: an address banned this many times inside findtime gets
+# a week rather than a day.
+recidive_bantime: "1w"
+recidive_findtime: "1d"
+recidive_maxretry: 3
+# Add your own static IP here if you have one, so a fat-fingered password
+# can never lock you out of your own box.
+fail2ban_ignoreip: []
+
+# Security updates install automatically either way; this decides whether
+# the box may reboot itself to finish one. Off by default: a reboot mid-run
+# loses an in-flight collection.
+unattended_upgrades_reboot: false
+unattended_upgrades_reboot_time: "04:00"
 
 # Daily verified application-level backup (pipeline backup --keep N), on top
 # of the VPS provider's own daily snapshots. Writes to

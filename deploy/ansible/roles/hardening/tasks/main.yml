@@ -1,0 +1,73 @@
+---
+# --- SSH ----------------------------------------------------------------------
+# Password authentication stays enabled by explicit decision — see the
+# template. Everything here hardens around that rather than replacing it:
+# modern ciphers, a short login grace, three attempts, no X11 or agent
+# forwarding. fail2ban below and ufw's rate-limited SSH rule are what
+# actually blunt a password-guessing attempt.
+- name: Harden the SSH daemon
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-sectortrace.conf
+    mode: "0600"
+    # Debian's stock sshd_config has `Include /etc/ssh/sshd_config.d/*.conf`
+    # on its first line, and SSH takes the first value it sees for any
+    # keyword — so a drop-in here wins over the main file. Validated before
+    # it is written: a syntax error that only surfaces on restart means no
+    # more SSH.
+    validate: /usr/sbin/sshd -t -f %s
+  when: harden_ssh
+  notify: restart ssh
+
+# --- fail2ban -----------------------------------------------------------------
+# Debian 12+ minimal images often have no rsyslog, so /var/log/auth.log
+# doesn't exist and the stock jail silently never bans anything. Pointing
+# the backend at the journal is what makes it actually work.
+- name: Configure the fail2ban SSH jail
+  ansible.builtin.template:
+    src: fail2ban-jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+  when: enable_fail2ban
+  notify: restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: enable_fail2ban
+
+# --- Kernel hardening ----------------------------------------------------------
+- name: Apply security sysctls
+  ansible.builtin.template:
+    src: sysctl-hardening.conf.j2
+    dest: /etc/sysctl.d/70-sectortrace-hardening.conf
+    mode: "0644"
+  notify: reload sysctl
+
+# --- Automatic security updates -------------------------------------------------
+- name: Enable the unattended-upgrades schedule
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      // Managed by Ansible — see roles/hardening/tasks/main.yml
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+  when: enable_unattended_upgrades
+
+- name: Configure what unattended-upgrades may install
+  ansible.builtin.template:
+    src: unattended-upgrades.conf.j2
+    dest: /etc/apt/apt.conf.d/52-sectortrace-unattended
+    mode: "0644"
+  when: enable_unattended_upgrades
+
+- name: Enable and start the unattended-upgrades service
+  ansible.builtin.service:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+  when: enable_unattended_upgrades

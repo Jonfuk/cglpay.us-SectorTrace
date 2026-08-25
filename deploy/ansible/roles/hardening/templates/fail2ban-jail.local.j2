@@ -1,0 +1,43 @@
+# Managed by Ansible — see roles/hardening/templates/fail2ban-jail.local.j2.
+
+[DEFAULT]
+# Read from the systemd journal rather than /var/log/auth.log. A minimal
+# Debian image may have no rsyslog at all, in which case the stock
+# file-backed jail finds nothing and bans nobody, while looking healthy.
+backend = systemd
+
+bantime = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+
+# Never lock yourself out from these. Add your own static IP here if you
+# have one.
+ignoreip = 127.0.0.1/8 ::1{% if fail2ban_ignoreip %} {{ fail2ban_ignoreip | join(' ') }}{% endif %}
+
+
+# ufw owns the firewall on this box, so bans are inserted as ufw rules
+# rather than as a parallel iptables chain that ufw doesn't know about.
+banaction = ufw
+
+[sshd]
+enabled = true
+port = {{ ssh_port }}
+mode = aggressive
+
+# Repeat offenders: an address that earns {{ recidive_maxretry }} separate bans within
+# {{ recidive_findtime }} is not a person who forgot their password, and gets a much
+# longer one. Reads fail2ban's own log, so it sits above every other jail.
+[recidive]
+enabled = true
+backend = auto
+logpath = /var/log/fail2ban.log
+bantime = {{ recidive_bantime }}
+findtime = {{ recidive_findtime }}
+maxretry = {{ recidive_maxretry }}
+
+# No jail for Caddy. The portal is public, read-only and unauthenticated by
+# design, so there are no failed logins to count — adding a filter that
+# banned on HTTP status codes would mostly ban crawlers and people reloading
+# a slow page. The admin UI, which does have something worth guessing at, is
+# not reachable from the internet at all (Caddy 403s it; reach it over the
+# SSH tunnel), so it is covered by the sshd jail above instead.

@@ -1,0 +1,51 @@
+# Managed by Ansible — see roles/tuning/templates/sysctl-tuning.conf.j2.
+# Performance only; the security sysctls are in 70-sectortrace-hardening.conf.
+#
+# NOTHING HERE TOUCHES net.ipv4.ip_forward. Docker sets it to 1 and needs it
+# that way for container networking; hardening guides that blanket-set it to
+# 0 break every published port on the box, which is a miserable thing to
+# debug. If you add sysctls here, leave that one alone.
+
+# --- Memory -------------------------------------------------------------------
+# Swap exists as insurance against a document-processing spike, not as
+# working memory: keep the kernel off it until it genuinely needs it.
+vm.swappiness = {{ vm_swappiness }}
+
+# Neo4j maps a lot of regions and documents this exact value as a
+# requirement; the default (65530) is low enough that a growing store hits
+# it and fails with an opaque mmap error.
+vm.max_map_count = 262144
+
+# vm.overcommit_memory is deliberately left at the kernel default. Setting
+# it to 2 (which the PostgreSQL docs suggest, to keep the OOM killer away
+# from the postmaster) computes a commit limit from RAM+swap that a JVM's
+# large virtual reservation blows straight through on a box this size —
+# Neo4j would fail to start. Setting it to 1 is Redis's recommendation and
+# buys nothing here.
+
+# --- Writeback ----------------------------------------------------------------
+# Gen5 NVMe absorbs writes fast; flushing earlier and in smaller batches
+# avoids the multi-second stall that a large dirty pool causes when it
+# finally goes out, which on a database is a query timeout.
+vm.dirty_background_ratio = 5
+vm.dirty_ratio = 10
+
+# --- Connection handling ------------------------------------------------------
+# Caddy, the app, Postgres and Neo4j all listen. The default backlog (4096
+# syn / 4096 somaxconn on modern kernels, less on older) is fine at this
+# scale; these are set explicitly so a kernel default change doesn't move
+# them underneath us.
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
+
+# Reclaim closed connections promptly rather than holding them in FIN-WAIT.
+net.ipv4.tcp_fin_timeout = 30
+
+# --- Docker's file watching ---------------------------------------------------
+# Containers share the host's inotify budget, and exhausting it shows up as
+# unrelated-looking failures in whichever container asked last.
+fs.inotify.max_user_instances = 512
+fs.inotify.max_user_watches = 524288
+
+# --- File handles --------------------------------------------------------------
+fs.file-max = 2097152

@@ -1,0 +1,37 @@
+// Managed by Ansible — see roles/hardening/templates/unattended-upgrades.conf.j2.
+
+// Security updates only. The full dist-upgrade is a deliberate act you take
+// by re-running the playbook, not something that happens to a serving box
+// at 6am — an unattended major-version bump of Docker or Postgres is not a
+// thing to discover from a monitoring alert.
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "origin=Debian,codename=${distro_codename},label=Debian-Security";
+};
+
+// Kernel packages accumulate and /boot is small. Removing superseded ones
+// keeps a year-long uptime from filling it.
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+
+{% if unattended_upgrades_reboot %}
+// Reboots itself when a security update needs one. The stack comes back on
+// its own — every container is `restart: unless-stopped` — but any
+// in-flight collection run is lost, so this is opt-in.
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ unattended_upgrades_reboot_time }}";
+{% else %}
+// Never reboots on its own. `cat /var/run/reboot-required` says when one is
+// pending; the playbook also reports it at the end of every run.
+Unattended-Upgrade::Automatic-Reboot "false";
+{% endif %}
+
+{% if contact_email %}
+Unattended-Upgrade::Mail "{{ contact_email }}";
+Unattended-Upgrade::MailReport "on-change";
+{% endif %}

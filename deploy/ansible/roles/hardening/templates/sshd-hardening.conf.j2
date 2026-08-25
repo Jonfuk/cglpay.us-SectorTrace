@@ -1,0 +1,44 @@
+# Managed by Ansible — see roles/hardening/templates/sshd-hardening.conf.j2.
+# Debian includes this directory from the first line of sshd_config, and SSH
+# uses the first value it finds for a keyword, so everything here overrides
+# the stock file.
+
+Port {{ ssh_port }}
+
+# Password authentication stays ON, by explicit decision — this box must
+# remain reachable without a key on it. Do not "harden" this to `no`
+# without the operator asking for it.
+#
+# What carries the weight instead: fail2ban's sshd jail (journal-backed,
+# banning through ufw), MaxAuthTries below, ufw rate-limiting on the SSH
+# port, and a short LoginGraceTime. Use a long password.
+PasswordAuthentication yes
+PermitRootLogin yes
+
+PubkeyAuthentication yes
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+MaxAuthTries 3
+MaxSessions 10
+LoginGraceTime 30
+
+# Not turned off, deliberately. The operator UI is reachable only through an
+# SSH tunnel to the app's loopback port (see the README), and
+# `AllowTcpForwarding no` — which most hardening guides set — would break
+# exactly the access path this deployment depends on.
+AllowTcpForwarding yes
+GatewayPorts no
+X11Forwarding no
+AllowAgentForwarding no
+
+# Drop unresponsive sessions rather than accumulating them.
+ClientAliveInterval 300
+ClientAliveCountMax 2
+TCPKeepAlive no
+
+# Modern algorithms only. Everything here is supported by any OpenSSH client
+# from the last several years; if you need to reach this box from something
+# genuinely ancient, this is the block to relax.
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group-exchange-sha256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
