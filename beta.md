@@ -528,6 +528,32 @@ documents pre-Phase-4). Nothing new rejected this cycle.
 
 ## Questions Requiring Human Input
 
+0. **`pipeline/ai_promotion.py` and `docs/AI_PROMOTION_POLICY.md` exist,
+   describe a real narrow-but-real path for AI-authored evidence promotion,
+   and are currently wired to nothing.** Found while scanning for more
+   dormant capability after BETA-009's graph-subsystem discovery. It is
+   carefully designed — a distinct `actor_type = 'ai'` so an AI can never be
+   written into `review_decisions.decided_by` as if it were a person,
+   objective predicates (official source, exact identity, dated, archived,
+   no conflicts), two independent reviews required, 10% sampling review, a
+   quarantine-on-false-promotion circuit breaker — and it landed via the
+   same commit as dataset-completion safeguards (`1ccbe6f`), suggesting it
+   was built for a specific bounded backfill effort rather than as a general
+   policy change. But nothing in `pipeline/cli.py` or the web server calls
+   `pipeline.ai_promotion.validate()` or constructs a `Recommendation` —
+   it's schema and policy with no caller. **This sits in real tension with
+   `CLAUDE.md`'s settled decision 4** ("Nothing is promoted to evidence
+   without a person. Database triggers enforce it") — not necessarily a
+   contradiction (a well-guarded, sampled, human-supervised exception is a
+   different thing from no promotion gate at all), but not obviously
+   reconciled either, and it's exactly the kind of "two choices imply
+   fundamentally different directions" case §49 of the original brief says
+   to surface rather than resolve autonomously. **Not touched, not wired
+   up, not extended — flagged only.** Worth knowing: is this meant to be
+   activated for something specific, or is it dead code from an experiment
+   that should either be finished, documented as inactive-by-design, or
+   removed?
+
 1. **Is `deploy/ansible/`'s self-host build a live fallback, deliberately
    kept, or dead?** Not asked this cycle — Railway-as-production was the
    question in front of the session, and answering it didn't require also
