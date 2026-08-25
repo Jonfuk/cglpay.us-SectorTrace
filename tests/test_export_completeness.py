@@ -29,6 +29,11 @@ from pipeline.web import public_export, public_queries, queries
 from pipeline.web.server import build_server
 
 CORPUS = 1_200
+# Deliberately larger than the 50-row `recent` window pfd() draws its table
+# from, for the same reason CORPUS is larger than the contracts page's
+# window -- a fixture of 40 would pass against the bug this file exists to
+# catch.
+CORPUS_PFD = 75
 
 
 @pytest.fixture
@@ -54,6 +59,16 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
           "Birmingham City Council" if i % 2 else "Another Council",
           "2025-06-01" if i % 2 else "2026-06-01")
          for i in range(CORPUS)])
+    conn.executemany(
+        "INSERT INTO pfd_reports (report_ref, report_date, coroner_area, "
+        " categories, report_url, matters_of_concern, source_url, "
+        " retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (?, '2026-01-15', 'Birmingham and Solihull', 'Alcohol, drug "
+        " and medication related deaths', ?, 'A concern.', "
+        " 'https://judiciary.uk/reports', '2026-08-01T00:00:00Z', 200, "
+        " 'judiciary_uk', 'pfd1')",
+        [(f"2026-{i:04d}", f"https://judiciary.uk/reports/2026-{i:04d}/")
+         for i in range(CORPUS_PFD)])
     conn.commit()
     return conn
 
@@ -168,6 +183,54 @@ def test_the_json_export_is_complete_too(client):
         params={"endpoint": "contracts", "format": "json"}).json()
     assert len(payload["contracts"]) == CORPUS
     assert payload["_provenance"]["row_count"] == CORPUS
+
+
+# --- the same fix, for PFD reports (BETA-019) -------------------------------------
+#
+# pfd()'s own `recent` key is LIMIT 50 for the same reason contracts() windows
+# to 500: it is answering a page with other things to show beside the table.
+# The download has to read the whole corpus instead, the same way
+# all_contract_notices does -- see all_pfd_reports's own docstring.
+
+
+def test_the_pfd_export_holds_every_row_and_names_the_count(client):
+    response = client.get("/api/v1/export",
+                           params={"endpoint": "pfd", "format": "csv"})
+    assert response.status_code == 200
+
+    header, rows = _parse(response.text)
+    assert len(rows) == CORPUS_PFD
+    assert header["rows"].startswith(f"{CORPUS_PFD:,}")
+
+
+def test_the_pfd_export_carries_the_pfd_licence(client):
+    response = client.get("/api/v1/export",
+                           params={"endpoint": "pfd", "format": "csv"})
+    header, _ = _parse(response.text)
+    # OGL v3.0 (m08_pfd_reports) -- not "not recorded", which is what an
+    # endpoint missing from licences.ENDPOINT_MODULES would produce.
+    assert "Open Government Licence" in header.get("licence", "")
+
+
+def test_the_pfd_export_columns_are_the_columns_the_page_shows(ro):
+    """One SELECT feeds both `recent` and the complete export, the same
+    discipline `all_contract_notices` follows and for the same reason: a
+    column added for the table should reach the download without a second
+    commit remembering to update it."""
+    windowed = public_queries.pfd(ro)["recent"]
+    total, streamed = public_queries.all_pfd_reports(ro)
+    first = next(iter(streamed))
+
+    assert total == CORPUS_PFD
+    assert list(first) == list(windowed[0])
+
+
+def test_the_pfd_json_export_is_complete_too(client):
+    payload = client.get(
+        "/api/v1/export",
+        params={"endpoint": "pfd", "format": "json"}).json()
+    assert len(payload["pfd"]) == CORPUS_PFD
+    assert payload["_provenance"]["row_count"] == CORPUS_PFD
 
 
 # --- and the easy path cannot reintroduce it -------------------------------------

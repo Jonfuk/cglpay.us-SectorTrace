@@ -191,6 +191,10 @@ ENDPOINT_MODULES: dict[str, tuple[str, ...]] = {
                    "m12_fingertips", "m13_la_budgets"),
     "fingertips": ("m12_fingertips",),
     "ndtms": ("m07_ndtms",),
+    # PFD reports only -- the export's `recent` key is the report corpus,
+    # not the SAR half of the same page's payload (m28_sar_reports, a
+    # different licence -- "authority_varies" -- and not exported here).
+    "pfd": ("m08_pfd_reports",),
 }
 
 

@@ -253,7 +253,13 @@ function renderRecent(container, data) {
         formatter: (c) => (c.getValue() ? 'yes' : 'stub') },
       { title: 'Report', field: 'report_url', width: 90, headerFilter: false,
         formatter: (c) => sourceLink(c.getValue(), 'report ↗') },
-    ], recent, { height: 520, total: (data.totals || {}).reports }),
+    ], recent, {
+      height: 520, total: (data.totals || {}).reports,
+      // The complete corpus, not just these 50 -- server.py streams every
+      // row from its own unwindowed query (public_queries.all_pfd_reports),
+      // the same pattern contracts.js's export uses for the same reason.
+      exportEndpoint: 'pfd',
+    }),
     provenanceFromRows(recent, { module: 'm08_pfd_reports', tables: ['pfd_reports'] })));
 }
 

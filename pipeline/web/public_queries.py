@@ -1884,6 +1884,44 @@ def pfd(conn: sqlite3.Connection) -> dict:
     }
 
 
+def all_pfd_reports(conn: sqlite3.Connection, *, batch: int = 2000
+                     ) -> tuple[int, Iterator[dict]]:
+    """Every PFD report, counted first and then streamed.
+
+    `pfd()` above returns `recent` — the newest 50, because it is answering
+    a page that already has other things to show beside the table. This
+    answers a download, where the cap is the bug: an export that ships the
+    newest 50 of 1,500+ reports and says nothing looks complete and is a few
+    percent of the corpus — the same failure `all_contract_notices` exists
+    to refuse (see its own docstring; this follows the identical shape:
+    count first, stream second, no `deadline()` guard because a complete
+    export is meant to take as long as it takes).
+
+    No filters, because `pfd()` itself takes none — every report is public
+    and there is no per-authority or per-provider slice of this corpus the
+    way contracts has one.
+    """
+    _public(["pfd_reports"])
+    total = _one(conn, "SELECT COUNT(*) AS n FROM pfd_reports").get("n", 0)
+
+    def rows() -> Iterator[dict]:
+        cursor = conn.execute("""
+            SELECT report_ref, report_date, coroner_area, categories,
+                   report_url, matters_of_concern IS NOT NULL AS has_concerns,
+                   source_url, retrieved_at
+            FROM pfd_reports ORDER BY report_ref DESC""")
+        try:
+            while True:
+                fetched = cursor.fetchmany(batch)
+                if not fetched:
+                    return
+                yield from (dict(row) for row in fetched)
+        finally:
+            cursor.close()
+
+    return total, rows()
+
+
 # --- provider deep dive -------------------------------------------------------
 
 

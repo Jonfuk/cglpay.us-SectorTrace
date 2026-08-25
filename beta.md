@@ -99,6 +99,62 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-019 | Complete-corpus CSV/JSON export for PFD reports
+  - completed: 2026-08-26T00:35:00Z
+  - commits: (see the commit immediately following this entry in
+    `git log beta`)
+  - result: BETA-018's own flagged follow-up, built this cycle. `pfd.js`'s
+    "Latest reports" table had no CSV export, unlike every comparable
+    "recent records" table elsewhere in the portal — confirmed as a real
+    backend gap, not a one-line frontend fix: `pfd()`'s `recent` array is
+    `LIMIT 50`, and `public_export.py`'s `EXPORTABLE` registry had no
+    `"pfd"` entry, so naively wiring one up would have silently exported
+    only the 50 newest of 1,539+ reports as if it were the whole corpus —
+    exactly the failure `WINDOWED = {"contracts"}` exists to refuse.
+  - Mirrored the existing `contracts` complete-export pattern exactly,
+    end to end: `public_queries.all_pfd_reports(conn)` (count first,
+    then a streaming cursor over the unlimited query — no `deadline()`
+    guard, same reasoning as `all_contract_notices`'s own docstring: a
+    complete export of a six-figure-adjacent corpus is meant to take as
+    long as it takes); `"pfd"` added to both `EXPORTABLE` (`recent` →
+    label `"pfd"`) and `WINDOWED` in `public_export.py`; a new `elif
+    endpoint == "pfd"` branch in `server.py`'s `_export_complete`
+    (previously a hardcoded `if endpoint != "contracts": raise`, one
+    endpoint deep); `exportEndpoint: 'pfd'` added to the frontend table.
+    Also found and fixed a smaller adjacent gap while wiring this up:
+    `licences.ENDPOINT_MODULES` had no `"pfd"` entry either, so the
+    export's licence line would have read "not recorded for this
+    endpoint" instead of the correct OGL v3.0 — added, scoped to
+    `m08_pfd_reports` only (not `m28_sar_reports`, a different licence,
+    since SAR data isn't part of this export).
+  - **SAR's own "Latest SAR documents" table deliberately not addressed**
+    — flagged as a separate, harder question in BETA-019's own queue entry
+    before implementation started: it shares the same `/api/v1/pfd`
+    endpoint but is a different sub-array (`data.sar.recent`), and
+    `EXPORTABLE`'s one-key-per-endpoint design has no natural slot for a
+    second exportable table under one endpoint. Not solved here; would
+    need its own design decision, not a bent version of this fix.
+  - note: **Verified against real production data, not just the fixture**
+    — the live corpus is exactly 1,539 PFD reports (matching the page's
+    own hero text); fetched both `/api/v1/export?endpoint=pfd&format=csv`
+    and `&format=json` directly against the dev server and confirmed both
+    returned all 1,539 rows with a correctly-populated OGL licence line,
+    not the 50-row page window. 14 tests in `tests/test_export_completeness.py`
+    (extended, not a new file — this is exactly the file `contracts`' own
+    complete-export tests live in, the natural home): row-count and
+    header-count agreement, licence presence, column-shape agreement
+    between the windowed and complete queries (the same "one SELECT feeds
+    both" discipline `all_contract_notices` established), JSON
+    completeness, and the pre-existing generic guard
+    (`test_every_windowed_endpoint_has_a_complete_reader`, which iterates
+    `WINDOWED` and would have caught a missing `_export_complete` branch
+    automatically). Full suite run clean and uninterrupted: 2441 passed,
+    106 skipped, 33 deselected, 2 pre-existing unrelated failures
+    (confirmed a sixth time).
+  - possible follow-up: SAR export, if wanted, needs its own design
+    decision on how `EXPORTABLE` should handle a second exportable table
+    under one endpoint — not queued, flagged only.
+
 - [DONE] BETA-018 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file
   - completed: 2026-08-25T23:10:00Z
   - commits: `087c1c6` (`beta`)
@@ -840,47 +896,6 @@ DONE
     requiring the provider's explicit sign-off, not something to autonomously
     finish and merge.
 
-### NEXT
-
-- [NEXT] BETA-019 | Complete-corpus CSV export for PFD reports (and scope SAR separately)
-  - priority: P3
-  - impact: 3
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: ui/api
-  - depends_on: none
-  - objective: `pfd.js`'s "Latest reports" table has no CSV export, unlike
-    every comparable "recent records" table elsewhere in the portal
-    (`contracts.js`, `treatment.js`, `pay.js`). Found during BETA-018's
-    frontend audit.
-  - rationale: **Not a simple oversight — checked and it's a real backend
-    gap.** `pfd()`'s `recent` array is `LIMIT 50` (matching `contracts`'
-    own `notices` cap), and `pipeline/web/public_export.py`'s `EXPORTABLE`
-    registry has no `"pfd"` entry at all. Naively adding one keyed to
-    `recent` would silently export only the 50 newest reports as if it
-    were the whole corpus — exactly the failure `WINDOWED = {"contracts"}`
-    exists to refuse (see `public_export.py`'s own comment on why
-    `contracts` was added there: a capped export that doesn't say so is
-    worse than no export). The correct fix mirrors `contracts`': a new
-    `public_queries.all_pfd_reports(conn, ...)` streaming query reading
-    all 1,539+ rows unlimited, `"pfd"` added to both `EXPORTABLE` and
-    `WINDOWED`, and a new branch in `server.py`'s `_export_complete`
-    (currently a hardcoded `if endpoint != "contracts": raise` — see line
-    ~807). Test coverage should mirror whatever `test_web_public.py`/
-    `test_portal_isolation.py` already assert for the contracts complete-
-    export path.
-  - suggested_first_action: Read `_export_complete` and
-    `all_contract_notices` end to end first — the pattern to copy is
-    already fully worked out there, this is "do it again for a second
-    endpoint," not new design. **SAR's "Latest SAR documents" table is a
-    separate, harder question**: it shares the same `/api/v1/pfd` endpoint
-    but is a different sub-array (`data.sar.recent`), and `EXPORTABLE`'s
-    one-key-per-endpoint design has no natural slot for a second exportable
-    table under one endpoint — decide whether that's worth a design change
-    or whether SAR export is out of scope, rather than bending the PFD fix
-    to also cover it.
-
 ### BLOCKED
 
 - [BLOCKED] BETA-011 | Wire up AI-authored evidence promotion
@@ -947,7 +962,7 @@ DONE
 | P3 | Module 31: H-CLIC temporary accommodation, TA1 (dataset) | 3 | 3 | 4 | DONE (BETA-016) |
 | P2 | Surface Modules 29-31 as a Comparators section on the authority page | 4 | 2 | 5 | DONE (BETA-017) |
 | P2 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file | 4 | 3 | 5 | DONE (BETA-018) |
-| P3 | Complete-corpus CSV export for PFD reports | 3 | 3 | 4 | NEXT (BETA-019) |
+| P3 | Complete-corpus CSV export for PFD reports | 3 | 3 | 4 | DONE (BETA-019) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1115,6 +1130,16 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
+- BETA-019: extended `tests/test_export_completeness.py` rather than
+  writing a new file — it is already the contracts complete-export tests'
+  home, and the whole point of this change was "do the same thing again
+  for a second endpoint." 14 tests total (10 pre-existing plus 4 new),
+  including one pre-existing generic guard
+  (`test_every_windowed_endpoint_has_a_complete_reader`) that would have
+  failed automatically had `_export_complete` not gained a `pfd` branch.
+  Verified against real production data as well as the fixture (the live
+  corpus is exactly 1,539 reports) — HIGH end of the brief's own §22 scale
+  for touching the export/download path, tested accordingly.
 - BETA-018: no Python changed, so the offline suite served only as a
   regression check (111 tests across portal isolation/controls/public/
   authority/docs-coverage — it could not have caught any of this cycle's
@@ -1354,40 +1379,38 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-018 landed since the previous version, at the
-project owner's own direct request to continue exploring the frontend.
-Per §13 of the original brief, this section must answer five questions
+*(Superseded revision — BETA-019 landed since the previous version. Per
+§13 of the original brief, this section must answer five questions
 without conversational history; the version below does, as of
-2026-08-25T23:10Z.)*
+2026-08-26T00:35Z.)*
 
-**What is currently being worked on?** Nothing — BETA-018 just completed.
+**What is currently being worked on?** Nothing — BETA-019 just completed.
 No `IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-018: a frontend UI audit
-(the project owner asked directly to continue exploring UI/UX
-improvements) that found and fixed two real, verified bugs — chart
-titles/labels hardcoding a colour that only worked in dark theme, and the
-theme switcher being completely unreachable below 900px viewport width
-with nothing replacing it — plus one pre-existing bug the fix attempt
-surfaced along the way (a flex-wrap column-overflow in the mobile nav),
-and removed one piece of confirmed dead code (162 KB of unused Leaflet
-vendor files, orphaned since the map moved to MapLibre). See its DONE
-entry for the full verification detail — everything was checked live
-in-browser via computed layout/style assertions, not just source reading,
-since the Browser pane's screenshot tool is unavailable in this
-environment.
+**What was the last successful change?** BETA-019: complete-corpus
+CSV/JSON export for PFD reports, mirroring the existing `contracts`
+windowed-export pattern exactly (streaming query, `EXPORTABLE`/`WINDOWED`
+registration, a new `_export_complete` branch), plus a smaller adjacent
+licence-registration gap found and fixed along the way. Verified against
+real production data: the export now returns all 1,539 reports, not the
+page's 50-row window. SAR's own export was deliberately scoped out as a
+separate, harder question (`EXPORTABLE`'s one-key-per-endpoint design has
+no natural slot for it) rather than bent to also cover it.
 
-**What should happen next?** BETA-019 (complete-corpus CSV export for PFD
-reports) is queued `NEXT` — a real, well-scoped gap found during the same
-audit, deliberately not rushed this cycle because it turned out to need a
-genuine backend feature (mirroring `contracts`' own windowed-export
-pattern), not a one-line frontend fix. Beyond that, three smaller frontend
-findings from the same audit are recorded under Deferred Ideas
-(Compare-page tables/export, Claims-page search, typeahead ARIA
-completeness) for whoever picks up the frontend thread next — lower
-confidence or bigger scope than what was fixed this cycle, so flagged
-rather than guessed at. This session has now completed 18 queue items
-since `beta` was created.
+**What should happen next?** The queue is `NEXT`/`READY` empty again.
+Three smaller frontend findings from BETA-018's audit remain recorded
+under Deferred Ideas (Compare-page tables/export, Claims-page search,
+typeahead ARIA completeness) — lower confidence or bigger scope than
+what's been fixed so far, worth a fresh look rather than assuming still
+accurate. SAR export (this entry's own deferred half) is a real, if
+smaller, design question. Beyond those, a proper §52 strategic
+reassessment is still owed — the one that produced BETA-017/018/019 was
+narrow (one question each time: "can users find this," "does the frontend
+have gaps," "does an export tell the truth"), not the fuller pass across
+comparable products, technical debt, and neglected product areas the
+brief describes. This session has now completed 19 queue items since
+`beta` was created — a natural point to check in before another
+autonomous cycle picks its own next thread.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1399,17 +1422,16 @@ since `beta` was created.
    operational/scheduling reason, not a code-quality one; do not restart
    without new information about collection-calendar availability.
 
-**What are the highest-value upcoming items?** BETA-019 (PFD export,
-ready and well-scoped). A decision from the project owner on BETA-011's
-candidate type would unblock the single most sensitive item in the queue.
-Questions Requiring Human Input #2 (crime data LSOA crosswalk) and #3
-(document-search UI scoping) are both real if the project owner has a
-view. The H-CLIC B&B breakdown and the three smaller frontend findings
-(Deferred Ideas) are all small, low-risk additions to existing work rather
-than new initiatives, if wanted. BETA-003's ansible-mirror changes still
-have never been run against a real VPS, which remains the highest-value
-*unverifiable* lever in the queue — nothing further to do on it from this
-dev checkout.
+**What are the highest-value upcoming items?** A decision from the
+project owner on BETA-011's candidate type would unblock the single most
+sensitive item in the queue. Questions Requiring Human Input #2 (crime
+data LSOA crosswalk) and #3 (document-search UI scoping) are both real if
+the project owner has a view. The H-CLIC B&B breakdown, SAR export, and
+the three frontend findings under Deferred Ideas are all small, low-risk
+additions to existing work rather than new initiatives, if wanted.
+BETA-003's ansible-mirror changes still have never been run against a
+real VPS, which remains the highest-value *unverifiable* lever in the
+queue — nothing further to do on it from this dev checkout.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims

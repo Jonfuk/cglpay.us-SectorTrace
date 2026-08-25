@@ -804,12 +804,16 @@ class Handler(BaseHTTPRequestHandler):
         reader can see that 98,636 is the number of notices matching these
         filters and that 98,636 is what they were sent.
         """
-        if endpoint != "contracts":  # pragma: no cover - WINDOWED has one member
+        if endpoint == "contracts":
+            total, rows = public_queries.all_contract_notices(
+                conn, **_contract_query(params))
+            _, label = public_export.rows_for(endpoint, {"notices": []})
+        elif endpoint == "pfd":
+            total, rows = public_queries.all_pfd_reports(conn)
+            _, label = public_export.rows_for(endpoint, {"recent": []})
+        else:  # pragma: no cover - every WINDOWED member is handled above
             raise ApiError(f"No complete reader for {endpoint!r}.", status=500)
 
-        total, rows = public_queries.all_contract_notices(
-            conn, **_contract_query(params))
-        _, label = public_export.rows_for(endpoint, {"notices": []})
         provenance = public_export.provenance(endpoint, filters, row_count=total)
         name = f"{self._export_name(label, params)}.{fmt}"
 
