@@ -109,9 +109,9 @@
       {{ preflight_dns.stdout_lines | map('split') | map('first') | unique | list }}
   when: not skip_dns_check
 
-# netaddr is what ansible.utils.ipaddr needs to answer "is this address
-# inside that CIDR". The one package this role installs, and only because
-# getting the proxy question wrong silently breaks the admin allowlist.
+# netaddr is what the address-in-network test needs. The one package this
+# role installs, and only because getting the proxy question wrong silently
+# breaks the admin allowlist.
 - name: Install netaddr for CIDR matching
   ansible.builtin.apt:
     name: python3-netaddr
@@ -125,11 +125,18 @@
 # Deliberately not preflight_-prefixed: this is consumed by the sectortrace
 # role's Caddyfile, so naming it after the role that happens to compute it
 # would misdescribe what it is. It has a matching default in group_vars.
+#
+# `in_any_network` (a test) rather than the `ipaddr` filter: ipaddr takes a
+# single network string and raises "unknown filter type" when handed a list
+# of them, which is exactly what this needs to check against. Only the IPv4
+# ranges are consulted because the lookup above is `getent ahostsv4`.
 - name: Decide whether the record is proxied through Cloudflare  # noqa: var-naming[no-role-prefix]
   ansible.builtin.set_fact:
     caddy_behind_cloudflare: >-
       {{
-        (preflight_resolved_ips | ansible.utils.ipaddr(cloudflare_ipv4_ranges) | length > 0)
+        (preflight_resolved_ips
+          | select('ansible.utils.in_any_network', cloudflare_ipv4_ranges)
+          | list | length > 0)
         if (behind_cloudflare == "auto" and not skip_dns_check)
         else (behind_cloudflare | bool if behind_cloudflare != "auto" else false)
       }}
