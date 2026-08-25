@@ -58,6 +58,7 @@ from pipeline.web import (
     review,
 )
 from pipeline.web.jobs import JobError, JobRegistry, JobStore
+from pipeline.web.ratelimit import TokenBucketLimiter
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PUBLIC_DIR = STATIC_DIR / "public"
@@ -342,11 +343,17 @@ class Handler(BaseHTTPRequestHandler):
     _body_read = False
     _responded = False
 
-    def __init__(self, *args, settings: Settings, jobs: JobRegistry, **kwargs):
+    def __init__(self, *args, settings: Settings, jobs: JobRegistry,
+                 rate_limiter: TokenBucketLimiter | None = None, **kwargs):
         self.settings = settings
         # Shared across every request: the whole point of the registry is that
         # a run started by one request is visible to the next.
         self.jobs = jobs
+        # Shared across every request too, and for the same reason a token
+        # bucket exists at all: a per-connection one would reset every time a
+        # client opened a new connection, which is exactly what a scraper
+        # working around it would do.
+        self.rate_limiter = rate_limiter
         super().__init__(*args, **kwargs)
 
     # --- plumbing -------------------------------------------------------------
@@ -425,7 +432,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "same-origin")
 
     def _send(self, status: int, body: bytes, content_type: str,
-               max_age: int | None = None, etag: str | None = None) -> None:
+               max_age: int | None = None, etag: str | None = None,
+               extra_headers: dict[str, str] | None = None) -> None:
         self._responded = True
 
         # Compressed above a threshold, and only for things that compress. The
@@ -469,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", f"max-age={max_age}, private")
         else:
             self.send_header("Cache-Control", "no-store")
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         # The API is same-origin only. No CORS headers are ever sent, so a
         # cross-origin page cannot read a reply even if it manages to send a
         # request.
@@ -478,9 +488,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _send_json(self, payload: Any, status: int = 200,
-                    max_age: int | None = None) -> None:
+                    max_age: int | None = None,
+                    extra_headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, default=str).encode("utf-8")
-        self._send(status, body, "application/json; charset=utf-8", max_age=max_age)
+        self._send(status, body, "application/json; charset=utf-8",
+                   max_age=max_age, extra_headers=extra_headers)
 
     def _discard_body(self) -> None:
         """Read and throw away a request body that was refused unread.
@@ -539,6 +551,22 @@ class Handler(BaseHTTPRequestHandler):
         host_header = self.headers.get("Host") or ""
         return urlparse(origin).netloc.lower() == host_header.lower()
 
+    def _client_ip(self) -> str:
+        """The address rate limiting keys on.
+
+        `X-Forwarded-For`'s first hop, when present, else the direct TCP
+        peer. Every real deployment puts a reverse proxy in front and the
+        app is not otherwise reachable — the Docker builds publish the app's
+        own port on loopback only, and Caddy is the sole way in; Railway's
+        edge is the equivalent there. A spoofed header sent straight to an
+        unproxied `./start.sh web` only ever lets someone evade their own
+        local rate limit, which is not worth defending against.
+        """
+        forwarded = self.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return self.client_address[0]
+
     # --- routing --------------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
@@ -574,6 +602,19 @@ class Handler(BaseHTTPRequestHandler):
                                   max_age=0)
             if path in STATIC_FILES and self.command in ("GET", "HEAD"):
                 return self._serve_static(path)
+            # /api/v1/* only: the public, unauthenticated API a scraper can
+            # reach. /api/admin/* is the operator's own tooling, gated on
+            # trust in the network it is bound to rather than on request
+            # rate — see the settled decisions in CLAUDE.md.
+            if (path.startswith("/api/v1/") and self.rate_limiter is not None
+                    and self.settings.api_rate_limit_enabled):
+                retry_after = self.rate_limiter.check(self._client_ip())
+                if retry_after is not None:
+                    return self._send_json(
+                        {"error": "Too many requests. Slow down and try again shortly."},
+                        status=429,
+                        extra_headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+                    )
             if path.startswith("/api/"):
                 return self._serve_api(path, params)
             raise ApiError(f"No route for {path}", status=404)
@@ -1607,13 +1648,26 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     and so the CLI can report the real port before anything blocks.
     """
     settings = settings or get_settings()
+    # One bucket per client address, shared across every request thread —
+    # see Handler.__init__'s comment on why it has to be shared rather than
+    # per-connection. capacity/burst covers a page load that fires several
+    # endpoint calls at once; per-minute is the sustained rate a scraper
+    # would be held to.
+    rate_limiter = (
+        TokenBucketLimiter(
+            capacity=settings.api_rate_limit_burst,
+            refill_per_second=settings.api_rate_limit_per_minute / 60.0,
+        )
+        if settings.api_rate_limit_enabled else None
+    )
     # The registry is given a store, so the job list opens showing what this
     # warehouse has been asked to do rather than only what has happened since
     # the last restart. A run killed by a crash reappears as interrupted.
     server = ThreadingHTTPServer(
         (host, port),
         partial(Handler, settings=settings,
-                 jobs=JobRegistry(store=JobStore(settings))))
+                 jobs=JobRegistry(store=JobStore(settings)),
+                 rate_limiter=rate_limiter))
     # Sockets held by request threads must not keep the process alive after
     # Ctrl-C; a review UI that needs killing twice is a review UI people leave
     # running by accident.

@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
 
+    # A per-IP token bucket on the public /api/v1/* routes, answering
+    # sustained abuse with 429 + Retry-After. Generous by design: it exists
+    # to deter a scraper hammering the API, not to meter ordinary interactive
+    # use, and several readers behind one shared NAT address (a union office,
+    # a campaign meeting) must never see it. Set API_RATE_LIMIT_ENABLED=false
+    # to disable entirely — the LAN-only, --host 127.0.0.1 case does not need
+    # it, and it costs nothing to leave off there.
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_per_minute: float = 120.0
+    api_rate_limit_burst: float = 40.0
+
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural
     # config modules will extend. Contracts Finder documents a harsh

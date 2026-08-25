@@ -26,12 +26,18 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `29d07c9`.
-- Three items completed this session: BETA-001 (master), BETA-002, BETA-003.
-- Baseline: `uv run python -m pytest` was not run in full this cycle (see
-  Testing Decisions) — targeted tests were run for each change instead, all
-  green. A future session touching migrations, exports or write paths should
-  run it in full first.
+  directly, not `beta`). `beta` is now at `8e59063` going into BETA-007.
+- Five items completed this session: BETA-001 (master), BETA-002, BETA-003,
+  BETA-004, BETA-007.
+- Baseline: full `uv run python -m pytest` run once, after BETA-007 (the
+  first change this cycle touching core server code) — **2342 passed, 106
+  skipped, 30 deselected, 3 failed**, all three confirmed pre-existing and
+  unrelated (see BETA-007's Testing Decisions): a flaky concurrency test that
+  passes in isolation, and two document-parsing tests broken by a corrupted
+  `transformers` package cache file in this checkout's `.venv` (an optional
+  ML dependency for document OCR, nothing to do with anything this session
+  touched). Not investigated further — pre-existing environment state, not
+  this cycle's problem to fix.
 
 ## Architectural Summary
 
@@ -92,6 +98,48 @@ DONE
 -->
 
 ### DONE
+
+- [DONE] BETA-007 | Per-IP rate limit on the public API (/api/v1/*)
+  - completed: 2026-08-25T00:00:00Z
+  - commits: (pending push — see this file's own commit immediately after
+    this entry lands)
+  - result: Strategic reassessment after BETA-001–004 (queue empty of ready
+    work by design — see Next Recommended Actions in the prior revision of
+    this file) surfaced this from `docs/upgrade-roadmap.md` §3J ("API rate
+    cap"), filed 2026-08-14 and deliberately deferred pending "the portal
+    being reachable by readers the operator does not trust" — a condition
+    BETA-003 just confirmed true (production is Railway, a public host).
+    Implemented as specified there: a per-IP token bucket on `/api/v1/*`
+    only (not `/api/admin/*`, which is gated on network trust rather than
+    request rate — unchanged), `429` + `Retry-After` rather than silence.
+    New `pipeline/web/ratelimit.py` (`TokenBucketLimiter`, no new
+    dependency — the algorithm is a dozen lines), two new settings
+    (`api_rate_limit_per_minute`, default 120; `api_rate_limit_burst`,
+    default 40 — generous by design so several readers behind one shared
+    NAT address never see it), `api_rate_limit_enabled` to turn it off
+    entirely. Client IP resolution honours `X-Forwarded-For`'s first hop
+    when present (every real deployment topology — Caddy in the Docker
+    builds, Railway's edge — puts a trusted proxy in front and the app is
+    not otherwise reachable), else the direct TCP peer.
+  - note: **Verified thoroughly given this touches production server code**:
+    14 new unit/integration tests (a fake-clock unit suite for the bucket
+    algorithm itself, plus a real-server integration suite covering the
+    429+Retry-After path, independent-buckets-per-IP, the admin API and
+    static/health routes staying unaffected, and the disable switch);
+    188 existing web tests unaffected; full suite run (first time this
+    cycle) — 3 failures, all confirmed pre-existing (see Current Beta
+    Status); live-browser check that ordinary interactive use (~18 API
+    calls across 4 page loads) never approaches the default burst; a manual
+    burst against the real dev server confirmed the defaults are generous
+    enough not to trip during normal use (and, separately, confirmed the
+    server's own connection handling is unaffected by the change — see
+    commit message for the WinError investigation that turned out to be
+    unrelated Windows/curl.exe socket behaviour, not this code).
+  - possible follow-up: nothing queued. `docs/upgrade-roadmap.md` §3J's
+    entry can be marked delivered in a future doc pass (not done here —
+    this session already flagged, in BETA-002, that treating "corrected the
+    findings register" as a standing chore rather than a one-off has its
+    own cost/benefit question for the project owner to weigh).
 
 - [DONE] BETA-004 | Audit the ~45 stale agent/codex/claude branches for anything else worth reviving
   - completed: 2026-08-25T00:00:00Z
@@ -323,7 +371,9 @@ None this cycle.
 
 ## Security Improvements
 
-None this cycle.
+BETA-007: a per-IP token bucket on `/api/v1/*`, `429` + `Retry-After`.
+See its DONE entry. Does not touch `/api/admin/*`'s security model (network
+trust / bind address), which is unchanged and out of scope here.
 
 ## Testing Decisions
 
@@ -341,9 +391,15 @@ None this cycle.
   explicitly in BETA-003's DONE entry; do not treat as equivalent to a real
   syntax check.
 
-Full ~1,200-test suite not run this cycle — nothing touched migrations,
-exports or write paths. A future session picking up BETA-004+ should run it
-before anything that does.
+- BETA-007: full suite run for the first time this cycle (see Current Beta
+  Status for the 3 pre-existing, unrelated failures), plus 14 new tests
+  (`tests/test_ratelimit.py` — fake-clock unit tests for the token bucket;
+  `tests/test_web_rate_limit.py` — real-server integration tests), plus
+  `ruff check` on every touched file, plus a live-browser check and a manual
+  burst against the real dev server. This is the MEDIUM/HIGH end of the
+  brief's own §22 risk scale — new middleware on every public API
+  request — and was tested accordingly, unlike BETA-001–004's lighter,
+  proportionate checks.
 
 ## Deferred Ideas
 
