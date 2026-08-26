@@ -26,17 +26,19 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `ef1a4c4`, going into BETA-028.
-- Twenty-eight items completed across this session and its predecessors:
-  BETA-001 through BETA-027, plus BETA-032 (BETA-001 on `master`).
-  BETA-032 is out-of-band: ten specific UI requests the project owner gave
-  directly in an interactive session rather than through this queue — see
-  its DONE entry below. The queue's own BETA-028 through BETA-031 were not
-  displaced by it and remain exactly where the §52 reassessment left them.
-  The §52 strategic reassessment below was run 2026-08-26 after four
-  consecutive narrow front-end items, and the queue was re-aimed at
-  high-impact front-end work per the project owner's direct steer
-  ("prioritise improvements for the front end web ui… mind blowing").
+  directly, not `beta`). `beta` is now at `5adc5e6`, going into BETA-028.
+- Twenty-nine items completed across this session and its predecessors:
+  BETA-001 through BETA-027, plus BETA-032 and BETA-033 (BETA-001 on
+  `master`). BETA-032 and BETA-033 are out-of-band: the project owner
+  gave UI requests directly in an interactive session, then asked to be
+  interviewed for further design refinement of the same two pages, rather
+  than going through this queue — see their DONE entries below. The
+  queue's own BETA-028 through BETA-031 were not displaced by either and
+  remain exactly where the §52 reassessment left them. The §52 strategic
+  reassessment below was run 2026-08-26 after four consecutive narrow
+  front-end items, and the queue was re-aimed at high-impact front-end
+  work per the project owner's direct steer ("prioritise improvements for
+  the front end web ui… mind blowing").
 - Baseline: full `uv run python -m pytest` run once, after BETA-007 (the
   first change this cycle touching core server code) — **2342 passed, 106
   skipped, 30 deselected, 3 failed**, all three confirmed pre-existing and
@@ -317,6 +319,132 @@ DONE
     on evidence figures were considered and rejected as theatre.
 
 ### DONE
+
+- [DONE] BETA-033 | Overview hero region map, orchestrated page-load and scroll-reveal motion; fixed a dead section found along the way
+  - completed: 2026-08-26T23:32:47Z
+  - commits: `5adc5e6` (`beta`)
+  - origin: **Not drawn from this queue**, same as BETA-032 immediately
+    below. After BETA-032 shipped, the project owner asked to be
+    interviewed for further design refinement of the Overview and Pay
+    pages specifically — an explicit "perfect the design" ask, answered
+    with several rounds of `AskUserQuestion` before any code was written
+    (ambition level, hero treatment, motion appetite, palette direction,
+    then the specific hero-visual concept, Pay page's own role, motion
+    style, and finally a technical-cost finding that changed the hero
+    visual's shape mid-conversation — see the "conflicts" note below).
+  - result: the Overview hero now carries a real, if simplified,
+    silhouette of England's nine regions, shaded by the same
+    "authorities appearing as a contract buyer" coverage signal already
+    reported nationally on the snapshot cards — darker regions have more
+    of their authorities showing contract evidence, which is drawn from
+    a new `authorities.regions` breakdown in `summary()`
+    (`public_queries.py`), not a second measure invented for the map.
+    Both the Overview and Pay heroes now play a staggered page-load
+    reveal (`.hero-animated`, pure CSS, no JS), and every `.section` on
+    both pages reveals as the reader scrolls to it
+    (`components.js`'s new `revealOnScroll`, IntersectionObserver-based,
+    one-shot per element). The Pay page did not get its own dedicated
+    visual signature this round — the project owner chose to decide that
+    after seeing the Overview result rather than commit to it upfront;
+    it stays a plausible BETA-034+ candidate.
+  - **The hero map's shape changed twice during the interview, each time
+    for a concrete technical reason surfaced before committing to code,
+    not a taste reversal:** (1) the project owner's first choice was to
+    reuse the `/geography` page's real interactive map; researching that
+    found it depends on a live CDN basemap (`cartocdn.com`) and a 14MB
+    full-resolution boundary payload (`/api/v1/boundaries`) — a
+    reasonable cost for a page a reader chose to visit, a bad one for
+    the homepage's first paint, and a direct, undisclosed-at-the-time
+    conflict with the settled "both front ends render with the network
+    cable unplugged" rule (CLAUDE.md decision 6). Flagged before
+    building anything. (2) Presented with that cost, the owner's next
+    choice was still the literal map, accepting the tradeoff — then,
+    once told the concrete 14MB figure specifically (not just the
+    abstract policy conflict), chose a third option instead: dissolve
+    the same already-collected, already-provenanced authority polygons
+    (`authorities.geometry_geojson`) into their 9 real regions, once,
+    server-side, and ship that as a small static asset. This is what
+    shipped: `scripts/generate_region_outline.py` (a one-off, run by
+    hand, not part of the pipeline's own module registry — regenerate
+    only if Module 0 re-collects boundaries from a new ONS vintage) uses
+    `shapely.ops.unary_union` per region, then drops sliver polygons
+    below 0.05% of each region's dissolved area (adjacent authority
+    polygons rarely share byte-identical edges, so the raw union left
+    hundreds of sub-square-metre artefacts at every near-miss seam —
+    East of England alone dissolved to 490 sub-polygons before this
+    filter, 441 of them under 1e-5 sq degrees; after it, every region is
+    1-5 real landmasses), then simplifies at 0.04 degrees. Output:
+    `pipeline/web/static/public/assets/england-regions.json`, 9
+    features, ~64KB on disk / ~28KB over the wire, day-cached. No
+    MapLibre, no CDN request, no settled-decision conflict, and the
+    resulting silhouette is real England geometry rather than an
+    abstract cartogram — checked by eye against the computed bounding
+    box (-5.72 to 1.76°E, 49.96 to 55.79°N, which is genuinely
+    Cornwall-to-Berwick) since this session could not render a
+    screenshot (see Verified, below). The frontend projects the GeoJSON
+    to SVG itself (`overview.js`'s `projectRing`/`pathForGeometry`/
+    `viewBoxFor`, a new `svgEl()` DOM helper in `app.js` alongside
+    `el()` — `document.createElement` cannot produce real SVG elements,
+    only `document.createElementNS` can), with a longitude/latitude
+    aspect correction so England is drawn at roughly its true
+    proportions rather than the wider-and-squatter shape a naive
+    equirectangular plot would give it this far from the equator.
+  - **Found and fixed in passing, unrelated to anything asked for**: the
+    Overview page's "Current snapshot" section — the coverage /
+    evidence-quality / sector-context cards (local authorities tracked,
+    procurement notices indexed, providers tracked, human-verified
+    evidence rows, contract value, sector vacancy/turnover) — has never
+    actually rendered on the live site. `render()` built a `snapshot`
+    div with `el('div', {})`, filled it via `renderCards(snapshot, ...)`,
+    and never inserted that div into the page tree at all; a *separate*,
+    permanently-empty `<div id="snapshot">` sat in its place. Confirmed
+    present as far back as `HEAD~2` (well before this session), so this
+    predates both BETA-032 and BETA-033 — not something either
+    introduced. One-line fix: `renderCards(page.querySelector('#snapshot'), summary)`,
+    matching every other section's own call pattern. No test caught it
+    because no test exercises the rendered DOM of this page; the offline
+    suite is fixture-backed against the Python API layer, not JS
+    wiring.
+  - validation: full offline suite — 2469 passed, 106 skipped, 33
+    deselected, 2 failed (`test_documents.py`, the same pre-existing,
+    disclosed, environment-caused failures as BETA-032's baseline — a
+    third failure BETA-032 saw in `test_m04_companies.py` did not
+    reproduce this run, consistent with it being the live-network
+    integration test flakiness that file already carries, not a
+    regression). `ruff check pipeline scripts` clean.
+    `tests/test_portal_isolation.py` updated and passing: the new
+    `/assets/england-regions.json` static path is registered in
+    `server.py`'s `STATIC_FILES` (guarded by the same directory-origin
+    and public-surface-pinning tests every other static asset is) and
+    added to that test's `PUBLIC_STATIC_PATHS`.
+  - **Verified live against the dev server, with one disclosed gap**:
+    confirmed via DOM/network inspection (not screenshot — this
+    session's browser pane reported `document.hidden: true` /
+    `visibilityState: "hidden"` throughout and could not composite a
+    frame) that the region map fetches and renders 9 `<path>` elements
+    with correct `aria-label` (computed highest/lowest region from real
+    data — London 100%, East of England 72%, on the live warehouse), the
+    static asset serves at 200 with a day-long cache header, and the
+    "Current snapshot" fix produces the expected 4 section headings
+    where 3 showed before. **Not verified**: whether the page-load
+    animation and scroll-reveal are visually correct in a real,
+    foregrounded browser tab. Direct testing of raw
+    `requestAnimationFrame` and `IntersectionObserver` in this same
+    hidden tab showed neither ever fires — a session-specific rendering
+    limitation also seen verifying BETA-032's count-up animation, not
+    something diagnosable from here. The CSS itself was checked in
+    isolation (a freshly-created probe element with the `.reveal` class
+    correctly computed `opacity: 0`), so the mechanism is sound, but a
+    live-browser eyeball of the actual motion is still owed, same as
+    BETA-024's and BETA-027's carried-forward caveat.
+  - possible follow-up: Pay page's own signature visual (deferred, see
+    "result" above); a live-browser check of the motion work once a
+    session has a compositing browser; `docs/CAVEATS.md` and CLAUDE.md's
+    settled-decision list could note the `/geography` page's existing
+    CDN/basemap dependency explicitly, since this conversation surfaced
+    it as an undocumented exception to decision 6 rather than a written
+    one — not changed this round because it was a pre-existing condition
+    being worked around, not something this work touched.
 
 - [DONE] BETA-032 | Overview & Pay page polish: count-up metrics, provider-matched highlights, statutory/gender-pay-gap cleanup, census removal
   - completed: 2026-08-26T22:45:46Z
@@ -1984,6 +2112,10 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `5adc5e6` — BETA-033: overview hero region map, orchestrated motion,
+  scroll reveals; fixed a dead "Current snapshot" section found along the
+  way (out-of-queue, project-owner-directed; `beta`).
+- `d1f1f43` — beta.md: record BETA-032, fix stale queue notes (`beta`).
 - `ef1a4c4` — BETA-032: overview and pay page polish — count-up metrics,
   provider-matched highlights, census removal (out-of-queue,
   project-owner-directed; `beta`).
@@ -2049,21 +2181,33 @@ BETA-027 finished and was not updated at the time — BETA-027 is now DONE
 above, BETA-028 (offline map fallback) is the item marked IN_PROGRESS;
 this session did not touch it and cannot confirm how far it got.
 
-**What was the last successful change?** BETA-032 (`ef1a4c4`,
-2026-08-26T22:45Z): ten Overview/Pay-page UI requests the project owner
-gave directly in an interactive session, out-of-band from this queue —
-see its DONE entry above. Before that, BETA-027 (`8da06a6`): the command
-palette. Before that, BETA-026 (`538095f`): quoted phrases anchor
-document-search snippets and highlight as a unit.
+**What was the last successful change?** BETA-033 (`5adc5e6`,
+2026-08-26T23:32Z): the Overview hero's England region map, orchestrated
+page-load and scroll-reveal motion on the Overview and Pay pages, and a
+pre-existing dead-section bug fixed along the way — out-of-band from this
+queue, the same interactive session's follow-up to BETA-032. See its DONE
+entry above, in particular the settled-decision-6 finding: reusing
+`/geography`'s live map for the hero was rejected specifically because it
+depends on a CDN basemap and a 14MB boundary payload, the exact gap
+BETA-028 below exists to close. Whoever picks up BETA-028 may find
+`scripts/generate_region_outline.py`'s dissolve-and-simplify approach (or
+its output asset) directly useful for an offline fallback, rather than
+something to re-derive. Before BETA-033: BETA-032 (`ef1a4c4`); before
+that, BETA-027 (`8da06a6`), the command palette.
 
 **What should happen next?** Whichever of BETA-028/029/030/031 the queue
 above still shows as not DONE, in that order — this note cannot confirm
-which, only that BETA-032 did not touch any of them. The project owner
-has also asked, in the same interactive session as BETA-032, to be
-interviewed for further Overview/Pay design refinement; that may land
-directly as further commits rather than through this queue, the same way
-BETA-032 did — check `git log` for anything after `ef1a4c4` before
-assuming the queue below is still the single source of truth.
+which, only that neither BETA-032 nor BETA-033 touched any of them. The
+project owner may continue interviewing for further Overview/Pay design
+work (BETA-033's own possible follow-up notes a deferred Pay-page
+signature visual) — that could land directly as further commits rather
+than through this queue, the same way BETA-032/033 did — check `git log`
+for anything after `5adc5e6` before assuming the queue below is still the
+single source of truth. A live-browser eyeball of BETA-033's motion work
+(count-up, page-load sequence, scroll reveal) is still owed — this
+session's browser pane could not composite frames for any of the three
+sessions that have now hit this same limitation (BETA-024, BETA-027,
+BETA-032/033).
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
