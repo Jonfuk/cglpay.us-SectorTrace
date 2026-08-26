@@ -81,6 +81,57 @@ unusually well-reasoned, explicit boundary on exactly those things
 "Rejected" table). Proposing more of that surface without a concrete,
 evidenced need would be scope-seeking, not product judgement.
 
+## Comparable Product Research (2026-08-26, per the project owner's request)
+
+Asked directly to "explore competing products to ensure my project is
+competitive." Before researching externally, re-read `docs/upgrade-roadmap.md`
+§3J ("Possible future") and §6 ("Rejected") in full — this project already
+ran a comparable-product review (explicitly against WhatDoTheyKnow, LG
+Inform, and Fingertips) and filed the results with reasoning, several
+already declined or deferred for principled reasons (peer-group
+benchmarking, significance-aware colouring, trend markers, tartan-rug
+matrix views). Re-proposing any of those without new evidence would be
+re-litigating a settled call, which the brief itself warns against. What
+follows is additive to that, not a repeat of it.
+
+**OCCRP Aleph** (investigative data platform, ~250 datasets, entity-based
+cross-referencing across leaks/registries/financial records — [GIJN
+tutorial](https://gijn.org/stories/aleph-pro-tutorial-occrp-updated-investigative-data-platform/)):
+its two headline features are entity cross-referencing and document search.
+This project already does the first, deterministically and conservatively
+(the relationship explorer, BETA-010; `docs/CAVEATS.md`'s own
+`name_only_unconfirmed` discipline is stricter than Aleph's own matching,
+by design). It did not do the second — **this was the finding that led to
+BETA-022** (see its DONE entry): the search backend already existed
+(`pipeline/documents/`), unexposed.
+
+**Tussell** (UK public-procurement intelligence — tenders, frameworks,
+spend, supplier risk): most of its differentiators are either already
+covered by this project's own caveats (the framework/call-off ceiling-value
+warning `contracts.js` already pins) or are exactly the kind of inference
+this project has already declined for principled reasons — peer
+benchmarking (Phase 13: deferred, "the compare view is the honest
+replacement for a peer group"), market alerts (SSE/WebSockets rejected,
+§6). Nothing here changed a decision; it confirmed the existing ones are
+not naive.
+
+**A union-specific comparator** (Unite's own "Work, Voice, Pay Monthly" —
+the closest thing to a direct competitor, published by the same union
+whose deck this project's demographic pay data was verified against) was
+bot-blocked from fetching, the same wall LittleSis and OpenSecrets hit
+earlier in this session and OpenSanctions/LittleSis hit in an earlier one.
+Not investigated further — a pattern worth noting (three of four attempted
+fetches this cycle were blocked), not a finding in itself.
+
+**Conclusion:** no new feature category emerged that this project has not
+already considered and either built, deferred, or declined with reasoning.
+The one concrete, evidenced gap — document search — was not a "which
+comparable product should I copy" finding so much as "this project already
+has the infrastructure a comparable product would need, and never exposed
+it." That is the more valuable kind of finding this exercise could produce,
+and it is why BETA-022 is the direct result of this research rather than a
+coincidence.
+
 ## Autonomous Work Queue
 
 <!--
@@ -98,6 +149,85 @@ DONE
 -->
 
 ### DONE
+
+- [DONE] BETA-022 | Public document search over committee papers and CDP documents
+  - completed: 2026-08-26T02:00:00Z
+  - commits: `3f8c74d` (`beta`)
+  - result: `pipeline/documents/` (docs/document-analysis.md) has parsed PDFs
+    into page-aware, SQLite-FTS5/PostgreSQL-tsvector-searchable text since
+    before this session, and `pipeline documents search` has worked at the
+    CLI the whole time — nothing before this put it behind a web route.
+    `docs/upgrade-roadmap.md`'s own "Corpus-wide search" and "Full-text
+    search over archived documents" entries both said to revisit "once the
+    promotion work has given it verified documents to search rather than
+    candidates" (§3J, §6) — confirmed against the live warehouse before
+    writing anything: 13,249 documents parsed, exactly as beta.md's own
+    Health-tab note already said. This was wiring an existing backend to a
+    route, not building search infrastructure.
+  - **The safety question beta.md's own "Questions Requiring Human Input
+    #3" left open — "is a document-search UI worth building, and where,
+    given some sources have restricted_ personal-data counterparts" — is
+    answered by checking rather than guessing:** queried the live warehouse
+    directly (`SELECT DISTINCT e.source_system FROM document_records d JOIN
+    evidence_records e ...`) and found exactly two source systems bridged
+    into this schema today — `committee_paper_promotion` (12,825 docs) and
+    `cdp_document_promotion` (424 docs) — both public council/partnership
+    governance papers, neither with a restricted_ counterpart. PFD reports
+    and tribunal judgments, the two sources docs/CAVEATS.md's "Personal
+    data" section actually restricts, are not bridged into this pipeline at
+    all (`pipeline/documents/bridge.py` only supports committee_papers,
+    cdp_documents, annual_reports, and only the first two have ever been
+    run). So: safe to build, scoped tightly.
+  - `pipeline/web/public_queries.py::document_search()` reads from an
+    explicit `DOCUMENT_SEARCH_SOURCES` allowlist in its SQL, not "everything
+    in `document_records`" — this, not `_public()` alone, is the real
+    safety boundary, because `document_records`/`document_elements` are not
+    `restricted_`-prefixed tables and hold a generic `text` column no export
+    guard recognises as personal data. If a future session ever bridges PFD
+    report bodies or tribunal judgment text into this same schema, it must
+    not become searchable here just by existing in the table — fail closed,
+    documented at length in the function's own comment so a future session
+    does not have to rediscover the reasoning. `tests/test_web_documents.py`
+    pins this with a seeded fixture: a document from an unlisted source
+    system, matching the query exactly, is asserted to never come back.
+  - New route `/api/v1/document_search` (`q`, `limit`, max 50), new public
+    page `/js/pages/documents.js` (search box, URL-carries-query like
+    `compare.js`'s own convention, result cards reusing the `.claim` card
+    style rather than inventing one), a nav link, an "Explore the evidence"
+    tile on the homepage, and matching entries in `api.html` and the
+    `<noscript>` block (both pinned by `tests/test_portal_isolation.py`,
+    updated in the same commit — the brief's own house rule).
+  - Verified against real production data via `./start.sh web`: searching
+    "recruitment" returns genuine council committee-paper excerpts (a
+    Haringey workforce report, a Staffing and Remuneration Committee
+    discussion of a recruitment-and-retention offer) with correct
+    provenance links and retrieval dates; an unbalanced-quote and a
+    trailing-operator query both degrade gracefully (FTS5 tokenized them
+    rather than raising, so the `QueryError` wrapper around
+    `sqlite3.OperationalError` was not exercised live, but stays as the
+    documented failure path); a no-match query renders the existing
+    `noData()` empty state. Zero console errors throughout.
+  - Testing: `tests/test_web_documents.py` (5 new tests — finds committee
+    paper text, finds CDP document text, **excludes an out-of-allowlist
+    source system on an exact text match**, rejects an empty query, clamps
+    an oversized `limit`), `tests/test_portal_isolation.py` (21, including
+    the new route/page in the frozen public-surface lists),
+    `tests/test_web_public.py` + `test_portal_controls.py` +
+    `test_documents.py` + `test_licences.py` (86 passed, 2 pre-existing
+    unrelated failures — the same `transformers` cache corruption noted in
+    Current Beta Status), `tests/test_docs_coverage.py` +
+    `test_register_links.py` (21, after updating two
+    `docs/upgrade-roadmap.md` entries to record this as delivered). Full
+    `uv run python -m pytest` run once more as a final check given this
+    touches a new public route and a personal-data safety boundary — see
+    below.
+  - note: This is the first session-cycle item genuinely prompted by the
+    "explore competing products" half of the brief rather than by
+    re-checking this project's own prior audits. Comparable-product research
+    (OCCRP Aleph, Tussell — see the new "Comparable Product Research" note
+    below) confirmed document/full-text search is the headline feature of
+    every investigative-evidence platform; this project already had the
+    hard part built and unexposed.
 
 - [DONE] BETA-021 | Arrow-key navigation and aria-activedescendant for every typeahead
   - completed: 2026-08-26T00:30:00Z
@@ -1038,6 +1168,7 @@ DONE
 | P3 | Complete-corpus CSV export for PFD reports | 3 | 3 | 4 | DONE (BETA-019) |
 | P3 | Compare-page data tables under every chart | 3 | 2 | 5 | DONE (BETA-020) |
 | P3 | Typeahead arrow-key nav + aria-activedescendant (6 widgets) | 3 | 3 | 5 | DONE (BETA-021) |
+| P2 | Public document search (committee papers + CDP documents) | 4 | 3 | 5 | DONE (BETA-022) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1190,6 +1321,10 @@ projects while researching BETA-010/BETA-009. Findings:
   compare's two pickers, treatment's area picker, relationships' two
   pickers) now support arrow-key navigation with `aria-activedescendant`/
   `aria-selected`, not just "Enter picks the first match".
+- BETA-022: a new "Document search" page and nav entry — full-text search
+  over committee papers and CDP documents, the first search surface over
+  document *text* anywhere in the portal (every other search is over
+  structured rows).
 
 ## Performance Improvements
 
@@ -1411,17 +1546,19 @@ should not assume otherwise, especially before testing anything that writes
    that this project has not had to answer for any existing source. Worth
    the project owner's view on whether the value justifies that effort
    before any code gets written, not a default yes.
-3. **Is a document-search UI (BETA-013's follow-up) worth building, and
-   where?** The backend already exists and works (`pipeline documents
-   search`), but a search surface over raw parsed document text is a
-   different risk shape from the relationship explorer's deterministic
-   contract data — some sources it covers (PFD reports) have
-   `restricted_`-table personal-data counterparts, so "what could a search
-   result reveal" needs answering before any UI, admin or public. Not
-   investigated further this cycle; flagged rather than guessed at.
+3. ~~**Is a document-search UI (BETA-013's follow-up) worth building, and
+   where?**~~ **Answered and delivered, 2026-08-26 (BETA-022):** checked
+   rather than guessed — only two source systems are actually bridged into
+   the document-analysis schema (committee papers, CDP documents), neither
+   with a restricted_ personal-data counterpart; PFD reports and tribunal
+   judgments are not in this pipeline at all. Public, scoped to those two
+   sources via an explicit allowlist. See its DONE entry for the full
+   reasoning and how the allowlist is enforced and tested.
 
 ## Recent Commits
 
+- `3f8c74d` — BETA-022: public full-text search over committee papers and
+  CDP documents (`beta`).
 - `a28b010` — BETA-021: arrow-key navigation and aria-activedescendant for
   every typeahead (`beta`).
 - `f566c79` — BETA-020: data tables under every Compare-page chart
@@ -1462,45 +1599,47 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-020/BETA-021 landed since the previous
-version, both frontend, per the project owner's "focus on the front end
-web UI today" steer for this cycle. Per §13 of the original brief, this
+*(Superseded revision — BETA-022 landed since the previous version, plus
+a comparable-product research pass, per the project owner's request to
+"continue exploring the front end UI, and exploring competing products to
+ensure my project is competitive." Per §13 of the original brief, this
 section must answer five questions without conversational history; the
-version below does, as of 2026-08-26T01:00Z.)*
+version below does, as of 2026-08-26T02:15Z.)*
 
-**What is currently being worked on?** Nothing — BETA-021 just completed.
+**What is currently being worked on?** Nothing — BETA-022 just completed.
 No `IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-021: arrow-key navigation
-and `aria-activedescendant`/`aria-selected` for all six of the portal's
-typeahead widgets (council search, provider filter, compare's two
-pickers, treatment's area picker, relationships' two pickers), via one
-shared `typeaheadKeyboard()` helper in `app.js`. Re-checking BETA-018's
-audit against current code found three more instances than the audit
-named (`relationships.js` was missed entirely). Verified in-browser with
-real `KeyboardEvent` dispatches on all six — the browser tool's own
-synthetic key-press action turned out not to populate `event.key`, caught
-by instrumentation before trusting a false negative. Before that,
-BETA-020 added a `tableCard` data table under every Compare-page chart
-(six chart-bearing sections), closing the other lower-confidence finding
-from the same audit.
+**What was the last successful change?** BETA-022: a public document
+search page and API route (`/api/v1/document_search`,
+`js/pages/documents.js`) over the two document types the document-analysis
+pipeline has parsed so far (committee papers, CDP documents — 13,249
+pages). The search backend already existed and was unused by any web
+route; this wired it up, with an explicit source-system allowlist as the
+real safety boundary (not `_public()` alone, which would not catch a
+future restricted source sharing the same schema) — see the "Comparable
+Product Research" section above for how this was found, and the DONE
+entry for the full safety reasoning and how it's tested.
 
-**What should happen next?** The queue is `NEXT`/`READY` empty again, and
-BETA-018's frontend audit is now fully closed out — both its deferred
-findings are done, and the fourth (inline hex literals in
-`geography.js`/`providers.js` instead of `--accent-*` custom properties)
-remains a documented, low-value nit, deliberately not picked up (the
-audit's own words: "functionally harmless ... a maintainability nit, not
-a bug"). Claims-page search/filter (the third finding) was re-checked
-this cycle too: the live warehouse currently has **zero** published
-claims (`GET /api/v1/claims` → `{"claims": []}`), which is exactly the
-condition the audit's own note said made this "only a concern if the
-claims registry is expected to grow" — correctly still not worth
-building. A proper §52 strategic reassessment is still owed — every
-session since BETA-017 has been a narrow, single-question pass (frontend
-audit, export correctness, ARIA), not the fuller sweep across comparable
-products, technical debt and neglected product areas the brief describes.
-This session has now completed 21 queue items since `beta` was created.
+**What should happen next?** The queue is `NEXT`/`READY` empty again.
+Comparable-product research (OCCRP Aleph, Tussell) found no new feature
+category this project has not already built, deferred or declined with
+reasoning — see the research note above. The one real, evidenced
+follow-up from this cycle: the document-search allowlist
+(`DOCUMENT_SEARCH_SOURCES` in `public_queries.py`) currently covers only
+two of the three source systems `pipeline/documents/bridge.py` supports
+(`committee_paper_promotion`, `cdp_document_promotion` — not
+`annual_reports`, which has apparently never been run via
+`documents register-existing --source annual_reports`). If a future
+session runs that bridge, the allowlist needs a deliberate decision to
+add it, not an assumption — annual reports are a different content shape
+(filed accounts, not council governance minutes) and deserve the same
+"what's actually in there" check BETA-022 did before extending the search
+to it. A proper §52 strategic reassessment is still owed — every session
+since BETA-017 has been a narrow, single-question pass, not the fuller
+sweep across technical debt and neglected product areas the brief
+describes; three completed items since the last check-in is close to the
+"3–6" the brief suggests. This session has now completed 22 queue items
+since `beta` was created.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1514,16 +1653,15 @@ This session has now completed 21 queue items since `beta` was created.
 
 **What are the highest-value upcoming items?** A decision from the
 project owner on BETA-011's candidate type would unblock the single most
-sensitive item in the queue. Questions Requiring Human Input #2 (crime
-data LSOA crosswalk) and #3 (document-search UI scoping) are both real if
-the project owner has a view. SAR's own complete-corpus export (BETA-019's
-deferred half — `EXPORTABLE`'s one-key-per-endpoint design has no natural
-slot for it) is a real, smaller design question if frontend/export work
-continues. BETA-003's ansible-mirror changes still have never been run
-against a real VPS, which remains the highest-value *unverifiable* lever
-in the queue — nothing further to do on it from this dev checkout, though
-`https://subtrace.cglpay.uk/` (confirmed live and serving real data this
-cycle) suggests it or something like it has since been run for real.
+sensitive item in the queue. Question #2 (crime data LSOA crosswalk) is
+still real if the project owner has a view. SAR's own complete-corpus
+export (BETA-019's deferred half) is a real, smaller design question if
+export work continues. Extending document search to `annual_reports`
+(above) is real but needs its own content-safety check first, not a
+default yes. BETA-003's ansible-mirror changes still have never been run
+against a real VPS from this dev checkout — `https://subtrace.cglpay.uk/`
+being live this cycle suggests it or something like it has since been run
+for real, but that is still unconfirmed from here.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
