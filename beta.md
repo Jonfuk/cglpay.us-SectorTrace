@@ -99,6 +99,80 @@ DONE
 
 ### DONE
 
+- [DONE] BETA-021 | Arrow-key navigation and aria-activedescendant for every typeahead
+  - completed: 2026-08-26T00:30:00Z
+  - commits: `a28b010` (`beta`)
+  - result: The other lower-confidence finding from BETA-018's frontend
+    audit (see Deferred Ideas) that was actually still there on re-check.
+    The audit named three call sites; re-checking found **six**, not three
+    — `relationships.js`'s `entityPicker` (explicitly commented as
+    "generalised from compare.js") was missed. Of the six, only two
+    (`#find-council`, `#f-provider` in `index.html`) actually declared
+    `role="combobox"` — `compare.js`/`treatment.js`/`relationships.js`'s
+    pickers only had `role="listbox"` on the `<ul>`, and `treatment.js`'s
+    had no role or keyboard handling at all. So the audit's framing
+    ("overpromising ARIA") was more true of two widgets than five, but the
+    underlying gap — no arrow-key nav, `aria-selected` never set — was real
+    everywhere.
+  - Added one shared `typeaheadKeyboard(input, list)` export in `app.js`
+    (`ArrowDown`/`ArrowUp` move a roving highlight, `Escape` clears it,
+    `Enter` picks the highlighted option or the first if none is
+    highlighted — the existing behaviour, unchanged) rather than writing
+    the same logic six times. `styles.css` already had a
+    `li[aria-selected="true"]` rule waiting for this, unused, since before
+    this session. Brought all six to the same `role="combobox"` +
+    `aria-expanded` + `aria-controls` contract and removed each site's own
+    ad-hoc "Enter picks first match" listener in favour of the shared one.
+  - note on verification method: the in-app browser tool's synthetic key
+    press does not populate `KeyboardEvent.key`/`.code`/`.keyCode` — caught
+    by instrumenting a listener before assuming the fix was broken.
+    Switched to `dispatchEvent(new KeyboardEvent(...))` with real `key`
+    values for all in-browser verification instead; this is what actually
+    exercised the arrow-key/Enter/Escape paths on all six widgets. No JS
+    test runner exists in this project (no build step, by design — see
+    `CLAUDE.md` settled decision 6), so `tests/test_portal_controls.py` +
+    `test_web_public.py` + `test_portal_isolation.py` (76 tests) were run
+    as a backend-contract/isolation smoke check only, not as proof of this
+    change — the in-browser `dispatchEvent` checks are the real evidence.
+
+- [DONE] BETA-020 | Data tables under every Compare-page chart
+  - completed: 2026-08-26T00:00:00Z
+  - commits: `fb5974e` (rebased to `f566c79` on push; `beta`)
+  - result: One of the three lower-confidence findings BETA-018's frontend
+    audit deferred (see Deferred Ideas): `compare.js` drew four
+    chart-bearing sections (grant, budget, treatment, contracts, plus
+    charity/provider-contracts once a provider is selected — six sections
+    total) with no accompanying data table, unlike every other
+    chart-bearing page in the portal. Re-checked against current code
+    before acting, per this file's own discipline — the gap was still
+    there. Added a `tableCard` beneath each chart, reusing the exact
+    component every other page already uses rather than inventing a new
+    one: `renderYearsChart` (shared by grant/budget/contracts/provider
+    contracts) gets a `yearsTableColumns()` helper that derives columns
+    from `opts` and the rows themselves, since the same function draws four
+    differently-shaped series; `renderTreatment` gets one table per
+    indicator chart (mirroring `treatment.js`'s own `drawTable`, England
+    rows included with `authority_name: 'England'`); `renderCharity` gets a
+    static Provider/Year end/Income/Expenditure table. No `exportEndpoint`
+    on any of them — `compare` is not in `public_export.py`'s `EXPORTABLE`
+    registry and adding one was out of scope for a UI-gap fix.
+  - Verified in-browser (`./start.sh web`, not the beta deployment — this
+    dev checkout's `DATABASE_URL` is live Railway production, GET-only, see
+    Environment Note): selected Adur (authority) and Turning Point
+    (provider), all six sections rendered with correct columns and
+    GBP-formatted values (including a real negative budget figure,
+    `-£411,000`, rendering correctly), zero console errors. No test file
+    covers the JS frontend directly (no build step, no JS test runner in
+    this project); ran `tests/test_web_compare.py` +
+    `tests/test_portal_isolation.py` (31 tests) as the backend-contract and
+    isolation smoke check since the endpoint itself was untouched — both
+    green.
+  - note: A concurrent session pushed `419171f` ("mirror: add explicit
+    local PostgreSQL reset", `deploy/ansible-mirror/`) to `origin/beta`
+    between this item starting and finishing — rebased cleanly, no file
+    overlap. Per `CLAUDE.md`'s "several sessions share this checkout"
+    warning, this is expected, not a conflict to resolve further.
+
 - [DONE] BETA-019 | Complete-corpus CSV/JSON export for PFD reports
   - completed: 2026-08-26T00:35:00Z
   - commits: `ece19ae` (`beta`)
@@ -962,6 +1036,8 @@ DONE
 | P2 | Surface Modules 29-31 as a Comparators section on the authority page | 4 | 2 | 5 | DONE (BETA-017) |
 | P2 | Frontend UI audit: theme-aware chart colours, mobile theme switcher, dead vendor file | 4 | 3 | 5 | DONE (BETA-018) |
 | P3 | Complete-corpus CSV export for PFD reports | 3 | 3 | 4 | DONE (BETA-019) |
+| P3 | Compare-page data tables under every chart | 3 | 2 | 5 | DONE (BETA-020) |
+| P3 | Typeahead arrow-key nav + aria-activedescendant (6 widgets) | 3 | 3 | 5 | DONE (BETA-021) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1106,6 +1182,14 @@ projects while researching BETA-010/BETA-009. Findings:
   synced control inside the offcanvas nav); a pre-existing flex-wrap bug
   that could push the last offcanvas nav item off-screen is fixed at the
   root, independent of the theme-switcher fix that surfaced it.
+- BETA-020: every chart-bearing section on the Compare page (grant, budget,
+  treatment × N indicators, contracts, charity, provider contracts) now has
+  a `tableCard` data table beneath its chart, matching every other
+  chart-bearing page in the portal.
+- BETA-021: all six typeahead widgets (council search, provider filter,
+  compare's two pickers, treatment's area picker, relationships' two
+  pickers) now support arrow-key navigation with `aria-activedescendant`/
+  `aria-selected`, not just "Enter picks the first match".
 
 ## Performance Improvements
 
@@ -1214,24 +1298,16 @@ trust / bind address), which is unchanged and out of scope here.
   confidence or bigger scope than the two bugs that were fixed and
   verified; a future session should re-check each against current code
   before acting, the same discipline this file applies everywhere else):
-  - The Compare page (`compare.js`) draws charts with no accompanying data
-    table for any of its three chart-bearing sections, unlike every other
-    chart-bearing page in the portal. Reasonable next UI feature if
-    revisited — reuse the existing `tableCard` pattern, do not invent a
-    new one.
+  - ~~The Compare page (`compare.js`) draws charts with no accompanying
+    data table~~ — **done, see BETA-020.**
   - The Claims page (`claims.js`) has no search/filter/sort control,
     unlike the Tabulator-backed directory tables elsewhere; only a concern
     if the claims registry is expected to grow past what browser
     find-in-page comfortably handles.
-  - The typeahead widgets (top-bar council search, filter-bar provider
-    search, the authority/provider pickers on `treatment.js`/`compare.js`)
-    declare full `role="combobox"`/`role="listbox"` ARIA but only
-    implement "Enter selects the first match" — no arrow-key navigation,
-    `aria-selected` never set. `app.js` has a comment explaining the
-    Enter-only choice was deliberate for its own control; whether the
-    ARIA roles overpromise relative to what's delivered across all three
-    instances is worth a screen-reader-user's actual judgement, not
-    guessed at from source alone.
+  - ~~The typeahead widgets ... declare full `role="combobox"`/
+    `role="listbox"` ARIA but only implement "Enter selects the first
+    match"~~ — **done, see BETA-021** (which also found three more
+    instances than this note named).
   - Some map/graph JS (`geography.js`'s MapLibre layer paints,
     `providers.js`'s entity-graph colours) uses inline hex literals rather
     than the `--accent-*` CSS custom properties the rest of the stylesheet
@@ -1346,6 +1422,12 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `a28b010` — BETA-021: arrow-key navigation and aria-activedescendant for
+  every typeahead (`beta`).
+- `f566c79` — BETA-020: data tables under every Compare-page chart
+  (`beta`).
+- `419171f` — mirror: add explicit local PostgreSQL reset (concurrent
+  session, `beta`).
 - `ece19ae` — BETA-019: complete-corpus CSV/JSON export for PFD reports
   (`beta`).
 - `087c1c6` — BETA-018: theme-aware chart colours, mobile theme switcher,
@@ -1380,38 +1462,45 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-019 landed since the previous version. Per
-§13 of the original brief, this section must answer five questions
-without conversational history; the version below does, as of
-2026-08-26T00:35Z.)*
+*(Superseded revision — BETA-020/BETA-021 landed since the previous
+version, both frontend, per the project owner's "focus on the front end
+web UI today" steer for this cycle. Per §13 of the original brief, this
+section must answer five questions without conversational history; the
+version below does, as of 2026-08-26T01:00Z.)*
 
-**What is currently being worked on?** Nothing — BETA-019 just completed.
+**What is currently being worked on?** Nothing — BETA-021 just completed.
 No `IN_PROGRESS` item.
 
-**What was the last successful change?** BETA-019: complete-corpus
-CSV/JSON export for PFD reports, mirroring the existing `contracts`
-windowed-export pattern exactly (streaming query, `EXPORTABLE`/`WINDOWED`
-registration, a new `_export_complete` branch), plus a smaller adjacent
-licence-registration gap found and fixed along the way. Verified against
-real production data: the export now returns all 1,539 reports, not the
-page's 50-row window. SAR's own export was deliberately scoped out as a
-separate, harder question (`EXPORTABLE`'s one-key-per-endpoint design has
-no natural slot for it) rather than bent to also cover it.
+**What was the last successful change?** BETA-021: arrow-key navigation
+and `aria-activedescendant`/`aria-selected` for all six of the portal's
+typeahead widgets (council search, provider filter, compare's two
+pickers, treatment's area picker, relationships' two pickers), via one
+shared `typeaheadKeyboard()` helper in `app.js`. Re-checking BETA-018's
+audit against current code found three more instances than the audit
+named (`relationships.js` was missed entirely). Verified in-browser with
+real `KeyboardEvent` dispatches on all six — the browser tool's own
+synthetic key-press action turned out not to populate `event.key`, caught
+by instrumentation before trusting a false negative. Before that,
+BETA-020 added a `tableCard` data table under every Compare-page chart
+(six chart-bearing sections), closing the other lower-confidence finding
+from the same audit.
 
-**What should happen next?** The queue is `NEXT`/`READY` empty again.
-Three smaller frontend findings from BETA-018's audit remain recorded
-under Deferred Ideas (Compare-page tables/export, Claims-page search,
-typeahead ARIA completeness) — lower confidence or bigger scope than
-what's been fixed so far, worth a fresh look rather than assuming still
-accurate. SAR export (this entry's own deferred half) is a real, if
-smaller, design question. Beyond those, a proper §52 strategic
-reassessment is still owed — the one that produced BETA-017/018/019 was
-narrow (one question each time: "can users find this," "does the frontend
-have gaps," "does an export tell the truth"), not the fuller pass across
-comparable products, technical debt, and neglected product areas the
-brief describes. This session has now completed 19 queue items since
-`beta` was created — a natural point to check in before another
-autonomous cycle picks its own next thread.
+**What should happen next?** The queue is `NEXT`/`READY` empty again, and
+BETA-018's frontend audit is now fully closed out — both its deferred
+findings are done, and the fourth (inline hex literals in
+`geography.js`/`providers.js` instead of `--accent-*` custom properties)
+remains a documented, low-value nit, deliberately not picked up (the
+audit's own words: "functionally harmless ... a maintainability nit, not
+a bug"). Claims-page search/filter (the third finding) was re-checked
+this cycle too: the live warehouse currently has **zero** published
+claims (`GET /api/v1/claims` → `{"claims": []}`), which is exactly the
+condition the audit's own note said made this "only a concern if the
+claims registry is expected to grow" — correctly still not worth
+building. A proper §52 strategic reassessment is still owed — every
+session since BETA-017 has been a narrow, single-question pass (frontend
+audit, export correctness, ARIA), not the fuller sweep across comparable
+products, technical debt and neglected product areas the brief describes.
+This session has now completed 21 queue items since `beta` was created.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1427,12 +1516,14 @@ autonomous cycle picks its own next thread.
 project owner on BETA-011's candidate type would unblock the single most
 sensitive item in the queue. Questions Requiring Human Input #2 (crime
 data LSOA crosswalk) and #3 (document-search UI scoping) are both real if
-the project owner has a view. The H-CLIC B&B breakdown, SAR export, and
-the three frontend findings under Deferred Ideas are all small, low-risk
-additions to existing work rather than new initiatives, if wanted.
-BETA-003's ansible-mirror changes still have never been run against a
-real VPS, which remains the highest-value *unverifiable* lever in the
-queue — nothing further to do on it from this dev checkout.
+the project owner has a view. SAR's own complete-corpus export (BETA-019's
+deferred half — `EXPORTABLE`'s one-key-per-endpoint design has no natural
+slot for it) is a real, smaller design question if frontend/export work
+continues. BETA-003's ansible-mirror changes still have never been run
+against a real VPS, which remains the highest-value *unverifiable* lever
+in the queue — nothing further to do on it from this dev checkout, though
+`https://subtrace.cglpay.uk/` (confirmed live and serving real data this
+cycle) suggests it or something like it has since been run for real.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
