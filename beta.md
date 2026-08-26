@@ -150,32 +150,53 @@ DONE
 
 ### IN_PROGRESS
 
-*(none — BETA-023 completed 2026-08-26; BETA-024 is next)*
+*(none — BETA-024 completed 2026-08-26; see Next Recommended Actions for
+what follows)*
 
 ### NEXT
 
-- [NEXT] BETA-024 | Per-route document titles and focus management on navigation
+- [NEXT] BETA-025 | "Show more" pagination for document search
   - priority: P3
-  - impact: 3
-  - effort: 1
-  - confidence: 5
+  - impact: 2
+  - effort: 2
+  - confidence: 4
   - risk: 1
-  - area: ui/a11y
+  - area: ui/search
   - depends_on: none
-  - objective: Every route sets its own `document.title`; hashchange-driven
-    renders move focus to `#main` so SPA navigation is announced by screen
-    readers and browser history entries are distinguishable.
-  - rationale: All 13 routes share one static title, so back/forward history
-    and bookmarks cannot tell routes apart, and `render()` swaps `#main`
-    without moving focus anywhere — a screen reader user activating a nav
-    link hears nothing about the page that replaced the old one.
-  - suggested_first_action: Add a route→title map in app.js's `render()` and
-    set `document.title` after the module resolves; focus `#main` (already
-    `tabindex="-1"`) with `{ preventScroll: true }` on every render except
-    the first. Pin with the same static-source-analysis style
-    tests/test_portal_controls.py uses.
+  - objective: Beyond the 50 results the page now shows, a reader can ask for
+    the rest instead of being told to narrow the search.
+  - rationale: BETA-023 made the cut-off honest ("showing 50 of 14,150") but
+    the only remedy offered is narrowing; common queries on the live corpus
+    (e.g. "commissioning") exceed 50 pages.
+  - suggested_first_action: Add an `offset` param to
+    `public_queries.document_search` through both backends' SQL, then an
+    accumulating "show more" button in documents.js's runSearch that re-fetches
+    with offset and appends rendered results (fetchJSON's cache keys on the
+    full URL, so distinct offsets do not collide).
+  - notes: Keep the count line truthful when appending. Quoted-phrase
+    awareness in snippet/highlight tokenisation is a related but separable
+    polish — separate ID if picked up.
 
 ### DONE
+
+- [DONE] BETA-024 | Per-route document titles and focus management on navigation
+  - completed: 2026-08-26T13:40:00Z
+  - commits: `f2115d7` (`beta`)
+  - result: app.js's router now sets a per-route `document.title`
+    (ROUTE_TITLES, kept in lockstep with ROUTES by test — drift in either
+    direction fails), and moves focus to `#main` with preventScroll when the
+    base route changes. The move is gated on an actual route change, not on
+    every render: filter edits re-render the whole page through the state
+    subscription and must not yank focus out of the control being typed in,
+    and first load keeps the reader's own starting point. Pinned by
+    tests/test_portal_navigation.py (static-source assertions, this suite's
+    offline style), including that index.html's `<main tabindex="-1">` — the
+    precondition for the handoff landing anywhere at all — stays put.
+  - validation: tests/test_portal_navigation.py (5) + test_portal_controls.py
+    + test_portal_isolation.py pass (36 total); ruff clean. Browser check not
+    possible from this checkout (no node/browser tooling; see Environment
+    Note) — behaviour is deliberately simple and source-pinned; next live
+    session should eyeball a nav click announcing/retitling correctly.
 
 - [DONE] BETA-023 | Document search results that show why they matched
   - completed: 2026-08-26T13:05:00Z
@@ -1223,7 +1244,8 @@ DONE
 | P3 | Typeahead arrow-key nav + aria-activedescendant (6 widgets) | 3 | 3 | 5 | DONE (BETA-021) |
 | P2 | Public document search (committee papers + CDP documents) | 4 | 3 | 5 | DONE (BETA-022) |
 | P2 | Document search: match-centred snippets, highlighting, result counts | 4 | 2 | 5 | DONE (BETA-023) |
-| P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | NEXT (BETA-024) |
+| P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | DONE (BETA-024) |
+| P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | NEXT (BETA-025) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1385,6 +1407,10 @@ projects while researching BETA-010/BETA-009. Findings:
   matching pages" when the result list is cut. A mid-page match used to be
   invisible: the client truncated from character 0 with no indication the
   page matched anywhere else.
+- BETA-024: every route names itself in the browser tab (history entries and
+  bookmarks are distinguishable for the first time), and navigating between
+  sections hands focus to the page content so screen readers announce the
+  change instead of silence. Filter edits deliberately do not move focus.
 
 ## Performance Improvements
 
@@ -1617,6 +1643,9 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `f2115d7` — BETA-024: per-route titles and focus handoff on portal
+  navigation (`beta`).
+- `e8b6ed4` — beta.md: record BETA-023, queue BETA-024 (`beta`).
 - `cb4781b` — BETA-023: match-centred snippets and honest result counts in
   document search (`beta`).
 - `3f8c74d` — BETA-022: public full-text search over committee papers and
@@ -1661,52 +1690,44 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-023 landed since the previous version; the
+*(Superseded revision — BETA-024 landed since the previous version; the
 front-end focus continues per the project owner's standing request to
 "focus on the front end web ui." Five questions, answerable without
-conversational history, as of 2026-08-26T13:10Z.)*
+conversational history, as of 2026-08-26T13:50Z.)*
 
-**What is currently being worked on?** Nothing — BETA-023 just completed.
-The next item is queued and ready: **BETA-024** (per-route document titles
-+ SPA focus management in `app.js`), with its `suggested_first_action`
-written out.
+**What is currently being worked on?** Nothing — BETA-024 just completed.
+**BETA-025** ("show more" pagination for document search) is queued NEXT
+with its `suggested_first_action` written out.
 
-**What was the last successful change?** BETA-023 (`cb4781b`): document
-search now returns a match-centred snippet plus total count server-side,
-and documents.js highlights matched terms with DOM-built `<mark>` nodes and
-says "showing N of M matching pages". Validated by 9 fixture tests, the
-portal isolation/controls suites, ruff, and one read-only live check of the
-PostgreSQL path.
+**What was the last successful change?** BETA-024 (`f2115d7`): app.js sets a
+per-route `document.title` and moves focus to `#main` on genuine route
+changes only (not filter re-renders, not first load), pinned by the new
+tests/test_portal_navigation.py.
 
-**What should happen next?** BETA-024 — small, self-contained, pinned with
-the static-analysis test style test_portal_controls.py uses. After that,
-the remaining front-end candidates are thinner: pagination/"show more" for
-document search (needs an `offset` param through both backends), quoted-
-phrase awareness in snippet/highlight tokenisation, and the strategic
-reassessment §52 keeps flagging as owed (every session since BETA-017 has
-been a narrow single-question pass).
+**What should happen next?** Either BETA-025 (small, both-backends SQL
+change plus an accumulating results list) or the §52 strategic reassessment
+that has been flagged as owed since BETA-022 — every session since BETA-017
+has been a narrow single-question pass. Front-end candidates beyond that
+are thinning: quoted-phrase awareness in snippet tokenisation, and eyeball-
+verifying BETA-024's focus/title behaviour in a real browser at the next
+opportunity.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
    owner to specify which candidate type it applies to first. See
    Questions Requiring Human Input #0.
 2. BETA-005 (WDTK robots.txt exception) — time-boxed to 2026-09-10 or an
-   earlier mySociety reply. Not this project's call to make sooner.
-3. BETA-006 (`--jobs 4` re-evaluation) — refused twice already for an
-   operational/scheduling reason, not a code-quality one; do not restart
-   without new information about collection-calendar availability.
+   earlier mySociety reply.
+3. BETA-006 (`--jobs 4` re-evaluation) — refused twice for operational/
+   scheduling reasons; do not restart without new scheduling information.
 
-**What are the highest-value upcoming items?** A decision from the
-project owner on BETA-011's candidate type would unblock the single most
-sensitive item in the queue. Question #2 (crime data LSOA crosswalk) is
-still real if the project owner has a view. Extending document search to
-`annual_reports` remains gated on its own content-safety check, not a
-default yes. BETA-003's ansible-mirror changes still unverified against a
-real VPS from this checkout.
+**What are the highest-value upcoming items?** A decision from the project
+owner on BETA-011's candidate type would unblock the single most sensitive
+item in the queue. Question #2 (crime data LSOA crosswalk) is still real if
+the owner has a view. Extending document search to `annual_reports` stays
+gated on its own content-safety check, not a default yes.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
-should still be checked against actual code before being trusted for
-anything not touched since BETA-002's reconciliation — BETA-008's DONE
-entry records this as a recurring pattern (three separate stale claims
-found across the session), not a one-off worth assuming fixed.
+should still be checked against actual code before being trusted (BETA-008's
+DONE entry records this as a recurring pattern).
