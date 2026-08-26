@@ -283,6 +283,40 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-document_search" data-route="document_search">
+    <h3><code>/api/v1/document_search</code></h3>
+    <p>
+      Full-text search over page-level text extracted from published
+      committee papers and community drug partnership documents — the two
+      document types currently parsed by the document-analysis pipeline
+      (<code>docs/document-analysis.md</code>). Not a search of the whole
+      warehouse: PFD reports, tribunal judgments and every structured
+      warehouse table are reached through their own routes above, not this
+      one, and a document type is added to this search only after a
+      deliberate decision that its extracted text carries no restricted
+      personal data.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>q</code></td><td>Required. The search term(s).</td></tr>
+        <tr><td><code>limit</code></td><td>Optional, default 25, maximum 50.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>results</code> — one row per matching page/element, each
+      with <code>document_type</code>, <code>title</code>,
+      <code>page_number</code>, the matched <code>text</code>,
+      <code>source_url</code>, <code>retrieved_at</code> and
+      <code>published_at</code> — plus <code>query</code> and
+      <code>caveat</code>. A result is a page that contains the term, not a
+      finding: read the source page before citing anything found here.
+    </p>
+    <p>
+      <code>/api/v1/document_search?q=recruitment</code>
+    </p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>

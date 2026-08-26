@@ -290,6 +290,7 @@ const ROUTES = {
   '/relationships': () => import('/js/pages/relationships.js'),
   '/claims': () => import('/js/pages/claims.js'),
   '/coverage': () => import('/js/pages/coverage.js'),
+  '/documents': () => import('/js/pages/documents.js'),
 };
 
 let disposeCurrent = null;
@@ -336,6 +337,7 @@ async function render() {
       '/contracts': ['Public money', 'money'], '/geography': ['Service access · Public money', 'access'],
       '/treatment': ['Service access', 'access'], '/pfd': ['Safety & legal', 'safety'],
       '/claims': ['Safety & legal · Accountability', 'accountability'],
+      '/documents': ['Accountability', 'accountability'],
       '/coverage': ['Accountability', 'accountability'], '/authorities': ['Service access · Accountability', 'access'],
       '/compare': ['Accountability', 'accountability'], '/': ['Accountability', 'accountability'],
     };

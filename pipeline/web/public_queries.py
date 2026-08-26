@@ -34,7 +34,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Iterator
 
-from pipeline import catalog
+from pipeline import catalog, db
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.exports.geojson import LAYER_CAVEATS
 from pipeline.notice_urls import notice_page_url
@@ -2910,4 +2910,108 @@ def claims_resolve(conn: sqlite3.Connection, table: str,
         "url": resolved["url"],
         "source_url": resolved["source_url"],
         "retrieved_at": resolved["retrieved_at"],
+    }
+
+
+# --- document search (BETA-022) ------------------------------------------------
+#
+# `pipeline/documents/` (docs/document-analysis.md) already parses PDFs into
+# page-aware, provenanced, full-text-searchable elements — SQLite FTS5 on one
+# backend, PostgreSQL `tsvector` on the other — and `pipeline documents
+# search` has worked at the CLI since that layer shipped. Nothing before this
+# put it behind a web route. `docs/upgrade-roadmap.md`'s own "Corpus-wide
+# search" and "Full-text search over archived documents" entries both said to
+# revisit "once the promotion work has given it verified documents to search
+# rather than candidates" — which is exactly what has since happened here
+# (13,249 documents parsed, confirmed against the live warehouse before
+# writing this), so this is wiring an existing backend to a route, not
+# building search infrastructure from nothing.
+
+# The only two source systems actually bridged into `document_records` today
+# — confirmed against the live warehouse, not assumed from the docs:
+# `SELECT DISTINCT e.source_system FROM document_records d JOIN
+# evidence_records e ON e.evidence_id = d.evidence_id` returns exactly these
+# two. Both are public council governance papers (committee agendas/papers
+# via m09/m10, and community drug partnership documents); neither has a
+# restricted_ counterpart.
+#
+# This allowlist, not `_public()` alone, is the real safety boundary for this
+# route: `document_records`/`document_elements` are not `restricted_`-prefixed
+# tables and hold a generic `text` column no export guard recognises as
+# personal data (see `pipeline/exports/__init__.py`'s own `PERSONAL_DATA_COLUMNS`
+# comment: "exports must fail closed if one is ever added, rather than leaking
+# it because the prefix check passed" — the same principle applies here). If a
+# future session runs `pipeline documents register-existing --source
+# annual_reports`, or bridges PFD report bodies or tribunal judgment text
+# (both restricted per docs/CAVEATS.md's "Personal data" section) into this
+# same schema, it must NOT become searchable here just by existing in the
+# table. Fail closed: a source_system not in this tuple is never searched.
+DOCUMENT_SEARCH_SOURCES = ("committee_paper_promotion", "cdp_document_promotion")
+
+DOCUMENT_SEARCH_CAVEAT = (
+    "This searches page-level text extracted from published committee papers "
+    "and community drug partnership documents only — not the whole warehouse, "
+    "and not every document type the pipeline collects. A result is a page "
+    "that contains the term, not a finding: read the source page, and its own "
+    "caveats, before citing anything found here."
+)
+
+
+def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) -> dict:
+    _public(["document_records", "document_elements", "document_versions",
+             "evidence_records"])
+    query = (query or "").strip()
+    if not query:
+        raise QueryError("document_search needs a `q` parameter.")
+    limit = max(1, min(limit, 50))
+    placeholders = ", ".join("?" for _ in DOCUMENT_SEARCH_SOURCES)
+
+    if db.backend_of(conn) == "sqlite":
+        sql = (
+            "SELECT s.document_element_id, s.document_id, s.page_number, "
+            "s.element_type, s.text, d.document_type, d.title, d.filename, "
+            "d.published_at, e.source_url, e.retrieved_at "
+            "FROM document_element_search s "
+            "JOIN document_records d ON d.document_id = s.document_id "
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+            f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders}) "
+            "ORDER BY rank LIMIT ?"
+        )
+    else:
+        sql = (
+            "SELECT de.document_element_id, d.document_id, de.page_number, "
+            "de.element_type, de.text, d.document_type, d.title, d.filename, "
+            "d.published_at, e.source_url, e.retrieved_at "
+            "FROM document_elements de "
+            "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+            "JOIN document_records d ON d.document_id = dv.document_id "
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+            "WHERE dv.is_active = 1 "
+            "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
+            f"AND e.source_system IN ({placeholders}) LIMIT ?"
+        )
+    params = (query, *DOCUMENT_SEARCH_SOURCES, limit)
+
+    try:
+        rows = _rows(conn, sql, params)
+    except sqlite3.OperationalError as error:
+        # FTS5 MATCH raises on malformed query syntax (an unbalanced quote, a
+        # bare trailing operator) rather than returning no rows — a reader's
+        # search term is not a schema problem this route should crash on.
+        raise QueryError(f"Could not search for {query!r}: {error}") from None
+
+    return {
+        "results": [{
+            "document_id": r["document_id"],
+            "document_type": r["document_type"],
+            "title": r["title"] or r["filename"],
+            "page_number": r["page_number"],
+            "element_type": r["element_type"],
+            "text": r["text"],
+            "source_url": r["source_url"],
+            "retrieved_at": r["retrieved_at"],
+            "published_at": r["published_at"],
+        } for r in rows],
+        "query": query,
+        "caveat": DOCUMENT_SEARCH_CAVEAT,
     }

@@ -223,6 +223,7 @@ function renderExplore(container) {
     ['#/treatment', 'Treatment data', 'Understand demand and activity figures with their uncertainty and limits.'],
     ['#/pfd', 'Safety & legal', 'Explore coroners’ reports, concerns, and provider mentions responsibly.'],
     ['#/claims', 'Evidence-backed claims', 'Find campaign-ready claims with the evidence behind them.'],
+    ['#/documents', 'Document search', 'Search the text of published committee papers and partnership documents.'],
   ];
   const routeCards = [];
   for (const route of routes) {
