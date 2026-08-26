@@ -26,13 +26,17 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `f23e85d` going into BETA-027.
-- Twenty-six items completed across this session and its predecessors:
-  BETA-001 through BETA-026 (BETA-001 on `master`). The §52 strategic
-  reassessment below was run 2026-08-26 after four consecutive narrow
-  front-end items, and the queue was re-aimed at high-impact front-end work
-  per the project owner's direct steer ("prioritise improvements for the
-  front end web ui… mind blowing").
+  directly, not `beta`). `beta` is now at `ef1a4c4`, going into BETA-028.
+- Twenty-eight items completed across this session and its predecessors:
+  BETA-001 through BETA-027, plus BETA-032 (BETA-001 on `master`).
+  BETA-032 is out-of-band: ten specific UI requests the project owner gave
+  directly in an interactive session rather than through this queue — see
+  its DONE entry below. The queue's own BETA-028 through BETA-031 were not
+  displaced by it and remain exactly where the §52 reassessment left them.
+  The §52 strategic reassessment below was run 2026-08-26 after four
+  consecutive narrow front-end items, and the queue was re-aimed at
+  high-impact front-end work per the project owner's direct steer
+  ("prioritise improvements for the front end web ui… mind blowing").
 - Baseline: full `uv run python -m pytest` run once, after BETA-007 (the
   first change this cycle touching core server code) — **2342 passed, 106
   skipped, 30 deselected, 3 failed**, all three confirmed pre-existing and
@@ -313,6 +317,77 @@ DONE
     on evidence figures were considered and rejected as theatre.
 
 ### DONE
+
+- [DONE] BETA-032 | Overview & Pay page polish: count-up metrics, provider-matched highlights, statutory/gender-pay-gap cleanup, census removal
+  - completed: 2026-08-26T22:45:46Z
+  - commits: `ef1a4c4` (`beta`)
+  - origin: **Not drawn from this queue.** The project owner gave ten
+    specific UI requests directly in an interactive session (not the
+    autonomous work loop), covering the Overview and Pay pages. Recorded
+    here after the fact so a later session has the full picture; the
+    queue's IN_PROGRESS/NEXT/READY/RESEARCH items above were not displaced
+    by it.
+  - result (Overview): the four "campaign view, at a glance" metrics count
+    up on load; "active evidence signals" (a count of how many layers
+    happened to be non-zero) replaced with the same "matched to a known
+    provider" measure already shown on the Contracts page (new
+    `summary()["contracts"]["matched_to_provider"]` in
+    `public_queries.py`); the 8 explore cards carry a lens-coloured accent
+    (money/workforce/access/safety/accountability, reusing app.js's
+    existing route-lens categorisation) instead of a flat uniform style;
+    Freshness now lists rough sleeping, statutory homelessness and
+    temporary accommodation — missing from `FRESHNESS_TABLES` since
+    Modules 29-31 shipped (BETA-014/015/016), so those three source
+    tables were being collected but never shown as collected; "largest
+    notices in the corpus" narrowed from the top 10 overall to the top 5
+    matched to a tracked provider (new `largest_matched_to_provider`
+    query in `contracts()`), since the unmatched top 10 is dominated by
+    anonymous cross-government framework notices with no provider
+    attached — not a useful "biggest deal we found" list for the
+    campaign.
+  - result (Pay): charity accounts table now sorts newest-report-first;
+    statutory minimum rates table restricted to the current period (April
+    2026), the incorrect "Rate (hourly)" column dropped, and the Under-18
+    row excluded (not legally recruitable into a CQC-regulated adult
+    substance misuse service, per the project owner directly); gender pay
+    gap filings render as a grouped bar chart (median/mean hourly gap %)
+    instead of a table; the workforce census section (indicators + metrics
+    table, all rows unverified) removed from the page entirely per direct
+    instruction, with its nav link — the `pay()` query and its
+    `workforce_census`/`census_*` fields are untouched server-side, only
+    the page's own rendering of them was removed; Skills for Care
+    "National estimates" hides rows with no hourly-pay figure (188 of 500
+    rows on the live warehouse).
+  - **Conflicts with BETA-031's own research note above**, which
+    considered a count-up animation on evidence figures and rejected it as
+    "theatre." The project owner asked for this one directly and
+    specifically, which is a different footing than the §52 research
+    judgement call it overrides — noted here rather than quietly
+    overwritten, in case a later session re-reads BETA-031 and wonders why
+    the counters exist. The implementation respects
+    `prefers-reduced-motion` (jumps straight to the final value) and is
+    presentation-only — no value is altered, only how it arrives on
+    screen.
+  - validation: full offline suite — 2468 passed, 106 skipped, 33
+    deselected, 3 failed, all three pre-existing and unrelated (documents/
+    Companies House parsing, nothing this session touched — same
+    disclosed category as BETA-007's baseline). `ruff check pipeline
+    tests` clean. Verified live against the dev server (`./start.sh web`):
+    sort order, filtered rows/columns, removed sections, the
+    `matched_to_provider`/count-up wiring, and the explore-card accents
+    read back via computed style rather than just class presence — an
+    earlier draft put `.lens-money`/`.lens-accountability` classes
+    directly on the cards, which collided with the *existing*,
+    differently-scoped `.lens-accountability` rule the hero-kicker badge
+    uses (components.js's `lensBadge()`), and would have silently
+    mis-coloured two of the five accents; fixed by setting `--lens` as an
+    inline custom property instead of a class. Could not screenshot — this
+    session's browser pane did not composite frames — so visual
+    confirmation used `get_page_text` and DOM/computed-style reads instead.
+  - possible follow-up: the project owner has asked to be interviewed for
+    further design refinement of these same two pages next. Expect a
+    BETA-033+ entry, either landing directly from that conversation or
+    queued here first.
 
 - [DONE] BETA-027 | Command palette: unified search across pages, authorities, providers and documents
   - completed: 2026-08-26T17:40:00Z
@@ -1909,6 +1984,11 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `ef1a4c4` — BETA-032: overview and pay page polish — count-up metrics,
+  provider-matched highlights, census removal (out-of-queue,
+  project-owner-directed; `beta`).
+- `8da06a6` — BETA-027: command palette — unified search across pages,
+  councils, providers and documents (`beta`).
 - `538095f` — BETA-026: quoted phrases anchor snippets and highlight as a
   unit (`beta`).
 - `6db979a` — BETA-025: show-more pagination for document search via offset
@@ -1963,22 +2043,27 @@ should not assume otherwise, especially before testing anything that writes
 *(Revision after the §52 reassessment, 2026-08-26T16:30Z. Five questions,
 answerable without conversational history.)*
 
-**What is currently being worked on?** BETA-027 (IN_PROGRESS): the command
-palette — unified search across pages, authorities, providers and document
-text, opened from a topbar button or Ctrl/Cmd-K. First queue item re-aimed
-at the project owner's "mind blowing front end" steer; nothing implemented
-yet, see its `next_action` for the exact starting point.
+**What is currently being worked on?** This paragraph was written before
+BETA-027 finished and was not updated at the time — BETA-027 is now DONE
+(see above; not re-verified live by this note). Per the queue markers
+above, BETA-028 (offline map fallback) is the item marked IN_PROGRESS;
+this session did not touch it and cannot confirm how far it got.
 
-**What was the last successful change?** BETA-026 (`538095f`): quoted
-phrases anchor document-search snippets and highlight as a unit, fixing a
-real windowing bug found on the way. Since then: the §52 strategic
-reassessment (this file, above the queue) — its findings are the reason
-the queue below looks nothing like the old one.
+**What was the last successful change?** BETA-032 (`ef1a4c4`,
+2026-08-26T22:45Z): ten Overview/Pay-page UI requests the project owner
+gave directly in an interactive session, out-of-band from this queue —
+see its DONE entry above. Before that, BETA-027 (`8da06a6`): the command
+palette. Before that, BETA-026 (`538095f`): quoted phrases anchor
+document-search snippets and highlight as a unit.
 
-**What should happen next?** Implement BETA-027 per its `next_action`;
-then BETA-028 (offline map fallback) and BETA-029 (overview payload).
-BETA-024's focus/title handoff and BETA-025's show-more flow still deserve
-a live-browser eyeball at the next live opportunity.
+**What should happen next?** Whichever of BETA-028/029/030/031 the queue
+above still shows as not DONE, in that order — this note cannot confirm
+which, only that BETA-032 did not touch any of them. The project owner
+has also asked, in the same interactive session as BETA-032, to be
+interviewed for further Overview/Pay design refinement; that may land
+directly as further commits rather than through this queue, the same way
+BETA-032 did — check `git log` for anything after `ef1a4c4` before
+assuming the queue below is still the single source of truth.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
