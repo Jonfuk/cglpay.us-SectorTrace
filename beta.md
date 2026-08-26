@@ -150,34 +150,48 @@ DONE
 
 ### IN_PROGRESS
 
-*(none — BETA-024 completed 2026-08-26; see Next Recommended Actions for
-what follows)*
+*(none — BETA-025 completed 2026-08-26)*
 
 ### NEXT
 
-- [NEXT] BETA-025 | "Show more" pagination for document search
-  - priority: P3
-  - impact: 2
-  - effort: 2
-  - confidence: 4
+- [NEXT] BETA-026 | Quoted-phrase awareness in document-search snippets and highlights
+  - priority: P4
+  - impact: 1
+  - effort: 1
+  - confidence: 5
   - risk: 1
   - area: ui/search
-  - depends_on: none
-  - objective: Beyond the 50 results the page now shows, a reader can ask for
-    the rest instead of being told to narrow the search.
-  - rationale: BETA-023 made the cut-off honest ("showing 50 of 14,150") but
-    the only remedy offered is narrowing; common queries on the live corpus
-    (e.g. "commissioning") exceed 50 pages.
-  - suggested_first_action: Add an `offset` param to
-    `public_queries.document_search` through both backends' SQL, then an
-    accumulating "show more" button in documents.js's runSearch that re-fetches
-    with offset and appends rendered results (fetchJSON's cache keys on the
-    full URL, so distinct offsets do not collide).
-  - notes: Keep the count line truthful when appending. Quoted-phrase
-    awareness in snippet/highlight tokenisation is a related but separable
-    polish — separate ID if picked up.
+  - depends_on: BETA-025
+  - objective: A search like `"rough sleeping"` highlights the phrase as a
+    unit, not the two words independently wherever they occur apart.
+  - rationale: `_search_terms` deliberately ignores query syntax; correct for
+    locating a passage, but highlighting `rough` and `sleeping` separately
+    misrepresents what matched once phrases are supported by the index query
+    itself.
+  - suggested_first_action: Detect quoted spans in
+    `public_queries._search_terms`, emit them as phrase tokens, and have both
+    the Python snippet window and documents.js's highlighter prefer whole-
+    phrase matches before falling back to individual words.
 
 ### DONE
+
+- [DONE] BETA-025 | "Show more" pagination for document search
+  - completed: 2026-08-26T14:20:00Z
+  - commits: `6db979a` (`beta`)
+  - result: `document_search()` takes a clamped `offset` (negative clamps to
+    0 rather than PostgreSQL raising / SQLite walking backwards) threaded
+    through both backends' SQL and server.py's route; documents.js grows an
+    accumulating "Show N more" control under the results. The button lives
+    in its own slot so a failed fetch never touches the pages already on
+    screen, is replaced with "Loading…" while in flight (no double-click
+    duplicate windows), and the count line stays truthful as the list grows.
+    Offset is deliberately *not* URL state — the shareable address stays
+    `#/documents?q=…`; how far one reader has paged is transient view state.
+  - validation: tests/test_web_documents.py now 12 tests (window tiling
+    without overlap against an unpaged reference, offset past end empty-not-
+    error, negative clamp); combined run with portal navigation/isolation/
+    controls/public suites = 92 passed; ruff clean across pipeline+tests;
+    live read-only PG check confirmed disjoint windows and clamping.
 
 - [DONE] BETA-024 | Per-route document titles and focus management on navigation
   - completed: 2026-08-26T13:40:00Z
@@ -1245,7 +1259,8 @@ what follows)*
 | P2 | Public document search (committee papers + CDP documents) | 4 | 3 | 5 | DONE (BETA-022) |
 | P2 | Document search: match-centred snippets, highlighting, result counts | 4 | 2 | 5 | DONE (BETA-023) |
 | P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | DONE (BETA-024) |
-| P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | NEXT (BETA-025) |
+| P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | DONE (BETA-025) |
+| P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | NEXT (BETA-026) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1411,6 +1426,9 @@ projects while researching BETA-010/BETA-009. Findings:
   bookmarks are distinguishable for the first time), and navigating between
   sections hands focus to the page content so screen readers announce the
   change instead of silence. Filter edits deliberately do not move focus.
+- BETA-025: document search results longer than one window are reachable —
+  an accumulating "Show N more" button under the list, with the count line
+  kept truthful as it grows and failures confined to the button's own slot.
 
 ## Performance Improvements
 
@@ -1643,6 +1661,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `6db979a` — BETA-025: show-more pagination for document search via offset
+  windows (`beta`).
 - `f2115d7` — BETA-024: per-route titles and focus handoff on portal
   navigation (`beta`).
 - `e8b6ed4` — beta.md: record BETA-023, queue BETA-024 (`beta`).
@@ -1690,42 +1710,39 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-024 landed since the previous version; the
+*(Superseded revision — BETA-025 landed since the previous version; the
 front-end focus continues per the project owner's standing request to
 "focus on the front end web ui." Five questions, answerable without
-conversational history, as of 2026-08-26T13:50Z.)*
+conversational history, as of 2026-08-26T14:30Z.)*
 
-**What is currently being worked on?** Nothing — BETA-024 just completed.
-**BETA-025** ("show more" pagination for document search) is queued NEXT
-with its `suggested_first_action` written out.
+**What is currently being worked on?** Nothing — BETA-025 just completed.
+**BETA-026** (quoted-phrase awareness in snippets/highlights) is queued
+NEXT; three items have now completed this session (BETA-023/024/025).
 
-**What was the last successful change?** BETA-024 (`f2115d7`): app.js sets a
-per-route `document.title` and moves focus to `#main` on genuine route
-changes only (not filter re-renders, not first load), pinned by the new
-tests/test_portal_navigation.py.
+**What was the last successful change?** BETA-025 (`6db979a`): offset-
+windowed pagination for document search through both backends, with an
+accumulating "Show N more" control whose failures never disturb results
+already on screen. Validated by 12 document-search tests, 92 combined
+passes across the portal suites, ruff, and a live read-only PG check.
 
-**What should happen next?** Either BETA-025 (small, both-backends SQL
-change plus an accumulating results list) or the §52 strategic reassessment
-that has been flagged as owed since BETA-022 — every session since BETA-017
-has been a narrow single-question pass. Front-end candidates beyond that
-are thinning: quoted-phrase awareness in snippet tokenisation, and eyeball-
-verifying BETA-024's focus/title behaviour in a real browser at the next
-opportunity.
+**What should happen next?** BETA-026 is small and self-contained. More
+importantly: **the §52 strategic reassessment is now overdue by its own
+rule** (3–6 completed items since the last one — none has ever been done,
+and this session alone completed three). The next substantial session
+should run it before picking further narrow UI polish.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
-   owner to specify which candidate type it applies to first. See
-   Questions Requiring Human Input #0.
+   owner to specify which candidate type it applies to first.
 2. BETA-005 (WDTK robots.txt exception) — time-boxed to 2026-09-10 or an
    earlier mySociety reply.
 3. BETA-006 (`--jobs 4` re-evaluation) — refused twice for operational/
    scheduling reasons; do not restart without new scheduling information.
 
-**What are the highest-value upcoming items?** A decision from the project
-owner on BETA-011's candidate type would unblock the single most sensitive
-item in the queue. Question #2 (crime data LSOA crosswalk) is still real if
-the owner has a view. Extending document search to `annual_reports` stays
-gated on its own content-safety check, not a default yes.
+**What are the highest-value upcoming items?** The §52 sweep itself;
+BETA-026 as a filler; eyeball-verifying BETA-024's focus/title handoff in a
+real browser at the next live opportunity. A project-owner decision on
+BETA-011's candidate type would unblock the queue's most sensitive item.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
