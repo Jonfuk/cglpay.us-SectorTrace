@@ -111,3 +111,84 @@ def test_document_search_limit_is_clamped(conn, settings):
     # the same discipline as every other public route with a limit parameter.
     result = public_queries.document_search(conn, query="budget", limit=10_000)
     assert len(result["results"]) == 3
+
+
+def test_document_search_reports_total_beyond_the_limit(conn, settings):
+    """`total` counts every matching page, not just the page of results sent —
+    the portal says "showing N of M" rather than letting a cut-off list read
+    as complete."""
+    for i in range(3):
+        _seed_document(
+            conn, settings, evidence_id=f"ev-total-{i}",
+            source_system="committee_paper_promotion",
+            document_type="COMMITTEE_PAPER",
+            text="Budget pressures continue across the service.")
+
+    result = public_queries.document_search(conn, query="budget", limit=1)
+
+    assert len(result["results"]) == 1
+    assert result["total"] == 3
+
+    result = public_queries.document_search(conn, query="budget")
+    assert result["total"] == len(result["results"])
+
+
+def test_document_search_total_respects_the_allowlist(conn, settings):
+    """The safety boundary applies to the count too: pages outside the source
+    allowlist are invisible to `total`, not merely filtered from the rows."""
+    _seed_document(
+        conn, settings, evidence_id="ev-count-allowlisted",
+        source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text="The phrase xyzzyplugh appears here.")
+    _seed_document(
+        conn, settings, evidence_id="ev-count-excluded",
+        source_system="pfd_report_promotion",
+        document_type="PFD_REPORT", text="The phrase xyzzyplugh appears there too.")
+
+    result = public_queries.document_search(conn, query="xyzzyplugh")
+
+    assert result["total"] == 1
+    assert len(result["results"]) == 1
+    assert result["results"][0]["source_url"] == "https://example.test/ev-count-allowlisted"
+
+
+def test_document_search_snippet_is_centred_on_the_match(conn, settings):
+    """A mid-page match must be visible from the snippet alone. Before this,
+    the portal truncated from character 0, so a reader could be shown a page
+    whose reason for matching was nowhere in what they could see."""
+    # Distinct numbered padding, so an assertion can prove the snippet's
+    # window opens near the match rather than anywhere in a repeated phrase.
+    padding = "".join(
+        f"Sentence {i:02d} records routine committee business. "
+        for i in range(1, 17))
+    closing = " Further routine matters were recorded for the minute." * 4
+    text = padding + "The recruitment freeze begins in April." + closing
+    assert len(text) > 320
+    _seed_document(
+        conn, settings, evidence_id="ev-snippet",
+        source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text=text, title="Long minutes")
+
+    row = public_queries.document_search(conn, query="recruitment")["results"][0]
+
+    assert "recruitment" in row["snippet"].lower()
+    assert len(row["snippet"]) <= 321
+    assert row["snippet"].startswith("…")
+    assert "Sentence 01" not in row["snippet"]
+    # The full page text still ships alongside it — the snippet is a window,
+    # not a replacement, and exports/other consumers keep getting everything.
+    assert row["text"] == text
+
+
+def test_document_search_short_text_is_returned_whole(conn, settings):
+    """A page shorter than the snippet window needs no windowing — and no
+    ellipsis pretending something was cut."""
+    _seed_document(
+        conn, settings, evidence_id="ev-short",
+        source_system="cdp_document_promotion",
+        document_type="UNKNOWN", text="Naloxone provision expanded.")
+
+    row = public_queries.document_search(conn, query="naloxone")["results"][0]
+
+    assert row["snippet"] == "Naloxone provision expanded."
+    assert "…" not in row["snippet"]

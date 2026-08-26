@@ -2956,6 +2956,55 @@ DOCUMENT_SEARCH_CAVEAT = (
     "caveats, before citing anything found here."
 )
 
+# The window a result shows around its first match. Sized to what the portal
+# renders without further truncation, so the client never has to guess where
+# in the page the match was.
+_SNIPPET_RADIUS = 140
+_SNIPPET_MAX = 320
+
+
+def _search_terms(query: str) -> list[str]:
+    """The words a reader typed, for locating where a page matched.
+
+    The FTS layer receives the raw query and interprets its own syntax; these
+    terms exist only to find the matching passage afterwards, so operators
+    like OR/NEAR and quoting are deliberately not carried over — they are
+    query syntax, not strings the page text contains.
+    """
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9']*", query or "")
+    return [w.lower() for w in words if len(w) >= 2]
+
+
+def _match_snippet(text: str | None, terms: list[str]) -> str:
+    """A window onto the passage that matched, not the top of the page.
+
+    Computed here rather than with SQLite's snippet() and PostgreSQL's
+    ts_headline separately so both backends return byte-identical snippets
+    for the same text — the two engines' headline functions differ in their
+    splitting rules, and a result that changes shape depending on which
+    backend the warehouse runs on is a result that cannot be pinned by test.
+    Falls back to the head of the page when no term can be located (a
+    one-character query, punctuation-only input).
+    """
+    value = str(text or "")
+    if len(value) <= _SNIPPET_MAX:
+        return value
+    lower = value.lower()
+    hit = min((i for t in terms for i in (lower.find(t),) if i >= 0), default=-1)
+    if hit < 0:
+        return value[: _SNIPPET_MAX - 1] + "…"
+    start = max(0, hit - _SNIPPET_RADIUS)
+    end = min(len(value), start + _SNIPPET_MAX)
+    if start > 0:
+        boundary = value.find(" ", start)
+        if boundary != -1 and boundary < hit:
+            start = min(boundary + 1, hit)
+    if end < len(value):
+        boundary = value.rfind(" ", max(start, hit), end)
+        if boundary > start:
+            end = boundary
+    return ("…" if start > 0 else "") + value[start:end].strip() + ("…" if end < len(value) else "")
+
 
 def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) -> dict:
     _public(["document_records", "document_elements", "document_versions",
@@ -2977,6 +3026,13 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders}) "
             "ORDER BY rank LIMIT ?"
         )
+        count_sql = (
+            "SELECT COUNT(*) "
+            "FROM document_element_search s "
+            "JOIN document_records d ON d.document_id = s.document_id "
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+            f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders})"
+        )
     else:
         sql = (
             "SELECT de.document_element_id, d.document_id, de.page_number, "
@@ -2990,16 +3046,29 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
             f"AND e.source_system IN ({placeholders}) LIMIT ?"
         )
+        count_sql = (
+            "SELECT COUNT(*) "
+            "FROM document_elements de "
+            "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+            "JOIN document_records d ON d.document_id = dv.document_id "
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+            "WHERE dv.is_active = 1 "
+            "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
+            f"AND e.source_system IN ({placeholders})"
+        )
     params = (query, *DOCUMENT_SEARCH_SOURCES, limit)
+    count_params = (query, *DOCUMENT_SEARCH_SOURCES)
 
     try:
         rows = _rows(conn, sql, params)
+        total = conn.execute(count_sql, count_params).fetchone()[0]
     except sqlite3.OperationalError as error:
         # FTS5 MATCH raises on malformed query syntax (an unbalanced quote, a
         # bare trailing operator) rather than returning no rows — a reader's
         # search term is not a schema problem this route should crash on.
         raise QueryError(f"Could not search for {query!r}: {error}") from None
 
+    terms = _search_terms(query)
     return {
         "results": [{
             "document_id": r["document_id"],
@@ -3008,10 +3077,14 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "page_number": r["page_number"],
             "element_type": r["element_type"],
             "text": r["text"],
+            # The window the portal renders: centred on what matched, so a
+            # result is self-explaining even when the match sits mid-page.
+            "snippet": _match_snippet(r["text"], terms),
             "source_url": r["source_url"],
             "retrieved_at": r["retrieved_at"],
             "published_at": r["published_at"],
         } for r in rows],
+        "total": total,
         "query": query,
         "caveat": DOCUMENT_SEARCH_CAVEAT,
     }

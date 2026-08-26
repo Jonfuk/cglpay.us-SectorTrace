@@ -16,7 +16,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, isoDate, sourceLink } from '/app.js';
+import { el, replace, fetchJSON, isoDate, sourceLink, num } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, truncate,
          shareButton } from '/js/components.js';
 
@@ -78,7 +78,7 @@ async function runSearch(holder, query) {
 
   let data;
   try {
-    data = await fetchJSON('document_search', { q: query, limit: 25 });
+    data = await fetchJSON('document_search', { q: query, limit: 50 });
   } catch (error) {
     replace(holder, el('div', { class: 'section' },
       errorCard(error.message, () => runSearch(holder, query))));
@@ -86,24 +86,76 @@ async function runSearch(holder, query) {
   }
 
   const results = data.results || [];
+  const total = Number(data.total);
+  const truncated = Number.isFinite(total) && total > results.length;
   replace(holder, section(
     `Results for "${query}"`,
     null,
     pinnedCaveat(data.caveat, 'Read before citing a result'),
     results.length
-      ? el('div', { class: 'doc-results' }, results.map(renderResult))
+      ? [
+          // The count is said out loud for the same reason tableCard's row
+          // count is: a list that simply stops looks complete, and a reader
+          // who cites "nothing found" from page one of three pages of
+          // matches has been failed by the page, not by the warehouse.
+          el('p', {
+            class: 'small muted',
+            text: truncated
+              ? `Showing ${num(results.length)} of ${num(total)} matching `
+                + 'pages — narrow the search to reach the rest.'
+              : `${num(results.length)} matching `
+                + `page${results.length === 1 ? '' : 's'}.`,
+          }),
+          el('div', { class: 'doc-results' },
+            results.map((result) => renderResult(result, query))),
+        ]
       : noData(`pages matching "${query}"`, null)));
 }
 
-function renderResult(result) {
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/* Marks each query term inside the snippet. Built as element and text nodes,
+ * not an HTML string — this text was extracted from council PDFs and reaches
+ * the DOM as a text node like every other warehouse value (settled decision
+ * 9), so an innerHTML shortcut here would be exactly the hole that rule
+ * closes. Falls back to plain text when no term can be parsed (symbol-only
+ * input). */
+function highlightedSnippet(passage, query) {
+  const holder = el('p', { class: 'small doc-snippet' });
+  const value = String(passage ?? '');
+  const tokens = [...new Set(
+    (String(query || '').toLowerCase().match(/[a-z0-9][a-z0-9']*/g) || [])
+      .filter((token) => token.length >= 2))];
+  if (!tokens.length) {
+    holder.textContent = value;
+    return holder;
+  }
+  const pattern = new RegExp(`(${tokens.map(escapeRegExp).join('|')})`, 'gi');
+  let last = 0;
+  for (let match = pattern.exec(value); match; match = pattern.exec(value)) {
+    if (match.index > last) holder.append(value.slice(last, match.index));
+    holder.append(el('mark', { text: match[0] }));
+    last = match.index + match[0].length;
+  }
+  if (last < value.length) holder.append(value.slice(last));
+  return holder;
+}
+
+function renderResult(result, query) {
   const label = result.title || `${result.document_type} page ${result.page_number ?? ''}`.trim();
+  // The snippet arrives centred on the match; against an older cached API
+  // response without one, fall back to the head of the page rather than
+  // rendering nothing at all.
+  const passage = result.snippet ?? truncate(result.text || '', 320);
   return el('article', { class: 'claim' },
     el('div', { class: 'row wrap', style: 'justify-content:space-between;align-items:baseline;gap:8px;' },
       el('strong', { text: label }),
       el('span', { class: 'small muted',
         text: [result.document_type, result.page_number ? `page ${result.page_number}` : null]
           .filter(Boolean).join(' · ') })),
-    el('p', { class: 'small', text: truncate(result.text || '', 320) }),
+    highlightedSnippet(passage, query),
     el('div', { class: 'row wrap', style: 'gap:8px;', },
       result.source_url ? sourceLink(result.source_url, 'Read the source page') : null,
       el('span', { class: 'small muted',

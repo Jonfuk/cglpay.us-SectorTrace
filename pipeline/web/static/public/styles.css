@@ -784,6 +784,17 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .claim-citations ul { list-style: none; margin: 0; padding: 0; }
 .claim-citations li { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 .claim-citations li:first-child { border-top: none; }
+
+/* Document-search result snippets (pages/documents.js). The matched terms
+   are marked with the portal's amber rather than Bootstrap's default mark
+   yellow, and the text colour is pinned dark on both themes: the highlight
+   is opaque, so it must carry its own contrast instead of inheriting a body
+   colour that goes near-white in dark mode. */
+.doc-snippet { margin: var(--space-2) 0; color: var(--text-secondary); }
+.doc-snippet mark {
+  background: var(--accent-amber); color: #08111f;
+  padding: 0 2px; border-radius: var(--radius-sm);
+}
 .citation-unresolved {
   color: var(--accent-red); font-family: var(--mono); font-size: 12.5px;
   word-break: break-all;
