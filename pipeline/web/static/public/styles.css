@@ -194,6 +194,14 @@ main { padding: var(--space-8) var(--space-6) var(--space-16); max-width: 1440px
 .route-lens.lens-money .eyebrow, .route-lens.lens-accountability .eyebrow { color: var(--accent-amber); }
 main:focus { outline: none; }
 .section { margin-bottom: var(--space-12); }
+
+/* Scroll-triggered reveal (components.js's revealOnScroll). `.reveal` is
+   only ever added by that JS, immediately before it starts observing --
+   never a bare CSS rule on `.section` itself -- so a page that does not
+   call it, or a browser without IntersectionObserver, shows every section
+   at full opacity by default rather than losing content permanently. */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.is-visible { opacity: 1; transform: none; }
 .section > header { margin-bottom: var(--space-4); }
 .section > header p { color: var(--text-secondary); max-width: 76ch; }
 .section-action { margin: 0 0 var(--space-4); }
@@ -219,6 +227,29 @@ main:focus { outline: none; }
 .hero .lede { font-size: 18px; color: var(--text-secondary); max-width: 68ch; }
 .hero .lede strong { color: var(--text-primary); font-weight: 600; }
 .hero-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
+
+/* Overview only: the England region silhouette sits beside the headline on
+   wide viewports and drops below it on narrow ones. Every other page's hero
+   stays the plain single column above. */
+.hero-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px); gap: var(--space-8); align-items: center; }
+.hero-map { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.hero-map-svg { width: 100%; height: auto; max-height: 380px; filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .35)); }
+.hero-map-svg path { transition: fill-opacity .15s; }
+.hero-map-svg path:hover { fill-opacity: 1; stroke: var(--accent-teal); }
+.hero-map-caption { text-align: center; max-width: 30ch; }
+
+/* The page-load sequence: hero children rise in, staggered, once. Reduced
+   motion is handled by the sitewide `animation-duration: .01ms` override
+   below rather than a second code path here. */
+.hero-animated > * { opacity: 0; animation: hero-rise .6s ease forwards; }
+.hero-animated > *:nth-child(1) { animation-delay: .05s; }
+.hero-animated > *:nth-child(2) { animation-delay: .16s; }
+.hero-animated > *:nth-child(3) { animation-delay: .27s; }
+.hero-animated > *:nth-child(n+4) { animation-delay: .38s; }
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .hero-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); color: var(--text-muted); font: 700 13px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; }
 .lens-badge, .timing-badge { display: inline-flex; align-items: center; width: fit-content; padding: 3px 8px; border: 1px solid var(--border-accent); border-radius: 999px; font: 700 12px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; }
 .lens-accountability, .timing-current { color: var(--accent-amber); border-color: var(--caveat-border); background: var(--caveat-bg); }
@@ -718,6 +749,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .busybar-run { width: 40%; height: 100%; background: var(--accent-teal); animation: busyslide 1.1s ease-in-out infinite; }
 @keyframes busyslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 @media (prefers-reduced-motion: reduce) { .busybar-run { animation: none; width: 100%; opacity: 0.5; } }
+
+@media (max-width: 960px) {
+  .hero-split { grid-template-columns: 1fr; }
+  .hero-map { max-width: 320px; margin: 0 auto; }
+}
 
 @media (max-width: 720px) {
   .topbar { gap: var(--space-3); padding: var(--space-3) var(--space-4); }

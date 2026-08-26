@@ -11,7 +11,7 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
-          truncate, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
+          truncate, shareButton, findingBlock, evidenceMeta, revealOnScroll } from '/js/components.js';
 
 function takeaway(status, statusClass, text) {
   return el('div', { class: 'takeaway' },
@@ -35,7 +35,7 @@ export async function render(main) {
   }
 
   const page = el('div', {},
-    el('div', { class: 'hero' },
+    el('div', { class: 'hero hero-animated' },
       el('h1', { text: 'Pay & benchmarks' }),
       el('p', { class: 'lede' },
         'Explore published pay, advertised roles and statutory floors. Each source layer answers a different question, so they are not combined into one pay score.'),
@@ -76,6 +76,7 @@ export async function render(main) {
   renderPublishedPay(page.querySelector('#published-pay'), data, charts);
   renderBenchmarks(page.querySelector('#benchmarks'), data);
 
+  revealOnScroll(page);
   return () => disposeCharts(charts);
 }
 

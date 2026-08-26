@@ -803,4 +803,28 @@ export function escapeHtml(text) {
   }[c]));
 }
 
+/* Scroll-triggered section reveals. Elements are only ever hidden by a class
+ * this function adds itself, immediately before observing them — if
+ * IntersectionObserver is missing, or a page never calls this, sections
+ * render at full opacity by default rather than staying invisible forever.
+ * One-shot per element (`unobserve` after the first reveal): a reader
+ * scrolling back up should not watch the page replay itself. */
+export function revealOnScroll(root, selector = '.section') {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  if (typeof IntersectionObserver === 'undefined') return;
+  const targets = root.querySelectorAll(selector);
+  if (!targets.length) return;
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      entry.target.classList.add('is-visible');
+      observer.unobserve(entry.target);
+    }
+  }, { threshold: 0.08, rootMargin: '0px 0px -8% 0px' });
+  for (const target of targets) {
+    target.classList.add('reveal');
+    observer.observe(target);
+  }
+}
+
 export { isoDate };

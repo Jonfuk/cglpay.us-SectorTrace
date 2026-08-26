@@ -33,6 +33,24 @@ export function el(tag, props, ...children) {
   return node;
 }
 
+/* Same contract as `el()` — attributes via setAttribute, text via
+ * textContent, never innerHTML — but in the SVG namespace, which
+ * `document.createElement` cannot produce. Used by the overview hero's
+ * region map; nothing else in the portal draws its own SVG. */
+export function svgEl(tag, props, ...children) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'text') node.textContent = value;
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 
 export function replace(container, ...children) {

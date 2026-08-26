@@ -422,6 +422,20 @@ def summary(conn: sqlite3.Connection) -> dict:
         conn, "SELECT COUNT(*) AS matched FROM contracts WHERE supplier_name_raw IN "
                "(SELECT alias_raw FROM supplier_aliases)").get("matched", 0)
 
+    # Per-region breakdown of the same "appears as a contract buyer" signal
+    # as `with_contracts` above, for the hero's England silhouette. A count
+    # and a ratio within one evidence layer, same as `matched_to_provider` —
+    # nothing here is summed or compared across layers.
+    regions = _rows(
+        conn,
+        "SELECT a.region, COUNT(DISTINCT a.ons_code) AS authorities_total, "
+        "       COUNT(DISTINCT CASE WHEN c.buyer_ons_code IS NOT NULL "
+        "                            THEN a.ons_code END) AS authorities_with_contracts "
+        "FROM authorities a "
+        "LEFT JOIN contracts c ON c.buyer_ons_code = a.ons_code "
+        "WHERE a.region IS NOT NULL "
+        "GROUP BY a.region")
+
     latest_census = _one(
         conn, "SELECT MAX(census_year) AS y FROM workforce_census_metrics").get("y")
     census_metrics = _rows(
@@ -454,6 +468,8 @@ def summary(conn: sqlite3.Connection) -> dict:
         "authorities": {
             "total": authorities.get("total", 0),
             "with_contracts": with_contracts.get("n", 0),
+            "regions": regions,
+            "regions_caveat": CAVEATS["contract_value"],
         },
         "contracts": {
             "total_notices": contracts.get("total_notices", 0),

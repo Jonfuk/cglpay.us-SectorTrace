@@ -70,6 +70,7 @@ PUBLIC_STATIC_PATHS = {
     "/fonts/space-grotesk-700.woff2",
     "/fonts/archivo-narrow-500.woff2",
     "/fonts/archivo-narrow-700.woff2",
+    "/assets/england-regions.json",
 }
 
 # The portal's read-only API, as route names under /api/v1/.

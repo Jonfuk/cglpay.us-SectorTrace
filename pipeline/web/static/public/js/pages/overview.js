@@ -19,10 +19,10 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
+import { el, svgEl, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard,
-          lensBadge, timingBadge, findingBlock } from '/js/components.js';
+          lensBadge, timingBadge, findingBlock, revealOnScroll } from '/js/components.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -41,25 +41,27 @@ export async function render(main) {
     return () => {};
   }
 
-  const snapshot = el('div', {});
+  const heroMap = el('div', { class: 'hero-map', id: 'hero-map' });
   const page = el('div', {},
-    el('div', { class: 'hero' },
-      el('div', { class: 'hero-kicker' }, lensBadge('accountability'), ' · England-wide evidence desk'),
-      el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
-      el('p', { class: 'lede' },
-        'Explore published evidence about pay, commissioning, providers, treatment activity ',
-        'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
-        'missing values are never guessed.'),
-      el('div', { class: 'hero-actions' },
-        shareButton({
-          title: 'SectorTrace overview',
-          text: 'Explore the latest SectorTrace evidence snapshot.',
-        }),
-        el('a', { class: 'btn ghost', href: '#/coverage' }, 'How evidence is handled')),
-      el('details', { class: 'read-first' },
-        el('summary', { text: 'Read this first' }),
-        el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
-        el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
+    el('div', { class: 'hero hero-split hero-animated' },
+      el('div', { class: 'hero-copy' },
+        el('div', { class: 'hero-kicker' }, lensBadge('accountability'), ' · England-wide evidence desk'),
+        el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
+        el('p', { class: 'lede' },
+          'Explore published evidence about pay, commissioning, providers, treatment activity ',
+          'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
+          'missing values are never guessed.'),
+        el('div', { class: 'hero-actions' },
+          shareButton({
+            title: 'SectorTrace overview',
+            text: 'Explore the latest SectorTrace evidence snapshot.',
+          }),
+          el('a', { class: 'btn ghost', href: '#/coverage' }, 'How evidence is handled')),
+        el('details', { class: 'read-first' },
+          el('summary', { text: 'Read this first' }),
+          el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
+          el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
+      heroMap),
     el('div', { id: 'snapshot' }),
     el('div', { id: 'briefing-strip' }),
     el('div', { id: 'explore' }),
@@ -67,15 +69,126 @@ export async function render(main) {
     el('div', { id: 'contracts-chart' }));
   replace(main, page);
 
-  renderCards(snapshot, summary);
+  // Pre-existing bug fixed in passing (BETA-032): this used to fill a
+  // detached `el('div', {})` that was never inserted into `page` — the
+  // element below with a matching id was a separate, permanently-empty
+  // node. The whole "Current snapshot" band (coverage, evidence quality,
+  // sector context cards) has not rendered on the live site until now.
+  renderCards(page.querySelector('#snapshot'), summary);
   renderBriefingStrip(page.querySelector('#briefing-strip'), summary);
   renderExplore(page.querySelector('#explore'));
   renderEvidenceStatus(page.querySelector('#evidence-status'), summary);
+  // Lazily filled after first paint — a separate fetch of its own, and not
+  // on the critical path for the headline text above it.
+  renderHeroMap(heroMap, summary);
   // Freshness is seconds of table scans, so renderEvidenceStatus fetches it
   // lazily after first paint and fills the third status panel in place.
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
+  revealOnScroll(page);
   return () => disposeCharts(charts);
+}
+
+// --- hero: England region silhouette -----------------------------------------
+
+/* The hero's one visual risk: a real (if simplified) silhouette of England's
+ * nine regions, shaded by the same "appears as a contract buyer" coverage
+ * signal the snapshot cards already report nationally -- so darker is not
+ * decoration, it is "more of this region's authorities show contract
+ * evidence." Deliberately not the /geography page's live MapLibre workspace:
+ * that fetches 14MB of full authority boundaries plus live basemap tiles
+ * from a CDN, which is a reasonable cost for a page a reader chose to visit
+ * and a bad one for the homepage's first paint. This fetches a ~60KB
+ * pre-simplified region dissolve (scripts/generate_region_outline.py) and
+ * draws it as plain inline SVG -- no map library, no network dependency
+ * beyond the portal's own static file.
+ */
+const REGION_MAP_HEIGHT = 380;
+
+function projectRing(ring, bbox, width, height) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const points = ring.map(([lon, lat]) => {
+    const x = (lon - minLon) / (maxLon - minLon) * width;
+    const y = height - (lat - minLat) / (maxLat - minLat) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return `M ${points.join(' L ')} Z`;
+}
+
+function pathForGeometry(geometry, bbox, width, height) {
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  const parts = [];
+  for (const polygon of polygons) {
+    for (const ring of polygon) parts.push(projectRing(ring, bbox, width, height));
+  }
+  return parts.join(' ');
+}
+
+// Real England, not a naive lon/lat rectangle: a degree of longitude is
+// shorter than a degree of latitude this far from the equator, and drawing
+// both as equal units makes the country look wider and squatter than it is.
+function viewBoxFor(bbox) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const meanLatRad = (minLat + maxLat) / 2 * (Math.PI / 180);
+  const aspect = ((maxLon - minLon) * Math.cos(meanLatRad)) / (maxLat - minLat);
+  return { width: Math.round(REGION_MAP_HEIGHT * aspect), height: REGION_MAP_HEIGHT };
+}
+
+async function renderHeroMap(container, summary) {
+  let shapes;
+  try {
+    const response = await fetch('/assets/england-regions.json');
+    shapes = await response.json();
+  } catch (error) {
+    // Decorative: a failed fetch removes the visual rather than showing an
+    // error card the hero has no room for.
+    container.remove();
+    return;
+  }
+
+  const density = new Map(
+    (summary.authorities?.regions || []).map((r) => [r.region, r]));
+  const fractions = [...density.values()]
+    .map((r) => (r.authorities_total ? r.authorities_with_contracts / r.authorities_total : 0));
+  const maxFraction = Math.max(...fractions, 0.0001);
+
+  const { width, height } = viewBoxFor(shapes.meta.bbox);
+  const paths = shapes.features.map((feature) => {
+    const region = feature.properties.region;
+    const row = density.get(region);
+    const fraction = row?.authorities_total ? row.authorities_with_contracts / row.authorities_total : 0;
+    const intensity = fraction / maxFraction;
+    // Muted slate for genuinely zero coverage (rare, but distinct from "some
+    // coverage, drawn pale") rather than the same hue at near-zero opacity,
+    // which a reader could mistake for "no data" either way.
+    const fill = fraction === 0 ? 'rgba(130, 147, 170, 0.25)'
+      : `rgba(33, 212, 208, ${(0.18 + intensity * 0.62).toFixed(2)})`;
+    return svgEl('path', {
+      d: pathForGeometry(feature.geometry, shapes.meta.bbox, width, height),
+      fill, stroke: '#08111f', 'stroke-width': '1',
+    }, svgEl('title', { text: row
+      ? `${region}: ${num(row.authorities_with_contracts)} of ${num(row.authorities_total)} authorities appear as a contract buyer (${pct(fraction)})`
+      : `${region}: no coverage data` }));
+  });
+
+  const sorted = [...density.values()].filter((r) => r.authorities_total)
+    .sort((a, b) => (b.authorities_with_contracts / b.authorities_total) - (a.authorities_with_contracts / a.authorities_total));
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  const ariaLabel = best && worst
+    ? `Map of England's nine regions, shaded by the share of local authorities `
+      + `that appear as a contract buyer. Highest: ${best.region} at `
+      + `${pct(best.authorities_with_contracts / best.authorities_total)}. `
+      + `Lowest: ${worst.region} at ${pct(worst.authorities_with_contracts / worst.authorities_total)}.`
+    : `Map of England's nine regions, shaded by contract-buyer coverage.`;
+
+  replace(container,
+    svgEl('svg', {
+      viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': ariaLabel,
+      class: 'hero-map-svg',
+    }, paths),
+    el('p', { class: 'hero-map-caption small muted',
+      text: 'Share of local authorities appearing as a contract buyer, by region.' }));
 }
 
 /** A `<strong>` that counts up to `value` on first paint rather than
