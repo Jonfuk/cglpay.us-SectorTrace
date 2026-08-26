@@ -148,7 +148,60 @@ DEFERRED
 DONE
 -->
 
+### IN_PROGRESS
+
+*(none — BETA-023 completed 2026-08-26; BETA-024 is next)*
+
+### NEXT
+
+- [NEXT] BETA-024 | Per-route document titles and focus management on navigation
+  - priority: P3
+  - impact: 3
+  - effort: 1
+  - confidence: 5
+  - risk: 1
+  - area: ui/a11y
+  - depends_on: none
+  - objective: Every route sets its own `document.title`; hashchange-driven
+    renders move focus to `#main` so SPA navigation is announced by screen
+    readers and browser history entries are distinguishable.
+  - rationale: All 13 routes share one static title, so back/forward history
+    and bookmarks cannot tell routes apart, and `render()` swaps `#main`
+    without moving focus anywhere — a screen reader user activating a nav
+    link hears nothing about the page that replaced the old one.
+  - suggested_first_action: Add a route→title map in app.js's `render()` and
+    set `document.title` after the module resolves; focus `#main` (already
+    `tabindex="-1"`) with `{ preventScroll: true }` on every render except
+    the first. Pin with the same static-source-analysis style
+    tests/test_portal_controls.py uses.
+
 ### DONE
+
+- [DONE] BETA-023 | Document search results that show why they matched
+  - completed: 2026-08-26T13:05:00Z
+  - commits: `cb4781b` (`beta`)
+  - result: `document_search()` now returns, per result, a `snippet` windowed
+    onto the passage that matched (computed in Python so SQLite FTS5 and
+    PostgreSQL return byte-identical snippets — the two engines' native
+    headline functions differ in splitting rules and a snippet that changes
+    shape with the backend cannot be pinned by test), plus a route-level
+    `total` counting every allowlisted match. documents.js renders the
+    snippet with `<mark>` highlighting built as element/text nodes (never
+    innerHTML — settled decision 9; the text is scraped council PDFs), says
+    "showing N of M matching pages" when the list is cut (the client now
+    asks for the server ceiling of 50 rather than silently stopping at 25),
+    and degrades gracefully against an older cached API response without a
+    snippet. Allowlist semantics untouched: `total` counts through the same
+    WHERE clause, so excluded source systems are invisible to the count too
+    (pinned by test). Full page `text` still ships per result.
+  - validation: tests/test_web_documents.py extended to 9 tests (snippet
+    centring, short-text whole-return, total vs limit, allowlist-aware
+    count) — all pass; test_portal_isolation.py + test_portal_controls.py +
+    test_web_public.py pass (76); ruff clean. PostgreSQL path confirmed live
+    read-only against this checkout's configured warehouse (`total: 5652`
+    for "recovery", short texts returned whole, count query instant at this
+    corpus size) — see Environment Note re production data; GET-equivalent,
+    nothing written.
 
 - [DONE] BETA-022 | Public document search over committee papers and CDP documents
   - completed: 2026-08-26T02:00:00Z
@@ -1169,6 +1222,8 @@ DONE
 | P3 | Compare-page data tables under every chart | 3 | 2 | 5 | DONE (BETA-020) |
 | P3 | Typeahead arrow-key nav + aria-activedescendant (6 widgets) | 3 | 3 | 5 | DONE (BETA-021) |
 | P2 | Public document search (committee papers + CDP documents) | 4 | 3 | 5 | DONE (BETA-022) |
+| P2 | Document search: match-centred snippets, highlighting, result counts | 4 | 2 | 5 | DONE (BETA-023) |
+| P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | NEXT (BETA-024) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1325,6 +1380,11 @@ projects while researching BETA-010/BETA-009. Findings:
   over committee papers and CDP documents, the first search surface over
   document *text* anywhere in the portal (every other search is over
   structured rows).
+- BETA-023: document-search results now show the passage that matched,
+  highlighted, instead of the top of the page — and say "showing N of M
+  matching pages" when the result list is cut. A mid-page match used to be
+  invisible: the client truncated from character 0 with no indication the
+  page matched anywhere else.
 
 ## Performance Improvements
 
@@ -1557,6 +1617,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `cb4781b` — BETA-023: match-centred snippets and honest result counts in
+  document search (`beta`).
 - `3f8c74d` — BETA-022: public full-text search over committee papers and
   CDP documents (`beta`).
 - `a28b010` — BETA-021: arrow-key navigation and aria-activedescendant for
@@ -1599,47 +1661,30 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-022 landed since the previous version, plus
-a comparable-product research pass, per the project owner's request to
-"continue exploring the front end UI, and exploring competing products to
-ensure my project is competitive." Per §13 of the original brief, this
-section must answer five questions without conversational history; the
-version below does, as of 2026-08-26T02:15Z.)*
+*(Superseded revision — BETA-023 landed since the previous version; the
+front-end focus continues per the project owner's standing request to
+"focus on the front end web ui." Five questions, answerable without
+conversational history, as of 2026-08-26T13:10Z.)*
 
-**What is currently being worked on?** Nothing — BETA-022 just completed.
-No `IN_PROGRESS` item.
+**What is currently being worked on?** Nothing — BETA-023 just completed.
+The next item is queued and ready: **BETA-024** (per-route document titles
++ SPA focus management in `app.js`), with its `suggested_first_action`
+written out.
 
-**What was the last successful change?** BETA-022: a public document
-search page and API route (`/api/v1/document_search`,
-`js/pages/documents.js`) over the two document types the document-analysis
-pipeline has parsed so far (committee papers, CDP documents — 13,249
-pages). The search backend already existed and was unused by any web
-route; this wired it up, with an explicit source-system allowlist as the
-real safety boundary (not `_public()` alone, which would not catch a
-future restricted source sharing the same schema) — see the "Comparable
-Product Research" section above for how this was found, and the DONE
-entry for the full safety reasoning and how it's tested.
+**What was the last successful change?** BETA-023 (`cb4781b`): document
+search now returns a match-centred snippet plus total count server-side,
+and documents.js highlights matched terms with DOM-built `<mark>` nodes and
+says "showing N of M matching pages". Validated by 9 fixture tests, the
+portal isolation/controls suites, ruff, and one read-only live check of the
+PostgreSQL path.
 
-**What should happen next?** The queue is `NEXT`/`READY` empty again.
-Comparable-product research (OCCRP Aleph, Tussell) found no new feature
-category this project has not already built, deferred or declined with
-reasoning — see the research note above. The one real, evidenced
-follow-up from this cycle: the document-search allowlist
-(`DOCUMENT_SEARCH_SOURCES` in `public_queries.py`) currently covers only
-two of the three source systems `pipeline/documents/bridge.py` supports
-(`committee_paper_promotion`, `cdp_document_promotion` — not
-`annual_reports`, which has apparently never been run via
-`documents register-existing --source annual_reports`). If a future
-session runs that bridge, the allowlist needs a deliberate decision to
-add it, not an assumption — annual reports are a different content shape
-(filed accounts, not council governance minutes) and deserve the same
-"what's actually in there" check BETA-022 did before extending the search
-to it. A proper §52 strategic reassessment is still owed — every session
-since BETA-017 has been a narrow, single-question pass, not the fuller
-sweep across technical debt and neglected product areas the brief
-describes; three completed items since the last check-in is close to the
-"3–6" the brief suggests. This session has now completed 22 queue items
-since `beta` was created.
+**What should happen next?** BETA-024 — small, self-contained, pinned with
+the static-analysis test style test_portal_controls.py uses. After that,
+the remaining front-end candidates are thinner: pagination/"show more" for
+document search (needs an `offset` param through both backends), quoted-
+phrase awareness in snippet/highlight tokenisation, and the strategic
+reassessment §52 keeps flagging as owed (every session since BETA-017 has
+been a narrow single-question pass).
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1654,14 +1699,10 @@ since `beta` was created.
 **What are the highest-value upcoming items?** A decision from the
 project owner on BETA-011's candidate type would unblock the single most
 sensitive item in the queue. Question #2 (crime data LSOA crosswalk) is
-still real if the project owner has a view. SAR's own complete-corpus
-export (BETA-019's deferred half) is a real, smaller design question if
-export work continues. Extending document search to `annual_reports`
-(above) is real but needs its own content-safety check first, not a
-default yes. BETA-003's ansible-mirror changes still have never been run
-against a real VPS from this dev checkout — `https://subtrace.cglpay.uk/`
-being live this cycle suggests it or something like it has since been run
-for real, but that is still unconfirmed from here.
+still real if the project owner has a view. Extending document search to
+`annual_reports` remains gated on its own content-safety check, not a
+default yes. BETA-003's ansible-mirror changes still unverified against a
+real VPS from this checkout.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
