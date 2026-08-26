@@ -1816,6 +1816,17 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Known Issues
 
+- **2026-08-26: `refs/heads/beta` was found corrupted** (a file of spaces,
+  not a SHA) immediately after the BETA-027 commit, blocking `git push`,
+  `git log` and `git status` ("your current branch appears to be broken";
+  every file reported as newly staged). Repaired non-destructively by
+  rewriting the ref to the verified commit `8da06a6` (chain checked against
+  its parent and `origin/beta` before writing); nothing was lost and the
+  push then succeeded. Cause unknown — this checkout is shared by several
+  sessions (CLAUDE.md), and the corruption happened between a successful
+  commit and a push seconds later. If it recurs: verify the commit still
+  exists with `git cat-file -p <sha>` before touching anything, fix the
+  ref, never re-commit over a broken ref blind.
 - BETA-003's ansible-mirror changes are unverified against a real VPS —
   static checks only. First real run should be watched.
 - `deploy/ansible/`'s status relative to Railway (live fallback? unused?
