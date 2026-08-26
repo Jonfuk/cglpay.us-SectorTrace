@@ -249,3 +249,29 @@ def test_document_search_negative_offset_clamps_to_zero(conn, settings):
     assert clamped["offset"] == 0
     assert ([r["document_id"] for r in clamped["results"]]
             == [r["document_id"] for r in plain["results"]])
+
+
+def test_document_search_quoted_phrase_anchors_the_snippet(conn, settings):
+    """A quoted phrase is matched by the index as a unit, so the snippet
+    window should be anchored on the phrase itself — not on whichever of its
+    words happens to appear earliest."""
+    padding = "".join(
+        f"Sentence {i:02d} records routine committee business. "
+        for i in range(1, 17))
+    # "sleeping" alone appears early; the phrase appears late, with more than
+    # a full snippet-radius (_SNIPPET_RADIUS = 140) of filler between them, so
+    # an anchored window cannot hold both.
+    text = (padding + "A sleeping brief was mentioned once. "
+            + "Interim procedural business was recorded while the board "
+            + "considered the papers, and the interval was used for further "
+            + "routine administration of the agenda. "
+            + "The rough sleeping duty was then discussed. " + "More notes. " * 6)
+    _seed_document(
+        conn, settings, evidence_id="ev-phrase",
+        source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text=text, title="Phrase minutes")
+
+    row = public_queries.document_search(conn, query='"sleeping duty"')["results"][0]
+
+    assert "sleeping duty" in row["snippet"]
+    assert "sleeping brief" not in row["snippet"]

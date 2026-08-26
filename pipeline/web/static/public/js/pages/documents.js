@@ -167,23 +167,31 @@ function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/* Marks each query term inside the snippet. Built as element and text nodes,
- * not an HTML string — this text was extracted from council PDFs and reaches
- * the DOM as a text node like every other warehouse value (settled decision
- * 9), so an innerHTML shortcut here would be exactly the hole that rule
- * closes. Falls back to plain text when no term can be parsed (symbol-only
- * input). */
+/* Marks each query term inside the snippet, quoted phrases first: the server
+ * reads "rough sleeping" as a required phrase, so where the phrase occurs
+ * contiguously it is marked as one unit rather than as two words that happen
+ * to be near each other. Built as element and text nodes, not an HTML string
+ * — this text was extracted from council PDFs and reaches the DOM as a text
+ * node like every other warehouse value (settled decision 9), so an
+ * innerHTML shortcut here would be exactly the hole that rule closes. Falls
+ * back to plain text when no term can be parsed (symbol-only input). */
 function highlightedSnippet(passage, query) {
   const holder = el('p', { class: 'small doc-snippet' });
   const value = String(passage ?? '');
-  const tokens = [...new Set(
-    (String(query || '').toLowerCase().match(/[a-z0-9][a-z0-9']*/g) || [])
+  const raw = String(query || '');
+  // Mirrors _search_terms() in public_queries.py; keep the two in step.
+  const phrases = [...new Set((raw.match(/"[^"]+"/g) || [])
+    .map((span) => span.slice(1, -1).trim().toLowerCase())
+    .filter((token) => token.length >= 2))];
+  const words = [...new Set(
+    (raw.toLowerCase().match(/[a-z0-9][a-z0-9']*/g) || [])
       .filter((token) => token.length >= 2))];
-  if (!tokens.length) {
+  const terms = [...new Set([...phrases, ...words])];
+  if (!terms.length) {
     holder.textContent = value;
     return holder;
   }
-  const pattern = new RegExp(`(${tokens.map(escapeRegExp).join('|')})`, 'gi');
+  const pattern = new RegExp(`(${terms.map(escapeRegExp).join('|')})`, 'gi');
   let last = 0;
   for (let match = pattern.exec(value); match; match = pattern.exec(value)) {
     if (match.index > last) holder.append(value.slice(last, match.index));

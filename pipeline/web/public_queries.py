@@ -2967,12 +2967,19 @@ def _search_terms(query: str) -> list[str]:
     """The words a reader typed, for locating where a page matched.
 
     The FTS layer receives the raw query and interprets its own syntax; these
-    terms exist only to find the matching passage afterwards, so operators
-    like OR/NEAR and quoting are deliberately not carried over — they are
-    query syntax, not strings the page text contains.
+    terms exist only to find the matching passage afterwards. Quoted spans
+    are kept whole and listed first — FTS5 reads "rough sleeping" as a
+    required phrase, so the passage that matched contains it verbatim, and
+    both this window and the portal's highlighter should prefer the phrase
+    over its words occurring separately. Bare operators like OR/NEAR are not
+    carried over: they are query syntax, not strings the page text contains.
     """
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9']*", query or "")
-    return [w.lower() for w in words if len(w) >= 2]
+    value = query or ""
+    phrases = [p.strip().lower() for p in re.findall(r'"([^"]+)"', value)
+               if len(p.strip()) >= 2]
+    words = [w.lower() for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9']*", value)
+             if len(w) >= 2]
+    return list(dict.fromkeys(phrases + words))
 
 
 def _match_snippet(text: str | None, terms: list[str]) -> str:
@@ -2990,7 +2997,18 @@ def _match_snippet(text: str | None, terms: list[str]) -> str:
     if len(value) <= _SNIPPET_MAX:
         return value
     lower = value.lower()
-    hit = min((i for t in terms for i in (lower.find(t),) if i >= 0), default=-1)
+    # Phrase occurrences anchor the window before bare-word ones: a query
+    # like "sleeping duty" also contributes the words `sleeping`/`duty`, and
+    # whichever word happens to appear earliest in the page must not drag
+    # the window away from the passage that actually matched as a phrase.
+    phrases = [t for t in terms if " " in t]
+    words = [t for t in terms if " " not in t]
+    hit = -1
+    for group in (phrases, words):
+        hit = min((i for t in group for i in (lower.find(t),) if i >= 0),
+                  default=-1)
+        if hit >= 0:
+            break
     if hit < 0:
         return value[: _SNIPPET_MAX - 1] + "…"
     start = max(0, hit - _SNIPPET_RADIUS)
