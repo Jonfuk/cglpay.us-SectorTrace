@@ -47,6 +47,65 @@ export function sourceLink(url, label) {
     label || text);
 }
 
+/* Arrow-key roving highlight for a typeahead's `<ul role="listbox">`, shared
+ * by every typeahead on the portal — the top-bar council search, the filter
+ * bar's provider search, and the authority/provider pickers on
+ * `compare.js`/`treatment.js`. All five declare (or should declare, for
+ * consistency) `role="combobox"`, but until now only implemented "Enter
+ * selects the first match" — the roles overpromised what arrow keys and a
+ * screen reader's activedescendant announcement actually did. Written once
+ * here rather than five times; `styles.css`'s `li[aria-selected="true"]`
+ * rule already existed and expected this, unused, before this. `input` must
+ * have an `id` for `aria-activedescendant` to reference into. Call the
+ * returned `reset()` every time `list`'s `<li>` children are replaced — the
+ * old highlighted option no longer exists once that happens. */
+export function typeaheadKeyboard(input, list) {
+  let active = -1;
+  const options = () => Array.from(list.children);
+
+  const reset = () => {
+    active = -1;
+    input.removeAttribute('aria-activedescendant');
+  };
+
+  const setActive = (index) => {
+    const opts = options();
+    if (!opts.length) { reset(); return; }
+    active = index;
+    opts.forEach((li, i) => {
+      li.id = `${input.id}-opt-${i}`;
+      li.setAttribute('aria-selected', String(i === active));
+    });
+    input.setAttribute('aria-activedescendant', opts[active].id);
+    opts[active].scrollIntoView({ block: 'nearest' });
+  };
+
+  const move = (delta) => {
+    const count = options().length;
+    if (!count) return;
+    const next = active < 0 ? (delta > 0 ? 0 : count - 1)
+      : (active + delta + count) % count;
+    setActive(next);
+  };
+
+  input.addEventListener('keydown', (event) => {
+    if (list.hidden) return;
+    if (event.key === 'ArrowDown') { event.preventDefault(); move(1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
+    else if (event.key === 'Escape') { list.hidden = true; reset(); }
+    else if (event.key === 'Enter') {
+      const opts = options();
+      const target = active >= 0 ? opts[active] : opts[0];
+      if (target) {
+        event.preventDefault();
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      }
+    }
+  });
+
+  return reset;
+}
+
 // --- formatting --------------------------------------------------------------
 
 export const num = (n) =>
@@ -362,6 +421,8 @@ async function initFilterBar() {
     ? new window.Fuse(providers, { keys: ['canonical_name', 'provider_key'], threshold: 0.4 })
     : null;
 
+  const resetKeyboard = typeaheadKeyboard(input, list);
+
   const applyProvider = (key, label) => {
     input.value = label || '';
     list.hidden = true;
@@ -382,6 +443,7 @@ async function initFilterBar() {
         onmousedown: () => applyProvider(p.provider_key, p.canonical_name),
       }, p.is_target ? `★ ${p.canonical_name}` : p.canonical_name)),
     ]);
+    resetKeyboard();
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   };
@@ -447,6 +509,8 @@ async function initFindCouncil() {
     if (code) location.hash = `#/authorities/${code}`;
   };
 
+  const resetKeyboard = typeaheadKeyboard(input, list);
+
   const showMatches = () => {
     const term = input.value.trim();
     const matches = !term ? authorities.slice(0, 12)
@@ -457,6 +521,7 @@ async function initFindCouncil() {
       role: 'option',
       onmousedown: () => go(a.ons_code, a.name),
     }, `${a.name} · ${a.ons_code}`)));
+    resetKeyboard();
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   };
@@ -464,13 +529,9 @@ async function initFindCouncil() {
   input.addEventListener('focus', showMatches);
   input.addEventListener('input', showMatches);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  // Enter picks the top match. A search box that swallows Enter invites the
-  // reader to type and wait for nothing.
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
+  // Arrow keys move the highlight; Enter picks the highlighted option, or
+  // the top match if none is highlighted yet — a search box that swallows
+  // Enter invites the reader to type and wait for nothing.
 }
 
 // Bootstrap's dismissal data API deliberately prevents an anchor's normal

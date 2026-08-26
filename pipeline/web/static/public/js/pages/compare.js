@@ -15,7 +15,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp } from '/app.js';
+import { el, replace, fetchJSON, num, gbp, typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, symbolFor, escapeHtml,
           shareButton, findingBlock, tableCard } from '/js/components.js';
@@ -221,17 +221,22 @@ async function renderPicker(holder, chips, state, data) {
  * Picking navigates: the hash is rewritten with the new selection and the
  * router re-renders, so there is no local state to fall out of step. */
 function authorityPicker(state, authorities) {
-  const input = el('input', { type: 'search', placeholder: 'Add an authority',
-    'aria-label': 'Add an authority to compare', autocomplete: 'off' });
-  const list = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const input = el('input', { type: 'search', id: 'compare-add-authority',
+    placeholder: 'Add an authority', 'aria-label': 'Add an authority to compare',
+    autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false',
+    'aria-controls': 'compare-add-authority-list' });
+  const list = el('ul', { id: 'compare-add-authority-list', class: 'typeahead-list',
+    hidden: true, role: 'listbox' });
   const fuse = window.Fuse
     ? new window.Fuse(authorities, { keys: ['name', 'ons_code'], threshold: 0.4 })
     : null;
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const pick = (code) => {
     if (state.ons.includes(code)) return;
     input.value = '';
     list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
     appendToUrl('ons_code', code);
   };
   const show = () => {
@@ -244,32 +249,34 @@ function authorityPicker(state, authorities) {
     replace(list, matches.map((a) => el('li', {
       role: 'option', onmousedown: () => pick(a.ons_code),
     }, `${a.name} · ${a.ons_code}`)));
+    resetKeyboard();
     list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
   input.addEventListener('focus', show);
   input.addEventListener('input', show);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
   return el('div', { class: 'typeahead' }, input, list);
 }
 
 function providerPicker(state, providers) {
-  const input = el('input', { type: 'search', placeholder: 'Add a provider',
-    'aria-label': 'Add a provider to compare', autocomplete: 'off' });
-  const list = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const input = el('input', { type: 'search', id: 'compare-add-provider',
+    placeholder: 'Add a provider', 'aria-label': 'Add a provider to compare',
+    autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false',
+    'aria-controls': 'compare-add-provider-list' });
+  const list = el('ul', { id: 'compare-add-provider-list', class: 'typeahead-list',
+    hidden: true, role: 'listbox' });
   const fuse = window.Fuse
     ? new window.Fuse(providers, { keys: ['canonical_name', 'provider_key'],
       threshold: 0.4 })
     : null;
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const pick = (key) => {
     if (state.providers.includes(key)) return;
     input.value = '';
     list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
     appendToUrl('provider_key', key);
   };
   const show = () => {
@@ -282,16 +289,13 @@ function providerPicker(state, providers) {
     replace(list, matches.map((p) => el('li', {
       role: 'option', onmousedown: () => pick(p.provider_key),
     }, p.canonical_name)));
+    resetKeyboard();
     list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
   input.addEventListener('focus', show);
   input.addEventListener('input', show);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
   return el('div', { class: 'typeahead' }, input, list);
 }
 

@@ -17,7 +17,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON } from '/app.js';
+import { el, replace, fetchJSON, typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenance, shareButton } from '/js/components.js';
 
@@ -130,10 +130,14 @@ async function renderPicker(holder, onsCode, providerKey) {
  * page — generalised here to one picker function for either entity kind,
  * since this page never needs two different selection behaviours at once. */
 function entityPicker({ placeholder, ariaLabel, items, keys, label, pick }) {
-  const input = el('input', { type: 'search', placeholder, 'aria-label': ariaLabel,
-    autocomplete: 'off' });
-  const list = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const id = `relationships-picker-${placeholder.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const input = el('input', { type: 'search', id, placeholder, 'aria-label': ariaLabel,
+    autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false',
+    'aria-controls': `${id}-list` });
+  const list = el('ul', { id: `${id}-list`, class: 'typeahead-list', hidden: true,
+    role: 'listbox' });
   const fuse = window.Fuse ? new window.Fuse(items, { keys, threshold: 0.4 }) : null;
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const show = () => {
     const term = input.value.trim();
@@ -143,18 +147,20 @@ function entityPicker({ placeholder, ariaLabel, items, keys, label, pick }) {
             String(item[k] ?? '').toLowerCase().includes(term.toLowerCase())))
           .slice(0, 8);
     replace(list, matches.map((item) => el('li', {
-      role: 'option', onmousedown: () => { input.value = ''; list.hidden = true; pick(item); },
+      role: 'option', onmousedown: () => {
+        input.value = '';
+        list.hidden = true;
+        input.setAttribute('aria-expanded', 'false');
+        pick(item);
+      },
     }, label(item))));
+    resetKeyboard();
     list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
   input.addEventListener('focus', show);
   input.addEventListener('input', show);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
   return el('div', { class: 'typeahead' }, input, list);
 }
 

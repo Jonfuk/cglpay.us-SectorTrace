@@ -14,7 +14,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, isoDate } from '/app.js';
+import { el, replace, fetchJSON, num, isoDate, typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
           exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
@@ -54,10 +54,12 @@ export async function render(main) {
 
   const tabs = el('div', { class: 'metrictabs' });
   const areaInput = el('input', {
-    type: 'search', placeholder: 'All authorities', 'aria-label': 'Local authority',
-    autocomplete: 'off',
+    type: 'search', id: 'treatment-area', placeholder: 'All authorities',
+    'aria-label': 'Local authority', autocomplete: 'off', role: 'combobox',
+    'aria-expanded': 'false', 'aria-controls': 'treatment-area-list',
   });
-  const areaList = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const areaList = el('ul', { id: 'treatment-area-list', class: 'typeahead-list',
+    hidden: true, role: 'listbox' });
   const chartHolder = el('div', {});
   const tableHolder = el('div', {});
   const provHolder = el('div', {});
@@ -101,6 +103,8 @@ export async function render(main) {
     ? new window.Fuse(authorities, { keys: ['name', 'ons_code'], threshold: 0.4 })
     : null;
 
+  const resetAreaKeyboard = typeaheadKeyboard(areaInput, areaList);
+
   const showAreas = () => {
     const term = areaInput.value.trim();
     const matches = !term ? authorities.slice(0, 12)
@@ -112,12 +116,15 @@ export async function render(main) {
         role: 'option', onmousedown: () => pick(a.ons_code, a.name),
       }, a.name)),
     ]);
+    resetAreaKeyboard();
     areaList.hidden = false;
+    areaInput.setAttribute('aria-expanded', 'true');
   };
   const pick = (code, label) => {
     state.ons = code;
     areaInput.value = label;
     areaList.hidden = true;
+    areaInput.setAttribute('aria-expanded', 'false');
     load();
     // NDTMS is local-authority only and does not know about the topic tabs,
     // so it reloads when the authority changes and not when a tab is pressed.
