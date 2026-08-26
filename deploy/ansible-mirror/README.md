@@ -383,6 +383,7 @@ nobody exercises is a rollback path nobody has.
 sectortrace-mirror sync                  # refresh now, in the foreground
 sectortrace-mirror sync --dry-run        # what it would do; changes nothing
 sectortrace-mirror sync --warehouse-only # skip the archive
+sectortrace-mirror sync --reset          # recreate local PostgreSQL, then sync
 sectortrace-mirror sync --force          # re-apply the snapshot already in place
 sectortrace-mirror sync-status           # what is in place, and how stale that is
 sectortrace-mirror sync-log              # follow the journal
@@ -398,6 +399,13 @@ both a deployment and a mirror would otherwise have one command pointing at
 whichever state directory was installed last, and the two are not
 interchangeable. The state directory is `/opt/sectortrace-mirror/state`, not
 `/opt/sectortrace/state`, for the same reason.
+
+`sync --reset` is an explicit live-PostgreSQL recovery option. It removes only
+the mirror's `sectortrace-mirror_postgres-data` volume, recreates PostgreSQL
+from the current initialization SQL, waits for it to become healthy, and then
+continues the verified sync. It is unavailable in snapshot mode and cannot be
+combined with `--archive-only`; Neo4j, the raw archive, and the source database
+are never touched.
 
 `./start.sh` is the local-development path and does not belong on this box —
 see the self-host README's note on it, which applies here unchanged.

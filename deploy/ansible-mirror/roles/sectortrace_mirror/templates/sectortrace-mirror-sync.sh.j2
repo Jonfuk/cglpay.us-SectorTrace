@@ -28,6 +28,7 @@ MODE="{{ mirror_sync_mode }}"
 SOURCE_LABEL="{{ mirror_source_label | default('(unnamed source)', true) }}"
 MIN_FREE_GB={{ mirror_min_free_gb }}
 SUPERSEDED_KEEP={{ mirror_superseded_keep }}
+POSTGRES_VOLUME="sectortrace-mirror_postgres-data"
 STOP_APP={{ 1 if mirror_stop_app_during_sync else 0 }}
 ARCHIVE_SYNC={{ 1 if mirror_archive_sync else 0 }}
 ARCHIVE_WORKERS={{ mirror_archive_workers }}
@@ -53,6 +54,7 @@ METRICS_ARGS=()
 FORCE=0
 FORCE_ARGS=()
 DRY_RUN=0
+RESET=0
 # A stale source is a real failure and it is not this box's failure, so it is
 # reported at the end rather than at the point it is found. Everything after
 # the warehouse step — new archive objects, the projection — is worth doing
@@ -72,6 +74,9 @@ sectortrace-mirror-sync — refresh this mirror from its source deployment
   --force           Re-apply the newest snapshot even if it is the one
                     already in place. Snapshot mode only; live PostgreSQL modes always
                     copies, because there is no "same file" to recognise.
+  --reset           Recreate this mirror's local PostgreSQL volume before a
+                    live PostgreSQL sync. Deletes only the local warehouse;
+                    never removes Neo4j or the raw archive.
   --warehouse-only  Skip the raw-archive sync.
   --archive-only    Skip the warehouse step; pull archive objects only.
   -h, --help        This.
@@ -85,12 +90,28 @@ for arg in "$@"; do
     case "$arg" in
         --dry-run)        DRY_RUN=1 ;;
         --force)          FORCE=1; FORCE_ARGS=(--force) ;;
+        --reset)          RESET=1 ;;
         --warehouse-only) DO_ARCHIVE=0 ;;
         --archive-only)   DO_WAREHOUSE=0 ;;
         -h|--help)        usage; exit 0 ;;
         *) echo "unknown option: $arg" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+if [ "$RESET" -eq 1 ]; then
+    [ "$DRY_RUN" -eq 0 ] || {
+        echo "--reset cannot be combined with --dry-run" >&2
+        exit 2
+    }
+    [ "$DO_WAREHOUSE" -eq 1 ] || {
+        echo "--reset cannot be combined with --archive-only" >&2
+        exit 2
+    }
+    [ "$MODE" != "snapshot" ] || {
+        echo "--reset is supported for live PostgreSQL modes only; use tunnel or url" >&2
+        exit 2
+    }
+fi
 
 say() { printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
@@ -208,6 +229,31 @@ stop_app() {
     fi
 }
 
+reset_postgres() {
+    say "resetting the local PostgreSQL volume ($POSTGRES_VOLUME)"
+    docker compose stop postgres >/dev/null 2>&1 || true
+    docker compose rm -f postgres >/dev/null || fail "could not remove the local PostgreSQL container"
+    # This volume belongs only to this mirror's disposable warehouse. The
+    # compose project name is explicit in docker-compose.yml, so this cannot
+    # resolve to the source database or to Neo4j.
+    docker volume rm "$POSTGRES_VOLUME" >/dev/null 2>&1 || true
+    docker compose up -d postgres >/dev/null || fail "could not recreate local PostgreSQL"
+
+    local postgres_id="" health=""
+    for _ in $(seq 1 60); do
+        postgres_id="$(docker compose ps -q postgres)"
+        if [ -n "$postgres_id" ]; then
+            health="$(docker inspect -f '{% raw %}{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}{% endraw %}' "$postgres_id" 2>/dev/null || true)"
+            if [ "$health" = "healthy" ]; then
+                say "local PostgreSQL healthy after reset"
+                return 0
+            fi
+        fi
+        sleep 2
+    done
+    fail "local PostgreSQL did not become healthy after reset"
+}
+
 warehouse_snapshot() {
     # Asked first so the portal is only stopped when there is something to
     # restore — an outage every night for a box that is already current is a
@@ -257,6 +303,7 @@ warehouse_tunnel() {
     [ "$ready" -eq 1 ] || fail "nothing is answering on 127.0.0.1:$TUNNEL_PORT — check \`journalctl -u $TUNNEL_UNIT\`"
 
     stop_app
+    [ "$RESET" -eq 0 ] || reset_postgres
     say "copying the source warehouse over the tunnel"
     # --truncate because the target holds the last copy; verification is on by
     # default and is the point of this path — every value is compared against
@@ -268,6 +315,7 @@ warehouse_tunnel() {
 
 warehouse_url() {
     stop_app
+    [ "$RESET" -eq 0 ] || reset_postgres
     say "copying the source warehouse from its PostgreSQL URL"
     # --truncate because the target holds the last copy; verification is on
     # by default and compares every value against the live source.
