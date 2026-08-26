@@ -40,6 +40,7 @@ PUBLIC_STATIC_PATHS = {
     "/api.html",
     "/js/theme.js",
     "/js/components.js",
+    "/js/palette.js",
     "/js/pages/overview.js",
     "/js/pages/pay.js",
     "/js/pages/contracts.js",

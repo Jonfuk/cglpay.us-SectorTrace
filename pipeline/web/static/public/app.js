@@ -12,6 +12,7 @@
 'use strict';
 
 import { initPortalTheme, registerTheme } from '/js/theme.js';
+import { initPalette } from '/js/palette.js';
 
 // --- DOM helpers -------------------------------------------------------------
 
@@ -594,6 +595,7 @@ function boot() {
   initFilterBar();
   initFindCouncil();
   initMobileNavigation();
+  initPalette();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
   window.addEventListener('portalthemechange', render);

@@ -223,54 +223,8 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-027 | Command palette: unified search across pages, authorities, providers and documents
-  - started: 2026-08-26T16:30:00Z
-  - priority: P1
-  - impact: 5
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: ui/search
-  - depends_on: none
-  - files: pipeline/web/static/public/js/palette.js (new),
-    pipeline/web/static/public/index.html,
-    pipeline/web/static/public/styles.css,
-    pipeline/web/static/public/app.js, tests/test_portal_isolation.py,
-    tests/test_portal_palette.py (new)
-  - branch: beta
-  - last_commit: none yet
-  - objective: One search box (button in the topbar + Ctrl/Cmd-K) that finds
-    portal pages, authorities, providers and document text, keyboard-first,
-    navigating exactly where the existing per-surface searches navigate —
-    the "front door" pattern every comparable evidence platform has and
-    this portal lacks (§52 finding 7).
-  - current_state: Scoped, not yet implemented. Data is already in place:
-    `authorities` and `providers` are fetched and cached at boot by
-    initFindCouncil/initFilterBar; `document_search` (BETA-022) is live.
-    No new vendor dependency needed (Fuse is already vendored; the palette
-    can reuse the same match-then-fallback discipline).
-  - next_action: Create js/palette.js with a dialog-style overlay
-    (role=dialog, combobox input, grouped listbox: pages/authorities/
-    providers/documents), wire the topbar button + Ctrl-K binding in
-    index.html/app.js, add the asset to test_portal_isolation.py's frozen
-    list, and add a source-pinned test file in test_portal_navigation.py's
-    offline style. Every choice navigates (like find-council), so no
-    data-filter key is involved.
-  - validation_remaining: ruff on touched test files; portal isolation +
-    navigation + controls suites; live browser eyeball at the next live
-    opportunity (this checkout has no browser tooling — same caveat as
-    BETA-024).
-  - notes: Values reach the DOM as text nodes (settled decision 9) —
-    document results' titles come from scraped council PDFs. Keep the
-    palette a *navigator*, not a filter: no state keys, so
-    test_portal_controls.py's control-with-no-consumer guard is not
-    triggered. Documents group fetches debounced (200ms) and caps at 5
-    results; a document selection goes to `#/documents?q=…` so the reader
-    sees the full result list, not a bare snippet.
-
-### NEXT
-
-- [NEXT] BETA-028 | The map renders with the network cable unplugged
+- [IN_PROGRESS] BETA-028 | The map renders with the network cable unplugged
+  - started: 2026-08-26T17:45:00Z
   - priority: P1
   - impact: 4
   - effort: 2
@@ -278,24 +232,32 @@ DONE
   - risk: 2
   - area: ui/geography
   - depends_on: none
+  - files: pipeline/web/static/public/js/pages/geography.js, tests (see below)
+  - branch: beta
+  - last_commit: none yet
   - objective: When the CARTO basemap style is unreachable, fall back to a
     locally-defined MapLibre style (background colour, no sources) so the
     choropleth still draws and settled decision 6 holds on the one page
     that currently half-breaks it.
-  - rationale: §52 finding 4 — the external basemap is a deliberate,
-    CSP-allowlisted, test-pinned exception, but offline the style fetch
-    fails, `load` never fires, and the map canvas stays blank. Online
-    readers keep the basemap; offline readers get the map instead of a
-    void. Deliberately additive — no CSP change, no removal of the
-    basemap, and test_web_layers.py's URL pins stay true.
-  - suggested_first_action: In geography.js, move the layer-adding code
-    out of the `map.on('load')` closure into a function; add an 'error'
-    listener that, if the style never loaded, calls
-    `map.setStyle(localStyle)` and re-runs it on the next 'load'. Guard
-    against tile-error noise (only fall back before first successful
-    style load). Verify with the dev server offline (block the style URL)
-    if a browser is available; otherwise source-pin the fallback
-    behaviour in a test.
+  - current_state: Scoped, not yet implemented. The external basemap is a
+    deliberate, CSP-allowlisted, test-pinned exception
+    (server.py:183-185, tests/test_web_layers.py:253) — the fix must keep
+    those pins true (basemap stays for online readers) and only add the
+    offline path.
+  - next_action: In geography.js, move the layer-adding code out of the
+    `map.on('load')` closure into a named function; listen for 'error'
+    before first successful style load and on it call
+    `map.setStyle(localStyle)` and re-add layers on the next 'load'. Guard
+    against tile-error noise (fallback only fires if the style itself never
+    loaded). Pin the behaviour source-wise in a test.
+  - validation_remaining: ruff; portal suites; live check with the style
+    URL blocked if a browser is available (this checkout has none).
+  - notes: Local style = `{version: 8, sources: {}, layers: [{background}]}`
+    with the theme's background colour; dark/light aware via the existing
+    `isDark()`. test_web_layers.py's assertion that the carto URLs are
+    present in geography.js must keep passing — do not remove the basemap.
+
+### NEXT
 
 - [NEXT] BETA-029 | Overview stops downloading 500 notices to draw 10 bars
   - priority: P2
@@ -351,6 +313,74 @@ DONE
     on evidence figures were considered and rejected as theatre.
 
 ### DONE
+
+- [DONE] BETA-027 | Command palette: unified search across pages, authorities, providers and documents
+  - completed: 2026-08-26T17:40:00Z
+  - commits: (this commit; `beta`)
+  - result: One search box for the whole portal, opened from a topbar
+    button beside the council search, Ctrl/Cmd-K, or "/". It finds portal
+    pages, councils, providers and document text, and every choice
+    navigates by hash change exactly as the existing per-surface searches
+    do — the "front door" pattern the §52 reassessment identified as the
+    portal's remaining discoverability gap (three separate search boxes,
+    no way to search across them).
+  - **Architecture is the operator UI's own palette wearing public
+    clothes**, because that pattern is proven in this codebase
+    (`static/js/palette.js`): lazily-built dialog, score-ranked flat list
+    with inline kind labels (same `score()` — direct match beats
+    subsequence — so the two palettes feel identical to anyone who uses
+    both), hash-only navigation, focus restored on close, no state of its
+    own. New here: the councils and providers lists come from the API
+    payloads app.js already fetches and caches at boot (opening the
+    palette costs no extra request), and document results arrive live
+    from the BETA-022 endpoint — debounced 200ms, minimum 3 characters,
+    bounded, and stale-guarded so a response for an abandoned query can
+    never paint over the current one.
+  - **Two data-shape findings from verifying against the live warehouse:**
+    (1) document `title`s in this corpus are usually content-hash
+    filenames — a palette of hashes would teach a reader nothing, and the
+    documents page itself shows the same hashes (pre-existing, out of
+    scope, flagged below). The palette's document rows therefore show the
+    *snippet* — real match-centred evidence text, exactly why the row
+    matched — with a readable document-type label as detail. (2) One
+    document matches on several pages, so 12 raw rows for "recruitment"
+    collapse to 4 unique documents; results are deduped by
+    source_url+page and the fetch window widened (12) so five *unique*
+    documents still fit the display cap.
+  - Accessibility follows BETA-021's portal standard rather than the
+    operator palette's lighter one: the input declares role=combobox with
+    aria-expanded/aria-controls/aria-autocomplete, options carry
+    aria-selected with the input's aria-activedescendant pointing at the
+    roving highlight, Enter picks, Escape closes, Tab stays inside the
+    aria-modal dialog. Values reach the DOM as text nodes (settled
+    decision 9): document snippets are scraped council PDFs, and the
+    matched-span highlighting is built from element/text nodes, never
+    innerHTML.
+  - Wired through the frozen surfaces the house rule requires:
+    `server.py`'s module list (STATIC_FILES), `PUBLIC_STATIC_PATHS` in
+    tests/test_portal_isolation.py, and a new
+    tests/test_portal_palette.py pinning: every destination is a real
+    route *with the router's own title* (drift fails in both directions),
+    the visible trigger exists, app.js boots it, it navigates and never
+    filters (no data-filter, no setState), text-node discipline, the
+    debounce/bounds/stale-guard, navigation to `#/documents?q=…`, no
+    external requests, the keyboard contract, focus restore (including
+    the isConnected guard), and the platform-adaptive kbd hint (⌘K on a
+    Mac). 104 tests across palette+isolation+navigation+controls+public+
+    documents suites pass; ruff clean.
+  - **Live smoke test against the dev server** (this checkout's real
+    warehouse, GET-only per the Environment Note): `/js/palette.js`
+    serves (200), the homepage carries the trigger, `/api/v1/authorities`
+    returns 347 rows with the name/ons_code/region fields the palette
+    reads, and `/api/v1/document_search` returns match-centred snippets.
+    In-browser interaction (overlay opens, arrows move, Enter navigates)
+    could not be exercised — no browser or node in this checkout, the
+    same caveat BETA-024 carried; a structural balance check stood in for
+    a syntax check. Next live session should eyeball it.
+  - possible follow-up: readable display titles for committee papers on
+    the documents page itself (the palette worked around the hash-title
+    problem; the page still shows hashes) — a document-layer
+    improvement, not a palette one. Flagged, not queued.
 
 - [DONE] BETA-026 | Quoted phrases anchor snippets and highlight as a unit
   - completed: 2026-08-26T14:50:00Z
@@ -1455,7 +1485,7 @@ DONE
 | P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | DONE (BETA-024) |
 | P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | DONE (BETA-025) |
 | P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | DONE (BETA-026) |
-| P1 | Command palette: unified search (Ctrl-K) | 5 | 3 | 4 | IN_PROGRESS (BETA-027) |
+| P1 | Command palette: unified search (Ctrl-K) | 5 | 3 | 4 | DONE (BETA-027) |
 | P1 | Map renders with the network cable unplugged | 4 | 2 | 4 | NEXT (BETA-028) |
 | P2 | Overview payload: stop shipping 500 notices for 10 bars | 3 | 1 | 5 | NEXT (BETA-029) |
 | P2 | Copy-citation button in provenance drawer | 4 | 2 | 4 | READY (BETA-030) |
@@ -1632,6 +1662,10 @@ projects while researching BETA-010/BETA-009. Findings:
   highlighted as one unit. Fixing this properly exposed a real bug: an
   early lone word could drag the snippet window away from the passage that
   matched as a phrase, leaving the phrase outside what the reader saw.
+- BETA-027: the command palette — one search box (topbar button, Ctrl-K,
+  or "/") across pages, councils, providers and document text, with live
+  match-centred document snippets in the results and full keyboard
+  navigation. The portal's front door.
 
 ## Performance Improvements
 

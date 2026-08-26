@@ -96,6 +96,19 @@
            role="combobox" aria-expanded="false" aria-controls="find-council-list">
     <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
   </div>
+  <!--
+    The command palette (js/palette.js): one search box for the whole portal —
+    pages, councils, providers and document text — opened by this button,
+    Ctrl/Cmd-K, or "/". A navigator like the council search beside it, not a
+    filter: every choice navigates, so it holds no filter-bar state key and
+    the data-filter contract in tests/test_portal_controls.py does not apply.
+    The kbd hint is rewritten per platform at boot (⌘K on a Mac).
+  -->
+  <button id="palette-open" class="palette-open" type="button" aria-haspopup="dialog" aria-label="Search the portal">
+    <span class="search-icon" aria-hidden="true">⌕</span>
+    <span>Search</span>
+    <kbd aria-hidden="true">Ctrl K</kbd>
+  </button>
   <label class="theme-control" for="theme-select">Theme
     <select id="theme-select" class="theme-select" aria-label="Colour theme">
       <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
