@@ -293,7 +293,35 @@ const ROUTES = {
   '/documents': () => import('/js/pages/documents.js'),
 };
 
+/* One <title> per route. Until now all thirteen shared index.html's static
+ * title, so browser history could not tell two routes apart, a bookmark
+ * named itself after whichever page was open first, and nothing announced
+ * the change to a screen reader. Deep dives keep their section name rather
+ * than fetching the entity just for the tab — the page's own h1 carries the
+ * specifics once data arrives. */
+const ROUTE_TITLES = {
+  '/': 'Overview',
+  '/pay': 'Pay & benchmarks',
+  '/contracts': 'Funding & contracts',
+  '/geography': 'Places',
+  '/treatment': 'Treatment data',
+  '/providers': 'Providers',
+  '/relationships': 'Relationships',
+  '/pfd': 'Safety & legal',
+  '/authorities': 'Authorities',
+  '/compare': 'Compare authorities',
+  '/claims': 'Evidence-backed claims',
+  '/coverage': 'Coverage & limitations',
+  '/documents': 'Document search',
+};
+
 let disposeCurrent = null;
+/* The base route of the previous render. Filter changes re-render the whole
+ * page through the state subscription — same route, new data — and those
+ * must not steal focus from whatever control the reader is using. Only a
+ * change of route does that, and only after the first paint (focusing #main
+ * on initial load would fight the reader's own starting point). */
+let renderedBase = null;
 
 async function render() {
   const { path, params } = parseHash();
@@ -302,6 +330,10 @@ async function render() {
   const base = path.startsWith('/providers/') ? '/providers'
     : path.startsWith('/authorities/') ? '/authorities' : path;
   const load = ROUTES[base] || ROUTES['/'];
+  const routeLabel = ROUTE_TITLES[base];
+  document.title = routeLabel ? `${routeLabel} · SectorTrace` : 'SectorTrace';
+  const navigating = renderedBase !== null && renderedBase !== base;
+  renderedBase = base;
   updateFilterVisibility(base);
 
   for (const link of document.querySelectorAll('.mainnav a')) {
@@ -348,6 +380,11 @@ async function render() {
         el('span', { text: lens[0] }));
       main.prepend(cue);
     }
+    // The page content changed wholesale, but focus stayed on the nav link
+    // that was clicked — a screen reader has no idea anything happened.
+    // #main carries tabindex="-1" for exactly this; preventScroll keeps the
+    // reader where they were instead of jumping the viewport to the top.
+    if (navigating) main.focus({ preventScroll: true });
   } catch (error) {
     replace(main, el('div', { class: 'section' },
       el('div', { class: 'chart-error' },
