@@ -26,9 +26,13 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `8e59063` going into BETA-007.
-- Five items completed this session: BETA-001 (master), BETA-002, BETA-003,
-  BETA-004, BETA-007.
+  directly, not `beta`). `beta` is now at `f23e85d` going into BETA-027.
+- Twenty-six items completed across this session and its predecessors:
+  BETA-001 through BETA-026 (BETA-001 on `master`). The §52 strategic
+  reassessment below was run 2026-08-26 after four consecutive narrow
+  front-end items, and the queue was re-aimed at high-impact front-end work
+  per the project owner's direct steer ("prioritise improvements for the
+  front end web ui… mind blowing").
 - Baseline: full `uv run python -m pytest` run once, after BETA-007 (the
   first change this cycle touching core server code) — **2342 passed, 106
   skipped, 30 deselected, 3 failed**, all three confirmed pre-existing and
@@ -132,6 +136,75 @@ it." That is the more valuable kind of finding this exercise could produce,
 and it is why BETA-022 is the direct result of this research rather than a
 coincidence.
 
+## Strategic Reassessment (§52, run 2026-08-26 — the reassessment BETA-026's close-out flagged as owed)
+
+Run after four consecutive narrow front-end items (BETA-023–026), i.e. the
+top of §52's own 3–6-item window. Each §52 question was checked against the
+actual code this cycle, not against memory:
+
+1. **Is the roadmap still sensible?** The *discipline* is sound (every item
+   shipped vertical, tested, documented), but item *selection* had drifted
+   narrow: impacts ran 4 → 2 → 3 → 1. The project owner then removed the
+   ambiguity directly: front-end web UI improvements are the priority, and
+   the release needs to "really amaze end users". Correction applied: the
+   queue below is repopulated with impact ≥ 3 front-end items only.
+2. **Has the architecture changed what is now possible?** Yes, twice.
+   Document full-text search (BETA-022–026) exists behind one public
+   endpoint, and the portal already fetches the full authorities and
+   providers lists at boot (`initFindCouncil`/`initFilterBar`, both cached
+   by `fetchJSON`). A unified search surface — the one thing comparable
+   platforms (Aleph above all) treat as the front door — is now nearly
+   free in data terms. It did not exist as an option before this cycle.
+3. **Over-investing in one subsystem?** Yes — four items in a row on
+   document search. Search is now the portal's most-polished surface;
+   every other surface got nothing this cycle.
+4. **Neglected high-value part?** Two, both checked in code:
+   - The **map page is the one page that half-breaks settled decision 6**
+     ("both front ends must render with the network cable unplugged").
+     `geography.js:25` loads the basemap style from
+     `basemaps.cartocdn.com` — a *deliberate, documented* exception (CSP
+     allowlists it in `server.py:183-185`; `tests/test_web_layers.py:253`
+     pins the URLs), not an oversight. But with no network the style fetch
+     fails, MapLibre never fires `load`, and the choropleth layers are
+     never added: the reader gets the text alternative only, not a map.
+     index.html's own header comment ("makes no external requests") is
+     true of every asset and false of this one page's basemap. A local
+     fallback style would honour the promise without taking the basemap
+     away from online readers. Queued as BETA-028.
+   - The **homepage downloads 500 notice rows to draw a 10-bar chart**
+     (`overview.js` calls `contracts?limit=500`; `value_concentration` is
+     computed server-side over the whole corpus; `provenance()` dedupes and
+     shows at most 6 URLs). The payload is the page's single biggest
+     transfer and 98% of it is unused. Queued as BETA-029 — also the first
+     performance-section entry in three cycles.
+   - The admin UI remains untouched this whole session — real, but
+     deliberately deferred *again* by the owner's explicit "end users
+     first" steer. Kept visible in the backlog, not forgotten.
+5. **Comparable systems revealing a major gap?** No new category emerged
+   beyond what the 2026-08-26 research recorded. The applicable
+   un-emulated pattern is unified search as the front door — see (2).
+6. **Technical debt constraining?** No new constraint found. The deferred
+   nits (inline hex literals in map/graph code, claims-page filter) remain
+   as recorded in Deferred Ideas.
+7. **Users able to actually discover functionality?** Re-checked the way
+   BETA-017 did: document search (nav + homepage tile + noscript + /api),
+   comparators (authority page), relationships (nav) — all discoverable.
+   The remaining gap is *between* surfaces: three separate search boxes
+   (find-council, provider filter, document page) and no way to search
+   across them. That is a discoverability finding, not just a feature
+   request, and it is what BETA-027 addresses.
+8. **Data additions outpacing understanding?** No — no new datasets this
+   cycle; coverage and health surfaces keep pace.
+9. **Queue dominated by low-impact work?** Yes — see (1). This
+   reassessment's main correction.
+
+**Direction set for the next cycle:** front-end, high-impact, end-user
+facing, within the settled constraints (no build step, no new vendor
+dependencies, text-node DOM discipline, caveats discipline). BETA-027 is
+the flagship; BETA-028/029 make the portal's own documented promises true;
+BETA-030 is the first researcher-delight item; BETA-031 researches the
+homepage's first impression with a live browser before touching it.
+
 ## Autonomous Work Queue
 
 <!--
@@ -150,12 +223,132 @@ DONE
 
 ### IN_PROGRESS
 
-*(none — BETA-026 completed 2026-08-26)*
+- [IN_PROGRESS] BETA-027 | Command palette: unified search across pages, authorities, providers and documents
+  - started: 2026-08-26T16:30:00Z
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: ui/search
+  - depends_on: none
+  - files: pipeline/web/static/public/js/palette.js (new),
+    pipeline/web/static/public/index.html,
+    pipeline/web/static/public/styles.css,
+    pipeline/web/static/public/app.js, tests/test_portal_isolation.py,
+    tests/test_portal_palette.py (new)
+  - branch: beta
+  - last_commit: none yet
+  - objective: One search box (button in the topbar + Ctrl/Cmd-K) that finds
+    portal pages, authorities, providers and document text, keyboard-first,
+    navigating exactly where the existing per-surface searches navigate —
+    the "front door" pattern every comparable evidence platform has and
+    this portal lacks (§52 finding 7).
+  - current_state: Scoped, not yet implemented. Data is already in place:
+    `authorities` and `providers` are fetched and cached at boot by
+    initFindCouncil/initFilterBar; `document_search` (BETA-022) is live.
+    No new vendor dependency needed (Fuse is already vendored; the palette
+    can reuse the same match-then-fallback discipline).
+  - next_action: Create js/palette.js with a dialog-style overlay
+    (role=dialog, combobox input, grouped listbox: pages/authorities/
+    providers/documents), wire the topbar button + Ctrl-K binding in
+    index.html/app.js, add the asset to test_portal_isolation.py's frozen
+    list, and add a source-pinned test file in test_portal_navigation.py's
+    offline style. Every choice navigates (like find-council), so no
+    data-filter key is involved.
+  - validation_remaining: ruff on touched test files; portal isolation +
+    navigation + controls suites; live browser eyeball at the next live
+    opportunity (this checkout has no browser tooling — same caveat as
+    BETA-024).
+  - notes: Values reach the DOM as text nodes (settled decision 9) —
+    document results' titles come from scraped council PDFs. Keep the
+    palette a *navigator*, not a filter: no state keys, so
+    test_portal_controls.py's control-with-no-consumer guard is not
+    triggered. Documents group fetches debounced (200ms) and caps at 5
+    results; a document selection goes to `#/documents?q=…` so the reader
+    sees the full result list, not a bare snippet.
 
 ### NEXT
 
-*(empty — see Next Recommended Actions: the §52 strategic reassessment is
-owed before further narrow polish items are queued)*
+- [NEXT] BETA-028 | The map renders with the network cable unplugged
+  - priority: P1
+  - impact: 4
+  - effort: 2
+  - confidence: 4
+  - risk: 2
+  - area: ui/geography
+  - depends_on: none
+  - objective: When the CARTO basemap style is unreachable, fall back to a
+    locally-defined MapLibre style (background colour, no sources) so the
+    choropleth still draws and settled decision 6 holds on the one page
+    that currently half-breaks it.
+  - rationale: §52 finding 4 — the external basemap is a deliberate,
+    CSP-allowlisted, test-pinned exception, but offline the style fetch
+    fails, `load` never fires, and the map canvas stays blank. Online
+    readers keep the basemap; offline readers get the map instead of a
+    void. Deliberately additive — no CSP change, no removal of the
+    basemap, and test_web_layers.py's URL pins stay true.
+  - suggested_first_action: In geography.js, move the layer-adding code
+    out of the `map.on('load')` closure into a function; add an 'error'
+    listener that, if the style never loaded, calls
+    `map.setStyle(localStyle)` and re-runs it on the next 'load'. Guard
+    against tile-error noise (only fall back before first successful
+    style load). Verify with the dev server offline (block the style URL)
+    if a browser is available; otherwise source-pin the fallback
+    behaviour in a test.
+
+- [NEXT] BETA-029 | Overview stops downloading 500 notices to draw 10 bars
+  - priority: P2
+  - impact: 3
+  - effort: 1
+  - confidence: 5
+  - risk: 1
+  - area: performance/ui
+  - depends_on: none
+  - objective: overview.js's top-contracts section requests
+    `contracts?limit=500` but uses only `value_concentration.largest`
+    (server-computed, top 10) and at most 6 provenance URLs. Request
+    `limit=10` instead; same chart, ~98% less payload on the homepage's
+    biggest transfer.
+  - rationale: §52 finding 4 — the performance section has read "none"
+    for three cycles; this is the cheapest real win in it, found by
+    reading the code, not by guessing.
+  - suggested_first_action: One-line change in overview.js plus a
+    source-pinned assertion (in test_portal_navigation.py's style) that
+    the overview page's contracts call passes a bounded limit.
+
+### READY
+
+- [READY] BETA-030 | Copy-citation button in the provenance drawer
+  - priority: P2
+  - impact: 4
+  - effort: 2
+  - confidence: 4
+  - risk: 1
+  - area: ui
+  - depends_on: none
+  - objective: A "copy citation" control beside the provenance drawer's
+    source links, putting title, source URL, retrieval date and licence
+    on the clipboard in one action — the researcher's most common manual
+    step, made one click. Uses navigator.clipboard with a fallback;
+    degrades to invisible when neither is available.
+
+### RESEARCH
+
+- [RESEARCH] BETA-031 | Homepage first impression: is the hero earning its place?
+  - priority: P2
+  - question: The overview hero is deliberately conservative (its own
+    header comment explains why two requested headline numbers are
+    refused). Within that discipline, would a compact England coverage
+    visual (boundaries payload, reusing the geography page's palette) in
+    the hero measurably improve a first-time reader's understanding of
+    what this portal is — or is it decoration? Needs eyeballing live in
+    a browser before building; static review cannot answer it.
+  - research_needed: A live look at the current homepage at desktop and
+    mobile widths, then a judgement call on whether a data visual in the
+    hero adds comprehension or just pixels. The "mind blowing" steer is
+    satisfied by clarity plus speed, not by animation; count-up numbers
+    on evidence figures were considered and rejected as theatre.
 
 ### DONE
 
@@ -1262,6 +1455,11 @@ owed before further narrow polish items are queued)*
 | P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | DONE (BETA-024) |
 | P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | DONE (BETA-025) |
 | P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | DONE (BETA-026) |
+| P1 | Command palette: unified search (Ctrl-K) | 5 | 3 | 4 | IN_PROGRESS (BETA-027) |
+| P1 | Map renders with the network cable unplugged | 4 | 2 | 4 | NEXT (BETA-028) |
+| P2 | Overview payload: stop shipping 500 notices for 10 bars | 3 | 1 | 5 | NEXT (BETA-029) |
+| P2 | Copy-citation button in provenance drawer | 4 | 2 | 4 | READY (BETA-030) |
+| P2 | Homepage first-impression visual | 3 | 3 | 3 | RESEARCH (BETA-031) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1717,29 +1915,25 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-026 landed since the previous version. Four
-items completed this session, all front-end (BETA-023/024/025/026). Five
-questions, answerable without conversational history, as of
-2026-08-26T15:00Z.)*
+*(Revision after the §52 reassessment, 2026-08-26T16:30Z. Five questions,
+answerable without conversational history.)*
 
-**What is currently being worked on?** Nothing — BETA-026 just completed
-and the NEXT queue is deliberately empty: **the §52 strategic reassessment
-is the next piece of work**, by its own 3–6-items rule (four narrow items
-have landed since the last one; none has ever been run).
+**What is currently being worked on?** BETA-027 (IN_PROGRESS): the command
+palette — unified search across pages, authorities, providers and document
+text, opened from a topbar button or Ctrl/Cmd-K. First queue item re-aimed
+at the project owner's "mind blowing front end" steer; nothing implemented
+yet, see its `next_action` for the exact starting point.
 
 **What was the last successful change?** BETA-026 (`538095f`): quoted
-phrases now anchor document-search snippets and highlight as a unit.
-Finding it surfaced a real bug in BETA-023's snippet windowing — an early
-lone word could displace the window from the passage that matched as a
-phrase — fixed and pinned with a distractor test.
+phrases anchor document-search snippets and highlight as a unit, fixing a
+real windowing bug found on the way. Since then: the §52 strategic
+reassessment (this file, above the queue) — its findings are the reason
+the queue below looks nothing like the old one.
 
-**What should happen next?** Run the §52 sweep across neglected areas
-(admin UI has had nothing this session; performance section empty for two
-cycles), then repopulate NEXT from its findings. If continuing front-end
-work regardless: eyeball-verify BETA-024's focus/title handoff and
-BETA-025's show-more flow in a real browser at the next live opportunity,
-and consider whether the operator UI (/admin) deserves the same polish
-pass the portal has had.
+**What should happen next?** Implement BETA-027 per its `next_action`;
+then BETA-028 (offline map fallback) and BETA-029 (overview payload).
+BETA-024's focus/title handoff and BETA-025's show-more flow still deserve
+a live-browser eyeball at the next live opportunity.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1749,8 +1943,9 @@ pass the portal has had.
 3. BETA-006 (`--jobs 4` re-evaluation) — refused twice for operational/
    scheduling reasons; do not restart without new scheduling information.
 
-**What are the highest-value upcoming items?** The §52 sweep itself;
-then whatever it surfaces. A project-owner decision on BETA-011's
+**What are the highest-value upcoming items?** BETA-027 (the front door),
+BETA-028 (make decision 6 true on the map page), BETA-029 (homepage
+payload), BETA-030 (copy citation). A project-owner decision on BETA-011's
 candidate type would unblock the queue's most sensitive item.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
