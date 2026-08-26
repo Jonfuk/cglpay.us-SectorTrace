@@ -38,7 +38,7 @@ export async function render(main) {
     el('div', { class: 'hero' },
       el('h1', { text: 'Pay & benchmarks' }),
       el('p', { class: 'lede' },
-        'Explore published pay, advertised roles and workforce context. Each source layer answers a different question, so they are not combined into one pay score.'),
+        'Explore published pay, advertised roles and statutory floors. Each source layer answers a different question, so they are not combined into one pay score.'),
       el('div', { class: 'hero-actions' },
         shareButton({
           title: 'SectorTrace pay evidence',
@@ -49,7 +49,6 @@ export async function render(main) {
         el('button', { type: 'button', onclick: () => scrollToLayer('wage') }, 'Indicative wage'),
         el('button', { type: 'button', onclick: () => scrollToLayer('adverts') }, 'Advertised roles'),
         el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
-        el('button', { type: 'button', onclick: () => scrollToLayer('census') }, 'Workforce context'),
         el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
     (() => {
       const meta = evidenceMeta(data);
@@ -69,14 +68,12 @@ export async function render(main) {
     el('div', { id: 'wage' }),
     el('div', { id: 'adverts' }),
     el('div', { id: 'published-pay' }),
-    el('div', { id: 'census' }),
     el('div', { id: 'benchmarks' }));
   replace(main, page);
 
   renderWage(page.querySelector('#wage'), data, charts);
   renderAdverts(page.querySelector('#adverts'), data, charts);
-  renderPublishedPay(page.querySelector('#published-pay'), data);
-  renderCensus(page.querySelector('#census'), data, charts);
+  renderPublishedPay(page.querySelector('#published-pay'), data, charts);
   renderBenchmarks(page.querySelector('#benchmarks'), data);
 
   return () => disposeCharts(charts);
@@ -84,11 +81,21 @@ export async function render(main) {
 
 // --- 2c. provider-published and statutory pay evidence ---------------------
 
-function renderPublishedPay(container, data) {
+function renderPublishedPay(container, data, charts) {
   const rates = data.statutory_pay_rates || [];
   const published = data.provider_published_pay || [];
   const accreditations = data.living_wage_accreditations || [];
   const genderPayGap = data.gender_pay_gap_reports || [];
+  const genderPayGapHolder = el('div', {});
+
+  // `rates` is already ordered by effective_from DESC, period_label DESC
+  // (public_queries.pay), so the first row's period is the current one.
+  // Under-18s are excluded from the current period specifically: they
+  // cannot legally be recruited into a CQC-regulated adult substance
+  // misuse service, so that row never applies to this sector's workforce.
+  const currentPeriod = rates[0]?.period_label;
+  const currentRates = rates.filter(
+    (r) => r.period_label === currentPeriod && r.band_label !== 'Under 18');
 
   replace(container, section(
     'Published pay and employment evidence',
@@ -102,14 +109,13 @@ function renderPublishedPay(container, data) {
       el('div', { class: 'panel' },
         el('h3', { text: 'Statutory minimum rates' }),
         pinnedCaveat(data.caveats?.statutory_pay_rates_note, 'Hourly floors only'),
-        rates.length ? tableCard('Published rates', [
+        currentRates.length ? tableCard('Published rates', [
           { title: 'Period', field: 'period_label' },
           { title: 'Band', field: 'band_label' },
           { title: 'Role', field: 'band_role' },
-          { title: 'Rate (hourly)', field: 'amount', formatter: (c) => gbp(c.getValue(), { compact: false }) },
           { title: 'Published value', field: 'value_text' },
-        ], rates, { height: 280 }) : noData('statutory pay rates', './start.sh run m17_statutory_pay_rates'),
-        provenanceFromRows(rates, { tables: ['statutory_pay_rates'], module: 'm17_statutory_pay_rates' })),
+        ], currentRates, { height: 240 }) : noData('statutory pay rates', './start.sh run m17_statutory_pay_rates'),
+        provenanceFromRows(currentRates, { tables: ['statutory_pay_rates'], module: 'm17_statutory_pay_rates' })),
       el('div', { class: 'panel' },
         el('h3', { text: 'Living Wage Foundation checks' }),
         pinnedCaveat(data.caveats?.living_wage_note, 'How to read “not found”'),
@@ -135,22 +141,40 @@ function renderPublishedPay(container, data) {
     el('div', { class: 'panel' },
       el('h3', { text: 'Gender pay gap filings' }),
       pinnedCaveat(data.caveats?.gender_pay_gap_note, 'Missing is not zero'),
-      genderPayGap.length ? tableCard('Matched filings', [
-        { title: 'Provider', field: 'canonical_name' },
-        { title: 'Reporting year', field: 'reporting_year_label' },
-        { title: 'Employer', field: 'employer_name' },
-        { title: 'Median hourly gap', field: 'diff_median_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
-        { title: 'Mean hourly gap', field: 'diff_mean_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
-        { title: 'Employer size', field: 'employer_size' },
-      ], genderPayGap, { height: 320 }) : noData('matched gender pay gap filings', './start.sh run m20_gender_pay_gap'),
+      genderPayGap.length ? genderPayGapHolder
+        : noData('matched gender pay gap filings', './start.sh run m20_gender_pay_gap'),
       provenanceFromRows(genderPayGap, { tables: ['gender_pay_gap_reports'], module: 'm20_gender_pay_gap' }))));
+
+  if (!genderPayGap.length) return;
+
+  charts.push(mountChart(genderPayGapHolder, {
+    legend: { top: 0 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      valueFormatter: (v) => (v == null ? '—' : `${v}%`) },
+    xAxis: {
+      type: 'category',
+      data: genderPayGap.map((r) => `${truncate(r.canonical_name || r.employer_name || '—', 20)} · ${r.reporting_year_label || '—'}`),
+      axisLabel: { rotate: 20 },
+    },
+    yAxis: { type: 'value', name: 'hourly pay gap (%)', axisLabel: { formatter: (v) => `${v}%` } },
+    series: [
+      { name: 'Median hourly gap', type: 'bar', data: genderPayGap.map((r) => r.diff_median_hourly_percent) },
+      { name: 'Mean hourly gap', type: 'bar', data: genderPayGap.map((r) => r.diff_mean_hourly_percent) },
+    ],
+  }, {
+    height: 'short',
+    aria: 'Bar chart of median and mean hourly gender pay gap percentages for '
+      + 'each matched gender pay gap filing, by provider and reporting year.',
+  }));
 }
 
 // --- 2d. contextual comparators ---------------------------------------------
 
 function renderBenchmarks(container, data) {
   const ashe = data.ons_ashe_observations || [];
-  const skills = data.skills_for_care_estimates || [];
+  // Rows with no hourly pay figure carry nothing this table can show —
+  // annual-only estimates are still readable in the export, just not here.
+  const skills = (data.skills_for_care_estimates || []).filter((r) => r.hourly_pay != null);
 
   replace(container, section(
     'Context only: external comparators',
@@ -247,6 +271,11 @@ function renderWage(container, data, charts) {
       + 'because they differ materially.',
   }));
 
+  // Newest report first. The chart above reads `rows` in ascending year order
+  // for its x-axis, so the table gets its own sorted copy rather than a
+  // mutation of the array the chart already built its series from.
+  const newestFirst = [...rows].sort(
+    (a, b) => (b.financial_year_end || '').localeCompare(a.financial_year_end || ''));
   container.append(tableCard('Charity accounts — wages and employees', [
     { title: 'Provider', field: 'canonical_name' },
     { title: 'Charity no.', field: 'charity_number' },
@@ -259,7 +288,7 @@ function renderWage(container, data, charts) {
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
     { title: 'Per FTE', field: 'indicative_wage_per_fte',
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
-  ], rows, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300 }));
+  ], newestFirst, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300 }));
 }
 
 // --- 2b. NHS Jobs advertised pay ---------------------------------------------
@@ -357,99 +386,3 @@ function renderAdverts(container, data, charts) {
   }
 }
 
-// --- 2c. workforce census ----------------------------------------------------
-
-/** The verification caveat that is true right now, or none once all of them
- *  have been checked.
- *
- *  Three states rather than two, because a census metric became something a
- *  person can check one at a time (migration 0033) and a corpus that is partly
- *  checked is the state it will be in for most of its life. */
-function censusCaveat(data) {
-  const total = data.census_total ?? (data.workforce_census || []).length;
-  const verified = data.census_verified_count ?? 0;
-  if (!total || verified >= total) return null;
-  return verified === 0
-    ? pinnedCaveat(data.caveats?.census_unverified_note,
-                    'Every figure below is unverified')
-    : pinnedCaveat(data.caveats?.census_partly_verified_note,
-                    `${verified} of ${total} figures below `
-                    + `${verified === 1 ? 'has' : 'have'} been checked`);
-}
-
-function renderCensus(container, data, charts) {
-  const rows = data.workforce_census || [];
-  const holder = el('div', {});
-
-  replace(container, section(
-    'Workforce census indicators',
-    'Vacancy, turnover and headcount measures as published in the sector '
-    + 'workforce census.',
-    takeaway(rows.length ? (data.census_verified_count ? 'Partly verified' : 'Unverified') : 'Not collected',
-      rows.length && data.census_verified_count ? 'unverified' : 'neutral',
-      rows.length
-        ? 'These are workforce measures, not pay measures. Their verification status is shown before the chart and in the table.'
-        : 'No workforce-census rows match the current filters; a blank is not zero.'),
-    el('div', { class: 'panel' },
-      pinnedCaveat(data.caveats?.census_comparability_note, 'Not comparable between years'),
-      // Pinned until nothing below is unverified, not until something is
-      // verified. The chart draws every figure whatever its flag, so the
-      // caveat that used to vanish the moment one figure was checked would
-      // have left the other sixty-seven on screen with nothing said about
-      // them. The verified count goes in the heading so the reader can see
-      // which way the number is moving.
-      censusCaveat(data),
-      holder,
-      provenanceFromRows(rows, { tables: ['workforce_census_metrics'], module: 'm06_workforce_census' }))));
-
-  if (!rows.length) {
-    replace(holder, noData('workforce census metrics', './start.sh run m06_workforce_census'));
-    return;
-  }
-
-  const years = [...new Set(rows.map((r) => r.census_year))].sort();
-  const metrics = [...new Set(rows.map((r) => r.metric))];
-
-  charts.push(mountChart(holder, {
-    legend: { top: 0 },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: years },
-    yAxis: { type: 'value' },
-    series: metrics.map((metric, index) => ({
-      name: metric,
-      type: 'bar',
-      symbol: symbolFor(index),
-      data: years.map((year) => {
-        const matching = rows.filter((r) => r.census_year === year && r.metric === metric);
-        // One bar per (year, metric). Where the census reports several
-        // segments, the highest is shown and the table below carries them all
-        // — averaging segments would invent a figure the census never
-        // published.
-        return matching.length ? Math.max(...matching.map((m) => m.value ?? 0)) : null;
-      }),
-    })),
-  }, {
-    // The screen-reader description carries the verification state too. A
-    // caveat that only exists as a visual panel beside the chart is a caveat
-    // half the audience does not get.
-    aria: 'Grouped bar chart of workforce census metrics by census year. '
-      + `${data.census_verified_count ?? 0} of `
-      + `${data.census_total ?? rows.length} figures have been checked against `
-      + 'the page they were parsed from; the rest are unverified. Figures are '
-      + 'not comparable between census years.',
-  }));
-
-  container.append(tableCard('Census metrics', [
-    { title: 'Year', field: 'census_year' },
-    { title: 'Metric', field: 'metric' },
-    { title: 'Segment', field: 'workforce_segment' },
-    { title: 'Value', field: 'value' },
-    { title: 'Unit', field: 'unit' },
-    { title: 'Verified', field: 'verified',
-      formatter: (c) => (c.getValue() ? 'yes' : 'AWAITING VERIFICATION') },
-    { title: 'Source page', field: 'source_page' },
-  ], rows, {
-    height: 320,
-    rowClass: (row) => (row.verified ? null : 'unverified-row'),
-  }));
-}

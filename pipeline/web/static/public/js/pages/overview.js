@@ -78,6 +78,42 @@ export async function render(main) {
   return () => disposeCharts(charts);
 }
 
+/** A `<strong>` that counts up to `value` on first paint rather than
+ *  appearing pre-filled. Purely a presentation flourish on the strip's own
+ *  numbers -- it reads the same value `num()` would have rendered outright,
+ *  it just gets there over a few frames. A missing value renders as the
+ *  usual em dash, unanimated, because there is nothing to count up to. */
+function countUpMetric(value) {
+  const n = Number(value);
+  if (value === null || value === undefined || Number.isNaN(n)) {
+    return el('strong', { text: '—' });
+  }
+  return el('strong', { text: '0', 'data-count-target': String(n) });
+}
+
+/** Runs every `[data-count-target]` inside `root` from 0 to its target over
+ *  ~900ms with an ease-out curve. Skipped for reduced motion -- the number is
+ *  set to its final value immediately rather than left at 0. */
+function animateCounts(root) {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  for (const node of root.querySelectorAll('[data-count-target]')) {
+    const target = Number(node.dataset.countTarget);
+    if (reduceMotion || !Number.isFinite(target)) {
+      node.textContent = num(target);
+      continue;
+    }
+    const duration = 900;
+    const start = performance.now();
+    const step = (now) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      node.textContent = num(Math.round(target * eased));
+      if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+}
+
 function renderBriefingStrip(container, summary) {
   const sources = summary.pipeline?.sources || [];
   const retrieved = sources.map((s) => s.last_retrieved).filter(Boolean).sort().pop() || null;
@@ -89,10 +125,12 @@ function renderBriefingStrip(container, summary) {
         el('h2', { text: 'The campaign view, at a glance' })),
       timingBadge({ kind: retrieved ? 'current' : 'snapshot', date: retrieved ? retrieved.slice(0, 10) : null })),
     el('div', { class: 'evidence-strip-grid' },
-      el('div', {}, el('strong', { text: num(summary.funnel?.evidence_rows) }), el('span', { text: ' verified evidence rows' })),
-      el('div', {}, el('strong', { text: num(summary.contracts?.total_notices) }), el('span', { text: ' procurement notices indexed' })),
-      el('div', {}, el('strong', { text: num(summary.providers?.total) }), el('span', { text: ' providers tracked' })),
-      el('div', {}, el('strong', { text: num(signalCount) }), el('span', { text: ' active evidence signals' }))),
+      el('div', {}, countUpMetric(summary.funnel?.evidence_rows), el('span', { text: ' verified evidence rows' })),
+      el('div', {}, countUpMetric(summary.contracts?.total_notices), el('span', { text: ' procurement notices indexed' })),
+      el('div', {}, countUpMetric(summary.providers?.total), el('span', { text: ' providers tracked' })),
+      // Same "matched to a known provider" measure as the contracts page, in
+      // place of a count of how many layers happened to be non-zero.
+      el('div', {}, countUpMetric(summary.contracts?.matched_to_provider), el('span', { text: ' matched to a known provider' }))),
     el('p', { class: 'small muted', text: retrieved
       ? `Scope: England-wide public evidence. Latest source retrieval: ${retrieved.slice(0, 10)}.`
       : 'Scope: England-wide public evidence. Retrieval timing is not available in this extract.' }),
@@ -104,6 +142,7 @@ function renderBriefingStrip(container, summary) {
       sources: sources.map((s) => SOURCE_LABELS[s.source_system] || s.source_system).filter(Boolean),
       retrievedAt: retrieved ? retrieved.slice(0, 10) : null,
     })));
+  animateCounts(container);
 }
 
 function renderCards(container, summary) {
@@ -214,6 +253,26 @@ function renderCards(container, summary) {
       band('Sector context', 'Published workforce context, kept separate from the coverage counts above.', sectorContext))));
 }
 
+// Same lens classification app.js stamps onto each route's page-top cue
+// (`lensByRoute` in app.js), repeated here rather than imported: it is
+// presentation metadata about where a route sits in the campaign's argument,
+// not evidence, and the card's accent colour is the only place on this page
+// that reads it. Set as an inline custom property rather than a `lens-*`
+// class -- that class name is already `.lens-accountability` etc. on the
+// hero-kicker badge (components.js's lensBadge()), styled bare rather than
+// scoped to the badge, and reusing it here would pull that styling onto
+// two of these five cards.
+const EXPLORE_LENS = {
+  '#/pay': ['--accent-green', 'Workforce'],
+  '#/contracts': ['--accent-amber', 'Public money'],
+  '#/geography': ['--accent-teal', 'Service access'],
+  '#/providers': ['--accent-teal', 'Service access'],
+  '#/treatment': ['--accent-teal', 'Service access'],
+  '#/pfd': ['--accent-red', 'Safety & legal'],
+  '#/claims': ['--accent-purple', 'Accountability'],
+  '#/documents': ['--accent-purple', 'Accountability'],
+};
+
 function renderExplore(container) {
   const routes = [
     ['#/pay', 'Pay & benchmarks', 'Follow the workforce story from published pay to labour-market context.'],
@@ -230,10 +289,12 @@ function renderExplore(container) {
     const href = route[0];
     const title = route[1];
     const description = route[2];
-    routeCards.push(el('a', { class: 'explore-card', href },
+    const [lensVar, lensLabel] = EXPLORE_LENS[href] || ['--accent-teal', 'Evidence'];
+    routeCards.push(el('a', { class: 'explore-card', style: `--lens: var(${lensVar})`, href },
+      el('span', { class: 'explore-card-lens', text: lensLabel }),
       el('span', { class: 'explore-card-title', text: title }),
       el('span', { class: 'explore-card-description', text: description }),
-      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: 'Open route' })));
+      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: '→' })));
   }
   replace(container, section(
     'Explore the evidence',
@@ -369,49 +430,55 @@ async function renderTopContracts(container, charts) {
   }
 
   const concentration = data.value_concentration || {};
-  const largest = (concentration.largest || []).slice(0, 10).reverse();
-  const tableRows = (concentration.largest || []).slice(0, 10);
+  const matchedLargest = data.largest_matched_to_provider || [];
+  const largest = matchedLargest.slice(0, 5).reverse();
+  const tableRows = matchedLargest.slice(0, 5);
 
   const holder = el('div', {});
   const valueCaveat = data.caveats?.value_sum
     || 'Published notice values can include framework ceilings and are not a measure of sector spend.';
+  const providerCaveat = data.caveats?.provider_match;
 
   replace(container, section(
     'The largest notices in the corpus',
-    'Ten highest published values. Read the caveat before treating any of '
-    + 'these as sector spend.',
+    'Five highest published values, limited to notices matched to a tracked '
+    + 'provider by exact supplier name. Read the caveats before treating '
+    + 'any of these as sector spend.',
     pinnedCaveat(valueCaveat, 'Important limitation'),
+    providerCaveat ? pinnedCaveat(providerCaveat, 'Matching is a floor') : null,
     findingBlock({
-      finding: 'The largest published notices are useful for locating procurement activity, but their headline values should not be read as sector spend.',
-      value: `Median notice ${gbp(concentration.median_value_gbp, { compact: false })}`,
+      finding: 'The largest notices matched to a tracked provider are useful for locating procurement activity, but their headline values should not be read as sector spend.',
+      value: `Median notice (all notices) ${gbp(concentration.median_value_gbp, { compact: false })}`,
       evidenceStatus: 'Published', timing: { kind: 'current', date: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10) },
       caveat: valueCaveat, sources: ['Contracts Finder'],
       retrievedAt: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10),
     }),
     el('div', { class: 'panel' },
       el('p', { class: 'small muted' },
-        `Median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
+        `Corpus-wide: median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
         `mean ${gbp(concentration.mean_value_gbp)} · `,
         `${num(concentration.notices_over_1bn)} notices above £1bn carry `,
         `${pct(concentration.share_over_1bn)} of the total`),
       holder,
       el('details', { class: 'chart-data' },
         el('summary', { text: `View data (${num(tableRows.length)} notices)` }),
-        tableCard('Largest published notices', [
+        tableCard('Largest published notices matched to a provider', [
+          { title: 'Provider', field: 'canonical_name' },
           { title: 'Buyer', field: 'buyer_name' },
           { title: 'Notice', field: 'title' },
           { title: 'Published value', field: 'value_display', width: 150 },
           { title: 'Notice ID', field: 'notice_id', width: 150 },
         ], tableRows.map((notice) => ({
+          canonical_name: notice.canonical_name || '—',
           buyer_name: notice.buyer_name || 'Not published',
           title: notice.title || 'Untitled notice',
           value_display: gbp(notice.value_core, { compact: false }),
           notice_id: notice.notice_id || '—',
-        })), { height: 360, total: tableRows.length })),
+        })), { height: 300, total: tableRows.length })),
       provenance({
         sources: (data.notices || []).map((n) => n.source_url),
         retrievedAt: (data.notices || []).map((n) => n.retrieved_at).sort().pop(),
-        tables: ['contracts'],
+        tables: ['contracts', 'supplier_aliases'],
         module: 'm01_procurement',
       }))));
 
@@ -428,14 +495,15 @@ async function renderTopContracts(container, charts) {
     },
     yAxis: {
       type: 'category',
-      data: largest.map((n) => truncate(n.buyer_name || n.notice_id, 32)),
+      data: largest.map((n) => truncate(n.canonical_name || n.buyer_name || n.notice_id, 32)),
     },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (params) => {
         const row = largest[params[0].dataIndex];
         return [
-          `<strong>${escapeHtml(row.buyer_name || '')}</strong>`,
+          `<strong>${escapeHtml(row.canonical_name || '')}</strong>`,
+          escapeHtml(row.buyer_name || ''),
           escapeHtml(truncate(row.title || '', 80)),
           `<strong>${gbp(row.value_core, { compact: false })}</strong>`,
         ].join('<br>');
@@ -452,10 +520,9 @@ async function renderTopContracts(container, charts) {
     }],
   }, {
     height: 'tall',
-    aria: `Bar chart of the ten highest-value procurement notices. `
-      + `${num(concentration.notices_over_1bn)} notices above one billion pounds `
-      + `account for ${pct(concentration.share_over_1bn)} of the total value, `
-      + `and are cross-government framework ceilings rather than sector spend.`,
+    aria: `Bar chart of the five highest-value procurement notices matched to `
+      + `a tracked provider by exact supplier name. Matching is a floor, so `
+      + `this is not the five highest-value notices in the whole corpus.`,
   }));
 }
 

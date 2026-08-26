@@ -391,7 +391,8 @@ def _evidence_funnel(conn: sqlite3.Connection) -> dict:
 
 def summary(conn: sqlite3.Connection) -> dict:
     """Landing-page figures. Every one carries what it is and what it is not."""
-    _public(["providers", "authorities", "contracts", "workforce_census_metrics",
+    _public(["providers", "authorities", "contracts", "supplier_aliases",
+              "workforce_census_metrics",
               "fingertips_indicators", "schema_migrations",
               "cdp_document_candidates", "committee_paper_candidates",
               "foi_request_candidates", "cdp_documents", "committee_papers",
@@ -412,6 +413,14 @@ def summary(conn: sqlite3.Connection) -> dict:
         "           AS direct_awards, "
         "       SUM(CASE WHEN psr_basis IS NOT NULL THEN 1 ELSE 0 END) AS psr_notices "
         "FROM contracts")
+    # Same "matched to a known provider" measure as the contracts page --
+    # exact supplier-name match only, so this is a floor. Shown on the
+    # overview strip instead of the old "active evidence signals" count,
+    # which counted how many layers were non-zero rather than measuring
+    # anything about the evidence itself.
+    matched_to_provider = _one(
+        conn, "SELECT COUNT(*) AS matched FROM contracts WHERE supplier_name_raw IN "
+               "(SELECT alias_raw FROM supplier_aliases)").get("matched", 0)
 
     latest_census = _one(
         conn, "SELECT MAX(census_year) AS y FROM workforce_census_metrics").get("y")
@@ -451,6 +460,7 @@ def summary(conn: sqlite3.Connection) -> dict:
             "total_value_gbp": contracts.get("total_value_gbp", 0),
             "direct_awards": contracts.get("direct_awards", 0),
             "psr_notices": contracts.get("psr_notices", 0),
+            "matched_to_provider": matched_to_provider,
             # Sent so the portal can refuse to headline a total that a few
             # framework ceilings account for. Without it the hero card would
             # read "£15tn of contracts", which is not true of anything.
@@ -520,6 +530,9 @@ FRESHNESS_TABLES: tuple[tuple[str, str], ...] = (
     # could not be read, just as the authority coverage matrix does for m24.
     ("Council spend files", "council_spend_files"),
     ("Skills for Care files", "skills_for_care_files"),
+    ("Rough sleeping snapshot", "rough_sleeping_snapshot"),
+    ("Statutory homelessness", "statutory_homelessness_snapshot"),
+    ("Temporary accommodation", "temporary_accommodation_snapshot"),
 )
 
 
@@ -818,9 +831,24 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
                      {**params, "limit": max(1, min(int(limit), 5000))})
     _add_notice_links(notices)
 
+    # The overview's "largest notices" list, narrowed to notices matched to a
+    # tracked provider by exact supplier-name -- otherwise the largest values
+    # in the corpus are dominated by cross-government framework notices with
+    # no provider attached at all, which is not a useful "biggest deal we
+    # found" list for the campaign.
+    largest_matched_to_provider = _rows(conn, f"""
+        SELECT c.notice_id, c.buyer_name, c.title, c.value_core, c.source_url,
+               sa.canonical_name
+        FROM contracts c
+        JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
+        {clause}
+        {'AND' if clause else 'WHERE'} c.value_core IS NOT NULL
+        ORDER BY c.value_core DESC LIMIT 5""", params)
+
     return {
         **totals,
         "value_concentration": _value_concentration(conn, clause, params),
+        "largest_matched_to_provider": largest_matched_to_provider,
         "matched_to_provider": _one(conn, f"""
             SELECT COUNT(*) AS matched FROM contracts c{clause}
             {'AND' if clause else 'WHERE'} c.supplier_name_raw IN

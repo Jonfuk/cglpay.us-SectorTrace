@@ -261,18 +261,45 @@ main:focus { outline: none; }
 
 .explore-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .explore-card {
-  min-height: 132px; display: flex; flex-direction: column; gap: var(--space-2);
+  --lens: var(--accent-teal);
+  min-height: 148px; display: flex; flex-direction: column; gap: var(--space-2);
   position: relative; padding: var(--space-5); border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg); background: var(--bg-surface); color: var(--text-primary);
-  text-decoration: none; transition: border-color .15s, transform .15s, background .15s;
+  border-top: 3px solid var(--lens);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(165deg, var(--bg-surface), var(--bg-elevated) 160%);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: border-color .15s, transform .15s, background .15s, box-shadow .15s;
 }
+/* Each card's `--lens` custom property is set inline per card (overview.js),
+   tracing the same evidence "lens" the route carries elsewhere on the portal
+   (the campaign-lens cue under the page h1) — the colour is telling the
+   reader something true about the card, not just varying for its own sake. */
 .explore-card:hover, .explore-card:focus-visible {
-  border-color: var(--accent-teal); background: var(--bg-elevated); color: var(--text-primary);
-  transform: translateY(-2px);
+  border-color: var(--lens); background: var(--bg-elevated); color: var(--text-primary);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 36px -16px var(--lens);
 }
+.explore-card-lens {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 700 11px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--lens);
+}
+.explore-card-lens::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--lens); }
 .explore-card-title { font-size: 17px; font-weight: 700; }
 .explore-card-description { color: var(--text-secondary); font-size: 13.5px; max-width: 34ch; }
-.explore-card-arrow { margin-top: auto; color: var(--accent-teal); font-size: 20px; line-height: 1; }
+.explore-card-arrow {
+  margin-top: auto; align-self: flex-end;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--border-accent); color: var(--lens);
+  font-size: 15px; line-height: 1;
+  transition: transform .15s, border-color .15s, background .15s;
+}
+.explore-card:hover .explore-card-arrow, .explore-card:focus-visible .explore-card-arrow {
+  transform: translateX(3px); border-color: var(--lens);
+  background: color-mix(in srgb, var(--lens) 18%, transparent);
+}
 
 .status-key { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin: calc(var(--space-2) * -1) 0 var(--space-4); }
 .evidence-status-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: stretch; }
