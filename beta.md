@@ -150,30 +150,31 @@ DONE
 
 ### IN_PROGRESS
 
-*(none — BETA-025 completed 2026-08-26)*
+*(none — BETA-026 completed 2026-08-26)*
 
 ### NEXT
 
-- [NEXT] BETA-026 | Quoted-phrase awareness in document-search snippets and highlights
-  - priority: P4
-  - impact: 1
-  - effort: 1
-  - confidence: 5
-  - risk: 1
-  - area: ui/search
-  - depends_on: BETA-025
-  - objective: A search like `"rough sleeping"` highlights the phrase as a
-    unit, not the two words independently wherever they occur apart.
-  - rationale: `_search_terms` deliberately ignores query syntax; correct for
-    locating a passage, but highlighting `rough` and `sleeping` separately
-    misrepresents what matched once phrases are supported by the index query
-    itself.
-  - suggested_first_action: Detect quoted spans in
-    `public_queries._search_terms`, emit them as phrase tokens, and have both
-    the Python snippet window and documents.js's highlighter prefer whole-
-    phrase matches before falling back to individual words.
+*(empty — see Next Recommended Actions: the §52 strategic reassessment is
+owed before further narrow polish items are queued)*
 
 ### DONE
+
+- [DONE] BETA-026 | Quoted phrases anchor snippets and highlight as a unit
+  - completed: 2026-08-26T14:50:00Z
+  - commits: `538095f` (`beta`)
+  - result: `_search_terms` keeps quoted spans whole and lists them first,
+    and `_match_snippet` anchors the window on a phrase occurrence before
+    considering bare words — which exposed a real bug, not just polish: the
+    original `min()` over every term's position let an early single word
+    ("sleeping" at char 770) drag the window away from the passage that
+    matched as a phrase ("sleeping duty" at char 971), leaving the phrase
+    outside the snippet entirely. documents.js's highlighter mirrors the
+    same tokenisation (phrases-first alternation), so where the phrase
+    occurs contiguously it is marked as one unit. Unmatched lone quotes
+    degrade to word behaviour identically on both sides.
+  - validation: tests/test_web_documents.py now 13 (phrase anchoring pinned
+    with a distractor word placed beyond one snippet radius); 93 combined
+    passes across document-search + portal suites; ruff clean.
 
 - [DONE] BETA-025 | "Show more" pagination for document search
   - completed: 2026-08-26T14:20:00Z
@@ -1260,7 +1261,7 @@ DONE
 | P2 | Document search: match-centred snippets, highlighting, result counts | 4 | 2 | 5 | DONE (BETA-023) |
 | P3 | Per-route document titles + SPA focus management | 3 | 1 | 5 | DONE (BETA-024) |
 | P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | DONE (BETA-025) |
-| P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | NEXT (BETA-026) |
+| P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | DONE (BETA-026) |
 
 This table is not kept current for every cycle's smaller items — see the
 note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
@@ -1429,6 +1430,10 @@ projects while researching BETA-010/BETA-009. Findings:
 - BETA-025: document search results longer than one window are reachable —
   an accumulating "Show N more" button under the list, with the count line
   kept truthful as it grows and failures confined to the button's own slot.
+- BETA-026: quoted phrases in a search anchor the result snippet and are
+  highlighted as one unit. Fixing this properly exposed a real bug: an
+  early lone word could drag the snippet window away from the passage that
+  matched as a phrase, leaving the phrase outside what the reader saw.
 
 ## Performance Improvements
 
@@ -1661,6 +1666,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `538095f` — BETA-026: quoted phrases anchor snippets and highlight as a
+  unit (`beta`).
 - `6db979a` — BETA-025: show-more pagination for document search via offset
   windows (`beta`).
 - `f2115d7` — BETA-024: per-route titles and focus handoff on portal
@@ -1710,26 +1717,29 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Superseded revision — BETA-025 landed since the previous version; the
-front-end focus continues per the project owner's standing request to
-"focus on the front end web ui." Five questions, answerable without
-conversational history, as of 2026-08-26T14:30Z.)*
+*(Superseded revision — BETA-026 landed since the previous version. Four
+items completed this session, all front-end (BETA-023/024/025/026). Five
+questions, answerable without conversational history, as of
+2026-08-26T15:00Z.)*
 
-**What is currently being worked on?** Nothing — BETA-025 just completed.
-**BETA-026** (quoted-phrase awareness in snippets/highlights) is queued
-NEXT; three items have now completed this session (BETA-023/024/025).
+**What is currently being worked on?** Nothing — BETA-026 just completed
+and the NEXT queue is deliberately empty: **the §52 strategic reassessment
+is the next piece of work**, by its own 3–6-items rule (four narrow items
+have landed since the last one; none has ever been run).
 
-**What was the last successful change?** BETA-025 (`6db979a`): offset-
-windowed pagination for document search through both backends, with an
-accumulating "Show N more" control whose failures never disturb results
-already on screen. Validated by 12 document-search tests, 92 combined
-passes across the portal suites, ruff, and a live read-only PG check.
+**What was the last successful change?** BETA-026 (`538095f`): quoted
+phrases now anchor document-search snippets and highlight as a unit.
+Finding it surfaced a real bug in BETA-023's snippet windowing — an early
+lone word could displace the window from the passage that matched as a
+phrase — fixed and pinned with a distractor test.
 
-**What should happen next?** BETA-026 is small and self-contained. More
-importantly: **the §52 strategic reassessment is now overdue by its own
-rule** (3–6 completed items since the last one — none has ever been done,
-and this session alone completed three). The next substantial session
-should run it before picking further narrow UI polish.
+**What should happen next?** Run the §52 sweep across neglected areas
+(admin UI has had nothing this session; performance section empty for two
+cycles), then repopulate NEXT from its findings. If continuing front-end
+work regardless: eyeball-verify BETA-024's focus/title handoff and
+BETA-025's show-more flow in a real browser at the next live opportunity,
+and consider whether the operator UI (/admin) deserves the same polish
+pass the portal has had.
 
 **What is blocked and why?**
 1. BETA-011 (AI-authored evidence promotion) — waiting on the project
@@ -1740,9 +1750,8 @@ should run it before picking further narrow UI polish.
    scheduling reasons; do not restart without new scheduling information.
 
 **What are the highest-value upcoming items?** The §52 sweep itself;
-BETA-026 as a filler; eyeball-verifying BETA-024's focus/title handoff in a
-real browser at the next live opportunity. A project-owner decision on
-BETA-011's candidate type would unblock the queue's most sensitive item.
+then whatever it surfaces. A project-owner decision on BETA-011's
+candidate type would unblock the queue's most sensitive item.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
