@@ -18,7 +18,7 @@
 import { el, replace, fetchJSON, num, gbp } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, symbolFor, escapeHtml,
-          shareButton, findingBlock } from '/js/components.js';
+          shareButton, findingBlock, tableCard } from '/js/components.js';
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
@@ -308,6 +308,7 @@ function appendToUrl(param, value) {
  * wherever else it is drawn. */
 function renderYearsChart(container, title, description, series, charts, opts) {
   const holder = el('div', {});
+  const tableHolder = el('div', {});
   const rows = series.rows || [];
   const entities = [...new Set(rows.map((r) => r[opts.entity]))];
   const years = [...new Set(rows.map((r) => r.year))].sort();
@@ -319,12 +320,16 @@ function renderYearsChart(container, title, description, series, charts, opts) {
         .map((text) => pinnedCaveat(text, 'Read this with the chart')),
       indicativeNote(opts, rows),
       holder,
+      tableHolder,
       provenanceMeta(opts, rows) || el('span', {}))));
 
   if (!entities.length || !years.length) {
     replace(holder, noData(`${title.toLowerCase()} series`, null));
     return;
   }
+
+  replace(tableHolder, tableCard('Values behind the chart',
+    yearsTableColumns(opts, rows), rows, { height: 280 }));
 
   const byEntityYear = new Map(rows.map((r) =>
     [`${r[opts.entity]}\u0000${r.year}`, r]));
@@ -380,6 +385,30 @@ function indicativeNote(opts, rows) {
     `Allocations for ${year} are published as indicative and are revised `
     + 'later. Do not compare an indicative year with a confirmed one.',
     'Indicative allocation');
+}
+
+/* The same rows the chart draws, as a table — every chart-bearing page but
+ * this one already pairs a chart with its rows (BETA-018's frontend audit
+ * flagged the gap). Columns are derived from `opts`/the rows themselves
+ * rather than hard-coded per series, since `renderYearsChart` is shared by
+ * five differently-shaped series (grant, budget, contracts, provider
+ * contracts). */
+function yearsTableColumns(opts, rows) {
+  const columns = [
+    { title: opts.entity === 'provider_name' ? 'Provider' : 'Authority', field: opts.entity },
+    { title: 'Year', field: 'year', width: 90 },
+    {
+      title: opts.value === 'value_gbp' ? 'Value' : 'Amount', field: opts.value,
+      width: 130, formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+  ];
+  if (rows.some((r) => r.count !== undefined)) {
+    columns.push({ title: 'Notices', field: 'count', width: 90 });
+  }
+  if (rows.some((r) => r.allocation_status)) {
+    columns.push({ title: 'Status', field: 'allocation_status', width: 130 });
+  }
+  return columns;
 }
 
 function provenanceMeta(opts, rows) {
@@ -497,6 +526,19 @@ function renderTreatment(container, data, charts) {
         + `${authorities.join(', ')} with the confidence intervals the source `
         + 'published, compared with the England figure.',
     }));
+
+    const tableRows = [
+      ...indicatorRows,
+      ...englandRows.map((r) => ({ ...r, authority_name: 'England' })),
+    ];
+    holder.append(tableCard(`${indicator.indicator_name} — values behind the chart`, [
+      { title: 'Authority', field: 'authority_name' },
+      { title: 'Period', field: 'time_period', width: 110 },
+      { title: 'Value', field: 'value', width: 100 },
+      { title: 'Lower 95%', field: 'lower_ci_95', width: 110 },
+      { title: 'Upper 95%', field: 'upper_ci_95', width: 110 },
+      { title: 'Note', field: 'value_note' },
+    ], tableRows, { height: 260 }));
   }
 }
 
@@ -510,6 +552,7 @@ function ciRgb(hex) {
  * figures. */
 function renderCharity(container, data, charts) {
   const holder = el('div', {});
+  const tableHolder = el('div', {});
   const rows = data.rows || [];
   const providers = [...new Set(rows.map((r) => r.provider_key))];
   const years = [...new Set(rows.map((r) => r.financial_year_end))].sort();
@@ -519,6 +562,7 @@ function renderCharity(container, data, charts) {
     el('div', { class: 'panel' },
       pinnedCaveat(data.caveat, 'Read this with the chart'),
       holder,
+      tableHolder,
       provenanceFromRows(rows, {
         module: 'm03_charity_finance', tables: ['charity_financials'],
       }) || el('span', {}))));
@@ -527,6 +571,19 @@ function renderCharity(container, data, charts) {
     replace(holder, noData('charity accounts', './start.sh run m03_charity_finance'));
     return;
   }
+
+  replace(tableHolder, tableCard('Values behind the chart', [
+    { title: 'Provider', field: 'canonical_name' },
+    { title: 'Year end', field: 'financial_year_end', width: 110 },
+    {
+      title: 'Income', field: 'total_income', width: 130,
+      formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+    {
+      title: 'Expenditure', field: 'total_expenditure', width: 130,
+      formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+  ], rows, { height: 260 }));
 
   const byKey = new Map(rows.map((r) =>
     [`${r.provider_key}\u0000${r.financial_year_end}`, r]));
