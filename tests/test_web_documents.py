@@ -192,3 +192,60 @@ def test_document_search_short_text_is_returned_whole(conn, settings):
 
     assert row["snippet"] == "Naloxone provision expanded."
     assert "…" not in row["snippet"]
+
+
+def test_document_search_offset_pages_through_the_ranked_list(conn, settings):
+    """Offset windows tile the ranked list without overlap, while `total`
+    stays the size of the whole match set — the contract the portal's
+    "show more" button is built on."""
+    for i in range(5):
+        _seed_document(
+            conn, settings, evidence_id=f"ev-page-{i}",
+            source_system="committee_paper_promotion",
+            document_type="COMMITTEE_PAPER",
+            text=f"Budget pressures continue across service area {i}.")
+
+    pages = [
+        public_queries.document_search(conn, query="budget", limit=2, offset=o)
+        for o in (0, 2, 4)
+    ]
+
+    ids = [[row["document_id"] for row in page["results"]] for page in pages]
+    flattened = [doc_id for page in ids for doc_id in page]
+    assert len(flattened) == len(set(flattened)), "windows overlapped"
+
+    # The three windows tile exactly the same match set an unpaged query sees.
+    reference = public_queries.document_search(conn, query="budget", limit=50)
+    assert sorted(flattened) == sorted(
+        row["document_id"] for row in reference["results"])
+
+    for page in pages:
+        assert page["total"] == 5
+
+
+def test_document_search_offset_past_the_end_is_empty_not_an_error(conn, settings):
+    _seed_document(
+        conn, settings, evidence_id="ev-tail",
+        source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text="Budget pressures continue.")
+
+    result = public_queries.document_search(conn, query="budget", limit=2, offset=5)
+
+    assert result["results"] == []
+    assert result["total"] == 1
+
+
+def test_document_search_negative_offset_clamps_to_zero(conn, settings):
+    """PostgreSQL raises on a negative OFFSET and SQLite walks off the front
+    of its ranked list silently; neither is a behaviour worth preserving."""
+    _seed_document(
+        conn, settings, evidence_id="ev-clamp",
+        source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text="Budget pressures continue.")
+
+    clamped = public_queries.document_search(conn, query="budget", limit=2, offset=-9)
+    plain = public_queries.document_search(conn, query="budget", limit=2)
+
+    assert clamped["offset"] == 0
+    assert ([r["document_id"] for r in clamped["results"]]
+            == [r["document_id"] for r in plain["results"]])

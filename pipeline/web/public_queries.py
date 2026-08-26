@@ -3006,13 +3006,17 @@ def _match_snippet(text: str | None, terms: list[str]) -> str:
     return ("…" if start > 0 else "") + value[start:end].strip() + ("…" if end < len(value) else "")
 
 
-def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) -> dict:
+def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25,
+                    offset: int = 0) -> dict:
     _public(["document_records", "document_elements", "document_versions",
              "evidence_records"])
     query = (query or "").strip()
     if not query:
         raise QueryError("document_search needs a `q` parameter.")
     limit = max(1, min(limit, 50))
+    # A negative offset would make PostgreSQL raise and SQLite silently walk
+    # backwards off the front of the ranked list; clamping keeps one behaviour.
+    offset = max(0, int(offset))
     placeholders = ", ".join("?" for _ in DOCUMENT_SEARCH_SOURCES)
 
     if db.backend_of(conn) == "sqlite":
@@ -3024,7 +3028,7 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "JOIN document_records d ON d.document_id = s.document_id "
             "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
             f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders}) "
-            "ORDER BY rank LIMIT ?"
+            "ORDER BY rank LIMIT ? OFFSET ?"
         )
         count_sql = (
             "SELECT COUNT(*) "
@@ -3044,7 +3048,7 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
             "WHERE dv.is_active = 1 "
             "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
-            f"AND e.source_system IN ({placeholders}) LIMIT ?"
+            f"AND e.source_system IN ({placeholders}) LIMIT ? OFFSET ?"
         )
         count_sql = (
             "SELECT COUNT(*) "
@@ -3056,7 +3060,7 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
             f"AND e.source_system IN ({placeholders})"
         )
-    params = (query, *DOCUMENT_SEARCH_SOURCES, limit)
+    params = (query, *DOCUMENT_SEARCH_SOURCES, limit, offset)
     count_params = (query, *DOCUMENT_SEARCH_SOURCES)
 
     try:
@@ -3085,6 +3089,7 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25) ->
             "published_at": r["published_at"],
         } for r in rows],
         "total": total,
+        "offset": offset,
         "query": query,
         "caveat": DOCUMENT_SEARCH_CAVEAT,
     }

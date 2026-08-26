@@ -1222,7 +1222,8 @@ class Handler(BaseHTTPRequestHandler):
                 provider_key=_str(params, "provider_key") or None)
         if route == "document_search":
             return public_queries.document_search(
-                conn, query=_str(params, "q") or "", limit=_int(params, "limit", 25))
+                conn, query=_str(params, "q") or "",
+                limit=_int(params, "limit", 25), offset=_int(params, "offset", 0))
 
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:

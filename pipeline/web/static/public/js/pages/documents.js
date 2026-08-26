@@ -20,8 +20,17 @@ import { el, replace, fetchJSON, isoDate, sourceLink, num } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, truncate,
          shareButton } from '/js/components.js';
 
+/* Matches the server's own ceiling for one response; larger result sets are
+ * reached through "show more", which asks for the next window by offset. */
+const PAGE_SIZE = 50;
+
 export async function render(main, { params = null } = {}) {
   const initialQuery = (params ? params.get('q') : '') || '';
+  /* Accumulates across "show more" clicks for this visit to the route. It is
+   * deliberately not URL state: the shareable address is `#/documents?q=…`,
+   * and how far a reader has paged through their results is nobody else's
+   * business — unlike compare.js's selection, which *is* the whole finding. */
+  const session = { query: initialQuery, results: [], total: NaN };
 
   const input = el('input', {
     type: 'search', name: 'q', value: initialQuery,
@@ -68,48 +77,90 @@ export async function render(main, { params = null } = {}) {
     return () => {};
   }
 
-  await runSearch(resultsHolder, initialQuery);
+  await runSearch(resultsHolder, session);
   return () => {};
 }
 
-async function runSearch(holder, query) {
+async function runSearch(holder, session) {
   replace(holder, el('div', { class: 'section' },
     el('div', { class: 'panel' }, el('div', { class: 'shimmer' }))));
 
   let data;
   try {
-    data = await fetchJSON('document_search', { q: query, limit: 50 });
+    data = await fetchJSON('document_search',
+      { q: session.query, limit: PAGE_SIZE, offset: 0 });
   } catch (error) {
     replace(holder, el('div', { class: 'section' },
-      errorCard(error.message, () => runSearch(holder, query))));
+      errorCard(error.message, () => runSearch(holder, session))));
     return;
   }
 
-  const results = data.results || [];
-  const total = Number(data.total);
-  const truncated = Number.isFinite(total) && total > results.length;
+  session.results = data.results || [];
+  session.total = Number(data.total);
+
+  const hasMore = () =>
+    Number.isFinite(session.total) && session.total > session.results.length;
+
+  const countLine = el('p', { class: 'small muted' });
+  const list = el('div', { class: 'doc-results' });
+  const moreSlot = el('div', {});
+
+  const refreshCount = () => {
+    // The count is said out loud for the same reason tableCard's row count
+    // is: a list that simply stops looks complete, and a reader who cites
+    // "nothing found" from page one of thousands of matches has been failed
+    // by the page, not by the warehouse.
+    const shown = session.results.length;
+    countLine.textContent = hasMore()
+      ? `Showing ${num(shown)} of ${num(session.total)} matching pages.`
+      : `${num(shown)} matching page${shown === 1 ? '' : 's'}.`;
+  };
+
+  const refreshMore = () => {
+    moreSlot.replaceChildren();
+    if (!hasMore()) return;
+    const remaining = Math.min(PAGE_SIZE, session.total - session.results.length);
+    moreSlot.append(el('button', {
+      class: 'btn ghost', type: 'button',
+      onclick: () => loadMore(),
+    }, `Show ${num(remaining)} more`));
+  };
+
+  const loadMore = async () => {
+    // The slot is replaced wholesale while the request runs so no second
+    // click can queue a duplicate window.
+    moreSlot.replaceChildren(el('span', { class: 'small muted', text: 'Loading…' }));
+    let page;
+    try {
+      page = await fetchJSON('document_search',
+        { q: session.query, limit: PAGE_SIZE, offset: session.results.length });
+    } catch (error) {
+      // The pages already shown stay on screen; the failure and its retry
+      // belong to the slot the button came from.
+      moreSlot.replaceChildren(
+        errorCard(error.message, () => refreshMore()));
+      return;
+    }
+    const rows = page.results || [];
+    session.results = session.results.concat(rows);
+    for (const result of rows) list.append(renderResult(result, session.query));
+    refreshCount();
+    refreshMore();
+  };
+
+  for (const result of session.results) {
+    list.append(renderResult(result, session.query));
+  }
+  refreshCount();
+  refreshMore();
+
   replace(holder, section(
-    `Results for "${query}"`,
+    `Results for "${session.query}"`,
     null,
     pinnedCaveat(data.caveat, 'Read before citing a result'),
-    results.length
-      ? [
-          // The count is said out loud for the same reason tableCard's row
-          // count is: a list that simply stops looks complete, and a reader
-          // who cites "nothing found" from page one of three pages of
-          // matches has been failed by the page, not by the warehouse.
-          el('p', {
-            class: 'small muted',
-            text: truncated
-              ? `Showing ${num(results.length)} of ${num(total)} matching `
-                + 'pages — narrow the search to reach the rest.'
-              : `${num(results.length)} matching `
-                + `page${results.length === 1 ? '' : 's'}.`,
-          }),
-          el('div', { class: 'doc-results' },
-            results.map((result) => renderResult(result, query))),
-        ]
-      : noData(`pages matching "${query}"`, null)));
+    session.results.length
+      ? [countLine, list, moreSlot]
+      : noData(`pages matching "${session.query}"`, null)));
 }
 
 function escapeRegExp(text) {
