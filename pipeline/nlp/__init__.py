@@ -15,6 +15,12 @@ sentence-transformers model behind the `nlp` extra), `semantic_search`
 (keyword / semantic / hybrid retrieval over chunks, RRF-fused) and `eval`
 (the retrieval-metrics harness that gates changing the embedding model).
 
-Span / assertion / relation extraction and topic clustering land in later
-tranches — see `docs/semantic-analysis.md`.
+Tranche 034B: `ontology` — the SectorTrace controlled vocabulary
+(`ontology/concepts.yml`, `relations.yml`, `patterns/*.yml`), loaded,
+validated and content-versioned into `ontology_version`. Stdlib + PyYAML
+only; 034C's classifier consumes it and is always-on.
+
+GLiNER entity spans, assertion / context detection, relation-pattern claim
+candidates and topic clustering land in later tranches — see
+`docs/semantic-analysis.md`.
 """

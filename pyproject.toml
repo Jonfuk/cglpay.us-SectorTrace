@@ -21,6 +21,13 @@ dependencies = [
     # Analysis is deliberately local and bounded; it never becomes a second
     # evidence store.  Neo4j itself remains optional in the graph extra below.
     "networkx>=3.2",
+    # The SectorTrace ontology (pipeline/nlp/ontology/, BETA-034B) is a
+    # hand-maintained controlled vocabulary: YAML because it carries comments
+    # and reads without quoting/commas, and it must load with no extra
+    # installed (034C's classifier depends on it and is always-on). Already
+    # present transitively; declared here rather than relied on by accident,
+    # the same call made for `rich` above.
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]

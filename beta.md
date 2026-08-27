@@ -290,13 +290,13 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A complete on `beta`.** The foundation (migration
-    `0065` — `nlp_runs`, `nlp_model_registry`, `document_chunks`,
-    `document_embeddings`; `pipeline/nlp/{runs,models,chunk}.py`;
-    `pipeline nlp chunk`) plus the remainder now landed:
-    `pipeline/nlp/embeddings.py` (deterministic `stub` embedder — signed
-    hashed BoW, no download, CI default — and sentence-transformers behind
-    the new `nlp` extra, lazy import, revision-SHA recorded);
+  - current_state: **034A and 034B complete on `beta`.**
+    034A — the foundation (migration `0065` — `nlp_runs`,
+    `nlp_model_registry`, `document_chunks`, `document_embeddings`;
+    `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
+    remainder: `pipeline/nlp/embeddings.py` (deterministic `stub` embedder —
+    signed hashed BoW, no download, CI default — and sentence-transformers
+    behind the new `nlp` extra, lazy import, revision-SHA recorded);
     `pipeline/nlp/semantic_search.py` (keyword = existing FTS lifted
     element→chunk; semantic = Python-side exact cosine; hybrid = RRF k=60,
     degrades to keyword-only without embeddings; `source_system`/date
@@ -304,22 +304,37 @@ DONE
     (adapter turning `SearchError` into the handler's `QueryError`→400;
     `/api/v1/*` untouched, pinned by `test_portal_isolation.py`);
     `pipeline nlp {embed,search,eval-retrieval}`; `pipeline/nlp/eval.py` +
-    `tests/fixtures/nlp/retrieval_queries.json` (JSON, not YAML — no YAML
-    dep in the base install; Recall@5/10, MRR, nDCG@5/10 over marked
-    queries). `nlp_embed_batch_size` setting. `tests/test_nlp_embeddings.py`
-    + `tests/test_nlp_search_eval.py` + the portal-isolation additions
-    green; `ruff` clean.
-  - next_action: (1) `uv sync --extra nlp` and browser-verify `/api/admin/search`
-    in all three modes with a real MiniLM model, `/api/v1/*` payloads
-    unchanged — deferred: this checkout has no browser. (2) Grow
-    `retrieval_queries.json` from the 8-query seed (empty markers) to 30–50
-    campaign queries with human-marked relevant passages, against the live
-    warehouse, and record the baseline metrics. (3) An admin-UI surface for
-    the search endpoint (currently API-only). Then **034B** (SectorTrace
-    ontology) before 034D (GLiNER), per the plan's reorder.
+    `tests/fixtures/nlp/retrieval_queries.json` (Recall@5/10, MRR,
+    nDCG@5/10 over marked queries). `nlp_embed_batch_size` setting.
+    034B — `pipeline/nlp/ontology/` — `concepts.yml` (~80 concepts:
+    substances, medications, treatments, services, roles,
+    workforce-pressure conditions, finance, commissioning, outcomes,
+    generic provider/commissioner types; stable dotted ids, plural
+    `categories`, `pressure` marker category), `relations.yml` (~30 closed
+    predicates with `subject`/`object`/`pressure`),
+    `patterns/workforce_pressure.yml` + `patterns/README.md` (regex seeds
+    for 034C/F, not run by the loader). `pipeline/nlp/ontology.py` — load +
+    validate (unique ids, category/related/predicate refs resolve, unsafe
+    aliases) + content-hashed `ontology_version` + m28-idiom whole-token
+    matcher with a shallow `-s` plural fold. `pyyaml` added as a **base
+    dependency** (not an extra): the vocabulary is hand-maintained so YAML
+    (comments, no quoting) beats JSON, and 034C's always-on classifier
+    consumes it — mirrors the `rich` call, was already present
+    transitively.
+    `tests/test_nlp_{chunk,embeddings,search_eval,ontology}.py` + the
+    portal-isolation additions green; `ruff` clean.
+  - next_action: (1) `uv sync --extra nlp` + browser-verify `/api/admin/search`
+    with a real MiniLM model, `/api/v1/*` unchanged — deferred: no browser
+    here. (2) Grow `retrieval_queries.json` from the 8-query seed to 30–50
+    marked campaign queries against the live warehouse; record the baseline.
+    (3) Grow the ontology vocabulary as 034C/F exercise it. (4) An admin-UI
+    surface for search. **Next tranche: 034C** — `pipeline/nlp/label.py`,
+    ontology-term + pattern labelling writing provisional `document_topics`
+    rows with `match_method='ontology_v1'` (never reinterpreting `keyword_v1`),
+    and `classify.py` `TOPICS` becoming a thin shim over the loader.
   - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
-    portal-isolation + migration-equivalence + cli confirmed locally; full
-    run pending); the two browser/data items above.
+    portal-isolation + migration-equivalence + cli + ontology confirmed
+    locally; full run pending); the browser/data items above.
 
 ### NEXT
 

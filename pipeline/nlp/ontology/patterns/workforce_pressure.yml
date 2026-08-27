@@ -1,0 +1,42 @@
+# Workforce-pressure cue patterns (seed).
+#
+# Conservative on purpose — each of these should read as unambiguous
+# workforce-pressure language in a committee paper or SAR, not merely
+# workforce-adjacent. 034C/034F own how they are applied; see README.md.
+
+schema_version: "1"
+
+patterns:
+  - id: recruitment.struggling_to_recruit
+    kind: concept
+    concept: workforce.recruitment_difficulty
+    regex: '\b(struggl\w+|difficult\w*|unable|hard|challeng\w*) to recruit\b'
+  - id: recruitment.posts_hard_to_fill
+    kind: concept
+    concept: workforce.vacancy
+    regex: '\b(posts?|vacanc\w+|roles?)\b[^.]{0,40}\b(hard to fill|remain unfilled|could not be filled|difficult to fill)\b'
+  - id: retention.losing_experienced_staff
+    kind: concept
+    concept: workforce.retention_difficulty
+    regex: '\b(high|significant|rising)\s+(staff\s+)?turnover\b|\blosing (experienced |skilled )?staff\b'
+  - id: caseload.unmanageable
+    kind: concept
+    concept: workforce.caseload
+    regex: '\b(high|rising|increased|unmanageable|unsafe)\s+caseloads?\b'
+  - id: agency.reliance
+    kind: concept
+    concept: workforce.agency_reliance
+    regex: '\b(reliance on|use of|increased|rising)\s+(agency|locum|bank)\s+(staff|workers|spend)\b'
+  - id: pay.below_nhs
+    kind: concept
+    concept: workforce.pay_concern
+    regex: '\b(below|less than|not match\w*|behind)\b[^.]{0,30}\b(nhs|agenda for change|afc)\b'
+
+  - id: predicate.recruitment_pressure
+    kind: predicate
+    predicate: workforce.has_recruitment_pressure
+    regex: '\brecruit(ment)?\s+(and retention\s+)?(pressure|difficult\w+|challeng\w+|crisis)\b'
+  - id: predicate.pay_concern
+    kind: predicate
+    predicate: workforce.has_pay_concern
+    regex: '\b(pay|salar\w+|wage\w*)\b[^.]{0,40}\b(disparity|gap|erosion|uncompetitive|below|parity|cannot afford)\b'

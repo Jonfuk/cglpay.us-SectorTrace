@@ -1,0 +1,419 @@
+# SectorTrace ontology — concepts (BETA-034B)
+#
+# A hand-maintained controlled vocabulary for the substance-misuse treatment
+# sector, sized to what a pay-campaign evidence base needs to reason about:
+# who provides and commissions services, what those services and treatments
+# are, the workforce that delivers them, and the funding and commissioning
+# pressures around them.
+#
+# WHAT THIS IS AND IS NOT
+#   * A concept is a stable id plus the surface forms that mean it. Downstream
+#     tables store the id, never a display string — so renaming a label or
+#     adding an alias never invalidates a stored annotation.
+#   * It is a reading aid for wording, not a claim about the sector. A chunk
+#     tagged `finance.funding_reduction` contains language about a funding
+#     cut; whether a cut happened, to whom, is a person's call through the
+#     review queue.
+#   * `categories` may be plural. `pressure` is a marker category: it flags a
+#     concept that names a difficulty or negative situation, so the 034C
+#     classifier and 034E assertion layer can treat "no recruitment
+#     difficulties" differently from "recruitment difficulties remain".
+#   * Aliases are matched whole-token after normalisation (lowercase,
+#     punctuation to spaces, corporate suffixes dropped), never as
+#     substrings. Short or ambiguous forms that would match nonsense in free
+#     text (`via`, `cgl`, a bare `key`) are left out or listed in the
+#     loader's _UNSAFE_VARIANTS.
+#   * `related` links are navigational only — no arithmetic, no inference, no
+#     transitive closure is ever computed over them.
+#
+# VERSIONING. `pipeline/nlp/ontology.py` hashes the canonical content of this
+# file (and relations.yml) into `ontology_version`, recorded on every nlp_run
+# that consumes it. Editing a concept is expected; a new version recomputes
+# downstream annotations alongside the old, never in place.
+
+schema_version: "1"
+
+categories:
+  - substance      # a drug or drug class
+  - medication     # a prescribed drug used in treatment
+  - treatment      # a clinical or psychosocial intervention
+  - service        # a configured service or service model
+  - role           # a job role in the workforce
+  - workforce      # a workforce condition or attribute
+  - finance        # funding, budgets, cost
+  - commissioning  # procurement and contracting
+  - outcome        # a treatment or population outcome measure
+  - provider       # a generic provider type
+  - commissioner   # a generic commissioner type
+  - pressure       # marker: names a difficulty / negative situation
+
+concepts:
+
+  # --- substances -------------------------------------------------------
+  - id: substance.opioids
+    label: opioids
+    categories: [substance]
+    aliases: [opioid, opiate, opiates, opioid use, opiate use]
+    related: [substance.heroin, treatment.ost]
+  - id: substance.heroin
+    label: heroin
+    categories: [substance]
+    aliases: [heroin, diamorphine, street heroin]
+    related: [substance.opioids]
+  - id: substance.alcohol
+    label: alcohol
+    categories: [substance]
+    aliases: [alcohol, alcohol use, alcohol misuse, alcohol dependence, problem drinking, harmful drinking]
+    related: [service.alcohol_care_team, treatment.community_detox]
+  - id: substance.cocaine
+    label: cocaine
+    categories: [substance]
+    aliases: [cocaine, powder cocaine, crack, crack cocaine]
+  - id: substance.cannabis
+    label: cannabis
+    categories: [substance]
+    aliases: [cannabis, marijuana, skunk]
+  - id: substance.benzodiazepines
+    label: benzodiazepines
+    categories: [substance]
+    aliases: [benzodiazepines, benzos, diazepam, street benzodiazepines]
+  - id: substance.novel_psychoactive
+    label: novel psychoactive substances
+    categories: [substance]
+    aliases: [novel psychoactive substances, new psychoactive substances, nps, spice, synthetic cannabinoids]
+  - id: substance.nitrous_oxide
+    label: nitrous oxide
+    categories: [substance]
+    aliases: [nitrous oxide, laughing gas, nos]
+  - id: substance.polydrug
+    label: polydrug use
+    categories: [substance]
+    aliases: [polydrug use, poly drug use, polysubstance use, multiple substance use]
+
+  # --- medications used in treatment ----------------------------------
+  - id: medication.methadone
+    label: methadone
+    categories: [medication, treatment]
+    aliases: [methadone, methadone maintenance]
+    related: [treatment.ost]
+  - id: medication.buprenorphine
+    label: buprenorphine
+    categories: [medication, treatment]
+    aliases: [buprenorphine, subutex, suboxone, buvidal, long acting buprenorphine, depot buprenorphine]
+    related: [treatment.ost]
+  - id: medication.naloxone
+    label: naloxone
+    categories: [medication, treatment]
+    aliases: [naloxone, take home naloxone, prenoxad, nyxoid]
+    related: [outcome.non_fatal_overdose, treatment.harm_reduction]
+  - id: medication.long_acting_injectable
+    label: long-acting injectable treatment
+    categories: [medication, treatment]
+    aliases: [long acting injectable, depot injection, extended release injection]
+
+  # --- treatments / interventions -----------------------------------
+  - id: treatment.ost
+    label: opioid substitution treatment
+    categories: [treatment, medication]
+    aliases: [opioid substitution treatment, opioid substitution therapy, opioid agonist treatment, opioid agonist therapy, substitute prescribing, ost, oat, maintenance prescribing]
+    related: [medication.methadone, medication.buprenorphine, substance.opioids]
+  - id: treatment.community_detox
+    label: community detoxification
+    categories: [treatment]
+    aliases: [community detox, community detoxification, ambulatory detox, home detox]
+  - id: treatment.inpatient_detox
+    label: inpatient detoxification
+    categories: [treatment, service]
+    aliases: [inpatient detox, inpatient detoxification, medically managed withdrawal, tier 4 detox]
+    related: [treatment.residential_rehab]
+  - id: treatment.residential_rehab
+    label: residential rehabilitation
+    categories: [treatment, service]
+    aliases: [residential rehab, residential rehabilitation, residential treatment, tier 4, rehab placement]
+  - id: treatment.psychosocial
+    label: psychosocial intervention
+    categories: [treatment]
+    aliases: [psychosocial intervention, psychosocial support, structured psychosocial, keywork sessions, recovery focused intervention]
+  - id: treatment.harm_reduction
+    label: harm reduction
+    categories: [treatment]
+    aliases: [harm reduction, needle exchange, needle and syringe programme, needle syringe programme, injecting equipment provision, nsp]
+    related: [medication.naloxone, outcome.blood_borne_virus]
+  - id: treatment.mutual_aid
+    label: mutual aid
+    categories: [treatment]
+    aliases: [mutual aid, peer support groups, twelve step, narcotics anonymous, alcoholics anonymous, smart recovery]
+    related: [role.peer_mentor, service.recovery_community]
+  - id: treatment.contingency_management
+    label: contingency management
+    categories: [treatment]
+    aliases: [contingency management]
+
+  # --- services / service models ---------------------------------
+  - id: service.adult_treatment
+    label: adult drug and alcohol treatment service
+    categories: [service]
+    aliases: [adult treatment service, adult drug and alcohol service, adult substance misuse service, community drug and alcohol service, integrated drug and alcohol service, single point of access]
+  - id: service.young_people
+    label: young people's substance misuse service
+    categories: [service]
+    aliases: [young people substance misuse service, young people drug and alcohol service, ypsms, childrens substance misuse service]
+  - id: service.criminal_justice
+    label: criminal justice substance misuse service
+    categories: [service]
+    aliases: [criminal justice service, liaison and diversion, drug rehabilitation requirement, community rehabilitation, prison substance misuse service, arrest referral]
+  - id: service.alcohol_care_team
+    label: hospital alcohol care team
+    categories: [service]
+    aliases: [alcohol care team, hospital alcohol service, alcohol assertive outreach, alcohol liaison]
+    related: [substance.alcohol]
+  - id: service.rough_sleeping
+    label: rough sleeping and homelessness substance misuse support
+    categories: [service]
+    aliases: [rough sleeping drug and alcohol, homelessness substance misuse, rough sleeping initiative treatment, housing first support]
+  - id: service.outreach
+    label: outreach and assertive engagement
+    categories: [service]
+    aliases: [assertive outreach, street outreach, detached outreach, assertive engagement]
+  - id: service.recovery_community
+    label: recovery community
+    categories: [service]
+    aliases: [recovery community, recovery hub, recovery house, lived experience recovery organisation, lero]
+    related: [role.peer_mentor, treatment.mutual_aid]
+
+  # --- workforce roles -----------------------------------------
+  - id: role.recovery_worker
+    label: recovery worker
+    categories: [role]
+    aliases: [recovery worker, recovery practitioner, recovery coordinator, drug and alcohol worker, substance misuse worker, drug worker, alcohol worker, young persons worker]
+    related: [workforce.recruitment_difficulty, workforce.caseload]
+  - id: role.keyworker
+    label: keyworker
+    categories: [role]
+    aliases: [keyworker, key worker, care coordinator, named worker]
+  - id: role.nurse
+    label: substance misuse nurse
+    categories: [role]
+    aliases: [substance misuse nurse, drug and alcohol nurse, clinical nurse specialist, registered nurse]
+  - id: role.non_medical_prescriber
+    label: non-medical prescriber
+    categories: [role]
+    aliases: [non medical prescriber, nurse prescriber, independent prescriber, pharmacist prescriber, nmp]
+    related: [treatment.ost]
+  - id: role.doctor
+    label: substance misuse doctor
+    categories: [role]
+    aliases: [substance misuse doctor, addiction psychiatrist, gp with special interest, gpwsi, clinical lead, medical officer]
+  - id: role.psychosocial_practitioner
+    label: psychosocial practitioner
+    categories: [role]
+    aliases: [psychosocial practitioner, psychological wellbeing practitioner, counsellor, therapist]
+  - id: role.peer_mentor
+    label: peer mentor
+    categories: [role]
+    aliases: [peer mentor, peer supporter, peer support worker, volunteer mentor, lived experience worker]
+    related: [service.recovery_community]
+  - id: role.team_leader
+    label: team leader
+    categories: [role]
+    aliases: [team leader, team manager, service manager, operations manager, registered manager]
+  - id: role.safeguarding_lead
+    label: safeguarding lead
+    categories: [role]
+    aliases: [safeguarding lead, safeguarding practitioner]
+
+  # --- workforce conditions (pay campaign core) ----------------
+  - id: workforce.recruitment_difficulty
+    label: recruitment difficulty
+    categories: [workforce, pressure]
+    aliases: [recruitment difficulty, recruitment difficulties, hard to recruit, difficulty recruiting, unable to recruit, recruitment challenges, recruitment and retention difficulties, struggling to recruit]
+    related: [workforce.vacancy, workforce.pay_concern]
+  - id: workforce.retention_difficulty
+    label: retention difficulty
+    categories: [workforce, pressure]
+    aliases: [retention difficulty, retention difficulties, staff retention problems, difficulty retaining staff, high staff turnover, high turnover, losing experienced staff]
+    related: [workforce.turnover, workforce.pay_concern]
+  - id: workforce.vacancy
+    label: vacancies
+    categories: [workforce, pressure]
+    aliases: [vacancy, vacancies, vacant posts, unfilled posts, unfilled vacancies, vacancy rate, staffing gaps, gaps in the establishment]
+  - id: workforce.turnover
+    label: staff turnover
+    categories: [workforce, pressure]
+    aliases: [staff turnover, turnover rate, churn, staff churn]
+  - id: workforce.caseload
+    label: high caseloads
+    categories: [workforce, pressure]
+    aliases: [high caseload, high caseloads, unmanageable caseloads, caseload pressure, caseloads have risen, increased caseloads, workload pressure]
+    related: [role.recovery_worker, outcome.unmet_need]
+  - id: workforce.agency_reliance
+    label: reliance on agency staff
+    categories: [workforce, finance, pressure]
+    aliases: [agency staff, agency workers, locum staff, bank staff, agency spend, reliance on agency, use of agency staff, temporary staff]
+    related: [workforce.vacancy, finance.cost_pressure]
+  - id: workforce.pay_concern
+    label: pay concern
+    categories: [workforce, pressure]
+    aliases: [pay concern, low pay, pay disparity, pay gap with the nhs, below agenda for change, pay erosion, uncompetitive pay, pay parity, real terms pay cut, staff cannot afford]
+    related: [finance.funding_reduction, workforce.recruitment_difficulty]
+  - id: workforce.morale
+    label: low morale
+    categories: [workforce, pressure]
+    aliases: [low morale, poor morale, staff morale, burnout, staff burnout, stress and burnout, exhaustion, compassion fatigue]
+  - id: workforce.sickness_absence
+    label: sickness absence
+    categories: [workforce, pressure]
+    aliases: [sickness absence, sickness rates, absence rates, long term sickness]
+  - id: workforce.tupe
+    label: TUPE transfer
+    categories: [workforce, commissioning]
+    aliases: [tupe, tupe transfer, transfer of undertakings, staff transfer, tuped across]
+    related: [commissioning.recommissioning, commissioning.contract_award]
+  - id: workforce.training
+    label: training and development
+    categories: [workforce]
+    aliases: [training and development, workforce development, continuing professional development, cpd, competency framework, staff training]
+  - id: workforce.lived_experience
+    label: lived experience in the workforce
+    categories: [workforce]
+    aliases: [lived experience workforce, peer workforce, lived experience recruitment]
+    related: [role.peer_mentor]
+
+  # --- finance ---------------------------------------------
+  - id: finance.public_health_grant
+    label: public health grant
+    categories: [finance]
+    aliases: [public health grant, phg, ring fenced public health grant, public health allocation]
+    related: [finance.funding_reduction, commissioner.local_authority_ph]
+  - id: finance.funding_reduction
+    label: funding reduction
+    categories: [finance, pressure]
+    aliases: [funding reduction, funding cut, funding cuts, budget cut, budget reduction, reduced funding, disinvestment, cut in real terms, real terms cut, grant reduction]
+    related: [finance.public_health_grant, workforce.pay_concern]
+  - id: finance.supplemental_funding
+    label: supplemental substance misuse funding
+    categories: [finance]
+    aliases: [supplemental substance misuse treatment and recovery grant, ssmtr, ssmtrg, additional treatment funding, rough sleeping drug and alcohol treatment grant, rsdatg, inpatient detoxification grant, individual placement and support grant]
+    related: [finance.public_health_grant]
+  - id: finance.cost_pressure
+    label: cost pressure
+    categories: [finance, pressure]
+    aliases: [cost pressure, cost pressures, inflationary pressure, rising costs, pay award pressure, unfunded pay award, financial pressure]
+  - id: finance.savings_target
+    label: savings target
+    categories: [finance, pressure]
+    aliases: [savings target, savings requirement, efficiency saving, mts saving, medium term financial strategy saving, budget saving]
+  - id: finance.contract_value
+    label: contract value
+    categories: [finance, commissioning]
+    aliases: [contract value, contract sum, annual contract value, contract price]
+
+  # --- commissioning -------------------------------------
+  - id: commissioning.recommissioning
+    label: recommissioning
+    categories: [commissioning]
+    aliases: [recommissioning, re commissioning, re procurement, retendering, re tendering, market testing, procurement exercise, competitive tender, tender process]
+    related: [commissioning.contract_award, workforce.tupe]
+  - id: commissioning.contract_award
+    label: contract award
+    categories: [commissioning]
+    aliases: [contract award, contract awarded, preferred bidder, successful bidder, new provider appointed, contract let]
+  - id: commissioning.contract_extension
+    label: contract extension
+    categories: [commissioning]
+    aliases: [contract extension, contract extended, extension of the contract, waiver to extend, direct award]
+  - id: commissioning.mobilisation
+    label: contract mobilisation
+    categories: [commissioning]
+    aliases: [mobilisation, contract mobilisation, service transition, transition period, go live]
+    related: [workforce.tupe]
+  - id: commissioning.lead_provider
+    label: lead provider model
+    categories: [commissioning, provider]
+    aliases: [lead provider, prime provider, lead provider model, prime contractor]
+  - id: commissioning.partnership
+    label: partnership or consortium delivery
+    categories: [commissioning, provider]
+    aliases: [partnership delivery, consortium, delivery partnership, subcontracting arrangement, supply chain partner]
+  - id: commissioning.grant_vs_contract
+    label: grant versus contract funding
+    categories: [commissioning, finance]
+    aliases: [grant funded, grant agreement, section 31 grant, grant rather than contract]
+
+  # --- outcomes ------------------------------------------
+  - id: outcome.successful_completion
+    label: successful treatment completion
+    categories: [outcome]
+    aliases: [successful completion, successful completions, completed treatment free of dependence, treatment exit, planned discharge]
+  - id: outcome.retention
+    label: treatment retention
+    categories: [outcome]
+    aliases: [treatment retention, retention in treatment, twelve week retention, engagement in treatment, drop out from treatment]
+  - id: outcome.waiting_time
+    label: waiting time
+    categories: [outcome, pressure]
+    aliases: [waiting time, waiting times, waiting list, wait for treatment, time to treatment entry, three week wait]
+    related: [service.adult_treatment, workforce.caseload]
+  - id: outcome.unmet_need
+    label: unmet need
+    categories: [outcome, pressure]
+    aliases: [unmet need, unmet treatment need, treatment gap, people not in treatment, low treatment penetration, coverage of need]
+  - id: outcome.drug_related_death
+    label: drug-related death
+    categories: [outcome, pressure]
+    aliases: [drug related death, drug related deaths, drug misuse death, drug poisoning death, fatal overdose, drug death rate]
+    related: [medication.naloxone, outcome.non_fatal_overdose]
+  - id: outcome.non_fatal_overdose
+    label: non-fatal overdose
+    categories: [outcome, pressure]
+    aliases: [non fatal overdose, overdose incident, near fatal overdose]
+    related: [medication.naloxone]
+  - id: outcome.blood_borne_virus
+    label: blood-borne virus
+    categories: [outcome]
+    aliases: [blood borne virus, hepatitis c, hep c, hiv, bbv, hepatitis c elimination]
+    related: [treatment.harm_reduction]
+  - id: outcome.alcohol_related_admission
+    label: alcohol-related hospital admission
+    categories: [outcome, pressure]
+    aliases: [alcohol related hospital admission, alcohol specific admission, alcohol attributable admission]
+    related: [substance.alcohol, service.alcohol_care_team]
+
+  # --- generic provider / commissioner types -----------
+  - id: provider.third_sector
+    label: third sector provider
+    categories: [provider]
+    aliases: [third sector provider, voluntary sector provider, charity provider, not for profit provider, vcse provider]
+  - id: provider.nhs_trust
+    label: NHS trust provider
+    categories: [provider]
+    aliases: [nhs trust provider, foundation trust provider, mental health trust provider]
+  - id: provider.social_enterprise
+    label: social enterprise provider
+    categories: [provider]
+    aliases: [social enterprise provider, community interest company provider]
+  - id: provider.private
+    label: private sector provider
+    categories: [provider]
+    aliases: [private provider, independent sector provider, for profit provider]
+  - id: commissioner.local_authority_ph
+    label: local authority public health
+    categories: [commissioner]
+    aliases: [local authority public health, public health team, director of public health, council public health, upper tier local authority]
+    related: [finance.public_health_grant]
+  - id: commissioner.ohid
+    label: Office for Health Improvement and Disparities
+    categories: [commissioner]
+    aliases: [office for health improvement and disparities, ohid, phe, public health england, dhsc, department of health and social care, combating drugs unit]
+  - id: commissioner.combined_authority
+    label: combined authority
+    categories: [commissioner]
+    aliases: [combined authority, mayoral combined authority, devolution deal]
+  - id: commissioner.icb
+    label: integrated care board
+    categories: [commissioner]
+    aliases: [integrated care board, icb, integrated care system, ics, clinical commissioning group, ccg]
+  - id: commissioner.pcc
+    label: police and crime commissioner
+    categories: [commissioner]
+    aliases: [police and crime commissioner, pcc, opcc, combating drugs partnership]

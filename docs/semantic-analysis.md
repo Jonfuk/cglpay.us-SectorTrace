@@ -114,6 +114,43 @@ Postgres-only migration, added **only** if the 034A retrieval benchmark
 shows exact search is too slow, and gated on the server actually having the
 `vector` extension.
 
+## What ships now (tranche 034B) — the ontology
+
+`pipeline/nlp/ontology/` is the SectorTrace controlled vocabulary, and
+`pipeline/nlp/ontology.py` loads, validates and versions it. Three files:
+
+* **`concepts.yml`** — each concept is a stable dotted id, one or more
+  `categories`, and the surface `aliases` that mean it. Downstream tables
+  store the id, never a label, so renaming a label or adding an alias never
+  invalidates a stored annotation. `categories` may be plural; `pressure` is
+  a *marker* category flagging a concept that names a difficulty, so the
+  034E assertion layer can keep "no recruitment difficulties" apart from
+  "recruitment difficulties remain".
+* **`relations.yml`** — the closed predicate vocabulary every 034F claim
+  candidate must use (`workforce.has_recruitment_pressure`,
+  `finance.has_funding_reduction`, `commissioning.is_recommissioning`, …).
+  Each carries its `subject` kind (provider / service / commissioner / area
+  / workforce), its `object` shape (`none` / `concept:<category>` /
+  `literal:<type>`) and a `pressure` flag. Nothing downstream may invent
+  `has_issue` or `associated_with`.
+* **`patterns/*.yml`** — regex weak-supervision seeds, consumed by 034C
+  (labelling) and 034F (relation assembly), never here. The loader checks
+  each pattern's `concept`/`predicate` reference resolves; it does not
+  compile or run the regexes.
+
+Matching is the m28 idiom: normalise (lowercase, punctuation → spaces,
+corporate suffixes dropped), whole-token sliding window, with a shallow
+`-s` plural fold so `workers`/`worker` share one alias. Ambiguous short
+forms and bare acronyms are on the loader's `_UNSAFE_VARIANTS` list — a
+concept still matches on its spelled-out aliases. `ontology.version()` is a
+SHA-256 over the canonical content (independent of YAML formatting and
+comments) and is what a consuming stage records as `ontology_version` on
+its `nlp_run`.
+
+YAML, not JSON, for a hand-maintained vocabulary (comments, no quoting or
+commas). `pyyaml` is a base dependency — it must load with no `nlp` extra,
+because 034C's classifier depends on it and is always-on.
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -122,7 +159,7 @@ earlier ones to be useful.
 | | Scope | State |
 |---|---|---|
 | **034A** | chunks + embeddings + hybrid search + retrieval eval harness | **shipped** — populating the 30–50-query gold set against the live warehouse is the remaining operator task |
-| **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`) | planned |
+| **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`, `patterns/`) | **shipped** — a starter vocabulary (~80 concepts, ~30 predicates); grown as 034C/F exercise it |
 | **034C** | deterministic ontology classifier — replaces `classify.py` `TOPICS`' vocabulary; weak-supervision seed for 034G; `keyword_v1` rows never reinterpreted | planned |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`). Abstract situations are 034C's / 034G's job, not GLiNER labels. Entity resolution is a separate deterministic step — GLiNER never writes `entity_id` | planned |
 | **034E** | assertion / context detection — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`, with `assertion_status` and `detector_confidence` stored separately; medSpaCy `ConText` where installed, a stdlib cue tagger always | planned |
