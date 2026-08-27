@@ -26,7 +26,10 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `5adc5e6`, going into BETA-028.
+  directly, not `beta`). `beta` is now at `eb1799f` — two out-of-queue
+  provider-identifier commits after BETA-033 (`9b3fe06`, `eb1799f`;
+  project-owner-directed, see Dataset Additions and Recent Commits) —
+  going into BETA-028.
 - Twenty-nine items completed across this session and its predecessors:
   BETA-001 through BETA-027, plus BETA-032 and BETA-033 (BETA-001 on
   `master`). BETA-032 and BETA-033 are out-of-band: the project owner
@@ -1742,6 +1745,60 @@ candidates and inventing one without a specific need would be speculative.
 That reasoning held until asked directly — this entry is the difference
 between inventing a dataset and building one that was actually requested.
 
+### Provider identifiers hand-verified (`9b3fe06`, `eb1799f`, 2026-08-27)
+
+Project-owner-directed, out of queue. `pipeline/providers.py` (the
+reference-config seed for `providers` / `provider_identifiers`) previously
+carried exactly one verified identifier — CGL's charity number, from the
+brief — with everything else left for Modules 3/4/5 to discover as
+`'unverified'`. The owner asked for the details of all 13 tracked
+providers to be researched and verified. Now seeded as `'verified'`:
+
+- **Charity numbers** (E&W register) for the 8 comparators that are
+  registered charities, and **company numbers** (Companies House,
+  8-char form) for those 8 plus Delphi Medical Limited. Every number
+  checked against the primary register itself, with the full
+  previous-name history read so a rename could not be mistaken for a
+  different legal entity.
+- **CQC provider IDs** for all 10 distinct entities (including
+  `inclusion` = Midlands Partnership University NHS FT, whose CQC id is
+  its ODS trust code `RRE`), each checked against the provider's current
+  page on cqc.org.uk.
+
+Findings recorded in `PROVIDER_NOTES` and the module docstring:
+
+- Three `provider_key`s are historical names of an entity that also has a
+  current-name key — `addaction`→`with_you`, `humankind`→`waythrough`,
+  `westminster_drug_project`→`via`. Identifiers live on the current key;
+  the historical key stays a bare name variant so a notice bearing the
+  old name still resolves to its own row.
+- `richmond_fellowship` remains a separately registered charity/company
+  but its **CQC** registration was archived 2024-06-04 (services moved to
+  Waythrough). `delphi_medical` resolved by the owner to Delphi Medical
+  Limited (`06944767` / CQC `1-2448282802`); the predecessor "Delphi
+  Medical Consultants Limited" CQC registration was archived 2024-11-15.
+- `inclusion` is a service brand of an NHS trust — no Companies House or
+  Charity Commission registration.
+
+**Behaviour change this locks in:** `m03` and `m04` seed from
+`provider_identifiers`, so they now fetch and fully walk every seeded
+entity (Companies House profile / officers / filings / PSC, charity
+financials) rather than only what name-search and cross-references turn
+up. `tests/test_m04_companies.py` and `tests/test_m04_viability.py` gained
+a fixture that scopes which companies each `ch.run()` walks; the
+`test_m20` `_add_company_number` helper became `INSERT OR IGNORE` (CGL's
+company number is now a seeded row). Full offline suite after both
+commits: **2469 passed, 106 skipped**, unchanged 2 pre-existing
+`test_documents.py` failures (the corrupted `transformers` cache, see
+BETA-007).
+
+**Follow-up flagged:** a scan for substance-misuse providers still
+missing from the tracked 13 — Cranstoun (charity 1061582), Changing Lives
+(500640, a Collective Voice sponsor), The Alcohol & Drug Service / ADS
+Hull (1108595), Spectrum Community Health CIC (07300133), and the
+group/NHS-trust and merged-entity long tail. See Questions Requiring
+Human Input.
+
 ## Architecture Decisions
 
 **Decision: BETA-001 landed on `master`, not `beta`.** See its DONE entry.
@@ -2109,9 +2166,34 @@ should not assume otherwise, especially before testing anything that writes
    judgments are not in this pipeline at all. Public, scoped to those two
    sources via an explicit allowlist. See its DONE entry for the full
    reasoning and how the allowlist is enforced and tested.
+4. **Which further substance-misuse providers should be added to the
+   tracked set?** After verifying the 13 (see Dataset Additions →
+   "Provider identifiers hand-verified"), a scan found real gaps. Clear
+   national candidates: **Cranstoun** (charity 1061582, company 03306337),
+   **Changing Lives** (charity 500640, company 00995799 — a Collective
+   Voice sponsor, so squarely a peer of the tracked charities), **The
+   Alcohol & Drug Service / ADS Hull** (charity 1108595, company
+   01990365). Non-charity: **Spectrum Community Health CIC** (company
+   07300133 — prison + community substance misuse across Northern
+   England). Group/subsidiary and merged-entity long tail worth a
+   decision: **Aquarius Action Projects** (charity 1014305, now in the
+   Waythrough group — track separately like `richmond_fellowship`?),
+   **Action on Addiction** (merged into We Are With You 2021 — a
+   historical-name key like `addaction`?), **Lifeline Project** (company
+   01842240, administration 2017 — already a test fixture in
+   `test_m04_viability.py`) and **Swanswell** (merged into CGL 2017).
+   NHS-trust comparators beyond `inclusion`/MPFT (CNTW, RDaSH, GMMH,
+   Surrey & Borders, Humber) exist but the project already has one NHS
+   provider as the pattern — adding more is a scope call, not an obvious
+   yes. Not added without the project owner's steer on where the line is.
 
 ## Recent Commits
 
+- `eb1799f` — seed hand-verified CQC provider IDs for all 13 providers
+  (out-of-queue, project-owner-directed; `beta`). See Dataset Additions.
+- `9b3fe06` — seed hand-verified charity + company numbers for all 13
+  providers; scope m04 tests to the companies each run walks
+  (out-of-queue, project-owner-directed; `beta`). See Dataset Additions.
 - `5adc5e6` — BETA-033: overview hero region map, orchestrated motion,
   scroll reveals; fixed a dead "Current snapshot" section found along the
   way (out-of-queue, project-owner-directed; `beta`).
