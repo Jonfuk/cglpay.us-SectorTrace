@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Gold span annotations for `pipeline nlp eval-spans`. Each entry is a real",
+    "or realistic sector paragraph with its entity spans marked by a person:",
+    "PROVIDER, COMMISSIONER, SERVICE, SUBSTANCE, TREATMENT, ROLE, LOCATION,",
+    "PROGRAMME. A predicted span is a hit when a gold span shares its label and",
+    "surface text (case-insensitively).",
+    "",
+    "This is a SEED. Grow it to ~100 entries from the live warehouse (run",
+    "`pipeline nlp spans --limit N`, read the chunks, correct the spans) before",
+    "using the numbers to judge a GLiNER model or threshold change. The stub",
+    "extractor only covers the dictionary-backed labels, so its recall on",
+    "LOCATION / PROGRAMME / novel provider names is expected to be low."
+  ],
+  "entries": [
+    {
+      "id": "cgl-ost",
+      "text": "Change Grow Live delivers opioid substitution treatment and needle exchange for the adult drug and alcohol service.",
+      "spans": [
+        {"label": "PROVIDER", "text": "Change Grow Live"},
+        {"label": "SUBSTANCE", "text": "opioid"},
+        {"label": "TREATMENT", "text": "opioid substitution treatment"},
+        {"label": "TREATMENT", "text": "needle exchange"},
+        {"label": "SERVICE", "text": "adult drug and alcohol service"}
+      ]
+    },
+    {
+      "id": "workforce-roles",
+      "text": "Recovery workers and non-medical prescribers are hard to recruit; methadone and buprenorphine prescribing continues across every team.",
+      "spans": [
+        {"label": "ROLE", "text": "Recovery workers"},
+        {"label": "ROLE", "text": "non-medical prescribers"},
+        {"label": "TREATMENT", "text": "methadone"},
+        {"label": "TREATMENT", "text": "buprenorphine"}
+      ]
+    },
+    {
+      "id": "commissioning",
+      "text": "Turning Point holds the contract, commissioned by the local authority public health team with support from the integrated care board.",
+      "spans": [
+        {"label": "PROVIDER", "text": "Turning Point"},
+        {"label": "COMMISSIONER", "text": "local authority public health"},
+        {"label": "COMMISSIONER", "text": "integrated care board"}
+      ]
+    },
+    {
+      "id": "alcohol-hospital",
+      "text": "The alcohol care team at the hospital referred patients with alcohol dependence to residential rehabilitation.",
+      "spans": [
+        {"label": "SERVICE", "text": "alcohol care team"},
+        {"label": "SUBSTANCE", "text": "alcohol dependence"},
+        {"label": "TREATMENT", "text": "residential rehabilitation"}
+      ]
+    }
+  ]
+}

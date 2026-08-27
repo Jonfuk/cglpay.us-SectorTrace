@@ -182,6 +182,49 @@ finds passages, it does not count problems.
 uv run pipeline nlp label --source-system committee_paper_promotion --limit 25
 ```
 
+## What ships now (tranche 034D) — entity spans and resolution
+
+`pipeline/nlp/spans.py` + `pipeline nlp spans` writes span-level
+`document_concept_mentions` (migration `0066`): a labelled character range
+inside a chunk, plus the element it falls in and the element-relative
+offsets 034E/034F need. Label set, and only this: **PROVIDER, COMMISSIONER,
+SERVICE, SUBSTANCE, TREATMENT, ROLE, LOCATION, PROGRAMME**. Abstract
+situations are 034C's job and never a span label.
+
+* **`stub`** — offline, deterministic, no download. Regex whole-word
+  matching of the 034B ontology's SUBSTANCE / TREATMENT / ROLE / SERVICE /
+  COMMISSIONER concepts, plus the maintained provider name variants
+  (`keywords.SUPPLIER_NAME_VARIANTS`) as PROVIDER spans. `extraction_score`
+  1.0, `concept_id` filled for the ontology-backed labels. It does **not**
+  do LOCATION, PROGRAMME or novel provider names — only the model does.
+* **`gliner`** — GLiNER zero-shot NER (CPU, no fine-tune), lazy import,
+  `nlp` extra. `concept_id` always NULL; `extraction_score` is the model's
+  own token→label score, named so it can't be read as P(true).
+
+`extraction_score` is typed on purpose: 1.0 means "exact dictionary hit",
+not "certainly correct". The table **never carries `entity_id`**.
+
+`pipeline/nlp/resolve.py` + `pipeline nlp resolve` is the separate,
+deterministic step: a PROVIDER span whose whole normalised text equals a
+known provider variant, and whose Evidence-Graph entity
+(`provider:<key>`, seeded by `pipeline graph backfill`) exists, gets a
+`document_entity_mentions` row with `match_method='<extractor>+alias'`; a
+COMMISSIONER span is matched against `LOCAL_AUTHORITY` entities by canonical
+name. Anything weaker stays a bare concept mention — a lead, not an
+attribution. There is no fuzzy matching and no model in this step.
+
+The span-extraction eval (`pipeline/nlp/spans_eval.py`,
+`pipeline nlp eval-spans`, `tests/fixtures/nlp/gold_spans.json`) reports
+precision / recall / F1 per label against a human-annotated set — the gate
+for a GLiNER model or threshold change. The committed set is a 4-entry seed;
+growing it to ~100 from the live warehouse is an operator task.
+
+```bash
+uv run pipeline nlp spans   --source-system committee_paper_promotion --limit 25   # stub
+uv run pipeline nlp resolve --source-system committee_paper_promotion
+uv run pipeline nlp eval-spans
+```
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -192,7 +235,7 @@ earlier ones to be useful.
 | **034A** | chunks + embeddings + hybrid search + retrieval eval harness | **shipped** — populating the 30–50-query gold set against the live warehouse is the remaining operator task |
 | **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`, `patterns/`) | **shipped** — a starter vocabulary (~80 concepts, ~30 predicates); grown as 034C/F exercise it |
 | **034C** | deterministic ontology classifier — `document_topics` `ontology_v1` rows over chunked elements; `classify.py` `TOPICS` frozen and documented, not code-coupled; weak-supervision seed for 034G; `keyword_v1` untouched | **shipped** |
-| **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`). Abstract situations are 034C's / 034G's job, not GLiNER labels. Entity resolution is a separate deterministic step — GLiNER never writes `entity_id` | planned |
+| **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
 | **034E** | assertion / context detection — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`, with `assertion_status` and `detector_confidence` stored separately; medSpaCy `ConText` where installed, a stdlib cue tagger always | planned |
 | **034F** | machine claim candidates (`document_claim_candidates`, high volume) via ontology relation patterns — **not** co-occurrence; a selection policy promotes a slice into `review_queue`; approval writes a `graph_claims` draft with the detector in `extractor_name`, never `promoted_by`; review decisions capture corrections, not just approve/reject | planned |
 | **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |

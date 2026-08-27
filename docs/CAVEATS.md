@@ -357,6 +357,17 @@ anyone using it.
   aid for finding passages, never a count of how many documents report a
   problem. `keyword_v1` rows (the older, frozen `classify.py` vocabulary)
   are a separate, coarser set and are not changed by this layer.
+- **Entity spans (BETA-034D, `document_concept_mentions`) are extractor
+  candidates, and `extraction_score` is not a probability of truth.** A
+  score of 1.0 means the offline stub made an exact dictionary hit; a GLiNER
+  score is the model's token→label confidence. A `PROVIDER` span becomes a
+  `document_entity_mentions` row — an attribution to a named organisation —
+  **only** through `pipeline nlp resolve`, and only on an exact normalised
+  name match against a registered entity. A span that does not resolve is a
+  lead for a person, never counted as "provider X is named in N documents".
+  The stub does not attempt `LOCATION`, `PROGRAMME` or unknown provider
+  names; absence of those spans is a limit of the offline path, not evidence
+  they are not there.
 
 ### Public Health Grant (Module 11)
 

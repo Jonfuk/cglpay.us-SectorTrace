@@ -112,7 +112,10 @@ class TestTheTreesMatch:
         # document_embeddings. The embedding column is a dialect-neutral
         # float32 blob in both trees — pgvector is a later Postgres-only
         # migration, so the two 0065 files stay structurally identical here.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 65
+        # 66 adds document_concept_mentions (tranche 034D): span-level entity
+        # mentions from GLiNER / the offline stub, with the char offsets
+        # 034E/F need. REAL -> double precision is the only dialect change.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 66
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

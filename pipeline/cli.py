@@ -349,6 +349,52 @@ def nlp_label(
         conn.close()
 
 
+@nlp_app.command("spans")
+def nlp_spans(
+    extractor: str = typer.Option(
+        None, help="Span extractor: 'stub' (offline, dictionary-backed, default) "
+        "or 'gliner' / a GLiNER model id (needs `uv sync --extra nlp`)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Extract and roll back, writing nothing"),
+) -> None:
+    """Extract entity spans (PROVIDER, COMMISSIONER, SERVICE, SUBSTANCE,
+    TREATMENT, ROLE, LOCATION, PROGRAMME) into `document_concept_mentions`.
+
+    Fetches nothing; the stub downloads nothing. This table never carries
+    `entity_id` — see `pipeline nlp resolve`.
+    """
+    from pipeline.nlp import spans as nlp_spans_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_spans_mod.run(conn, extractor=extractor, source_system=source_system,
+                                   limit=limit, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("resolve")
+def nlp_resolve(
+    source_system: str = typer.Option(None, help="Only mentions on chunks from this source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum concept mentions to consider"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and roll back, writing nothing"),
+) -> None:
+    """Resolve PROVIDER / COMMISSIONER concept mentions to registered
+    entities, deterministically. Only an exact normalised name match writes a
+    `document_entity_mentions` row; everything else stays a lead.
+    """
+    from pipeline.nlp import resolve as nlp_resolve_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_resolve_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("embed")
 def nlp_embed(
     model: str = typer.Option(
@@ -415,6 +461,25 @@ def nlp_eval_retrieval(
         report = nlp_eval.run(
             conn, queries_path=queries, mode=mode,
             model=model or settings.nlp_embedding_model)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-spans")
+def nlp_eval_spans(
+    gold: Path = typer.Option(
+        None, help="Gold span set JSON (default: tests/fixtures/nlp/gold_spans.json)"),
+    extractor: str = typer.Option(None, help="stub (default) | gliner | a GLiNER model id"),
+) -> None:
+    """Score a span extractor against a human-annotated set: precision /
+    recall / F1, overall and per label. The gate for a GLiNER model or
+    threshold change."""
+    from pipeline.nlp import spans_eval
+
+    conn, _ = _document_connection()
+    try:
+        report = spans_eval.run(conn, gold_path=gold, extractor=extractor)
         typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
     finally:
         conn.close()

@@ -25,7 +25,13 @@ Tranche 034C: `label` — the deterministic ontology classifier. Runs the
 rows with `match_method='ontology_v1'` (concept ids and `cat:` categories),
 never touching the frozen `keyword_v1` vocabulary.
 
-GLiNER entity spans, assertion / context detection, relation-pattern claim
-candidates and topic clustering land in later tranches — see
-`docs/semantic-analysis.md`.
+Tranche 034D: `spans` — span-level entity extraction into
+`document_concept_mentions` (migration 0066). An offline dictionary-backed
+stub or GLiNER behind the `nlp` extra; label set is entities only. `resolve`
+— the separate deterministic step that turns a PROVIDER / COMMISSIONER span
+into a `document_entity_mentions` row on an exact name match, and only then.
+Neither ever writes `entity_id` from a model.
+
+Assertion / context detection, relation-pattern claim candidates and topic
+clustering land in later tranches — see `docs/semantic-analysis.md`.
 """

@@ -290,7 +290,7 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A, 034B and 034C complete on `beta`.**
+  - current_state: **034A–034D complete on `beta`.**
     034A — the foundation (migration `0065` — `nlp_runs`,
     `nlp_model_registry`, `document_chunks`, `document_embeddings`;
     `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
@@ -331,22 +331,39 @@ DONE
     pointing at the ontology as authoritative; deliberately **not**
     code-coupled (a collection run needs nothing from the nlp layer), so the
     "one vocabulary" guarantee is that new terms only ever go in the ontology.
-    `tests/test_nlp_{chunk,embeddings,search_eval,ontology,label}.py` + the
-    portal-isolation additions green; `ruff` clean.
+    034D — migration `0066` (`document_concept_mentions`, both trees; `REAL`
+    -> `double precision` the only dialect change). `pipeline/nlp/spans.py` +
+    `pipeline nlp spans`: span-level entity extraction into
+    `document_concept_mentions` — an offline `stub` (regex over the 034B
+    ontology's SUBSTANCE/TREATMENT/ROLE/SERVICE/COMMISSIONER concepts +
+    `SUPPLIER_NAME_VARIANTS` as PROVIDER; `extraction_score` 1.0; no
+    LOCATION/PROGRAMME/novel names) and `gliner` (lazy, `nlp` extra, full
+    label set, `concept_id` always NULL). `extraction_score` typed so it
+    can't read as P(true); the table never carries `entity_id`.
+    `pipeline/nlp/resolve.py` + `pipeline nlp resolve` — the separate
+    deterministic step: exact normalised PROVIDER-variant match →
+    `provider:<key>` entity (when `graph backfill` seeded it) →
+    `document_entity_mentions` (`match_method='<extractor>+alias'`);
+    COMMISSIONER → `LOCAL_AUTHORITY` entity by canonical name; anything
+    weaker stays a lead. `pipeline/nlp/spans_eval.py` +
+    `tests/fixtures/nlp/gold_spans.json` (P/R/F1 per label; 4-entry seed) +
+    `pipeline nlp eval-spans`. `gliner` added to the `nlp` extra.
+    `tests/test_nlp_{spans,resolve,spans_eval}.py` + migration-count bump
+    (65→66) green; `ruff` clean.
   - next_action: (1) `uv sync --extra nlp` + browser-verify `/api/admin/search`
     with a real MiniLM model, `/api/v1/*` unchanged — deferred: no browser
-    here. (2) Grow `retrieval_queries.json` from the 8-query seed to 30–50
-    marked campaign queries against the live warehouse; record the baseline.
-    (3) Grow the ontology vocabulary as 034D/F exercise it. (4) Admin-UI
-    surfaces for search and for the `ontology_v1` topic filter. **Next
-    tranche: 034D** — GLiNER zero-shot entity spans (`PROVIDER`,
-    `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`,
-    `PROGRAMME`) into `document_concept_mentions`; entity resolution a
-    separate deterministic step; GLiNER never writes `entity_id`. Needs the
-    `nlp` extra to grow (`gliner`) and a migration for the mentions table.
+    here. (2) Grow `retrieval_queries.json` (→30–50) and `gold_spans.json`
+    (→~100) against the live warehouse; record the baselines; then swap the
+    span stub for GLiNER and compare. (3) Grow the ontology vocabulary as
+    034E/F exercise it. (4) Admin-UI surfaces for search, the `ontology_v1`
+    topic filter and the mention/entity views. **Next tranche: 034E** —
+    assertion / context detection (`AFFIRMED` / `NEGATED` / `HISTORICAL` /
+    `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`) into a new
+    `document_assertions` table (migration): medSpaCy `ConText` where the
+    extra is present, a stdlib cue tagger always; hard-negative fixtures.
   - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
-    portal-isolation + migration-equivalence + cli + ontology confirmed
-    locally; full run pending); the browser/data items above.
+    portal-isolation + migration-equivalence + cli + ontology + spans/resolve
+    confirmed locally; full run pending); the browser/data items above.
 
 ### NEXT
 

@@ -138,11 +138,14 @@ graph = [
 # embedder with no weights on disk. `uv sync --extra nlp` is the opt-in that
 # turns on real embeddings and `--mode semantic` / `hybrid` search.
 #
-# 034A needs only sentence-transformers (it pulls torch + transformers +
-# huggingface_hub). GLiNER, spaCy and medSpaCy join this extra when the
-# entity and assertion tranches (034D/E) land -- see docs/semantic-analysis.md.
+# 034A added sentence-transformers (it pulls torch + transformers +
+# huggingface_hub). 034D adds gliner for zero-shot entity spans -- it reuses
+# the same torch/transformers stack, so the extra does not grow a second
+# heavy tree. spaCy / medSpaCy join when the assertion tranche (034E) lands
+# -- see docs/semantic-analysis.md.
 nlp = [
     "sentence-transformers>=3.0",
+    "gliner>=0.2.13",
 ]
 
 # The documentation site. An extra rather than a dependency-group because a
