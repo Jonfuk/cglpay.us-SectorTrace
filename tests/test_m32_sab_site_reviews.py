@@ -33,15 +33,17 @@ def _add_board(conn, name, url, nation="England"):
 
 
 def _mock_board_site(httpx_mock, *, links_html: str, origin: str = ORIGIN,
-                      pdf: bytes = PDF_BYTES):
+                      pdf: bytes = PDF_BYTES, homepage_only: bool = False):
     httpx_mock.add_response(url=f"{origin}/robots.txt", status_code=404, text="",
                              is_reusable=True)
     for path in m32.SAR_PATHS:
+        # "/" is not a SAR index path; the named ones are. homepage_only
+        # serves the links on "/" alone so a candidate stays from_index=False.
+        body = links_html if (path == "/" or not homepage_only) else "<p>nothing</p>"
         httpx_mock.add_response(url=f"{origin}{path}", status_code=200,
-                                 text=f"<html><body>{links_html}</body></html>",
-                                 is_reusable=True)
-    if ".pdf" in links_html:
-        httpx_mock.add_response(url=re.compile(rf"{re.escape(origin)}/.*\.pdf"),
+                                 text=f"<html><body>{body}</body></html>", is_reusable=True)
+    if ".pdf" in links_html or ".docx" in links_html:
+        httpx_mock.add_response(url=re.compile(rf"{re.escape(origin)}/.*\.(pdf|docx)"),
                                  content=pdf, status_code=200, is_reusable=True)
 
 
@@ -135,10 +137,11 @@ def test_run_auto_ingests_a_strong_link_whose_text_names_the_board(httpx_mock, s
     assert crawl["docs_ingested"] == 1
 
 
-def test_run_routes_a_weak_link_to_a_candidate_review_item(httpx_mock, settings, conn, monkeypatch):
+def test_run_routes_a_weak_link_not_on_an_index_page_to_a_candidate(httpx_mock, settings, conn, monkeypatch):
     _add_board(conn, "Camden Safeguarding Adults Board", ORIGIN)
-    # "learning brief" is SAR vocabulary but not the unambiguous phrase.
-    _mock_board_site(httpx_mock, links_html=(
+    # A weak-vocabulary link ("learning brief"), found only on the homepage
+    # — not on a confirmed SAR index page. Still needs a person.
+    _mock_board_site(httpx_mock, homepage_only=True, links_html=(
         '<a href="/d/Matthew-learning-brief.pdf">Learning brief: Matthew</a>'))
     monkeypatch.setattr(m28.pdftext, "page_texts", lambda *a, **k: [
         "A learning brief from Camden Safeguarding Adults Board."])
@@ -148,11 +151,42 @@ def test_run_routes_a_weak_link_to_a_candidate_review_item(httpx_mock, settings,
     assert conn.execute(
         "SELECT COUNT(*) AS n FROM sar_documents WHERE discovered_via = 'sab_website'"
     ).fetchone()["n"] == 0
-    item = conn.execute(
-        "SELECT * FROM review_queue WHERE item_type = 'sab_site_sar_candidate'").fetchone()
-    assert item is not None
     crawl = conn.execute("SELECT * FROM sab_site_crawls").fetchone()
     assert crawl["docs_candidate"] == 1
+
+
+def test_run_auto_ingests_from_a_confirmed_index_page_despite_a_pseudonym_link(
+        httpx_mock, settings, conn, monkeypatch):
+    """The loosening: a document linked only as a pseudonym, but sitting on
+    the board's own SAR listing page, is auto-ingested — the page context
+    plus the board-consistent text is enough."""
+    _add_board(conn, "Camden Safeguarding Adults Board", ORIGIN)
+    _mock_board_site(httpx_mock, links_html='<a href="/d/anne-2022.pdf">Anne (2022)</a>')
+    monkeypatch.setattr(m28.pdftext, "page_texts", lambda *a, **k: [
+        "A Safeguarding Adults Review commissioned by Camden Safeguarding Adults Board."])
+
+    m32.run(_ctx(conn, settings))
+
+    row = conn.execute(
+        "SELECT * FROM sar_documents WHERE discovered_via = 'sab_website'").fetchone()
+    assert row is not None and row["sab_name"] == "Camden Safeguarding Adults Board"
+
+
+def test_run_never_auto_ingests_a_template_even_on_an_index_page(httpx_mock, settings, conn, monkeypatch):
+    _add_board(conn, "Camden Safeguarding Adults Board", ORIGIN)
+    _mock_board_site(httpx_mock, links_html=(
+        '<a href="/d/SAR-referral-form.docx">SAR referral form</a>'))
+    monkeypatch.setattr(m28.pdftext, "page_texts", lambda *a, **k: [""])
+
+    m32.run(_ctx(conn, settings))
+
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM sar_documents WHERE discovered_via = 'sab_website'"
+    ).fetchone()["n"] == 0
+    item = conn.execute(
+        "SELECT context_json FROM review_queue WHERE item_type = 'sab_site_sar_candidate'"
+    ).fetchone()
+    assert "template or form" in item["context_json"]
 
 
 def test_run_does_not_store_a_document_that_names_a_different_board(httpx_mock, settings, conn, monkeypatch):

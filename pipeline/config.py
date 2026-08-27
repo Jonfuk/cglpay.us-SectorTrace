@@ -135,6 +135,13 @@ class Settings(BaseSettings):
     # standard per-host interval with the identifying User-Agent, every use
     # logged and raising a `robots_override_in_use` item, and removed if a
     # board asks.
+    #
+    # Fifth batch, 2026-08-27, from m32's second crawl (wider path set). Same
+    # footing again: lancashiresafeguardingpartnership.org.uk publishes 31
+    # SAR documents under /assets/ behind a robots.txt disallow, and
+    # kmsab.org.uk answers on its bare host as well as www (the fourth batch
+    # scoped only the www form) — the prefix match is a literal startswith,
+    # so both forms are listed.
     robots_exceptions: tuple[str, ...] = (
         # data.gov.uk's real API host. Its robots.txt disallows /api/
         # wholesale, which reads as aimed at crawlers hitting the CKAN search
@@ -186,6 +193,9 @@ class Settings(BaseSettings):
         "https://www.eastsussexsab.org.uk/media/",
         "https://www.kmsab.org.uk/assets/",
         "https://www.wiltshiresvpp.org.uk/assets/",
+        # Fifth batch (2026-08-27) — m32 second crawl; see the note above.
+        "https://lancashiresafeguardingpartnership.org.uk/assets/",
+        "https://kmsab.org.uk/assets/",
         # A handful of the earliest (Dec 2014) files in the m01 CSV archive
         # backfill are hosted on www.dropbox.com rather than CCS's own
         # domain. Dropbox's robots.txt disallows /s/ (shared-link paths) for

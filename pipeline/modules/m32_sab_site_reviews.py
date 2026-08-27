@@ -12,14 +12,18 @@ a byte-for-byte match on payload_sha256 is skipped silently. A differently
 formatted copy of a library review is stored as its own row (different URL,
 different bytes) and flagged possible_duplicate_of_library_sar for a person.
 
-HYBRID INGEST. A document is auto-ingested into sar_documents only when the
-link that led to it unambiguously says "Safeguarding Adults Review" AND the
-document's own text names *this* board (resolve_sab_name agrees). Anything
-weaker becomes a sab_site_sar_candidate review item — nothing reaches the
-canonical table on a guess, the same gate m09 puts on cdp_documents. A
-document whose text names a *different* board is a sab_site_sar_board_mismatch
-and is not stored: a board site linking to a neighbour's review is the
-expected false positive.
+HYBRID INGEST. A document is auto-ingested into sar_documents when either:
+  * the link that led to it unambiguously says "Safeguarding Adults Review"
+    AND its text names *this* board (resolve_sab_name agrees); or
+  * it sits on a confirmed SAR *index* page on this board's own site (a
+    guessed path that names SARs, or a page reached by following a SAR
+    link) AND its text either names this board or names no board at all.
+Never when the URL or link text looks like process furniture — a referral
+form, a template, terms of reference (_TEMPLATE_RE) — and never when the
+text names a *different* board (sab_site_sar_board_mismatch: a board site
+linking to a neighbour's review is the expected false positive). Everything
+else is a sab_site_sar_candidate review item; nothing reaches the canonical
+table on a guess, the same gate m09 puts on cdp_documents.
 
 sab_name is known here (it is the board whose site this is), so it is set to
 that board's official directory name with sab_name_source = 'sab_website',
@@ -107,6 +111,19 @@ _SAR_LINK_VOCAB = re.compile(
 _SAR_LINK_STRONG = re.compile(
     r"safeguarding[\s\-]?adults?[\s\-]?review|safeguarding[\s\-]?adult[\s\-]?review",
     re.IGNORECASE)
+
+# A board's SAR page also links its process furniture — referral forms,
+# templates, terms of reference, checklists. Those are not reviews; a
+# document whose URL or link text matches this is never auto-ingested (it
+# still becomes a review-queue candidate, so a misfiled real review is
+# recoverable).
+_TEMPLATE_RE = re.compile(
+    r"referral[\s\-]?form|\bform\s*\d|\bproforma\b|template|toolkit|"
+    r"terms?[\s\-]?of[\s\-]?reference|\bToR\b|checklist|flow[\s\-]?chart|"
+    r"process[\s\-]?map|\bpathway\b|guidance|\bpolicy\b|procedure|protocol|"
+    r"application[\s\-]?form|nomination|self[\s\-]?assessment|quality[\s\-]?mark|"
+    r"agenda|minutes|annual[\s\-]?report|newsletter|action[\s\-]?plan|"
+    r"strategic[\s\-]?plan|business[\s\-]?plan", re.IGNORECASE)
 
 _YEAR_RE = re.compile(r"\b(20[0-2]\d)\b")
 
@@ -205,7 +222,8 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
         page_url = result.final_url or result.url
         fetched_pages.add(page_url.split("#")[0])
         html_text = result.body.decode("utf-8", "replace")
-        candidate_urls.extend(sar_links_on_page(html_text, page_url, host, is_index))
+        for u, t in sar_links_on_page(html_text, page_url, host, is_index):
+            candidate_urls.append((u, t, is_index))
         for sub in sar_subpages_on_page(html_text, page_url, host):
             if sub not in subpages and sub.split("#")[0] not in fetched_pages:
                 subpages.append(sub)
@@ -256,11 +274,16 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
         crawl.unreachable = True
         return crawl
 
-    seen: set[str] = set()
-    for doc_url, link_text in candidate_urls:
-        if doc_url in seen or len(crawl.candidates) >= MAX_DOCS_PER_SAB:
-            continue
-        seen.add(doc_url)
+    # Collapse duplicates, keeping the first link text seen and treating a
+    # document as index-found if it was linked from any SAR index page.
+    merged: dict[str, tuple[str, bool]] = {}
+    for doc_url, link_text, from_index in candidate_urls:
+        text, idx = merged.get(doc_url, (link_text, False))
+        merged[doc_url] = (text or link_text, idx or from_index)
+
+    for doc_url, (link_text, from_index) in merged.items():
+        if len(crawl.candidates) >= MAX_DOCS_PER_SAB:
+            break
         try:
             fetched = client.get(doc_url)
         except RobotsDisallowed:
@@ -272,7 +295,7 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
                 "sab_site_doc_unavailable", doc_url,
                 {"sab_name": sab_name, "status": fetched.status_code}))
             continue
-        crawl.candidates.append((fetched, link_text))
+        crawl.candidates.append((fetched, link_text, from_index))
     return crawl
 
 
@@ -359,7 +382,7 @@ def run(ctx: ModuleContext) -> None:
             db.record_review_item(conn, module_name, item_type, raw_value, json.dumps(context))
 
         board_ingested = board_candidate = 0
-        for fetched, link_text in crawl.candidates:
+        for fetched, link_text, from_index in crawl.candidates:
             document_url = fetched.final_url or fetched.url
             ext = m28.document_extension(document_url)
             if ext is None:
@@ -382,10 +405,11 @@ def run(ctx: ModuleContext) -> None:
 
             text_board, _src = m28.resolve_sab_name(body_text, link_text, sab_index)
             names_other_board = bool(text_board) and not _same_board(text_board, sab_name)
+            names_this_board = _same_board(text_board, sab_name)
 
             haystack = f"{document_url} {link_text}"
             strong_link = bool(_SAR_LINK_STRONG.search(haystack))
-            names_this_board = _same_board(text_board, sab_name)
+            looks_template = bool(_TEMPLATE_RE.search(haystack))
 
             if names_other_board:
                 db.record_review_item(
@@ -394,14 +418,28 @@ def run(ctx: ModuleContext) -> None:
                                  "link_text": link_text[:200]}))
                 continue
 
-            if not (strong_link and names_this_board):
+            # Auto-ingest when the source is trustworthy enough that a person
+            # would only be rubber-stamping:
+            #   * an unambiguous "Safeguarding Adults Review" link whose text
+            #     also names this board (the original strict path), OR
+            #   * a document found on a confirmed SAR index page on this
+            #     board's own site whose text either names this board or
+            #     names no board at all (the loosening).
+            # Never a template/form, and never one naming a different board.
+            auto = (not looks_template) and (
+                (strong_link and names_this_board)
+                or (from_index and (names_this_board or not text_board)))
+
+            if not auto:
+                reason = ("looks like a template or form, not a review" if looks_template
+                          else "not on a confirmed SAR index page and the link is not unambiguous"
+                          if not from_index
+                          else "document text does not clearly name this board")
                 db.record_review_item(
                     conn, module_name, "sab_site_sar_candidate", document_url,
                     json.dumps({"sab_name": sab_name, "link_text": link_text[:200],
                                  "has_body_text": bool(body_text),
-                                 "reason": ("link vocabulary not unambiguous"
-                                            if not strong_link
-                                            else "document text does not name this board")}))
+                                 "from_index_page": from_index, "reason": reason}))
                 board_candidate += 1
                 continue
 

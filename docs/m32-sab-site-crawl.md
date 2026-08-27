@@ -114,14 +114,20 @@ to a neighbouring board's review is the expected false positive).
 
 ### Auto-ingest vs. confirm
 
-Recommended hybrid:
+As built, and loosened once on 2026-08-27 after the second crawl left ~500
+real SARs in the candidate queue (boards link the individual documents by
+pseudonym, not by the word "review"):
 
-* **Auto-ingest** into `sar_documents` when the link vocabulary is
-  unambiguous **and** the fetched document's own text names *this* board
-  (`resolve_sab_name` returns it). The board naming itself in its own SAR
-  is strong signal.
-* **Otherwise** → `sab_site_sar_candidate` review item, promoted by a
-  person, the way `m09` gates `cdp_documents`.
+* **Auto-ingest** into `sar_documents` when **either**
+  * the link vocabulary is unambiguous **and** the document's own text
+    names *this* board; **or**
+  * the document sits on a confirmed SAR *index* page on this board's own
+    site **and** its text names this board or names no board at all.
+* **Never** when the URL / link text is process furniture — a referral
+  form, template, terms of reference (`_TEMPLATE_RE`) — or when the text
+  names a *different* board.
+* **Otherwise** → `sab_site_sar_candidate`, promoted by a person, the way
+  `m09` gates `cdp_documents`.
 
 ### De-duplication against the library
 
