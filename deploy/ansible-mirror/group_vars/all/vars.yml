@@ -179,6 +179,14 @@ enable_fail2ban: true
 enable_unattended_upgrades: true
 ssh_port: 22
 harden_ssh: true
+
+# Differs from the self-host build (which keeps `yes`). A mirror is only ever
+# reached by an operator who already has a key on it — there is no scenario
+# where someone needs a root PASSWORD login to this box — so root is
+# key-only here. Non-root password login is untouched (PasswordAuthentication
+# stays `yes`), so a locked-out operator still has that way back in. `sshd -t`
+# validates the drop-in before it is written.
+sshd_permit_root_login: "prohibit-password"
 fail2ban_bantime: "24h"
 fail2ban_findtime: "10m"
 fail2ban_maxretry: 4

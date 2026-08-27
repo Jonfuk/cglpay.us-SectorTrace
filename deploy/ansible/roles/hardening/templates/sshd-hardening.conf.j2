@@ -13,7 +13,14 @@ Port {{ ssh_port }}
 # banning through ufw), MaxAuthTries below, ufw rate-limiting on the SSH
 # port, and a short LoginGraceTime. Use a long password.
 PasswordAuthentication yes
-PermitRootLogin yes
+
+# Root login mode. Defaults to `yes` for the self-host build, which keeps a
+# password login for root available for the same reason PasswordAuthentication
+# does. A deployment that has keys on every box that needs root — the mirror
+# does — sets sshd_permit_root_login to `prohibit-password` in its group_vars
+# so root is reachable by key only. `sshd -t` validates this before it lands,
+# so a bad value cannot cost you the box.
+PermitRootLogin {{ sshd_permit_root_login | default('yes') }}
 
 PubkeyAuthentication yes
 KbdInteractiveAuthentication no

@@ -28,6 +28,12 @@ same hardening, and a fix to any of them belongs in one place. Only
 `sectortrace_mirror` differs from `sectortrace`, and it is one role for
 both modes above — see `mirror_role` in `group_vars/all/vars.yml`.
 
+The shared roles run with the same variables as the self-host build bar one:
+this playbook sets `sshd_permit_root_login: prohibit-password`, so root SSH
+here is by key only. Nothing but an operator with a key on the box ever
+reaches a mirror. Non-root password login is untouched, so a lost key is not
+a locked door.
+
 ```bash
 git clone <this-repo-url> /opt/sectortrace/app
 cd /opt/sectortrace/app/deploy/ansible-mirror

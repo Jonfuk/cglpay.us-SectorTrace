@@ -263,6 +263,13 @@ ssh_port: 22
 # tunnel depends on it.
 harden_ssh: true
 
+# Root login mode, passed straight through to sshd's PermitRootLogin. `yes`
+# here for the same reason password auth stays on — this box must stay
+# reachable for root without a key on it. Set `prohibit-password` on a
+# deployment that keeps a key on every box that needs root (the mirror does,
+# and does set it).
+sshd_permit_root_login: "yes"
+
 # These carry real weight given password login stays enabled. A day-long ban
 # after 4 tries in 10 minutes costs a legitimate typo-ing operator very
 # little (add your IP to fail2ban_ignoreip) and makes password guessing

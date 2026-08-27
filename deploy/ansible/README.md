@@ -256,6 +256,12 @@ change are therefore deliberately left alone, both marked as such in
 - `PasswordAuthentication yes` — see above.
 - `AllowTcpForwarding yes` — the admin-UI tunnel below depends on it.
 
+`PermitRootLogin` follows the same logic as password auth and defaults to
+`yes` here. Set `sshd_permit_root_login: prohibit-password` if every box that
+needs root has a key on it — that leaves root reachable by key only while
+non-root password login is unchanged. The mirror playbook ships with that
+value set.
+
 What hardens SSH here instead: `MaxAuthTries 3`, a 30-second
 `LoginGraceTime`, modern ciphers/KEX/MACs only, no X11 or agent forwarding,
 ufw's rate-limited SSH rule, and a fail2ban jail that bans for 24h after 4
