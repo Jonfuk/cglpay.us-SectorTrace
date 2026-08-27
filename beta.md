@@ -26,10 +26,12 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `eb1799f` — two out-of-queue
-  provider-identifier commits after BETA-033 (`9b3fe06`, `eb1799f`;
-  project-owner-directed, see Dataset Additions and Recent Commits) —
-  going into BETA-028.
+  directly, not `beta`). `beta` is now at `fc97e66` — four out-of-queue
+  commits after BETA-033: three on the provider entity model (`9b3fe06`,
+  `eb1799f`, `fc97e66` — identifiers verified, then the set expanded to 21
+  with renamed/merged/dissolved status on the portal) and one beta.md
+  record (`2b264c2`); all project-owner-directed, see Dataset Additions
+  and Recent Commits — going into BETA-028.
 - Twenty-nine items completed across this session and its predecessors:
   BETA-001 through BETA-027, plus BETA-032 and BETA-033 (BETA-001 on
   `master`). BETA-032 and BETA-033 are out-of-band: the project owner
@@ -1799,6 +1801,52 @@ Hull (1108595), Spectrum Community Health CIC (07300133), and the
 group/NHS-trust and merged-entity long tail. See Questions Requiring
 Human Input.
 
+### Provider set expanded to 21; lifecycle status on the portal (`fc97e66`, 2026-08-27)
+
+Project-owner-directed follow-up to the two commits above ("add tiers
+1-3", "where a provider has merged / dissolved / renamed make this clear
+on the web UI"). Eight `provider_key`s added to
+`keywords.SUPPLIER_NAME_VARIANTS` and `pipeline/providers.py`, with the
+same hand-verification (primary registers + each provider's current CQC
+page):
+
+- **Active national peers:** `cranstoun` (charity 1061582, company
+  03306337, CQC 1-101678209), `changing_lives` (500640 / 00995799 / CQC
+  1-144519557 — registered as "The Cyrenians Ltd"; a Collective Voice
+  member), `alcohol_and_drug_service` (ADS Hull — 1108595 / 05375809 /
+  CQC 1-152340136), `spectrum_community_health` (CIC, company 07300133 /
+  CQC 1-183173152).
+- **Merged, still-registered:** `aquarius` (into the Waythrough group),
+  `action_on_addiction` (into The Forward Trust, 2021 — corrected from
+  the earlier assumption of With You), `swanswell` (into Cranstoun,
+  2022).
+- **Dissolved:** `lifeline_project` (administration 2017, company
+  dissolved 25 Jan 2024; already an `m04_viability` fixture).
+
+Name collisions checked and documented in `PROVIDER_NOTES`: the Hull ADS
+vs Greater Manchester's "ADS (Addiction Dependency Solutions)" (charity
+702559, dissolved 2026); "Changing Lives" the charity vs unrelated
+"Changing Lives UK Quality Care Limited" at CQC.
+
+Migration `0062` (see Database / Migration Changes) adds
+`providers.status` + `providers.superseded_by`, seeded from a new
+`PROVIDER_STATUS` map that also formalises the three renames already
+tracked (`addaction`, `humankind`, `westminster_drug_project`) and
+`richmond_fellowship`. `public_queries.providers()` and
+`provider_timeline()` return the status and the successor's display name;
+`js/pages/providers.js` renders a lifecycle badge in the provider heading
+and a one-line note linking the successor, and a **Status** column in the
+provider list ("MERGED → Waythrough"). Verified in a browser against the
+running portal. Evidence is never re-pointed onto the successor key — the
+note states this.
+
+Full offline suite after the change: **2469 passed, 106 skipped**,
+unchanged 2 pre-existing `test_documents.py` failures.
+
+Still open (Questions Requiring Human Input #4): Tier 4, the NHS-trust
+comparators beyond `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey &
+Borders, Humber) — a deliberate scope call, not taken.
+
 ## Architecture Decisions
 
 **Decision: BETA-001 landed on `master`, not `beta`.** See its DONE entry.
@@ -1845,6 +1893,18 @@ touched.
 BETA-016: migration `0061` adds `temporary_accommodation_snapshot` (SQLite +
 PostgreSQL dialect trees, kept in sync). Purely additive; no existing table
 touched.
+
+Provider-set expansion (`fc97e66`, out of queue, 2026-08-27): migration
+`0062` adds two columns to the reference-config `providers` table —
+`status` (`'active'` default, or `'renamed'` / `'merged'` / `'dissolved'`)
+and `superseded_by` (the surviving entity's `provider_key`, where there is
+one). Both dialect trees, kept in sync; `ALTER TABLE ADD COLUMN` with a
+default, non-destructive. Seeded from a new `PROVIDER_STATUS` map in
+`pipeline/providers.py`. Note: applied to the LAN PostgreSQL warehouse
+during this session (a seed script run under `.env`, which sets
+`DATABASE_URL`), so that database already carries `0062` + the re-seed —
+consistent with the committed code, but done a step ahead of a normal
+post-merge run.
 
 ## Deployment / Infrastructure Changes
 
@@ -2166,29 +2226,28 @@ should not assume otherwise, especially before testing anything that writes
    judgments are not in this pipeline at all. Public, scoped to those two
    sources via an explicit allowlist. See its DONE entry for the full
    reasoning and how the allowlist is enforced and tested.
-4. **Which further substance-misuse providers should be added to the
-   tracked set?** After verifying the 13 (see Dataset Additions →
-   "Provider identifiers hand-verified"), a scan found real gaps. Clear
-   national candidates: **Cranstoun** (charity 1061582, company 03306337),
-   **Changing Lives** (charity 500640, company 00995799 — a Collective
-   Voice sponsor, so squarely a peer of the tracked charities), **The
-   Alcohol & Drug Service / ADS Hull** (charity 1108595, company
-   01990365). Non-charity: **Spectrum Community Health CIC** (company
-   07300133 — prison + community substance misuse across Northern
-   England). Group/subsidiary and merged-entity long tail worth a
-   decision: **Aquarius Action Projects** (charity 1014305, now in the
-   Waythrough group — track separately like `richmond_fellowship`?),
-   **Action on Addiction** (merged into We Are With You 2021 — a
-   historical-name key like `addaction`?), **Lifeline Project** (company
-   01842240, administration 2017 — already a test fixture in
-   `test_m04_viability.py`) and **Swanswell** (merged into CGL 2017).
-   NHS-trust comparators beyond `inclusion`/MPFT (CNTW, RDaSH, GMMH,
-   Surrey & Borders, Humber) exist but the project already has one NHS
-   provider as the pattern — adding more is a scope call, not an obvious
-   yes. Not added without the project owner's steer on where the line is.
+4. ~~**Which further substance-misuse providers should be added to the
+   tracked set?**~~ **Tiers 1-3 added, 2026-08-27 (`fc97e66`, see Dataset
+   Additions → "Provider set expanded to 21").** Cranstoun, Changing
+   Lives, ADS (Hull) and Spectrum Community Health CIC as active peers;
+   Aquarius, Action on Addiction, Swanswell and Lifeline Project as
+   merged/dissolved entities that still surface in older evidence. Two
+   assumptions in the original scan were wrong and were corrected during
+   verification: Action on Addiction merged into **The Forward Trust**
+   (not With You), and Swanswell into **Cranstoun** in 2022 (not CGL in
+   2017). **Still open — Tier 4:** NHS-trust comparators beyond
+   `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey & Borders, Humber). The
+   project has one NHS provider as the pattern; adding more widens the
+   entity model deliberately and was left for the project owner's steer.
 
 ## Recent Commits
 
+- `fc97e66` — add 8 more substance-misuse providers (tiers 1-3); portal
+  shows renamed / merged / dissolved status with a link to the successor;
+  migration 0062 adds `providers.status` / `providers.superseded_by`
+  (out-of-queue, project-owner-directed; `beta`). See Dataset Additions.
+- `2b264c2` — beta.md: record the two provider-identifier commits
+  (`beta`).
 - `eb1799f` — seed hand-verified CQC provider IDs for all 13 providers
   (out-of-queue, project-owner-directed; `beta`). See Dataset Additions.
 - `9b3fe06` — seed hand-verified charity + company numbers for all 13
