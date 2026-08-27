@@ -59,6 +59,25 @@ def test_sar_links_on_page_keeps_only_same_host_docs_with_sar_vocabulary():
                       "Safeguarding Adults Review: Matthew")]
 
 
+def test_sar_links_on_page_index_mode_keeps_every_document():
+    """On a page reached via a SAR link, a document linked only as a
+    pseudonym is still collected."""
+    html = ('<a href="/d/anne-2023.pdf">Anne (2023)</a>'
+            '<a href="/d/brian-overview.pdf">Brian</a>')
+    plain = m32.sar_links_on_page(html, f"{ORIGIN}/x", "camden.example.gov.uk")
+    indexed = m32.sar_links_on_page(html, f"{ORIGIN}/x", "camden.example.gov.uk",
+                                     is_sar_index=True)
+    assert plain == []
+    assert len(indexed) == 2
+
+
+def test_sar_links_on_page_treats_www_and_bare_host_as_the_same_site():
+    html = '<a href="https://www.camden.example.gov.uk/d/SAR-x.pdf">SAR: X</a>'
+    links = m32.sar_links_on_page(html, "https://camden.example.gov.uk/reviews",
+                                   "camden.example.gov.uk")
+    assert len(links) == 1
+
+
 def test_run_follows_one_hop_to_a_reviews_page(httpx_mock, settings, conn, monkeypatch):
     """The reviews are behind a 'Safeguarding Adults Reviews' link on the
     homepage, not under any guessed path."""

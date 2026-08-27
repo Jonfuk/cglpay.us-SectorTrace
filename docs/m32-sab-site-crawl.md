@@ -11,9 +11,19 @@ record; what shipped matches it, with the notes below.
   filename or link text, falling back to the crawl year — a rebuild of
   `sar_documents` to make the column nullable was not worth it, and the SAR
   export caveat says so.
-* Sub-page following (one hop past the listing) is **not** implemented in the
-  first cut: discovery is the `SAR_PATHS` set plus documents linked directly
-  from those pages. `MAX_PAGES_PER_SAB` is headroom for adding it later.
+* Discovery is `SAR_PATHS` (a set widened 2026-08-27 from the real
+  structure of boards that returned nothing on the first run — `/published-sars`,
+  `/professionals/safeguarding-adult-review-sar-reports`, `/case-reviews/...`
+  and so on) plus **one hop**: a same-host link whose text says SAR but
+  points at a page is followed once. `www.` and the bare host are treated as
+  one site, and a homepage that redirects to another domain is followed. On
+  a page reached via a SAR link, every document is a candidate even if its
+  link text is only a pseudonym — the hybrid gate still decides ingest vs.
+  review.
+* First-run robots blocks: seven board hosts disallowed either the listing
+  paths or the asset directory the SAR PDFs sit in. Added to
+  `Settings.robots_exceptions` (fourth batch) on the same footing as the
+  council batches.
 * Review-item types shipped: `sab_website_unknown`,
   `sab_site_collection_failed`, `sab_site_robots_disallowed`,
   `sab_site_doc_unavailable`, `sab_no_sars_found`, `sab_site_sar_candidate`,

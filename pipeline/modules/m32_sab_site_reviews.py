@@ -49,33 +49,51 @@ SOURCE_SYSTEM = "sab_website"
 # a 404 is expected and unremarkable, exactly as in m09/m24.
 SAR_PATHS = [
     "/",
+    # observed on real board sites, 2026-08 (see docs/m32-sab-site-crawl.md)
     "/safeguarding-adults-reviews",
     "/safeguarding-adult-reviews",
+    "/safeguarding-adults-reviews-sar",
+    "/safeguarding-adult-reviews-sar",
     "/safeguarding-adults-reviews-sars",
     "/safeguarding-adult-reviews-sars",
+    "/published-sars",
     "/sar",
     "/sars",
     "/sar-reports",
-    "/published-sars",
+    "/sars-published",
     "/reviews",
     "/case-reviews",
+    "/case-reviews/safeguarding-adult-reviews",
     "/adult-reviews",
     "/learning-from-reviews",
     "/learning-reviews",
+    "/learning-from-safeguarding-adults-reviews",
+    "/learning-and-improvement",
     "/publications",
     "/resources",
     "/serious-case-reviews",
+    "/professionals",
+    "/professionals/safeguarding-adult-reviews",
+    "/professionals/safeguarding-adult-review-sar-reports",
     "/safeguarding/reviews",
     "/about-us/safeguarding-adults-reviews",
+    "/about-us/safeguarding-adult-reviews",
 ]
 
 # One hop past a discovery page: a link whose text says SAR but which points
 # at another same-host *page* (not a document) is followed once and scanned
 # too. Many boards keep their reviews one click below any of the guessed
 # paths, behind a "Safeguarding Adults Reviews" link on the homepage.
-MAX_SUBPAGES_PER_SAB = 6
+MAX_SUBPAGES_PER_SAB = 8
 MAX_PAGES_PER_SAB = len(SAR_PATHS) + MAX_SUBPAGES_PER_SAB
-MAX_DOCS_PER_SAB = 25
+MAX_DOCS_PER_SAB = 40
+
+
+def _host_key(netloc: str) -> str:
+    """Host for same-site comparison, insensitive to a leading www. — board
+    sites link between the www and bare forms freely, and treating them as
+    different hosts dropped every candidate on sites that do."""
+    return (netloc or "").lower().split("@")[-1].removeprefix("www.")
 
 _LINK_RE = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
                       re.IGNORECASE | re.DOTALL)
@@ -101,21 +119,29 @@ def _link_text(raw: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw or "")).strip()
 
 
-def sar_links_on_page(page_html: str, page_url: str, host: str) -> list[tuple[str, str]]:
+def sar_links_on_page(page_html: str, page_url: str, host: str,
+                       is_sar_index: bool = False) -> list[tuple[str, str]]:
     """(document_url, link_text) for links on one page that point at a
-    document (pdf/docx/odt) on the same host and carry SAR vocabulary in the
-    URL or the anchor text."""
+    document (pdf/docx/odt) on the same host.
+
+    Normally the link's URL or text must also carry SAR vocabulary. On a page
+    reached *via* a SAR-vocabulary link (`is_sar_index`) that filter is
+    dropped: the page context already vouches for it, so a document linked
+    only as "Anne (2023)" is still collected. The hybrid gate downstream
+    then decides auto-ingest vs. review, so relaxing here only widens what a
+    person gets to look at, never what is stored on a guess.
+    """
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for href, raw_text in _LINK_RE.findall(page_html or ""):
         url = urljoin(page_url, href.strip())
-        if urlparse(url).netloc != host:
+        if _host_key(urlparse(url).netloc) != _host_key(host):
             continue
         path = url.lower().split("?")[0]
         if not path.endswith(m28._DOCUMENT_EXTENSIONS):
             continue
         text = _link_text(raw_text)
-        if not _SAR_LINK_VOCAB.search(f"{url} {text}"):
+        if not is_sar_index and not _SAR_LINK_VOCAB.search(f"{url} {text}"):
             continue
         if url in seen:
             continue
@@ -131,7 +157,7 @@ def sar_subpages_on_page(page_html: str, page_url: str, host: str) -> list[str]:
     seen: set[str] = set()
     for href, raw_text in _LINK_RE.findall(page_html or ""):
         url = urljoin(page_url, href.strip()).split("#")[0]
-        if urlparse(url).netloc != host or url == page_url:
+        if _host_key(urlparse(url).netloc) != _host_key(host) or url == page_url:
             continue
         path = url.lower().split("?")[0]
         if path.endswith(m28._DOCUMENT_EXTENSIONS):
@@ -172,14 +198,14 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
     fetched_pages: set[str] = set()
     reached_anything = False
 
-    def scan(result) -> None:
+    def scan(result, is_index: bool) -> None:
         nonlocal reached_anything
         reached_anything = True
         crawl.pages_fetched += 1
         page_url = result.final_url or result.url
         fetched_pages.add(page_url.split("#")[0])
         html_text = result.body.decode("utf-8", "replace")
-        candidate_urls.extend(sar_links_on_page(html_text, page_url, host))
+        candidate_urls.extend(sar_links_on_page(html_text, page_url, host, is_index))
         for sub in sar_subpages_on_page(html_text, page_url, host):
             if sub not in subpages and sub.split("#")[0] not in fetched_pages:
                 subpages.append(sub)
@@ -200,7 +226,15 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
         if path == "/":
             crawl.homepage_status = result.status_code
             crawl.homepage_sha = result.payload_sha256
-        scan(result)
+            # A homepage that redirects to another domain (a stale directory
+            # URL, or www/bare canonicalisation) is followed: same-site is
+            # then judged against where it actually landed.
+            landed = urlparse(result.final_url or result.url).netloc
+            if landed:
+                host = landed
+        # A path that itself names SARs is an index page: harvest every
+        # document on it, not only the ones whose link text repeats the word.
+        scan(result, is_index=bool(_SAR_LINK_VOCAB.search(path)))
 
     # One hop: follow up to MAX_SUBPAGES_PER_SAB "Safeguarding Adults
     # Reviews" links found above and scan those for documents too.
@@ -216,7 +250,7 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
                 "sab_site_robots_disallowed", sub, {"sab_name": sab_name}))
             continue
         if result.ok:
-            scan(result)
+            scan(result, is_index=True)   # reached via a SAR-vocabulary link
 
     if not reached_anything and not crawl.robots_blocked:
         crawl.unreachable = True

@@ -122,6 +122,19 @@ class Settings(BaseSettings):
     # User-Agent, every use logged and raising a `robots_override_in_use`
     # item. coventry is scoped to /jsna only; m09 may surface sibling paths
     # (/public-health, /drug-and-alcohol) that need the same treatment.
+    #
+    # Fourth batch, 2026-08-27, from m32's first crawl of England Safeguarding
+    # Adults Board sites. Seven hosts, 125 review items between them, all
+    # Safeguarding Adults Board / Safeguarding Partnership sites whose
+    # robots.txt disallows either the review-listing paths (cindex.camden,
+    # safeguardingdurhamadults) or the asset directory the published SAR
+    # documents sit in (bromley /assets/, southwark /assets/, east sussex
+    # /media/, kent & medway /assets/, wiltshire /assets/). A SAR is a public
+    # document a board publishes for reuse; same footing as the batches
+    # above — prefix-scoped to what the review items show, fetched at the
+    # standard per-host interval with the identifying User-Agent, every use
+    # logged and raising a `robots_override_in_use` item, and removed if a
+    # board asks.
     robots_exceptions: tuple[str, ...] = (
         # data.gov.uk's real API host. Its robots.txt disallows /api/
         # wholesale, which reads as aimed at crawlers hitting the CKAN search
@@ -165,6 +178,14 @@ class Settings(BaseSettings):
         "https://adur-worthing-hr.onmats.com/w/webpage/",
         "https://hertsmere-foi.oncreate.app/w/webpage/",
         "https://contactus.digital.westmorlandandfurness.gov.uk/w/webpage/",
+        # Fourth batch (2026-08-27) — m32 SAB sites; see the note above.
+        "http://cindex.camden.gov.uk/",
+        "http://www.safeguardingdurhamadults.info/",
+        "https://bromleysafeguardingadults.org/assets/",
+        "https://safeguarding.southwark.gov.uk/assets/",
+        "https://www.eastsussexsab.org.uk/media/",
+        "https://www.kmsab.org.uk/assets/",
+        "https://www.wiltshiresvpp.org.uk/assets/",
         # A handful of the earliest (Dec 2014) files in the m01 CSV archive
         # backfill are hosted on www.dropbox.com rather than CCS's own
         # domain. Dropbox's robots.txt disallows /s/ (shared-link paths) for
