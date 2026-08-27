@@ -441,6 +441,28 @@ def nlp_queue_claims(
         conn.close()
 
 
+@nlp_app.command("gate-034g")
+def nlp_gate_034g(
+    min_per_class: int = typer.Option(50, min=1, help="Decided examples needed per class to train"),
+    heldout_per_class: int = typer.Option(15, min=0, help="Held-out eval examples needed per class"),
+) -> None:
+    """Report whether 034G (SetFit classifiers) can start: per-category
+    positive/negative decided-example counts, source/subject/time spread,
+    inter-reviewer agreement, and what is still missing. Read-only.
+    """
+    from pipeline.nlp import gate
+
+    conn, _ = _document_connection()
+    try:
+        report = gate.check(conn, min_per_class=min_per_class,
+                            heldout_per_class=heldout_per_class)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+        if not report["ready"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
 @nlp_app.command("decide-claim")
 def nlp_decide_claim(
     candidate: str = typer.Option(..., help="claim_candidate_id"),

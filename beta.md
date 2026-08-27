@@ -392,6 +392,15 @@ DONE
     `decisions.training_export()` joins the verdict to the triple.
     `decided_by` never defaulted. `graph_claim_id` stays NULL — **no
     `graph_claims` draft is written**. `tests/test_nlp_decisions.py` green.
+    034G gate-checker — `pipeline/nlp/gate.py` + `pipeline nlp gate-034g`:
+    read-only report over `claim_candidate_decisions`, per classifier
+    category (recruitment_pressure / pay_concern / high_caseload /
+    funding_reduction / access_problem): decided +/- counts, source /
+    distinct-subject / year spread, inter-reviewer agreement, and a
+    `blocking` list. Exits non-zero until every condition holds. Thresholds
+    are parameters (module constants as defaults). `tests/test_nlp_gate.py`
+    green. This makes the 034G gate measurable; closing it is reviewer
+    labour, not code.
   - context_034f_graph: `graph_claims` has **no writer anywhere in
     `pipeline/`** — a dormant schema (migration `0050`) with
     `evidence_graph.claim_provenance()` and the Neo4j projector, but nothing
@@ -401,13 +410,19 @@ DONE
     NOT scheduled. When taken it must set the detector in
     `extractor_name`/`extractor_version`, leave `confidence` for the
     reviewer, `review_status='draft'`, never `promoted_by`.
-  - next_action: **034G** (SetFit few-shot classifiers) is **gated** and not
-    startable — it needs ≥ ~50 positive *and* ≥ ~50 negative *decided*
-    examples per category (from `claim_candidate_decisions`, now writable),
-    source/provider/time diversity, a held-out eval set and a minimum
-    precision. **034H** (active learning → BERTopic → RAG) is gated /
-    deferred behind a named decision. So the nlp tranche work pauses here
-    until there is review data. Still open regardless: the `graph_claims`
+  - next_action: **034G** (SetFit few-shot classifiers) is **gated**;
+    `pipeline nlp gate-034g` now reports exactly how far off it is. Closing
+    the gate is reviewer labour: (a) `uv sync --extra nlp` and run the chain
+    on the live warehouse with a real embedder + `--extractor gliner`;
+    (b) work the `semantic_claim_candidate` queue with `decide-claim`,
+    favouring `corrected` over bare `reject`, until `gate-034g` exits 0
+    (~50 pos + ~50 neg + a held-out margin per category, source/subject/year
+    spread, ≥10 double-reviewed at ≥0.8 agreement). Only then is the SetFit
+    build (setfit into the `nlp` extra; one binary head per category over
+    chunk embeddings; predictions to a new versioned table with a confidence
+    column; a min-precision gate before any prediction is written) worth
+    doing. **034H** (active learning → BERTopic → RAG) is gated / deferred
+    behind a named decision. Still open regardless: the `graph_claims`
     wiring decision above; browser-verify `/api/admin/search`; grow
     `retrieval_queries.json` / `gold_spans.json` / `assertion_cases.json`
     from the live warehouse; decide on medSpaCy; admin-UI surfaces for

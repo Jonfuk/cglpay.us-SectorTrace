@@ -318,6 +318,28 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
     --by "A. Reviewer" --corrected-predicate workforce.has_retention_pressure
 ```
 
+## Getting from 034F to 034G
+
+034G (SetFit) is gated, and the gate is measurable. `pipeline nlp gate-034g`
+(`pipeline/nlp/gate.py`) reads `claim_candidate_decisions` and reports, per
+classifier category (`recruitment_pressure`, `pay_concern`, `high_caseload`,
+`funding_reduction`, `access_problem`): decided positive / negative counts,
+source-system / distinct-subject / year spread, inter-reviewer agreement on
+double-reviewed items, and a `blocking` list of exactly what is short. It
+exits non-zero until every condition holds. A *positive* is an `approved`
++ `AFFIRMED` candidate for that predicate, or one `corrected` to it; a
+*negative* is a `rejected` one, a `corrected`-away one, or an `approved` but
+`NEGATED` / `HISTORICAL` / `THIRD_PARTY` one.
+
+```bash
+uv run pipeline nlp gate-034g          # exits 1 with a blocking list until ready
+```
+
+The path to a green gate is reviewer labour, not code: run the chain on the
+real warehouse with a real embedder, work the `semantic_claim_candidate`
+queue with `decide-claim` (favouring `corrected` over bare `reject`), and
+re-check the gate.
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -331,7 +353,7 @@ earlier ones to be useful.
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
 | **034E** | assertion / context detection into `document_assertions` (migration `0067`) — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`; `assertion_status` and `detector_confidence` separate; stdlib cue tagger always on, medSpaCy `ConText` an optional path (not in the extra) | **shipped** — grow `assertion_cases.json`; wire medSpaCy if its model install is worth it |
 | **034F** | machine claim candidates (`document_claim_candidates`, migration `0068`) via controlled concept→predicate + pattern triggers — **not** co-occurrence; `promote.py` queues a slice into `review_queue`; `decisions.py` records approve / reject / **correct** into `claim_candidate_decisions` (034G's training signal) | **shipped bar the graph write** — being `graph_claims`' first writer is held as its own decision |
-| **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |
+| **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | **gated** — `pipeline nlp gate-034g` reports readiness; closing it is reviewer labour |
 | **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |
 
 ## Deferred behind a decision
