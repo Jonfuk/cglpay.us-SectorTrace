@@ -29,13 +29,15 @@ Not every tracked provider is a going concern. Some keys are former names
 of an entity now tracked under its current name (addaction→with_you,
 humankind→waythrough, westminster_drug_project→via); some are
 organisations absorbed into another (richmond_fellowship, aquarius,
-action_on_addiction, swanswell) or wound up entirely (lifeline_project).
-PROVIDER_STATUS records that per key — `status` and, where there is one
-successor, `superseded_by` — and it is seeded onto the `providers` table
-so the portal can say so plainly. The identifiers still live on the
-current/surviving key; a former or dissolved key keeps its name variants
-so a notice bearing that identity still resolves to its own row, and its
-evidence is never rewritten onto the successor. See PROVIDER_NOTES.
+action_on_addiction, swanswell, blenheim_cdp, edp_drug_alcohol into the
+Humankind/Waythrough line; ley_community into phoenix_futures) or wound up
+entirely (lifeline_project). PROVIDER_STATUS records that per key —
+`status` and, where there is one successor, `superseded_by` — and it is
+seeded onto the `providers` table so the portal can say so plainly. The
+identifiers still live on the current/surviving key; a former or
+dissolved key keeps its name variants so a notice bearing that identity
+still resolves to its own row, and its evidence is never rewritten onto
+the successor. See PROVIDER_NOTES.
 """
 from __future__ import annotations
 
@@ -50,7 +52,7 @@ PROVIDER_NOTES: dict[str, str] = {
     "addaction": "Former name of With You: the registered name of company 02580377 / charity 1001957 from 1998 until 26 Feb 2020. Same legal entity as `with_you`, where the identifiers are seeded — but do not merge evidence rows: the name on a notice is evidence of when it was used.",
     "with_you": "Formerly Addaction (renamed 26 Feb 2020). Company 02580377, charity 1001957.",
     "humankind": "Former name of Waythrough: 'Humankind Charity' was the registered name of company 01820492 / charity 515755 from 2018 until 6 Feb 2025 ('DISC' before that). Same legal entity as `waythrough`, where the identifiers are seeded. Distinct from the 2024 group formation with Richmond Fellowship, which stayed separately registered.",
-    "waythrough": "The former Humankind entity (company 01820492, charity 515755) renamed 6 Feb 2025 — not a new legal entity. Richmond Fellowship and Aquarius (charity 1014305) sit alongside it in the Waythrough group, each still separately registered.",
+    "waythrough": "The former Humankind entity (company 01820492, charity 515755) renamed 6 Feb 2025 — not a new legal entity. The Humankind/Waythrough line has absorbed several charities: Blenheim CDP (London, 2019), EDP Drug & Alcohol Services (Devon/Dorset, 2023), and — via the 2024 group formation — Richmond Fellowship and Aquarius, which stayed separately registered. Blenheim and EDP evidence is under their own keys.",
     "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers. Its CQC provider registration (1-151675564) was archived on 4 Jun 2024 with the regulated services moved to Waythrough — pre-June-2024 CQC evidence is still RF's.",
     "via": "Formerly Westminster Drug Project (renamed 5 Jun 2023). Company 02807934 ('Via Community Ltd'), charity 1031602. Short trading name; high false-positive risk in free text — match only exact registered variants or the historic 'Westminster Drug Project'.",
     "westminster_drug_project": "Former name of Via: the registered name of company 02807934 / charity 1031602 until 5 Jun 2023 (also historic 'Waltham Forest Drug Project' / 'Wandsworth Drug Project'). Same legal entity as `via`, where the identifiers are seeded.",
@@ -64,6 +66,13 @@ PROVIDER_NOTES: dict[str, str] = {
     "action_on_addiction": "Charity 1117988, company 05947481 ('3 To 1' until 2007). Merged into The Forward Trust in May 2021; the shell company remains registered and the name is retained for some Forward Trust services. Itself formed in 2007 from the Chemical Dependency Centre, Clouds and the original Action on Addiction.",
     "lifeline_project": "Manchester drug and alcohol charity (est. 1971), company 01842240. Entered administration in 2017 after a Charity Commission inquiry into financial controls; services were taken over by Change Grow Live, Humankind and others. Company dissolved 25 Jan 2024; charity (515691) removed from the register, so no live charity number to seed. Appears as a co-respondent in older employment-tribunal judgments — see tests/test_m04_viability.py, which uses it as a real insolvency fixture.",
     "swanswell": "Swanswell Charitable Trust: charity 1074891, company 03692925, CQC provider 1-127628178. Rugby / Warwickshire drug and alcohol charity. Merged into Cranstoun in 2022; CQC registration archived 1 Nov 2021, company dissolved 18 Oct 2022.",
+    "blenheim_cdp": "Blenheim Community Drug Project: large London drug and alcohol charity, charity 293959, company 01694712, CQC provider 1-516591398. Merged into Humankind in April 2019 (services kept the Blenheim name); company dissolved 26 Apr 2022. Evidence stays under this key; the surviving entity is `waythrough`.",
+    "edp_drug_alcohol": "E D P Drug & Alcohol Services: Devon and Dorset charity, charity 297370, company 02145656, CQC provider 1-587977840. Became a Humankind subsidiary in April 2020 and fully merged into it on 1 Jul 2023; the surviving entity is `waythrough`. 'EDP' alone is a high-false-positive acronym — match the full registered name.",
+    "bristol_drugs_project": "Independent Bristol charity (est. ~1986): charity 291714, company 01902326, CQC provider 1-126776288. Delivers the Bristol ROADS partnership. 'BDP' is a common acronym elsewhere — match 'Bristol Drugs Project' in full.",
+    "developing_health_independence": "'DHI': charity 1078154, company 03830311, CQC provider 1-927177975. Bath-based; drug and alcohol treatment plus housing across Bath & North East Somerset, Bristol, Wiltshire and Somerset. 'DHI' alone is ambiguous — match the full name.",
+    "neca": "North East Council on Addictions (registered as 'NECA'): charity 516516, company 01828287, CQC provider 1-126776368. Independent North East charity; adult and criminal-justice substance misuse.",
+    "ley_community": "The Ley Community Drug Services: charity 1074874, company 03736193, CQC provider 1-101610029. Therapeutic-community residential rehab near Oxford (est. 1971). A wholly-owned subsidiary of Phoenix House since 2018, still separately registered; its board reports to the Phoenix Group Board. Surviving parent is `phoenix_futures`.",
+    "practice_plus_group": "Practice Plus Group Health and Rehabilitation Services Limited: for-profit, not a charity. Company 10498997, CQC provider 1-3757899473. The Health in Justice arm (rebranded from Care UK Health in Justice in Oct 2020) is the leading independent provider of prison healthcare in England — ~47 establishments — with substance misuse among the services. 'Practice Plus Group' also runs urgent care, hospitals and diagnostics under other companies; match the Health and Rehabilitation Services entity for substance-misuse evidence.",
 }
 
 # provider_key -> (status, superseded_by). Seeded onto `providers.status` /
@@ -81,6 +90,9 @@ PROVIDER_STATUS: dict[str, tuple[str, str | None]] = {
     "aquarius": ("merged", "waythrough"),
     "action_on_addiction": ("merged", "forward_trust"),
     "swanswell": ("merged", "cranstoun"),
+    "blenheim_cdp": ("merged", "waythrough"),
+    "edp_drug_alcohol": ("merged", "waythrough"),
+    "ley_community": ("merged", "phoenix_futures"),
     "lifeline_project": ("dissolved", None),
 }
 
@@ -400,6 +412,132 @@ VERIFIED_IDENTIFIERS: list[dict[str, str]] = [
         "scheme": "cqc_provider_id",
         "identifier": "1-127628178",
         "role": "CQC-registered provider ('Swanswell Charitable Trust'); archived 1 Nov 2021",
+    },
+
+    # Second expansion, 2026-08-27 — two entities absorbed into the
+    # Humankind/Waythrough line, three active independent peers, a
+    # phoenix_futures subsidiary, and the leading for-profit prison-
+    # healthcare provider. Same verification: primary registers + each
+    # provider's current cqc.org.uk page.
+    {
+        "provider_key": "blenheim_cdp",
+        "scheme": "charity_number",
+        "identifier": "293959",
+        "role": "registered charity (England and Wales); merged into Humankind 2019",
+    },
+    {
+        "provider_key": "blenheim_cdp",
+        "scheme": "company_number",
+        "identifier": "01694712",
+        "role": "charitable company limited by guarantee; dissolved 26 Apr 2022",
+    },
+    {
+        "provider_key": "blenheim_cdp",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-516591398",
+        "role": "CQC-registered provider ('Blenheim CDP')",
+    },
+    {
+        "provider_key": "edp_drug_alcohol",
+        "scheme": "charity_number",
+        "identifier": "297370",
+        "role": "registered charity (England and Wales); merged into Humankind 1 Jul 2023",
+    },
+    {
+        "provider_key": "edp_drug_alcohol",
+        "scheme": "company_number",
+        "identifier": "02145656",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "edp_drug_alcohol",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-587977840",
+        "role": "CQC-registered provider ('E D P Drug & Alcohol Services')",
+    },
+    {
+        "provider_key": "bristol_drugs_project",
+        "scheme": "charity_number",
+        "identifier": "291714",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "bristol_drugs_project",
+        "scheme": "company_number",
+        "identifier": "01902326",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "bristol_drugs_project",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126776288",
+        "role": "CQC-registered provider ('Bristol Drugs Project Limited')",
+    },
+    {
+        "provider_key": "developing_health_independence",
+        "scheme": "charity_number",
+        "identifier": "1078154",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "developing_health_independence",
+        "scheme": "company_number",
+        "identifier": "03830311",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "developing_health_independence",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-927177975",
+        "role": "CQC-registered provider ('Developing Health and Independence')",
+    },
+    {
+        "provider_key": "neca",
+        "scheme": "charity_number",
+        "identifier": "516516",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "neca",
+        "scheme": "company_number",
+        "identifier": "01828287",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "neca",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126776368",
+        "role": "CQC-registered provider ('NECA')",
+    },
+    {
+        "provider_key": "ley_community",
+        "scheme": "charity_number",
+        "identifier": "1074874",
+        "role": "registered charity (England and Wales); wholly-owned subsidiary of Phoenix House",
+    },
+    {
+        "provider_key": "ley_community",
+        "scheme": "company_number",
+        "identifier": "03736193",
+        "role": "charitable company limited by guarantee; wholly-owned subsidiary of Phoenix House",
+    },
+    {
+        "provider_key": "ley_community",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-101610029",
+        "role": "CQC-registered provider ('Ley Community Drug Services')",
+    },
+    {
+        "provider_key": "practice_plus_group",
+        "scheme": "company_number",
+        "identifier": "10498997",
+        "role": "private limited company (not a charity); 'Practice Plus Group Health and Rehabilitation Services Limited'",
+    },
+    {
+        "provider_key": "practice_plus_group",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-3757899473",
+        "role": "CQC-registered provider ('Practice Plus Group Health and Rehabilitation Services Limited')",
     },
 ]
 

@@ -55,6 +55,17 @@ SUPPLIER_NAME_VARIANTS: dict[str, list[str]] = {
     "action_on_addiction": ["Action on Addiction"],
     "lifeline_project": ["Lifeline Project", "Lifeline"],
     "swanswell": ["Swanswell", "Swanswell Charitable Trust"],
+    "blenheim_cdp": ["Blenheim CDP", "Blenheim Community Drug Project"],
+    "edp_drug_alcohol": ["EDP Drug & Alcohol Services", "E D P Drug & Alcohol Services",
+                          "EDP Drug and Alcohol Services"],
+    "bristol_drugs_project": ["Bristol Drugs Project"],
+    "developing_health_independence": ["Developing Health and Independence",
+                                        "Developing Health & Independence"],
+    "neca": ["NECA", "North East Council on Addictions"],
+    "ley_community": ["The Ley Community Drug Services", "Ley Community Drug Services",
+                       "The Ley Community"],
+    "practice_plus_group": ["Practice Plus Group Health and Rehabilitation Services",
+                             "Practice Plus Group", "Care UK Health in Justice"],
 }
 
 # Search terms for tribunal judgments (Module 2) — respondent name variants
