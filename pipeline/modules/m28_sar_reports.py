@@ -179,8 +179,8 @@ def document_extension(url: str) -> str | None:
 _SAB_PREFIX_STOPWORDS = frozenset(
     "safeguarding adult adults review reviews report reports sar sars "
     "executive summary serious case overview thematic learning brief "
-    "briefing practitioner proforma final draft published the of "
-    "introduction confidential local".split())
+    "briefing practitioner proforma final draft published foreword "
+    "official criteria methodology introduction confidential the of".split())
 
 
 def _clean_sab_name(raw: str) -> str | None:
@@ -209,7 +209,9 @@ def _clean_sab_name(raw: str) -> str | None:
         return None
 
     start = phrase_start
-    while start > 0 and phrase_start - start < 5:
+    # Up to six place words: multi-authority boards run long ("Bracknell
+    # Forest and Windsor and Maidenhead Safeguarding Adults Board").
+    while start > 0 and phrase_start - start < 6:
         prev = tokens[start - 1]
         low = prev.lower()
         if low in _SAB_PREFIX_STOPWORDS:
@@ -219,7 +221,9 @@ def _clean_sab_name(raw: str) -> str | None:
         start -= 1
     while start < phrase_start and tokens[start].lower() in _SAB_PREFIX_STOPWORDS | {"and", "&"}:
         start += 1
-    if start == phrase_start:
+    # "Local Safeguarding Adults Board" with nothing else in front is the
+    # generic statutory term, not a named board.
+    if " ".join(tokens[start:phrase_start]).lower() in ("", "local", "a local"):
         return None
     return " ".join(tokens[start:])
 
