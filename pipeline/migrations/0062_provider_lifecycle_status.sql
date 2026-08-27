@@ -1,0 +1,27 @@
+-- Lifecycle state for a provider entity, so the portal can say plainly when
+-- an organisation on a comparison has been renamed, merged or dissolved --
+-- rather than leaving that fact only in the free-text `notes`, where a
+-- reader scanning a table of comparators would miss it.
+--
+-- Reference/config like the rest of this table: seeded from
+-- pipeline/providers.py on every run, no provenance. Two columns:
+--
+--   status         one of 'active' (the default, and the common case),
+--                  'renamed', 'merged', 'dissolved'. 'renamed' is for a
+--                  provider_key that is a former name of an entity now
+--                  tracked under its current name; 'merged' for one
+--                  absorbed into another organisation (whether or not the
+--                  original legal entity still exists as a shell);
+--                  'dissolved' for one that simply wound up.
+--
+--   superseded_by  the provider_key of the surviving or successor entity
+--                  where there is exactly one -- a renamed org points at
+--                  its current-name key, an absorbed one at its acquirer.
+--                  NULL where a provider was split across several
+--                  successors, or dissolved with none.
+--
+-- These describe the *entity*, not the evidence. Evidence rows that name an
+-- old identity stay attached to that provider_key and are not rewritten:
+-- the name on a notice is still evidence of when it was used.
+ALTER TABLE providers ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE providers ADD COLUMN superseded_by TEXT;

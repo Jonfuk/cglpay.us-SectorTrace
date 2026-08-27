@@ -408,6 +408,12 @@ main:focus { outline: none; }
 .badge.good { background: rgba(52,211,153,0.12); color: var(--accent-green); }
 .badge.bad { background: rgba(248,113,113,0.12); color: var(--accent-red); }
 .badge.neutral { background: var(--bg-elevated); color: var(--text-secondary); border-color: var(--border-accent); }
+/* Provider lifecycle: renamed / merged / dissolved. Muted, not alarming --
+   a merged comparator is still a valid comparator for its own era. */
+.badge.lifecycle { background: var(--bg-elevated); color: var(--text-secondary); border-color: var(--border-accent); text-transform: uppercase; letter-spacing: 0.05em; }
+.badge.lifecycle.dissolved { color: var(--accent-red); border-color: rgba(248,113,113,0.35); }
+.provider-lifecycle-note { color: var(--text-secondary); font-size: 13px; margin: 2px 0 0; }
+.provider-lifecycle-note a { color: var(--text-primary); }
 
 /* --- charts -------------------------------------------------------------- */
 

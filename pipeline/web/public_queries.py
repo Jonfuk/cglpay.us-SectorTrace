@@ -603,6 +603,10 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
                p.canonical_name,
                p.is_target,
                p.notes,
+               p.status,
+               p.superseded_by,
+               (SELECT sp.canonical_name FROM providers sp
+                 WHERE sp.provider_key = p.superseded_by) AS superseded_by_name,
                (SELECT COUNT(*) FROM contracts c
                   JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
                  WHERE sa.supplier_key = p.provider_key) AS contract_count,
@@ -1988,6 +1992,13 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                      (provider_key,))
     if not provider:
         raise QueryError(f"No provider {provider_key!r}.")
+
+    # The successor's display name, so the portal can link "now trading as X"
+    # / "merged into X" rather than printing a slug.
+    if provider.get("superseded_by"):
+        successor = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = ?",
+                          (provider["superseded_by"],))
+        provider["superseded_by_name"] = successor.get("canonical_name") if successor else None
 
     events: list[dict] = []
 

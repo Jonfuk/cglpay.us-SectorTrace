@@ -25,11 +25,17 @@ as 'unverified' pending the same hand check. A guessed identifier
 silently mis-attributes contracts, tribunal claims and accounts to the
 wrong legal entity, so it is worse than a NULL.
 
-Three provider_keys are historical names of an entity that also appears
-under its current name (addaction→with_you, humankind→waythrough,
-westminster_drug_project→via). The identifiers live on the current key;
-the historical key stays a bare name variant so a notice bearing the old
-name still resolves to its own row. See PROVIDER_NOTES.
+Not every tracked provider is a going concern. Some keys are former names
+of an entity now tracked under its current name (addaction→with_you,
+humankind→waythrough, westminster_drug_project→via); some are
+organisations absorbed into another (richmond_fellowship, aquarius,
+action_on_addiction, swanswell) or wound up entirely (lifeline_project).
+PROVIDER_STATUS records that per key — `status` and, where there is one
+successor, `superseded_by` — and it is seeded onto the `providers` table
+so the portal can say so plainly. The identifiers still live on the
+current/surviving key; a former or dissolved key keeps its name variants
+so a notice bearing that identity still resolves to its own row, and its
+evidence is never rewritten onto the successor. See PROVIDER_NOTES.
 """
 from __future__ import annotations
 
@@ -50,6 +56,32 @@ PROVIDER_NOTES: dict[str, str] = {
     "westminster_drug_project": "Former name of Via: the registered name of company 02807934 / charity 1031602 until 5 Jun 2023 (also historic 'Waltham Forest Drug Project' / 'Wandsworth Drug Project'). Same legal entity as `via`, where the identifiers are seeded.",
     "delphi_medical": "Private company, not a charity: Delphi Medical Limited, company 06944767, CQC provider 1-2448282802. A separately registered 'Delphi Medical Consultants Limited' (company 06014150, CQC provider 1-125892841) shares the Burnley address and historically held the substance-misuse registrations; its CQC registration was archived on 15 Nov 2024. Seeded identifiers refer to Delphi Medical Limited.",
     "inclusion": "Not a separate legal entity: a service brand of Midlands Partnership University NHS Foundation Trust (NHS provider, ODS / CQC code RRE — no Companies House or Charity Commission registration). Generic word; high false-positive risk in free-text matching.",
+    "cranstoun": "National drug and alcohol charity: charity 1061582, company 03306337 ('Cranstoun Drug Services' until 2011), CQC provider 1-101678209. Absorbed Swanswell in 2022.",
+    "changing_lives": "'Changing Lives' is the trading name of The Cyrenians Ltd (company 00995799, 'Tyneside Cyrenians Limited' until 2009), charity 500640; CQC registers it as 'The Cyrenians Ltd' (provider 1-144519557). A Collective Voice member. Homelessness charity whose remit includes drug and alcohol recovery services.",
+    "alcohol_and_drug_service": "'ADS', Hull: charity 1108595, company 05375809, CQC provider 1-152340136. Delivers the Aspire partnership with Rotherham Doncaster and South Humber NHS FT. NOT the Greater Manchester charity 'ADS (Addiction Dependency Solutions)' (charity 702559, company 01990365, dissolved 2026) — match the exact registered name.",
+    "spectrum_community_health": "Community interest company, not a charity: company 07300133, CQC provider 1-183173152. Prison healthcare (including substance misuse) and community services across Northern England. 'Spectrum' alone is generic — match only the registered name.",
+    "aquarius": "Operating name 'Aquarius': charity 1014305, company 02427100 (active). West Midlands alcohol, drugs and gambling support. A subsidiary within the Waythrough group (via Richmond Fellowship) but still separately registered. 'Aquarius' alone is a common word — match only the registered form.",
+    "action_on_addiction": "Charity 1117988, company 05947481 ('3 To 1' until 2007). Merged into The Forward Trust in May 2021; the shell company remains registered and the name is retained for some Forward Trust services. Itself formed in 2007 from the Chemical Dependency Centre, Clouds and the original Action on Addiction.",
+    "lifeline_project": "Manchester drug and alcohol charity (est. 1971), company 01842240. Entered administration in 2017 after a Charity Commission inquiry into financial controls; services were taken over by Change Grow Live, Humankind and others. Company dissolved 25 Jan 2024; charity (515691) removed from the register, so no live charity number to seed. Appears as a co-respondent in older employment-tribunal judgments — see tests/test_m04_viability.py, which uses it as a real insolvency fixture.",
+    "swanswell": "Swanswell Charitable Trust: charity 1074891, company 03692925, CQC provider 1-127628178. Rugby / Warwickshire drug and alcohol charity. Merged into Cranstoun in 2022; CQC registration archived 1 Nov 2021, company dissolved 18 Oct 2022.",
+}
+
+# provider_key -> (status, superseded_by). Seeded onto `providers.status` /
+# `providers.superseded_by` (migration 0062) so the portal can show when an
+# organisation on a comparison has been renamed, merged or dissolved.
+# Anything absent from this map is 'active' with no successor. `superseded_by`
+# is only set where there is exactly one — a rename points at the
+# current-name key, an absorption at the acquirer; lifeline_project's
+# services were split across several, so it stays NULL.
+PROVIDER_STATUS: dict[str, tuple[str, str | None]] = {
+    "addaction": ("renamed", "with_you"),
+    "humankind": ("renamed", "waythrough"),
+    "westminster_drug_project": ("renamed", "via"),
+    "richmond_fellowship": ("merged", "waythrough"),
+    "aquarius": ("merged", "waythrough"),
+    "action_on_addiction": ("merged", "forward_trust"),
+    "swanswell": ("merged", "cranstoun"),
+    "lifeline_project": ("dissolved", None),
 }
 
 # Identifiers asserted here are treated as verified. Keep this list to
@@ -242,6 +274,133 @@ VERIFIED_IDENTIFIERS: list[dict[str, str]] = [
         "identifier": "RRE",
         "role": "CQC provider id is the ODS trust code for Midlands Partnership University NHS Foundation Trust",
     },
+
+    # Further tracked providers added 2026-08-27 — national peers missing
+    # from the original 13, plus four merged/dissolved organisations that
+    # still appear in older evidence. Same verification as the block above:
+    # charity/company numbers off the primary registers, CQC IDs off each
+    # provider's current cqc.org.uk page. Status and successor are in
+    # PROVIDER_STATUS.
+    {
+        "provider_key": "cranstoun",
+        "scheme": "charity_number",
+        "identifier": "1061582",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "cranstoun",
+        "scheme": "company_number",
+        "identifier": "03306337",
+        "role": "charitable company limited by guarantee; 'Cranstoun Drug Services' until 2011",
+    },
+    {
+        "provider_key": "cranstoun",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-101678209",
+        "role": "CQC-registered provider ('Cranstoun')",
+    },
+    {
+        "provider_key": "changing_lives",
+        "scheme": "charity_number",
+        "identifier": "500640",
+        "role": "registered charity (England and Wales); registered name 'The Cyrenians Ltd'",
+    },
+    {
+        "provider_key": "changing_lives",
+        "scheme": "company_number",
+        "identifier": "00995799",
+        "role": "charitable company limited by guarantee ('The Cyrenians Ltd', 'Tyneside Cyrenians Limited' until 2009)",
+    },
+    {
+        "provider_key": "changing_lives",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-144519557",
+        "role": "CQC-registered provider ('The Cyrenians Ltd')",
+    },
+    {
+        "provider_key": "alcohol_and_drug_service",
+        "scheme": "charity_number",
+        "identifier": "1108595",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "alcohol_and_drug_service",
+        "scheme": "company_number",
+        "identifier": "05375809",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "alcohol_and_drug_service",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-152340136",
+        "role": "CQC-registered provider ('The Alcohol and Drug Service')",
+    },
+    {
+        "provider_key": "spectrum_community_health",
+        "scheme": "company_number",
+        "identifier": "07300133",
+        "role": "community interest company (not a charity)",
+    },
+    {
+        "provider_key": "spectrum_community_health",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-183173152",
+        "role": "CQC-registered provider ('Spectrum Community Health C.I.C.')",
+    },
+    {
+        "provider_key": "aquarius",
+        "scheme": "charity_number",
+        "identifier": "1014305",
+        "role": "registered charity (England and Wales); within the Waythrough group",
+    },
+    {
+        "provider_key": "aquarius",
+        "scheme": "company_number",
+        "identifier": "02427100",
+        "role": "charitable company limited by guarantee; within the Waythrough group",
+    },
+    {
+        "provider_key": "action_on_addiction",
+        "scheme": "charity_number",
+        "identifier": "1117988",
+        "role": "registered charity (England and Wales); merged into The Forward Trust 2021",
+    },
+    {
+        "provider_key": "action_on_addiction",
+        "scheme": "company_number",
+        "identifier": "05947481",
+        "role": "charitable company limited by guarantee ('3 To 1' until 2007); merged into The Forward Trust 2021",
+    },
+    {
+        "provider_key": "action_on_addiction",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-101649713",
+        "role": "CQC-registered provider ('Action on Addiction')",
+    },
+    {
+        "provider_key": "lifeline_project",
+        "scheme": "company_number",
+        "identifier": "01842240",
+        "role": "charitable company limited by guarantee; dissolved 25 Jan 2024",
+    },
+    {
+        "provider_key": "swanswell",
+        "scheme": "charity_number",
+        "identifier": "1074891",
+        "role": "registered charity (England and Wales); merged into Cranstoun 2022",
+    },
+    {
+        "provider_key": "swanswell",
+        "scheme": "company_number",
+        "identifier": "03692925",
+        "role": "charitable company limited by guarantee; dissolved 18 Oct 2022",
+    },
+    {
+        "provider_key": "swanswell",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-127628178",
+        "role": "CQC-registered provider ('Swanswell Charitable Trust'); archived 1 Nov 2021",
+    },
 ]
 
 
@@ -249,11 +408,14 @@ def seed_rows() -> tuple[list[dict], list[dict]]:
     """Returns (providers, provider_identifiers) rows to upsert."""
     providers = []
     for key, variants in SUPPLIER_NAME_VARIANTS.items():
+        status, superseded_by = PROVIDER_STATUS.get(key, ("active", None))
         providers.append({
             "provider_key": key,
             "canonical_name": variants[0],
             "is_target": 1 if key == TARGET_PROVIDER_KEY else 0,
             "notes": PROVIDER_NOTES.get(key),
+            "status": status,
+            "superseded_by": superseded_by,
         })
 
     identifiers = [

@@ -23,6 +23,36 @@ export async function render(main, { path }) {
   return key ? renderOne(main, key) : renderList(main);
 }
 
+// --- provider lifecycle: renamed / merged / dissolved ----------------------
+
+const LIFECYCLE_VERB = { renamed: 'Now operates as', merged: 'Merged into', dissolved: 'Dissolved' };
+
+function lifecycleBadge(status) {
+  if (!status || status === 'active') return null;
+  return el('span', {
+    class: status === 'dissolved' ? 'badge lifecycle dissolved' : 'badge lifecycle',
+    text: status,
+  });
+}
+
+// A one-line plain-language note under the heading, with a link to the
+// successor entity where there is one. The evidence itself is never moved,
+// so the note says so.
+function lifecycleNote(provider) {
+  const status = provider.status;
+  if (!status || status === 'active') return null;
+  const verb = LIFECYCLE_VERB[status] || status;
+  const tail = ' The records below stay attached to this name for the period it was used.';
+  if (!provider.superseded_by) {
+    return el('p', { class: 'provider-lifecycle-note' }, `${verb}.`, tail);
+  }
+  return el('p', { class: 'provider-lifecycle-note' },
+    `${verb} `,
+    el('a', { href: `#/providers/${encodeURIComponent(provider.superseded_by)}`,
+      text: provider.superseded_by_name || provider.superseded_by }),
+    '.', tail);
+}
+
 // --- the list ----------------------------------------------------------------
 
 async function renderList(main) {
@@ -109,6 +139,21 @@ async function renderList(main) {
     }) },
     { title: 'Campaign subject', field: 'is_target', width: 140,
       formatter: (c) => (c.getValue() ? '★ yes' : '') },
+    // Renamed / merged / dissolved, with a link to the surviving entity.
+    // A DOM node, built by el() like the register links below.
+    { title: 'Status', field: 'status', width: 200,
+      formatter: (c) => {
+        const d = c.getRow().getData();
+        if (!d.status || d.status === 'active') return '';
+        const parts = [lifecycleBadge(d.status)];
+        if (d.superseded_by) {
+          parts.push(' → ', el('a', {
+            href: `#/providers/${encodeURIComponent(d.superseded_by)}`,
+            text: d.superseded_by_name || d.superseded_by,
+          }));
+        }
+        return el('span', {}, ...parts);
+      } },
     { title: 'Contracts', field: 'contract_count', width: 100 },
     { title: 'Contract value', field: 'contract_value_gbp', width: 130,
       formatter: (c) => gbp(c.getValue()) },
@@ -151,7 +196,10 @@ async function renderOne(main, key) {
           'Who commissions it →')),
       el('h1', {}, provider.canonical_name || key,
         provider.is_target ? ' ' : null,
-        provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null),
+        provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null,
+        provider.status && provider.status !== 'active' ? ' ' : null,
+        lifecycleBadge(provider.status)),
+      lifecycleNote(provider),
       provider.notes ? el('p', { class: 'lede', text: provider.notes }) : null,
       // Built from the entity edges the timeline already carries rather than
       // from a new query: an `identified_by` edge is a scheme and an

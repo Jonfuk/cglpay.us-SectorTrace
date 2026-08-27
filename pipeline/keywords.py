@@ -47,6 +47,14 @@ SUPPLIER_NAME_VARIANTS: dict[str, list[str]] = {
     "phoenix_futures": ["Phoenix Futures"],
     "delphi_medical": ["Delphi Medical"],
     "inclusion": ["Inclusion"],
+    "cranstoun": ["Cranstoun", "Cranstoun Drug Services"],
+    "changing_lives": ["Changing Lives", "The Cyrenians", "Tyneside Cyrenians"],
+    "alcohol_and_drug_service": ["The Alcohol and Drug Service", "Alcohol and Drug Service", "Alcohol & Drug Service"],
+    "spectrum_community_health": ["Spectrum Community Health", "Spectrum Community Health CIC"],
+    "aquarius": ["Aquarius Action Projects", "Aquarius"],
+    "action_on_addiction": ["Action on Addiction"],
+    "lifeline_project": ["Lifeline Project", "Lifeline"],
+    "swanswell": ["Swanswell", "Swanswell Charitable Trust"],
 }
 
 # Search terms for tribunal judgments (Module 2) — respondent name variants
