@@ -26,12 +26,13 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `fc97e66` — four out-of-queue
-  commits after BETA-033: three on the provider entity model (`9b3fe06`,
-  `eb1799f`, `fc97e66` — identifiers verified, then the set expanded to 21
-  with renamed/merged/dissolved status on the portal) and one beta.md
-  record (`2b264c2`); all project-owner-directed, see Dataset Additions
-  and Recent Commits — going into BETA-028.
+  directly, not `beta`). `beta` is now at `b64ff10` — six out-of-queue
+  commits after BETA-033: four on the provider entity model (`9b3fe06`,
+  `eb1799f`, `fc97e66`, `b64ff10` — identifiers verified, then the set
+  expanded 13→21→28 with renamed/merged/dissolved status on the portal)
+  and two beta.md records (`2b264c2`, `2ca03a6`); all
+  project-owner-directed, see Dataset Additions and Recent Commits —
+  going into BETA-028.
 - Twenty-nine items completed across this session and its predecessors:
   BETA-001 through BETA-027, plus BETA-032 and BETA-033 (BETA-001 on
   `master`). BETA-032 and BETA-033 are out-of-band: the project owner
@@ -1847,6 +1848,45 @@ Still open (Questions Requiring Human Input #4): Tier 4, the NHS-trust
 comparators beyond `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey &
 Borders, Humber) — a deliberate scope call, not taken.
 
+### Second expansion — set now 28 (`b64ff10`, 2026-08-27)
+
+Project-owner-directed follow-up ("add 1, 2 except The Nelson Trust, 3,
+5"; "continue exploring"). Seven more `provider_key`s, same hand
+verification:
+
+- **Absorbed into the Humankind/Waythrough line:** `blenheim_cdp` (large
+  London charity, charity 293959 / company 01694712 dissolved 2022 / CQC
+  1-516591398; merged 2019) and `edp_drug_alcohol` (Devon/Dorset, charity
+  297370 / company 02145656 / CQC 1-587977840; fully merged 1 Jul 2023).
+  That line now swallows five prior identities — DISC, Blenheim, EDP,
+  Richmond Fellowship, Aquarius — noted in the `waythrough` note and the
+  module docstring.
+- **Active independent peers:** `bristol_drugs_project` (291714 / 01902326
+  / CQC 1-126776288; delivers Bristol ROADS), `developing_health_
+  independence` ('DHI', 1078154 / 03830311 / CQC 1-927177975),
+  `neca` (North East Council on Addictions, 516516 / 01828287 / CQC
+  1-126776368).
+- **Subsidiary:** `ley_community` (Oxford residential rehab, charity
+  1074874 / company 03736193 / CQC 1-101610029; wholly-owned by Phoenix
+  House → `phoenix_futures`).
+- **For-profit prison healthcare:** `practice_plus_group` (Health in
+  Justice arm, company 10498997 / CQC 1-3757899473; no charity).
+
+Corrections made during verification: KCA merged into **Addaction** (not
+CGL); NECA is **independent** (the earlier "merged into Humankind" was
+Blenheim). No schema or portal change — 0062's columns and
+`js/pages/providers.js` already handle the new merged keys. Full offline
+suite: **2469 passed, 106 skipped**, unchanged 2 pre-existing failures.
+
+Further exploration handed back to the project owner (see Questions
+Requiring Human Input #4): NHS trusts (Tier 4, still open); `compass`
+(York YP + adult charity, 518048 / 02054594); `kca` (Kent Council on
+Addictions → `with_you`, historical); residential-rehab charities
+(Broadway Lodge, Yeldall Manor, Kenward Trust, Bosence Farm, Trevi, The
+Amber Foundation); recovery-support CICs (Emerging Futures, The Well
+Communities); historical group brands (Recovery Focus → Waythrough line,
+Blue Sky → Forward Trust).
+
 ## Architecture Decisions
 
 **Decision: BETA-001 landed on `master`, not `beta`.** See its DONE entry.
@@ -2235,13 +2275,27 @@ should not assume otherwise, especially before testing anything that writes
    assumptions in the original scan were wrong and were corrected during
    verification: Action on Addiction merged into **The Forward Trust**
    (not With You), and Swanswell into **Cranstoun** in 2022 (not CGL in
-   2017). **Still open — Tier 4:** NHS-trust comparators beyond
-   `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey & Borders, Humber). The
-   project has one NHS provider as the pattern; adding more widens the
-   entity model deliberately and was left for the project owner's steer.
+   2017). A second batch (`b64ff10`) added Blenheim CDP, EDP, Bristol
+   Drugs Project, DHI, NECA, The Ley Community and Practice Plus Group —
+   set now 28. **Still open — Tier 4:** NHS-trust comparators beyond
+   `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey & Borders, Humber, CNWL,
+   SLaM, Nottinghamshire Healthcare). The project has one NHS provider as
+   the pattern; adding more widens the entity model deliberately and was
+   left for the project owner's steer. Also surfaced and not taken:
+   `compass` (York YP/adult charity), `kca` (historical → With You), the
+   residential-rehab charity sub-sector, recovery-support CICs, and the
+   private residential-rehab groups (a private-vs-third-sector pay
+   contrast, a separate decision).
 
 ## Recent Commits
 
+- `b64ff10` — add 7 more providers (set now 28): Blenheim CDP + EDP as
+  merged→waythrough, Bristol Drugs Project / DHI / NECA as active peers,
+  The Ley Community as a phoenix_futures subsidiary, Practice Plus Group
+  (for-profit prison healthcare) (out-of-queue, project-owner-directed;
+  `beta`). See Dataset Additions.
+- `2ca03a6` — beta.md: record the provider-set expansion (`fc97e66`) and
+  migration 0062 (`beta`).
 - `fc97e66` — add 8 more substance-misuse providers (tiers 1-3); portal
   shows renamed / merged / dissolved status with a link to the successor;
   migration 0062 adds `providers.status` / `providers.superseded_by`
