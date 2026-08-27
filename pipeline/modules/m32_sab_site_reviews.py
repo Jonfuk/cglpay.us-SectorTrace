@@ -51,17 +51,30 @@ SAR_PATHS = [
     "/",
     "/safeguarding-adults-reviews",
     "/safeguarding-adult-reviews",
+    "/safeguarding-adults-reviews-sars",
+    "/safeguarding-adult-reviews-sars",
     "/sar",
     "/sars",
+    "/sar-reports",
+    "/published-sars",
     "/reviews",
-    "/publications",
-    "/serious-case-reviews",
+    "/case-reviews",
+    "/adult-reviews",
+    "/learning-from-reviews",
     "/learning-reviews",
+    "/publications",
+    "/resources",
+    "/serious-case-reviews",
     "/safeguarding/reviews",
     "/about-us/safeguarding-adults-reviews",
 ]
 
-MAX_PAGES_PER_SAB = len(SAR_PATHS) + 2
+# One hop past a discovery page: a link whose text says SAR but which points
+# at another same-host *page* (not a document) is followed once and scanned
+# too. Many boards keep their reviews one click below any of the guessed
+# paths, behind a "Safeguarding Adults Reviews" link on the homepage.
+MAX_SUBPAGES_PER_SAB = 6
+MAX_PAGES_PER_SAB = len(SAR_PATHS) + MAX_SUBPAGES_PER_SAB
 MAX_DOCS_PER_SAB = 25
 
 _LINK_RE = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
@@ -111,6 +124,26 @@ def sar_links_on_page(page_html: str, page_url: str, host: str) -> list[tuple[st
     return out
 
 
+def sar_subpages_on_page(page_html: str, page_url: str, host: str) -> list[str]:
+    """Same-host links that are NOT documents but whose text/URL says SAR —
+    a "Safeguarding Adults Reviews" page one click below the guessed paths."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for href, raw_text in _LINK_RE.findall(page_html or ""):
+        url = urljoin(page_url, href.strip()).split("#")[0]
+        if urlparse(url).netloc != host or url == page_url:
+            continue
+        path = url.lower().split("?")[0]
+        if path.endswith(m28._DOCUMENT_EXTENSIONS):
+            continue
+        if not _SAR_LINK_VOCAB.search(f"{url} {_link_text(raw_text)}"):
+            continue
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
 @dataclass
 class BoardCrawl:
     """What one board's fetching produced. Built on a pool thread; nothing is
@@ -135,7 +168,22 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
     host = urlparse(base_url).netloc
 
     candidate_urls: list[tuple[str, str]] = []
+    subpages: list[str] = []
+    fetched_pages: set[str] = set()
     reached_anything = False
+
+    def scan(result) -> None:
+        nonlocal reached_anything
+        reached_anything = True
+        crawl.pages_fetched += 1
+        page_url = result.final_url or result.url
+        fetched_pages.add(page_url.split("#")[0])
+        html_text = result.body.decode("utf-8", "replace")
+        candidate_urls.extend(sar_links_on_page(html_text, page_url, host))
+        for sub in sar_subpages_on_page(html_text, page_url, host):
+            if sub not in subpages and sub.split("#")[0] not in fetched_pages:
+                subpages.append(sub)
+
     for path in SAR_PATHS:
         if crawl.pages_fetched >= MAX_PAGES_PER_SAB:
             break
@@ -149,14 +197,26 @@ def crawl_board(unit: tuple[str, str], client) -> BoardCrawl:
             continue
         if not result.ok:
             continue
-        reached_anything = True
-        crawl.pages_fetched += 1
         if path == "/":
             crawl.homepage_status = result.status_code
             crawl.homepage_sha = result.payload_sha256
-        page_url = result.final_url or result.url
-        candidate_urls.extend(sar_links_on_page(
-            result.body.decode("utf-8", "replace"), page_url, host))
+        scan(result)
+
+    # One hop: follow up to MAX_SUBPAGES_PER_SAB "Safeguarding Adults
+    # Reviews" links found above and scan those for documents too.
+    for sub in subpages[:MAX_SUBPAGES_PER_SAB]:
+        if crawl.pages_fetched >= MAX_PAGES_PER_SAB:
+            break
+        if sub.split("#")[0] in fetched_pages:
+            continue
+        try:
+            result = client.get(sub)
+        except RobotsDisallowed:
+            crawl.review_items.append((
+                "sab_site_robots_disallowed", sub, {"sab_name": sab_name}))
+            continue
+        if result.ok:
+            scan(result)
 
     if not reached_anything and not crawl.robots_blocked:
         crawl.unreachable = True

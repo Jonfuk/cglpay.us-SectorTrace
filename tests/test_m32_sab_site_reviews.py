@@ -59,6 +59,33 @@ def test_sar_links_on_page_keeps_only_same_host_docs_with_sar_vocabulary():
                       "Safeguarding Adults Review: Matthew")]
 
 
+def test_run_follows_one_hop_to_a_reviews_page(httpx_mock, settings, conn, monkeypatch):
+    """The reviews are behind a 'Safeguarding Adults Reviews' link on the
+    homepage, not under any guessed path."""
+    _add_board(conn, "Camden Safeguarding Adults Board", ORIGIN)
+    httpx_mock.add_response(url=f"{ORIGIN}/robots.txt", status_code=404, text="",
+                             is_reusable=True)
+    for path in m32.SAR_PATHS:
+        body = ('<a href="/our-work/adult-reviews-page">Safeguarding Adults Reviews</a>'
+                if path == "/" else "<p>not here</p>")
+        httpx_mock.add_response(url=f"{ORIGIN}{path}", status_code=200,
+                                 text=f"<html><body>{body}</body></html>", is_reusable=True)
+    httpx_mock.add_response(
+        url=f"{ORIGIN}/our-work/adult-reviews-page", status_code=200, is_reusable=True,
+        text='<html><body><a href="/d/Camden SAR Matthew 2021.pdf">'
+             'Safeguarding Adults Review: Matthew</a></body></html>')
+    httpx_mock.add_response(url=re.compile(rf"{re.escape(ORIGIN)}/d/.*\.pdf"),
+                             content=PDF_BYTES, status_code=200, is_reusable=True)
+    monkeypatch.setattr(m28.pdftext, "page_texts", lambda *a, **k: [
+        "Commissioned by Camden Safeguarding Adults Board."])
+
+    m32.run(_ctx(conn, settings))
+
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM sar_documents WHERE discovered_via = 'sab_website'"
+    ).fetchone()["n"] == 1
+
+
 def test_same_board_ignores_the_board_suffix_and_case():
     assert m32._same_board("Camden Safeguarding Adults Partnership Board",
                             "Camden Safeguarding Adults Board")
