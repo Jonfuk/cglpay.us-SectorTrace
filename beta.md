@@ -290,7 +290,8 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A–034E complete on `beta`; 034F first cut landed.**
+  - current_state: **034A–034F complete on `beta`** (034F bar the held
+    `graph_claims` write — see `context_034f_graph`). 034G/H are gated.
     034A — the foundation (migration `0065` — `nlp_runs`,
     `nlp_model_registry`, `document_chunks`, `document_embeddings`;
     `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
@@ -380,19 +381,37 @@ DONE
     writes `review_queue` `semantic_claim_candidate` items with full
     `context_json` and marks candidates `queued`. `tests/test_nlp_{relations,promote}.py`
     + migration-count bump (67→68) green; `ruff` clean. No new dependency.
-  - next_action: **034F second cut** — a decide-flow integration: an approved
-    `semantic_claim_candidate` review item → a `graph_claims` draft
-    (`extraction_method='nlp_rule_v1'`, `extractor_name`/`extractor_version`
-    set, `confidence` left for the reviewer, `review_status='draft'`), and a
-    `claim_candidate_decisions` row capturing the reviewer's *correction*
-    (`corrected_predicate` / `corrected_object_concept_id` / `reason_code`),
-    not just approve/reject. Must sit beside the existing graph review
-    lifecycle and honour `pipeline/ai_promotion.py`'s actor separation
-    (detector in `extractor_*`, never `promoted_by`). Then **034G**
-    (SetFit — gated) / **034H** (active learning → BERTopic → RAG, gated /
-    deferred). Also still open: browser-verify `/api/admin/search`; grow
+    034F (second cut, scoped by owner to "decisions table only") —
+    `pipeline/nlp/decisions.py` + `pipeline nlp decide-claim`:
+    `decide(conn, candidate_id, approved|rejected|corrected, decided_by, …)`
+    writes a `claim_candidate_decisions` row and moves the candidate to
+    `accepted` / `dismissed`. A `corrected` decision requires (and validates
+    against the ontology) a better `corrected_predicate` /
+    `corrected_object_concept_id` / `corrected_object_literal` /
+    `corrected_subject_mention_id` + `reason_code` — the 034G training signal;
+    `decisions.training_export()` joins the verdict to the triple.
+    `decided_by` never defaulted. `graph_claim_id` stays NULL — **no
+    `graph_claims` draft is written**. `tests/test_nlp_decisions.py` green.
+  - context_034f_graph: `graph_claims` has **no writer anywhere in
+    `pipeline/`** — a dormant schema (migration `0050`) with
+    `evidence_graph.claim_provenance()` and the Neo4j projector, but nothing
+    inserts it and there is no draft → `entity_relationships`
+    (`EXTRACTED_CLAIM`) lifecycle. Being its first writer is a standalone
+    decision the owner has parked; the approved-candidate → draft step is
+    NOT scheduled. When taken it must set the detector in
+    `extractor_name`/`extractor_version`, leave `confidence` for the
+    reviewer, `review_status='draft'`, never `promoted_by`.
+  - next_action: **034G** (SetFit few-shot classifiers) is **gated** and not
+    startable — it needs ≥ ~50 positive *and* ≥ ~50 negative *decided*
+    examples per category (from `claim_candidate_decisions`, now writable),
+    source/provider/time diversity, a held-out eval set and a minimum
+    precision. **034H** (active learning → BERTopic → RAG) is gated /
+    deferred behind a named decision. So the nlp tranche work pauses here
+    until there is review data. Still open regardless: the `graph_claims`
+    wiring decision above; browser-verify `/api/admin/search`; grow
     `retrieval_queries.json` / `gold_spans.json` / `assertion_cases.json`
-    from the live warehouse; decide on medSpaCy; admin-UI surfaces.
+    from the live warehouse; decide on medSpaCy; admin-UI surfaces for
+    search / topics / mentions / the claim-candidate worklist.
   - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
     migration-equivalence + cli + docs confirmed locally; full run pending);
     the browser/data items above.

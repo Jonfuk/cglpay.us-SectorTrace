@@ -42,9 +42,12 @@ Tranche 034F: `relations` — machine (subject, predicate, object) triples
 from spans + assertions into `document_claim_candidates` (migration 0068),
 via the ontology's controlled predicate vocabulary; co-occurrence alone
 never yields a candidate. `promote` — the narrow policy that queues a slice
-into `review_queue` (`item_type='semantic_claim_candidate'`). Nothing is
-auto-promoted; the approved-candidate → `graph_claims` draft write is the
-tranche's second cut.
+into `review_queue` (`item_type='semantic_claim_candidate'`). `decisions` —
+records a person's verdict on a candidate (approved / rejected / corrected,
+with a better predicate / object / subject) into `claim_candidate_decisions`;
+this is the 034G training signal. Nothing is auto-promoted, and the
+approved-candidate → `graph_claims` draft write stays held: `graph_claims`
+has no writer anywhere yet, so wiring it is its own decision.
 
 Topic clustering and the deferred RAG/LLM path land later — see
 `docs/semantic-analysis.md`.

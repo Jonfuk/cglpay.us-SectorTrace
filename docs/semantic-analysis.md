@@ -293,16 +293,29 @@ deterministic **validation** sample. It writes `review_queue` items
 offsets, source URL and payload SHA-256 in `context_json`, and marks the
 candidate `queued`.
 
-**Deferred to 034F's second cut:** the approved-candidate → `graph_claims`
-draft write (`extraction_method='nlp_rule_v1'`, detector in `extractor_name`,
-never `promoted_by`) and the `claim_candidate_decisions` writer that records
-a reviewer's *correction*, not just approve/reject. Those integrate with the
-graph review lifecycle and `pipeline/ai_promotion.py`'s actor-separation
-gate and want their own review. Nothing is auto-promoted (decision 4).
+`pipeline/nlp/decisions.py` + `pipeline nlp decide-claim` records a person's
+verdict on a candidate into `claim_candidate_decisions`: `approved` /
+`rejected` / `corrected`, and when `corrected`, a better predicate, object or
+subject plus a `reason_code`. A corrected candidate is far stronger training
+data than a binary reject — `decisions.training_export()` is the shape 034G
+reads. The reviewer's name is recorded as given, never defaulted. The
+candidate moves to `accepted` (approved / corrected) or `dismissed`
+(rejected); `accepted` does **not** mean a graph draft exists.
+
+**Held:** the approved-candidate → `graph_claims` draft write. `graph_claims`
+has no writer anywhere in the codebase (a dormant schema from migration
+`0050` with a provenance reader and a Neo4j projector, no draft →
+`entity_relationships` lifecycle), so being its first writer is a separate
+decision — not part of this tranche. When it lands it must set the detector
+in `extractor_name` / `extractor_version`, leave `confidence` for the
+reviewer, `review_status='draft'`, and never touch `promoted_by`
+(`pipeline/ai_promotion.py`). Nothing is auto-promoted (decision 4).
 
 ```bash
 uv run pipeline nlp relations    --source-system committee_paper_promotion --limit 25
 uv run pipeline nlp queue-claims --source-system committee_paper_promotion
+uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
+    --by "A. Reviewer" --corrected-predicate workforce.has_retention_pressure
 ```
 
 ## The tranches (BETA-034)
@@ -317,7 +330,7 @@ earlier ones to be useful.
 | **034C** | deterministic ontology classifier — `document_topics` `ontology_v1` rows over chunked elements; `classify.py` `TOPICS` frozen and documented, not code-coupled; weak-supervision seed for 034G; `keyword_v1` untouched | **shipped** |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
 | **034E** | assertion / context detection into `document_assertions` (migration `0067`) — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`; `assertion_status` and `detector_confidence` separate; stdlib cue tagger always on, medSpaCy `ConText` an optional path (not in the extra) | **shipped** — grow `assertion_cases.json`; wire medSpaCy if its model install is worth it |
-| **034F** | machine claim candidates (`document_claim_candidates`, migration `0068`) via controlled concept→predicate + pattern triggers — **not** co-occurrence; `promote.py` queues a primary/contradiction/novel/validation slice into `review_queue` | **first cut shipped** — the approved→`graph_claims`-draft write and the `claim_candidate_decisions` writer are the second cut |
+| **034F** | machine claim candidates (`document_claim_candidates`, migration `0068`) via controlled concept→predicate + pattern triggers — **not** co-occurrence; `promote.py` queues a slice into `review_queue`; `decisions.py` records approve / reject / **correct** into `claim_candidate_decisions` (034G's training signal) | **shipped bar the graph write** — being `graph_claims`' first writer is held as its own decision |
 | **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |
 | **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |
 

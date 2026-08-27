@@ -441,6 +441,40 @@ def nlp_queue_claims(
         conn.close()
 
 
+@nlp_app.command("decide-claim")
+def nlp_decide_claim(
+    candidate: str = typer.Option(..., help="claim_candidate_id"),
+    decision: str = typer.Option(..., help="approved | rejected | corrected"),
+    by: str = typer.Option(..., help="Reviewer name — recorded as given, never defaulted"),
+    reason: str = typer.Option(None, help="A short reason_code"),
+    corrected_predicate: str = typer.Option(None, help="A better relations.yml predicate id"),
+    corrected_object_concept: str = typer.Option(None, help="A better object concept id"),
+    corrected_object_literal: str = typer.Option(None, help="A better object literal"),
+    corrected_subject_mention: str = typer.Option(None, help="A better subject mention id"),
+    note: str = typer.Option(None),
+) -> None:
+    """Record a person's decision on a machine claim candidate into
+    `claim_candidate_decisions`. A 'corrected' decision captures a better
+    predicate / object / subject — stronger training data than a reject.
+    Writes no `graph_claims` draft (that step is held).
+    """
+    from pipeline.nlp import decisions
+
+    conn, _ = _document_connection()
+    try:
+        result = decisions.decide(
+            conn, candidate, decision, by, reason_code=reason,
+            corrected_predicate=corrected_predicate,
+            corrected_object_concept_id=corrected_object_concept,
+            corrected_object_literal=corrected_object_literal,
+            corrected_subject_mention_id=corrected_subject_mention, note=note)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    except decisions.ClaimDecisionError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    finally:
+        conn.close()
+
+
 @nlp_app.command("context")
 def nlp_context(
     detector: str = typer.Option(
