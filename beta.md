@@ -26,11 +26,11 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `b64ff10` — six out-of-queue
-  commits after BETA-033: four on the provider entity model (`9b3fe06`,
-  `eb1799f`, `fc97e66`, `b64ff10` — identifiers verified, then the set
-  expanded 13→21→28 with renamed/merged/dissolved status on the portal)
-  and two beta.md records (`2b264c2`, `2ca03a6`); all
+  directly, not `beta`). `beta` is now at `583476d` — eight out-of-queue
+  commits after BETA-033: five on the provider entity model (`9b3fe06`,
+  `eb1799f`, `fc97e66`, `b64ff10`, `583476d` — identifiers verified, then
+  the set expanded 13→21→28→32 with renamed/merged/dissolved status on the
+  portal) and three beta.md records (`2b264c2`, `2ca03a6`, next); all
   project-owner-directed, see Dataset Additions and Recent Commits —
   going into BETA-028.
 - Twenty-nine items completed across this session and its predecessors:
@@ -1887,6 +1887,47 @@ Amber Foundation); recovery-support CICs (Emerging Futures, The Well
 Communities); historical group brands (Recovery Focus → Waythrough line,
 Blue Sky → Forward Trust).
 
+### Third batch — set now 32 (`583476d`, 2026-08-27)
+
+Compass, KCA, Blue Sky and Recovery Focus, from the further-exploration
+list above:
+
+- `compass` — active national charity (York, est. 1986; YP-specialist +
+  adult substance misuse + wider health), charity 518048 / company
+  02054594 / CQC 1-126775082 (CQC name 'Compass - Services To Improve
+  Health And Wellbeing').
+- `kca` — Kent Council on Addictions (registered 'Kent Council on
+  Alcoholism', charity 270532 / company 01955497 'KCA (UK)'). Became a
+  wholly-owned subsidiary of Addaction on 1 Jan 2015; company dissolved
+  25 Apr 2017. `merged` → `with_you`.
+- `blue_sky` — Blue Sky Development and Regeneration (ex-offender
+  employment social enterprise, charity 1118372 / company 05639379).
+  Merged into The Forward Trust 2017, now 'Blue Sky Services'; company
+  dissolved 7 Feb 2023. `merged` → `forward_trust`.
+- `recovery_focus` — **not a legal entity**: the group brand for Richmond
+  Fellowship + Aquarius (and formerly DViP, 2Care, CAN, Croftlands Trust,
+  My Time) from 2015 until the 2024 merger renamed the group 'Waythrough'.
+  No registration of its own; seeded with no identifiers. `renamed` →
+  `waythrough`. Appears on pre-2024 contracts and CQC quality accounts.
+
+More verification corrections: NECA is independent (not merged into
+Humankind — that was **Blenheim CDP**); Recovery Focus, not Aquarius, was
+the pre-2024 group brand. `with_you` / `forward_trust` /
+`richmond_fellowship` notes updated. No schema or portal change.
+
+**How the reference data lands:** `seed_providers()` runs at the start of
+`run()` in m02/m03/m04/m05/m08/m14/m16/m19/m20/m23/m28 — any module run
+upserts the new `providers` / `provider_identifiers` rows and the portal
+then shows them. `pipeline web` / `pipeline migrate` apply 0062's columns
+but do **not** seed. Collecting evidence *for* the new providers (their
+Companies House filings, charity accounts, CQC locations, re-matched
+notices) needs the collection modules rerun — `m04` walks each
+newly-seeded company number, `m03` the charity numbers, `m05` re-matches
+by name, `m01`/`m02` re-filter/re-match. `./start.sh backup` then
+`./start.sh run all` against the PostgreSQL warehouse (per `.env`). The
+LAN Postgres was hand-seeded at the 21-provider stage and will catch up
+on the next module run.
+
 ## Architecture Decisions
 
 **Decision: BETA-001 landed on `master`, not `beta`.** See its DONE entry.
@@ -2281,14 +2322,20 @@ should not assume otherwise, especially before testing anything that writes
    `inclusion`/MPFT (CNTW, RDaSH, GMMH, Surrey & Borders, Humber, CNWL,
    SLaM, Nottinghamshire Healthcare). The project has one NHS provider as
    the pattern; adding more widens the entity model deliberately and was
-   left for the project owner's steer. Also surfaced and not taken:
-   `compass` (York YP/adult charity), `kca` (historical → With You), the
-   residential-rehab charity sub-sector, recovery-support CICs, and the
-   private residential-rehab groups (a private-vs-third-sector pay
-   contrast, a separate decision).
+   left for the project owner's steer. A third batch (`583476d`) added
+   Compass, KCA, Blue Sky and Recovery Focus — set now 32. Still not
+   taken: the NHS trusts, the residential-rehab charity sub-sector,
+   recovery-support CICs, and the private residential-rehab groups (a
+   private-vs-third-sector pay contrast, a separate decision).
 
 ## Recent Commits
 
+- `583476d` — add Compass, KCA, Blue Sky, Recovery Focus (set now 32):
+  Compass an active charity, the other three merged/renamed into With You
+  / Forward Trust / the Waythrough line (out-of-queue,
+  project-owner-directed; `beta`). See Dataset Additions.
+- `fd82152` — beta.md: record the second provider expansion (`b64ff10`)
+  (`beta`).
 - `b64ff10` — add 7 more providers (set now 28): Blenheim CDP + EDP as
   merged→waythrough, Bristol Drugs Project / DHI / NECA as active peers,
   The Ley Community as a phoenix_futures subsidiary, Practice Plus Group
