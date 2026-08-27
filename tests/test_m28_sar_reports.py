@@ -119,6 +119,7 @@ def test_parse_library_page_reads_title_href_and_year():
         "title": "HSAB SAR Edward report.pdf",
         "href": "./2026/HSAB SAR Edward report.pdf",
         "library_year": 2026,
+        "base": sar.LIBRARY_URL,
     }
     assert rows[2]["library_year"] == 2025
     assert rows[2]["title"] == "Camden Hannah"
@@ -214,6 +215,12 @@ def test_parse_sab_directory_groups_by_nation():
     assert by_name["Leeds Safeguarding Adults Board"]["nation"] == "England"
     assert by_name["Leeds Safeguarding Adults Board"]["website_url"] == "https://example.gov.uk/leeds-sab"
     assert by_name["Cardiff and Vale Safeguarding Board"]["nation"] == "Wales"
+    # Scotland's "Adult Support and Protection" naming is recognised.
+    assert by_name["Dundee Adult Support and Protection Committee"]["nation"] == "Scotland"
+    # A trailing parenthetical member-authority list is dropped from the name.
+    assert "Mid and West Wales Safeguarding Board" in by_name
+    # The site's own nav ("What is a Safeguarding Adults Review?") is not a board.
+    assert not any("What is a" in b["name"] for b in boards)
 
 
 def test_build_sab_index_is_england_only_and_place_keyed():
@@ -256,12 +263,37 @@ def test_resolve_sab_name_none_when_nothing_matches():
     assert sar.resolve_sab_name("Nothing here.", "Violet SAR V2.pdf", _IDX) == (None, None)
 
 
-def test_parse_scie_library_page_reads_li_rows():
+def test_directory_fetch_failure_falls_back_to_stored_boards(httpx_mock, settings, conn):
+    """A flaky directory page must not wipe out a working set of board names:
+    the resolution index rebuilds from safeguarding_adults_boards rows."""
+    conn.execute(
+        "INSERT INTO safeguarding_adults_boards (name, nation, website_url, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('Leeds Safeguarding Adults Board', 'England', 'https://x', "
+        "'https://x', '2026-01-01T00:00:00Z', 200, 'test', 'h')")
+    conn.commit()
+
+    httpx_mock.add_response(url="https://www.anncrafttrust.org/robots.txt",
+                             status_code=404, text="", is_reusable=True)
+    httpx_mock.add_response(url=sar.SAB_DIRECTORY_URL, status_code=403, text="Forbidden")
+
+    index = sar._collect_sab_directory(
+        ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None),
+        "m28_sar_reports")
+    assert index.get("leeds") == "Leeds Safeguarding Adults Board"
+
+
+def test_parse_scie_library_page_reads_the_collection_table():
     rows = sar.parse_scie_library_page(SCIE_HTML)
     assert len(rows) == 1
     assert rows[0]["title"] == "01 Croydon Mr A Exec Summary March 2016"
     assert rows[0]["library_year"] == 2015
-    assert rows[0]["href"].endswith("01 Croydon Mr A Exec Summary March 2016.pdf")
+    assert rows[0]["base"] == sar.SCIE_LIBRARY_URL
+    # Its href resolves against the SCIE directory, not search.html — the
+    # bug that 404'd every SCIE document on the first attempt.
+    url = sar.resolve_document_url(rows[0]["href"], rows[0]["base"])
+    assert url == ("https://nationalnetwork.org.uk/SCIE%20Library%202015-2018/"
+                   "01%20Croydon%20Mr%20A%20Exec%20Summary%20March%202016.pdf")
 
 
 def test_run_folds_in_the_scie_collection(httpx_mock, settings, conn, monkeypatch):
@@ -273,7 +305,7 @@ def test_run_folds_in_the_scie_collection(httpx_mock, settings, conn, monkeypatc
     httpx_mock.add_response(url=sar.resolve_document_url("./2026/MrBSARFinalReport.docx"),
                             content=_build_docx(DOCX_PARAGRAPHS))
     scie_url = sar.resolve_document_url(
-        "./SCIE Library 2015-2018/01 Croydon Mr A Exec Summary March 2016.pdf")
+        "./01 Croydon Mr A Exec Summary March 2016.pdf", sar.SCIE_LIBRARY_URL)
     httpx_mock.add_response(url=scie_url, content=b"%PDF-1.4 fake")
     monkeypatch.setattr(sar.pdftext, "page_texts", lambda *a, **k: [REPORT_TEXT])
 
@@ -283,7 +315,7 @@ def test_run_folds_in_the_scie_collection(httpx_mock, settings, conn, monkeypatc
             conn.execute("SELECT * FROM sar_documents").fetchall()}
     assert scie_url in rows
     assert rows[scie_url]["library_year"] == 2015
-    assert conn.execute("SELECT COUNT(*) AS n FROM safeguarding_adults_boards").fetchone()["n"] == 4
+    assert conn.execute("SELECT COUNT(*) AS n FROM safeguarding_adults_boards").fetchone()["n"] == 6
 
 
 # --- provider mentions --------------------------------------------------------------
@@ -340,6 +372,7 @@ def _allow_all_robots(httpx_mock) -> None:
 
 SAB_DIRECTORY_HTML = """
 <html><body>
+ <p><a href="https://www.anncrafttrust.org/x">What is a Safeguarding Adults Review?</a></p>
  <h2>England</h2>
  <ul>
   <li><a href="https://example.gov.uk/camden-sab">Camden Safeguarding Adults Partnership Board</a></li>
@@ -347,17 +380,27 @@ SAB_DIRECTORY_HTML = """
   <li><a href="https://example.gov.uk/leeds-sab">Leeds Safeguarding Adults Board</a></li>
  </ul>
  <h2>Wales</h2>
- <ul><li><a href="https://example.wales/cardiff">Cardiff and Vale Safeguarding Board</a></li></ul>
+ <ul>
+  <li><a href="https://example.wales/cardiff">Cardiff and Vale Safeguarding Board</a></li>
+  <li><a href="https://example.wales/mww">Mid and West Wales Safeguarding Board (Carmarthenshire, Ceredigion, Pembrokeshire, Powys)</a></li>
+ </ul>
+ <h2>Scotland</h2>
+ <ul><li><a href="https://example.scot/dundee">Dundee Adult Support and Protection Committee</a></li></ul>
 </body></html>
 """
 
+# The SCIE page: same <table> + <button class="collapsible"> shape as the
+# main library, under one "SCIE Library 2015-2018" heading, hrefs relative
+# to the SCIE directory.
 SCIE_HTML = """
-<html><body><h1>SCIE Library 2015-2018</h1>
- <ul>
-  <li>01 Croydon Mr A Exec Summary March 2016
-   <a href="./SCIE Library 2015-2018/01 Croydon Mr A Exec Summary March 2016.pdf">
-   <img src="../download-button.png"> Download</a></li>
- </ul>
+<html><body>
+ <button type="button" class="collapsible">SCIE Library 2015-2018</button>
+ <div class="content">
+  <table border="0">
+   <tr><td> 01 Croydon Mr A Exec Summary March 2016 </td>
+    <td> <a href="./01 Croydon Mr A Exec Summary March 2016.pdf"><img src="../download-button.png"> Download</a></td></tr>
+  </table>
+ </div>
 </body></html>
 """
 

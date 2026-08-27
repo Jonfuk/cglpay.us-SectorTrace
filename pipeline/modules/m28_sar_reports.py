@@ -56,6 +56,7 @@ import json
 import re
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
+import httpx
 import structlog
 
 from pipeline import db, ocr, pdftext, providers
@@ -161,48 +162,63 @@ def parse_library_page(page_html: str) -> list[dict]:
             link = html_lib.unescape(href.strip())
             if not title or not link:
                 continue
-            rows.append({"title": title, "href": link, "library_year": year})
+            rows.append({"title": title, "href": link, "library_year": year,
+                          "base": LIBRARY_URL})
     return rows
 
 
-# SCIE page: a flat <ul> of "<li>Title <a href="...">Download</a></li>" with
-# one heading over the lot and no per-item year. `strip_html` on the <li>
-# prefix gives the title; the year the collection was added (2015, its
-# start) stands in for library_year, which has only ever meant "when added".
-_SCIE_ROW_RE = re.compile(
-    r"<li[^>]*>(.*?)<a\s+[^>]*href=\"([^\"]+)\"", re.IGNORECASE | re.DOTALL)
+# The SCIE page is the SAME <table> shape as the main page, under one
+# "SCIE Library 2015-2018" collapsible instead of per-year ones, and its
+# hrefs ("./file.pdf") are relative to SCIE_LIBRARY_URL, not to search.html —
+# so both the section heading and the base URL differ. library_year is the
+# collection's start; it has only ever meant "when added to the library".
+_SCIE_SECTION_RE = re.compile(
+    r'<button[^>]*class="collapsible"[^>]*>\s*SCIE\s+Library[^<]*</button>(.*?)'
+    r'(?=<button[^>]*class="collapsible"|\Z)', re.IGNORECASE | re.DOTALL)
 
 
 def parse_scie_library_page(page_html: str) -> list[dict]:
-    """(title, href, library_year) rows from the SCIE Library 2015-2018 page."""
+    """(title, href, library_year, base) rows from the SCIE 2015-2018 page."""
+    match = _SCIE_SECTION_RE.search(page_html or "")
+    section = match.group(1) if match else (page_html or "")
     rows: list[dict] = []
-    for raw_title, href in _SCIE_ROW_RE.findall(page_html or ""):
+    for raw_title, href in _ROW_RE.findall(section):
         title = strip_html(raw_title)
         link = html_lib.unescape(href.strip())
         if not title or not link:
             continue
-        if not link.lower().split("?")[0].endswith(_DOCUMENT_EXTENSIONS):
-            continue
-        rows.append({"title": title, "href": link, "library_year": 2015})
+        rows.append({"title": title, "href": link, "library_year": 2015,
+                      "base": SCIE_LIBRARY_URL})
     return rows
 
 
 # Ann Craft Trust directory: nation headings, each over a list of
 # "<a href="board site">Board Name</a>". The page also links to unrelated
-# resources, so an anchor is kept only when its text reads like a board.
+# resources (the site's own menu, "What is a SAR?", etc.), so an anchor is
+# kept only when its text reads like a board's name.
 _NATION_HEADING_RE = re.compile(
     r"<h[1-6][^>]*>\s*(England|Wales|Scotland|Northern Ireland)\b",
     re.IGNORECASE)
+# Up to 240 chars: some Welsh regional boards carry a parenthetical list of
+# their member authorities ("Mid and West Wales Safeguarding Board
+# (Carmarthenshire, Ceredigion, Pembrokeshire, Powys)"), trimmed off below.
 _DIR_LINK_RE = re.compile(
-    r'<a\s+[^>]*href="([^"]+)"[^>]*>([^<]{4,140})</a>', re.IGNORECASE)
+    r'<a\s+[^>]*href="([^"]+)"[^>]*>([^<]{4,240})</a>', re.IGNORECASE)
+# "Adult Support and Protection" is Scotland's term; "Public Protection" a
+# couple of Scottish committees. Not just "board" as the body word.
+_SAB_NAME_LOOKS_RIGHT = re.compile(
+    r"safeguarding|adult (support and )?protection|public protection",
+    re.IGNORECASE)
+_SAB_BODY_WORD = re.compile(r"board|committee|partnership|team", re.IGNORECASE)
 
 
 def parse_sab_directory(page_html: str) -> list[dict]:
     """(name, nation, website_url) for every board in the directory.
 
-    Each anchor is attributed to the nearest nation heading above it. An
-    anchor whose text does not carry 'Safeguarding' / 'Adult Protection'
-    plus 'board'/'committee'/'partnership' is skipped.
+    Each anchor is attributed to the nearest nation heading above it and
+    kept only when its text carries a safeguarding/adult-protection phrase
+    and a body word (board / committee / partnership / team). A trailing
+    parenthetical member-authority list is dropped from the stored name.
     """
     headings = [(m.start(), m.group(1).title())
                 for m in _NATION_HEADING_RE.finditer(page_html or "")]
@@ -210,10 +226,9 @@ def parse_sab_directory(page_html: str) -> list[dict]:
     seen: set[str] = set()
     for m in _DIR_LINK_RE.finditer(page_html or ""):
         text = re.sub(r"\s+", " ", html_lib.unescape(m.group(2))).strip()
+        text = re.sub(r"\s*\([^)]*\)\s*$", "", text).strip()
         low = text.lower()
-        if not re.search(r"safeguarding|adult protection", low):
-            continue
-        if not re.search(r"board|committee|partnership", low):
+        if not _SAB_NAME_LOOKS_RIGHT.search(low) or not _SAB_BODY_WORD.search(low):
             continue
         if low in seen:
             continue
@@ -229,16 +244,21 @@ def parse_sab_directory(page_html: str) -> list[dict]:
     return out
 
 
-def resolve_document_url(href: str) -> str:
-    """An absolute, fetchable URL from a raw href.
+def resolve_document_url(href: str, base: str = LIBRARY_URL) -> str:
+    """An absolute, fetchable URL from a raw href, resolved against `base`.
 
     The source writes hrefs as literal filesystem paths — spaces and
     ampersands included, unescaped — which is invalid HTML but is what every
     browser tolerates by re-encoding on request. This does the same
     re-encoding explicitly, on the path only, so the query string (there
     never is one here) and any already-encoded byte are not touched twice.
+
+    `base` matters: a SCIE-collection href is "./file.pdf" relative to
+    SCIE_LIBRARY_URL, whose path ends in a directory ("/SCIE Library
+    2015-2018/"); resolved against search.html it would lose that directory
+    and 404.
     """
-    joined = urljoin(LIBRARY_URL, href)
+    joined = urljoin(base, href)
     parts = urlsplit(joined)
     return urlunsplit((parts.scheme, parts.netloc, quote(parts.path, safe="/%"),
                         parts.query, parts.fragment))
@@ -589,10 +609,19 @@ def _read_docx(conn, module_name: str, document_url: str,
     return text, "docx"
 
 
+def _stored_sab_index(conn) -> dict[str, str]:
+    """The resolution index rebuilt from whatever the directory table
+    already holds. Used when this run's fetch of the directory fails, so a
+    flaky page does not undo a working set of board names."""
+    rows = conn.execute(
+        "SELECT name, nation, website_url FROM safeguarding_adults_boards").fetchall()
+    return build_sab_index([dict(r) for r in rows])
+
+
 def _collect_sab_directory(ctx: ModuleContext, module_name: str) -> dict[str, str]:
     """Fetch and store the Ann Craft Trust board directory; return the
-    resolution index. A failure here is not fatal — sab_name resolution
-    still runs, just without a canonical name to land on."""
+    resolution index. A failure here is not fatal — resolution falls back to
+    the directory rows already stored, or runs without a canonical list."""
     conn = ctx.conn
     with PipelineHTTPClient(SOURCE_SAB_DIRECTORY, settings=ctx.settings, conn=conn) as client:
         try:
@@ -600,11 +629,18 @@ def _collect_sab_directory(ctx: ModuleContext, module_name: str) -> dict[str, st
         except RobotsDisallowed:
             db.record_review_item(conn, module_name, "sab_directory_robots_disallowed",
                                    SAB_DIRECTORY_URL, json.dumps({}))
-            return {}
+            return _stored_sab_index(conn)
+        except httpx.HTTPError as exc:
+            # A third-party page being down or slow is not a reason to abandon
+            # the whole SAR run — fall back to the directory rows already stored.
+            db.record_review_item(conn, module_name, "sab_directory_unavailable",
+                                   SAB_DIRECTORY_URL,
+                                   json.dumps({"error": f"{type(exc).__name__}: {exc}"}))
+            return _stored_sab_index(conn)
         if not page.ok:
             db.record_review_item(conn, module_name, "sab_directory_unavailable",
                                    SAB_DIRECTORY_URL, json.dumps({"status": page.status_code}))
-            return {}
+            return _stored_sab_index(conn)
 
         boards = parse_sab_directory(page.body.decode("utf-8", "replace"))
         if not boards:
@@ -612,7 +648,7 @@ def _collect_sab_directory(ctx: ModuleContext, module_name: str) -> dict[str, st
                 conn, module_name, "sab_directory", SAB_DIRECTORY_URL,
                 "no board entries recognised on the directory page; its markup "
                 "may have changed", source_url=SAB_DIRECTORY_URL)
-            return {}
+            return _stored_sab_index(conn)
 
         provenance = {
             "source_url": page.url,
@@ -735,7 +771,7 @@ def run(ctx: ModuleContext) -> None:
         seen_urls: set[str] = set()
         deduped: list[dict] = []
         for row in rows:
-            url = resolve_document_url(row["href"])
+            url = resolve_document_url(row["href"], row.get("base", LIBRARY_URL))
             if url in seen_urls:
                 continue
             seen_urls.add(url)
@@ -746,7 +782,7 @@ def run(ctx: ModuleContext) -> None:
             if ctx.limit and documents_written >= ctx.limit:
                 break
 
-            document_url = resolve_document_url(row["href"])
+            document_url = resolve_document_url(row["href"], row.get("base", LIBRARY_URL))
             ext = document_extension(document_url)
             if ext is None or _already_processed(conn, document_url):
                 continue
