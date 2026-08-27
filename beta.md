@@ -269,6 +269,48 @@ DONE
     `isDark()`. test_web_layers.py's assertion that the carto URLs are
     present in geography.js must keep passing — do not remove the basemap.
 
+- [IN_PROGRESS] BETA-034 | Semantic-analysis layer (pipeline/nlp): evidence-intelligence over the archive
+  - started: 2026-08-27
+  - priority: P2
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 3
+  - area: nlp/pipeline
+  - depends_on: pipeline/documents (document_elements), pipeline/graph (graph_claims)
+  - origin: **Not drawn from this queue.** Project owner via `/plan` on
+    2026-08-27, after two rounds of steering (clinical-NLP vs
+    evidence-intelligence framing; then a detailed pre-implementation
+    review). The approved plan and the authoritative design live in
+    `docs/semantic-analysis.md`; the plan file is
+    `~/.claude/plans/tranquil-riding-reddy.md`.
+  - objective: A downstream, local-only, non-collecting stage that makes the
+    ~27k-document archive semantically searchable and connects extracted
+    claims into the Evidence Graph — every derived statement a finding aid
+    or a machine candidate until a person promotes it through the existing
+    review queue → `graph_claims` path. Staged A–H; ship and stop per
+    letter.
+  - current_state: **034A foundation landed on `beta`.** Migration `0065`
+    (`nlp_runs`, `nlp_model_registry`, `document_chunks`,
+    `document_embeddings` — embedding is a dialect-neutral float32 blob in
+    both trees, pgvector deferred to a later Postgres-only migration).
+    `pipeline/nlp/{runs,models,chunk}.py`, `pipeline nlp chunk` CLI,
+    `nlp_*` settings, `docs/semantic-analysis.md`. `tests/test_nlp_chunk.py`
+    + migration-count bump green. Embeddings model, `/api/admin/search`
+    hybrid search, the retrieval eval harness and the `nlp` optional-deps
+    extra are the rest of 034A and are **not** landed — they cross the
+    "heavy dependency + new network surface + browser-verify" line and
+    want a checkpoint.
+  - next_action: 034A remainder — `pipeline/nlp/embeddings.py` with a
+    deterministic `stub` embedder (CI default, no download) and
+    sentence-transformers behind an `nlp` extra; `semantic_search.py`
+    (FTS + vector + metadata, RRF); `/api/admin/search?mode=…`;
+    `tests/fixtures/nlp/retrieval_queries.yml` + `pipeline nlp eval-retrieval`.
+    Then 034B (ontology) before 034D (GLiNER), per the plan's reorder.
+  - validation_remaining: `uv run python -m pytest` full suite; `ruff`;
+    once embeddings land, `uv sync --extra nlp` and the browser-verify pass
+    on `/api/admin/search` with `/api/v1/*` unchanged.
+
 ### NEXT
 
 - [NEXT] BETA-029 | Overview stops downloading 500 notices to draw 10 bars

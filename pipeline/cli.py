@@ -22,9 +22,11 @@ from pipeline.registry import (
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
 documents_app = typer.Typer(help="Inspect, parse, validate, and search archived documents.")
+nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunks, embeddings, search).")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
+app.add_typer(nlp_app, name="nlp")
 app.add_typer(mirror_app, name="mirror")
 
 
@@ -297,6 +299,28 @@ def documents_benchmark(
         typer.echo(__import__("json").dumps(rows, indent=2, sort_keys=True))
         if any(row.get("status") == "FAILED" for row in rows):
             raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("chunk")
+def nlp_chunk(
+    source_system: str = typer.Option(None, help="Only versions from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum active document versions to (re)chunk"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Build chunks and roll back, writing nothing"),
+) -> None:
+    """(Re)chunk active parsed documents into `document_chunks`.
+
+    Reads `document_elements`; fetches nothing. Idempotent for a fixed
+    chunker version; a bumped version supersedes old rows rather than
+    deleting them.
+    """
+    from pipeline.nlp import chunk as nlp_chunk_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_chunk_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
 

@@ -1,0 +1,113 @@
+# Semantic analysis (`pipeline/nlp`)
+
+A downstream, non-collecting stage over the document-analysis layer. It reads
+`document_elements` (the parser-neutral output of `pipeline/documents`, see
+[`document-analysis.md`](document-analysis.md)) and produces retrieval- and
+analysis-ready records. It **fetches nothing, calls no paid AI service, and
+requires no Neo4j**. Everything it writes is a *finding aid* or a *machine
+candidate* — nothing is attributed to a provider or promoted to a claim
+without a person, which is the existing review queue → `graph_claims` path
+([`evidence-graph.md`](evidence-graph.md), migration `0050`).
+
+```mermaid
+flowchart TD
+    A[document_elements] --> B[chunk: paragraph units]
+    B --> C[embeddings + hybrid search]
+    B --> D[GLiNER entity spans]
+    B --> E[ontology / weak-supervision labels]
+    C -. later .-> F[BERTopic clusters]
+    D --> G[assertion context]
+    E --> G
+    G --> H[claim candidates]
+    H --> I[review queue -> graph_claims -> Evidence Graph]
+```
+
+## Why this exists
+
+The warehouse holds tens of thousands of archived documents that sit as an
+archive *attached to* structured tables, not as a queryable corpus. Keyword
+search (`/api/v1/document_search`) cannot tell "no significant recruitment
+difficulties" from "recruitment difficulties remain a significant risk", and
+nothing connects a passage to the provider, place or issue it is about. This
+layer closes that gap **without** changing what a defensible figure is: a
+model span is a candidate a person confirms, an embedding says two passages
+are similar (not that a fact is true), and a topic cluster is a reading of
+wording (not a claim about the sector).
+
+## Provenance model
+
+Every invocation of a stage writes one `nlp_runs` row carrying the git
+commit, the chunker/model/ontology versions and a hash of the full config.
+Every derived row carries `nlp_run_id`. Model *names* are not identities —
+`nlp_model_registry` records each model's provider, id and resolved
+revision SHA. Reprocessing is expected: a chunk id is a hash of its own
+content and the chunker version, so a chunker change produces new ids and
+marks the old rows `superseded` rather than repointing an id at different
+text. Nothing is deleted; a new generation is recomputed alongside the old.
+
+The citation trail is by element id, not character offsets alone:
+
+```
+graph_claim -> claim candidate -> mention -> chunk
+            -> element_start_id / element_end_id -> document_version
+            -> evidence_record -> immutable raw-object path + payload SHA-256
+```
+
+## What ships now (tranche 034A)
+
+`document_chunks` — paragraph-level units merged from `document_elements` to
+a token target, never split mid-element. A heading flushes the current chunk
+and is remembered as its `preceding_heading_element_id` (the hook for
+section-aware context later). `char_start`/`char_end` are offsets into the
+version's concatenated element text, for mapping a within-chunk span back to
+the whole document.
+
+```bash
+uv run pipeline nlp chunk --source-system committee_papers --limit 25
+uv run pipeline nlp chunk --dry-run          # build and roll back
+```
+
+`nlp_runs` and `nlp_model_registry` ship with it; `document_embeddings` ships
+as an empty table (its writer is 034B). Migration `0065` is structurally
+identical in both dialect trees — the embedding column is a dialect-neutral
+little-endian float32 blob in each, so exact cosine is computed in Python. A
+pgvector `vector` column and an ANN index are a later Postgres-only
+migration, added **only** if the 034A retrieval benchmark shows exact search
+is too slow, and gated on the server actually having the `vector` extension.
+
+## The tranches (BETA-034)
+
+Ship and stop at each letter; later letters need not be correct for the
+earlier ones to be useful.
+
+| | Scope | State |
+|---|---|---|
+| **034A** | chunks + embeddings + hybrid search + retrieval eval harness | chunking shipped; embeddings/search next |
+| **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`) | planned |
+| **034C** | deterministic ontology classifier — replaces `classify.py` `TOPICS`' vocabulary; weak-supervision seed for 034G; `keyword_v1` rows never reinterpreted | planned |
+| **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`). Abstract situations are 034C's / 034G's job, not GLiNER labels. Entity resolution is a separate deterministic step — GLiNER never writes `entity_id` | planned |
+| **034E** | assertion / context detection — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`, with `assertion_status` and `detector_confidence` stored separately; medSpaCy `ConText` where installed, a stdlib cue tagger always | planned |
+| **034F** | machine claim candidates (`document_claim_candidates`, high volume) via ontology relation patterns — **not** co-occurrence; a selection policy promotes a slice into `review_queue`; approval writes a `graph_claims` draft with the detector in `extractor_name`, never `promoted_by`; review decisions capture corrections, not just approve/reject | planned |
+| **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |
+| **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |
+
+## Deferred behind a decision
+
+- **RAG / LLM question answering and free-form claim extraction.** Needs a
+  named decision — "does this corpus ever make an LLM-derived claim?" — and
+  is built against `pipeline/ai_promotion.py`'s policy gate (actor
+  separation, ≥2 independent reviews, objective predicates, archived
+  manifest). Answers must cite `graph_claims` / `evidence_records`
+  provenance or they are not shown. No paid API before that decision.
+- **Unsupervised topic discovery as evidence.** BERTopic clusters stay a
+  navigation aid; a cluster is never an input to a figure, an export or a
+  provider attribution.
+
+## Dependencies
+
+A local-only `nlp` optional-dependencies extra (`uv sync --extra nlp`),
+first-use model download, **excluded from the Railway image** — the same
+pattern as the `documents` and `ocr` extras. Every stage degrades honestly
+without it: chunking needs nothing, `--model stub` gives a deterministic
+embedder for CI and offline development, and the assertion detector falls
+back to a stdlib cue tagger. CI never downloads a model.

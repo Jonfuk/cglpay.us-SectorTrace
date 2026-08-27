@@ -227,6 +227,16 @@ class Settings(BaseSettings):
     document_max_zero_text_page_ratio: float = 0.60
     document_parse_timeout_seconds: int = 900
 
+    # The semantic-analysis layer (pipeline/nlp): a downstream stage over the
+    # document-analysis output, the same "never consulted by collectors" rule
+    # as the block above. 034A ships chunking only; `nlp_embedding_model`
+    # selects the embedder once that tranche lands — "stub" is the
+    # deterministic, no-download default that CI and offline development use,
+    # a real sentence-transformers id (behind the `nlp` extra) is the opt-in.
+    nlp_enabled: bool = True
+    nlp_embedding_model: str = "stub"
+    nlp_chunk_batch_size: int = 200
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
     # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is

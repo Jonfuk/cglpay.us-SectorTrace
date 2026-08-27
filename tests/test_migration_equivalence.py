@@ -107,7 +107,12 @@ class TestTheTreesMatch:
         # safeguarding_adults_boards (Module 28's board directory) and
         # sar_documents.sab_name_source. 64 adds sab_site_crawls and
         # sar_documents.discovered_via (Module 32, per-SAB site crawling).
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 64
+        # 65 adds the semantic-analysis foundation (pipeline/nlp, tranche
+        # 034A): nlp_runs, nlp_model_registry, document_chunks,
+        # document_embeddings. The embedding column is a dialect-neutral
+        # float32 blob in both trees — pgvector is a later Postgres-only
+        # migration, so the two 0065 files stay structurally identical here.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 65
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):
