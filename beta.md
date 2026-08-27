@@ -290,7 +290,7 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A and 034B complete on `beta`.**
+  - current_state: **034A, 034B and 034C complete on `beta`.**
     034A — the foundation (migration `0065` — `nlp_runs`,
     `nlp_model_registry`, `document_chunks`, `document_embeddings`;
     `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
@@ -321,17 +321,29 @@ DONE
     (comments, no quoting) beats JSON, and 034C's always-on classifier
     consumes it — mirrors the `rich` call, was already present
     transitively.
-    `tests/test_nlp_{chunk,embeddings,search_eval,ontology}.py` + the
+    034C — `pipeline/nlp/label.py` + `pipeline nlp label`: runs the 034B
+    matcher over each non-superseded chunk's elements and writes provisional
+    `document_topics` rows with `match_method='ontology_v1'` — a row per
+    concept (`topic=<concept_id>`, `match_count`=distinct alias spans) plus a
+    `cat:<category>` rollup row. Records `ontology_version` on the run;
+    idempotent (deletes/rewrites only its own `ontology_v1` rows). `keyword_v1`
+    left untouched — `classify.TOPICS` frozen with a docstring saying so and
+    pointing at the ontology as authoritative; deliberately **not**
+    code-coupled (a collection run needs nothing from the nlp layer), so the
+    "one vocabulary" guarantee is that new terms only ever go in the ontology.
+    `tests/test_nlp_{chunk,embeddings,search_eval,ontology,label}.py` + the
     portal-isolation additions green; `ruff` clean.
   - next_action: (1) `uv sync --extra nlp` + browser-verify `/api/admin/search`
     with a real MiniLM model, `/api/v1/*` unchanged — deferred: no browser
     here. (2) Grow `retrieval_queries.json` from the 8-query seed to 30–50
     marked campaign queries against the live warehouse; record the baseline.
-    (3) Grow the ontology vocabulary as 034C/F exercise it. (4) An admin-UI
-    surface for search. **Next tranche: 034C** — `pipeline/nlp/label.py`,
-    ontology-term + pattern labelling writing provisional `document_topics`
-    rows with `match_method='ontology_v1'` (never reinterpreting `keyword_v1`),
-    and `classify.py` `TOPICS` becoming a thin shim over the loader.
+    (3) Grow the ontology vocabulary as 034D/F exercise it. (4) Admin-UI
+    surfaces for search and for the `ontology_v1` topic filter. **Next
+    tranche: 034D** — GLiNER zero-shot entity spans (`PROVIDER`,
+    `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`,
+    `PROGRAMME`) into `document_concept_mentions`; entity resolution a
+    separate deterministic step; GLiNER never writes `entity_id`. Needs the
+    `nlp` extra to grow (`gliner`) and a migration for the mentions table.
   - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
     portal-isolation + migration-equivalence + cli + ontology confirmed
     locally; full run pending); the browser/data items above.

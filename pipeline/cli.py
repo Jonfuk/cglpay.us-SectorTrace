@@ -326,6 +326,29 @@ def nlp_chunk(
         conn.close()
 
 
+@nlp_app.command("label")
+def nlp_label(
+    source_system: str = typer.Option(None, help="Only chunked versions from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunked versions to (re)label"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Label and roll back, writing nothing"),
+) -> None:
+    """Tag chunked elements against the SectorTrace ontology, writing
+    provisional `document_topics` rows with `match_method='ontology_v1'`.
+
+    Reads the ontology and `document_elements`; fetches nothing. `keyword_v1`
+    rows are never touched. Idempotent — its own rows for an element are
+    rewritten each run.
+    """
+    from pipeline.nlp import label as nlp_label_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_label_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("embed")
 def nlp_embed(
     model: str = typer.Option(

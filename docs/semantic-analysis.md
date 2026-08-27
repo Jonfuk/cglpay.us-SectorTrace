@@ -151,6 +151,37 @@ YAML, not JSON, for a hand-maintained vocabulary (comments, no quoting or
 commas). `pyyaml` is a base dependency — it must load with no `nlp` extra,
 because 034C's classifier depends on it and is always-on.
 
+## What ships now (tranche 034C) — deterministic ontology labelling
+
+`pipeline/nlp/label.py` + `pipeline nlp label`. For every non-superseded
+chunk it runs the 034B matcher over each element the chunk covers and writes
+provisional `document_topics` rows with `match_method='ontology_v1'`:
+
+* one row per concept found — `topic = <concept_id>`, `match_count` = the
+  number of distinct alias spans in that element;
+* one `topic = 'cat:<category>'` rollup row per category present, summing its
+  concepts' spans — the coarse "this element is about workforce" filter,
+  mirroring what `keyword_v1` gives without needing the ontology loaded.
+
+The stage records `ontology_version` on its `nlp_run`, and is idempotent: it
+deletes and rewrites only its own `ontology_v1` rows for the elements in
+scope. `keyword_v1` is left exactly as it was — its topics are UPPERCASE
+buckets (`classify.TOPICS`, now documented as frozen), `ontology_v1` topics
+are dotted ids or `cat:`-prefixed, so the two never collide on
+`document_topics`' `(document_element_id, topic)` key. `classify.TOPICS` is
+deliberately **not** wired to the ontology loader: a collection run must
+need nothing from the nlp layer, so the "one vocabulary" guarantee is that
+all *new* terms go in the ontology and the frozen list is never extended.
+
+A tag marks wording, not fact: an `ontology_v1` row for
+`workforce.recruitment_difficulty` fires on "no recruitment difficulties"
+too. Affirmed / negated / historical is 034E's decision; until then a tag
+finds passages, it does not count problems.
+
+```bash
+uv run pipeline nlp label --source-system committee_paper_promotion --limit 25
+```
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -160,7 +191,7 @@ earlier ones to be useful.
 |---|---|---|
 | **034A** | chunks + embeddings + hybrid search + retrieval eval harness | **shipped** — populating the 30–50-query gold set against the live warehouse is the remaining operator task |
 | **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`, `patterns/`) | **shipped** — a starter vocabulary (~80 concepts, ~30 predicates); grown as 034C/F exercise it |
-| **034C** | deterministic ontology classifier — replaces `classify.py` `TOPICS`' vocabulary; weak-supervision seed for 034G; `keyword_v1` rows never reinterpreted | planned |
+| **034C** | deterministic ontology classifier — `document_topics` `ontology_v1` rows over chunked elements; `classify.py` `TOPICS` frozen and documented, not code-coupled; weak-supervision seed for 034G; `keyword_v1` untouched | **shipped** |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`). Abstract situations are 034C's / 034G's job, not GLiNER labels. Entity resolution is a separate deterministic step — GLiNER never writes `entity_id` | planned |
 | **034E** | assertion / context detection — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`, with `assertion_status` and `detector_confidence` stored separately; medSpaCy `ConText` where installed, a stdlib cue tagger always | planned |
 | **034F** | machine claim candidates (`document_claim_candidates`, high volume) via ontology relation patterns — **not** co-occurrence; a selection policy promotes a slice into `review_queue`; approval writes a `graph_claims` draft with the detector in `extractor_name`, never `promoted_by`; review decisions capture corrections, not just approve/reject | planned |

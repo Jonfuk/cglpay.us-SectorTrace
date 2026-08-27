@@ -18,7 +18,12 @@ sentence-transformers model behind the `nlp` extra), `semantic_search`
 Tranche 034B: `ontology` — the SectorTrace controlled vocabulary
 (`ontology/concepts.yml`, `relations.yml`, `patterns/*.yml`), loaded,
 validated and content-versioned into `ontology_version`. Stdlib + PyYAML
-only; 034C's classifier consumes it and is always-on.
+only.
+
+Tranche 034C: `label` — the deterministic ontology classifier. Runs the
+034B matcher over chunked elements and writes provisional `document_topics`
+rows with `match_method='ontology_v1'` (concept ids and `cat:` categories),
+never touching the frozen `keyword_v1` vocabulary.
 
 GLiNER entity spans, assertion / context detection, relation-pattern claim
 candidates and topic clustering land in later tranches — see

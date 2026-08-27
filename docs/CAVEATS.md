@@ -348,6 +348,15 @@ anyone using it.
   deterministic offline stand-in for CI and development and retrieves poorly
   by design; only a run with the real model behind the `nlp` extra should be
   read as retrieval at all.
+- **Ontology topic tags (BETA-034C, `document_topics` rows with
+  `match_method='ontology_v1'`) mark wording, not fact.** A row saying an
+  element is about `workforce.recruitment_difficulty` means the phrase is
+  present — including in "no recruitment difficulties this year". Whether a
+  tagged passage affirms, denies or merely reports the concept is not
+  decided until the assertion layer (034E); until then a tag is a reading
+  aid for finding passages, never a count of how many documents report a
+  problem. `keyword_v1` rows (the older, frozen `classify.py` vocabulary)
+  are a separate, coarser set and are not changed by this layer.
 
 ### Public Health Grant (Module 11)
 

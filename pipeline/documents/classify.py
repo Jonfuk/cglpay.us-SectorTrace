@@ -1,4 +1,19 @@
-"""Deliberately modest deterministic classification and topic tagging."""
+"""Deliberately modest deterministic classification and topic tagging.
+
+`TOPICS` here is FROZEN. It is the vocabulary behind `match_method='keyword_v1'`
+rows, written per element at parse time (`repository.persist_parse`), and
+those rows must never be reinterpreted — a term added here would change what
+`keyword_v1` means halfway through the corpus.
+
+The authoritative, extensible concept vocabulary is the SectorTrace ontology
+(`pipeline/nlp/ontology/`, BETA-034B). New concepts and aliases go there, and
+`pipeline nlp label` writes them as `match_method='ontology_v1'` rows in the
+same `document_topics` table (dotted concept ids / `cat:`-prefixed
+categories, so the two vocabularies never collide). Keeping the growth in one
+place is what stops the two lists drifting apart; this module is not wired to
+the ontology on purpose, so a collection run needs nothing from the nlp
+layer.
+"""
 from __future__ import annotations
 
 import re
