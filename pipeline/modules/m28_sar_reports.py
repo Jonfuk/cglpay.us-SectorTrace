@@ -50,6 +50,7 @@ this rule.
 """
 from __future__ import annotations
 
+import collections
 import html as html_lib
 import json
 import re
@@ -68,6 +69,22 @@ log = structlog.get_logger()
 
 SOURCE_SYSTEM = "national_sar_library"
 LIBRARY_URL = "https://nationalnetwork.org.uk/search.html"
+
+# The library kept a separate collection for the documents SCIE (the Social
+# Care Institute for Excellence) held before the National Network took the
+# register on. Same site, same flat-list shape, different page — folded into
+# the same processing so the corpus is the whole library, not just the part
+# added since 2019.
+SCIE_LIBRARY_URL = "https://nationalnetwork.org.uk/SCIE%20Library%202015-2018/"
+
+# The Ann Craft Trust's directory of Safeguarding Adults Boards — the one
+# maintained national index of them. Fetched to populate
+# safeguarding_adults_boards and, more usefully, to give sab_name resolution
+# a fixed set of official names to land on. See migration 0063.
+SAB_DIRECTORY_URL = (
+    "https://www.anncrafttrust.org/resources/"
+    "find-your-nearest-safeguarding-adults-board/")
+SOURCE_SAB_DIRECTORY = "anncrafttrust_sab_directory"
 
 # Each year's documents sit in a <table> under a "SARs <year>" collapsible
 # heading; see docs/verification notes in the module's PR for a captured
@@ -146,6 +163,70 @@ def parse_library_page(page_html: str) -> list[dict]:
                 continue
             rows.append({"title": title, "href": link, "library_year": year})
     return rows
+
+
+# SCIE page: a flat <ul> of "<li>Title <a href="...">Download</a></li>" with
+# one heading over the lot and no per-item year. `strip_html` on the <li>
+# prefix gives the title; the year the collection was added (2015, its
+# start) stands in for library_year, which has only ever meant "when added".
+_SCIE_ROW_RE = re.compile(
+    r"<li[^>]*>(.*?)<a\s+[^>]*href=\"([^\"]+)\"", re.IGNORECASE | re.DOTALL)
+
+
+def parse_scie_library_page(page_html: str) -> list[dict]:
+    """(title, href, library_year) rows from the SCIE Library 2015-2018 page."""
+    rows: list[dict] = []
+    for raw_title, href in _SCIE_ROW_RE.findall(page_html or ""):
+        title = strip_html(raw_title)
+        link = html_lib.unescape(href.strip())
+        if not title or not link:
+            continue
+        if not link.lower().split("?")[0].endswith(_DOCUMENT_EXTENSIONS):
+            continue
+        rows.append({"title": title, "href": link, "library_year": 2015})
+    return rows
+
+
+# Ann Craft Trust directory: nation headings, each over a list of
+# "<a href="board site">Board Name</a>". The page also links to unrelated
+# resources, so an anchor is kept only when its text reads like a board.
+_NATION_HEADING_RE = re.compile(
+    r"<h[1-6][^>]*>\s*(England|Wales|Scotland|Northern Ireland)\b",
+    re.IGNORECASE)
+_DIR_LINK_RE = re.compile(
+    r'<a\s+[^>]*href="([^"]+)"[^>]*>([^<]{4,140})</a>', re.IGNORECASE)
+
+
+def parse_sab_directory(page_html: str) -> list[dict]:
+    """(name, nation, website_url) for every board in the directory.
+
+    Each anchor is attributed to the nearest nation heading above it. An
+    anchor whose text does not carry 'Safeguarding' / 'Adult Protection'
+    plus 'board'/'committee'/'partnership' is skipped.
+    """
+    headings = [(m.start(), m.group(1).title())
+                for m in _NATION_HEADING_RE.finditer(page_html or "")]
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in _DIR_LINK_RE.finditer(page_html or ""):
+        text = re.sub(r"\s+", " ", html_lib.unescape(m.group(2))).strip()
+        low = text.lower()
+        if not re.search(r"safeguarding|adult protection", low):
+            continue
+        if not re.search(r"board|committee|partnership", low):
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        nation = "England"
+        for pos, name in headings:
+            if pos < m.start():
+                nation = name
+            else:
+                break
+        out.append({"name": text, "nation": nation,
+                    "website_url": html_lib.unescape(m.group(1).strip())})
+    return out
 
 
 def resolve_document_url(href: str) -> str:
@@ -229,11 +310,112 @@ def _clean_sab_name(raw: str) -> str | None:
 
 
 def extract_sab_name(text: str | None) -> str | None:
+    """The board named in the document's own opening — the 0057 primitive,
+    kept as-is. resolve_sab_name() layers on top of this."""
     if not text:
         return None
     head = text[:_SAB_NAME_SEARCH_CHARS]
     match = _SAB_NAME_RE.search(head) or _SAB_COMMISSIONED_RE.search(head)
     return _clean_sab_name(match.group(1)) if match else None
+
+
+_SAB_KEY_DROP = re.compile(
+    r"\b(safeguarding|adults?|partnership|board|committee|protection|"
+    r"the|of|council|county|borough|city|metropolitan|district|"
+    r"unitary|and)\b")
+
+
+def _sab_key(s: str | None) -> str:
+    """A board or place name reduced to its distinguishing tokens, so
+    'Camden', 'Camden Safeguarding Adults Board' and 'Camden Safeguarding
+    Adults Partnership Board' all key the same."""
+    s = re.sub(r"[^a-z0-9 &]+", " ", (s or "").lower())
+    s = _SAB_KEY_DROP.sub(" ", s)
+    return re.sub(r"\s+", " ", s.replace("&", " and ")).strip()
+
+
+def _place_of(board_name: str) -> str:
+    """The board name with its 'Safeguarding ... Board' tail removed."""
+    return re.sub(r"\s*safeguarding.*$", "", board_name or "", flags=re.IGNORECASE)
+
+
+def build_sab_index(directory_rows: list[dict]) -> dict[str, str]:
+    """`_sab_key` of a board's place -> its official name, England only.
+
+    England only because the campaign is England-wide and a Welsh or Scottish
+    board sharing a place word ("Cardiff", "Highland") would otherwise
+    resolve an English SAR to the wrong nation's body.
+    """
+    index: dict[str, str] = {}
+    for row in directory_rows:
+        if row.get("nation") != "England":
+            continue
+        official = row["name"]
+        for key in (_sab_key(official), _sab_key(_place_of(official))):
+            if key:
+                index.setdefault(key, official)
+    return index
+
+
+def resolve_sab_name(body_text: str | None, title: str | None,
+                      sab_index: dict[str, str]) -> tuple[str | None, str | None]:
+    """(sab_name, source) for one SAR, resolved in layers strongest first.
+
+    An empty `sab_index` (the directory fetch failed) degrades to the 0057
+    behaviour: opening-window text only, always 'document_text_unverified'.
+    """
+    text = body_text or ""
+
+    def canon(name: str) -> str | None:
+        return sab_index.get(_sab_key(_place_of(name))) or sab_index.get(_sab_key(name))
+
+    # 1. The board names itself in the opening.
+    head = text[:_SAB_NAME_SEARCH_CHARS]
+    m = _SAB_NAME_RE.search(head) or _SAB_COMMISSIONED_RE.search(head)
+    opening = _clean_sab_name(m.group(1)) if m else None
+    if opening:
+        return (canon(opening) or opening,
+                "document_text" if canon(opening) else "document_text_unverified")
+
+    # 2. Whole document: the board it names most often that resolves to the
+    #    directory (a neighbouring board mentioned once does not), or failing
+    #    that a board named four or more times.
+    counts: collections.Counter = collections.Counter()
+    for mm in _SAB_NAME_RE.finditer(text):
+        cleaned = _clean_sab_name(mm.group(1))
+        if cleaned:
+            counts[cleaned] += 1
+    resolved: collections.Counter = collections.Counter()
+    for name, n in counts.items():
+        official = canon(name)
+        if official:
+            resolved[official] += n
+    if resolved:
+        top, n = resolved.most_common(1)[0]
+        if n >= 2 or len(resolved) == 1:
+            return top, "document_text"
+    for name, n in counts.most_common(1):
+        if n >= 4:
+            return name, "document_text_unverified"
+
+    # 3. A directory board's place name sitting next to "Safeguarding" / "SAB"
+    #    at least three times in the text.
+    low = text.lower()
+    for key, official in sab_index.items():
+        if len(key) < 5 or low.count(key) < 3:
+            continue
+        if re.search(re.escape(key) + r"\W{0,40}(safeguarding|\bsab\b)", low):
+            return official, "document_text"
+
+    # 4. The library title carries a place that is exactly one directory board.
+    toks = _sab_key(title).split()
+    hits = {sab_index[" ".join(toks[i:i + j])]
+            for i in range(len(toks)) for j in (5, 4, 3, 2, 1)
+            if " ".join(toks[i:i + j]) in sab_index}
+    if len(hits) == 1:
+        return hits.pop(), "sab_directory"
+
+    return None, None
 
 
 def index_concern_terms(text: str, welded: bool = False) -> dict[str, int]:
@@ -407,6 +589,77 @@ def _read_docx(conn, module_name: str, document_url: str,
     return text, "docx"
 
 
+def _collect_sab_directory(ctx: ModuleContext, module_name: str) -> dict[str, str]:
+    """Fetch and store the Ann Craft Trust board directory; return the
+    resolution index. A failure here is not fatal — sab_name resolution
+    still runs, just without a canonical name to land on."""
+    conn = ctx.conn
+    with PipelineHTTPClient(SOURCE_SAB_DIRECTORY, settings=ctx.settings, conn=conn) as client:
+        try:
+            page = client.get(SAB_DIRECTORY_URL)
+        except RobotsDisallowed:
+            db.record_review_item(conn, module_name, "sab_directory_robots_disallowed",
+                                   SAB_DIRECTORY_URL, json.dumps({}))
+            return {}
+        if not page.ok:
+            db.record_review_item(conn, module_name, "sab_directory_unavailable",
+                                   SAB_DIRECTORY_URL, json.dumps({"status": page.status_code}))
+            return {}
+
+        boards = parse_sab_directory(page.body.decode("utf-8", "replace"))
+        if not boards:
+            db.record_parse_failure(
+                conn, module_name, "sab_directory", SAB_DIRECTORY_URL,
+                "no board entries recognised on the directory page; its markup "
+                "may have changed", source_url=SAB_DIRECTORY_URL)
+            return {}
+
+        provenance = {
+            "source_url": page.url,
+            "retrieved_at": page.retrieved_at.isoformat(),
+            "http_status": page.status_code,
+            "source_system": SOURCE_SAB_DIRECTORY,
+            "payload_sha256": page.payload_sha256,
+        }
+        for board in boards:
+            db.upsert(conn, "safeguarding_adults_boards", {
+                "name": board["name"],
+                "nation": board["nation"],
+                "website_url": board["website_url"],
+                **provenance,
+            }, natural_key=["name"])
+        if not ctx.dry_run:
+            conn.commit()
+        log.info("sar.sab_directory", boards=len(boards))
+        return build_sab_index(boards)
+
+
+def _reresolve_missing_sab_names(ctx: ModuleContext, sab_index: dict[str, str]) -> int:
+    """Re-run sab_name resolution over already-archived text for documents
+    that still have none. No re-fetch: this is what lets the resolver
+    improve and every existing row catch up on the next plain run."""
+    conn = ctx.conn
+    pending = conn.execute(
+        "SELECT d.document_url, p.title_raw, t.body_text "
+        "FROM sar_documents d "
+        "JOIN restricted_sar_report_text t ON t.document_url = d.document_url "
+        "LEFT JOIN restricted_sar_persons p ON p.document_url = d.document_url "
+        "WHERE d.sab_name IS NULL AND d.has_body_text = 1"
+    ).fetchall()
+    healed = 0
+    for row in pending:
+        name, source = resolve_sab_name(row["body_text"], row["title_raw"], sab_index)
+        if not name:
+            continue
+        conn.execute(
+            "UPDATE sar_documents SET sab_name = ?, sab_name_source = ? WHERE document_url = ?",
+            (name, source, row["document_url"]))
+        healed += 1
+    if healed and not ctx.dry_run:
+        conn.commit()
+    return healed
+
+
 @register_module(
     "m28_sar_reports", supports_since=False,
     since_note="the library gives no per-document date; a document already read is skipped "
@@ -421,6 +674,9 @@ def run(ctx: ModuleContext) -> None:
     documents_written = 0
     texts_read = 0
     provider_mentions = 0
+
+    ctx.phase("reading the Safeguarding Adults Board directory")
+    sab_index = _collect_sab_directory(ctx, module_name)
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         ctx.phase("reading the SAR library index")
@@ -449,6 +705,42 @@ def run(ctx: ModuleContext) -> None:
             if not ctx.dry_run:
                 conn.commit()
             return
+
+        # The SCIE 2015-2018 collection, folded in. Its own failure is a
+        # review item, not a reason to abandon the main library.
+        ctx.phase("reading the SCIE 2015-2018 collection")
+        try:
+            scie = client.get(SCIE_LIBRARY_URL)
+            if scie.ok:
+                scie_rows = parse_scie_library_page(scie.body.decode("utf-8", "replace"))
+                if scie_rows:
+                    rows = rows + scie_rows
+                else:
+                    db.record_parse_failure(
+                        conn, module_name, "listing", SCIE_LIBRARY_URL,
+                        "the SCIE collection page returned no recognisable rows",
+                        source_url=SCIE_LIBRARY_URL)
+            else:
+                db.record_review_item(conn, module_name, "sar_library_unavailable",
+                                       SCIE_LIBRARY_URL,
+                                       json.dumps({"status": scie.status_code}))
+        except RobotsDisallowed:
+            db.record_review_item(conn, module_name, "sar_library_robots_disallowed",
+                                   SCIE_LIBRARY_URL, json.dumps({}))
+        if not ctx.dry_run:
+            conn.commit()
+
+        # Two libraries can list the same document; the resolved URL is the
+        # natural key, so keep the first occurrence of each.
+        seen_urls: set[str] = set()
+        deduped: list[dict] = []
+        for row in rows:
+            url = resolve_document_url(row["href"])
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            deduped.append(row)
+        rows = deduped
 
         for row in ctx.track(rows, "SAR library entries"):
             if ctx.limit and documents_written >= ctx.limit:
@@ -489,17 +781,19 @@ def run(ctx: ModuleContext) -> None:
                     f"document is {ext}, not a PDF or DOCX; text was not extracted",
                     source_url=document_url)
 
-            sab_name = extract_sab_name(body_text)
+            sab_name, sab_source = resolve_sab_name(body_text, row["title"], sab_index)
             if body_text and not sab_name:
                 db.record_parse_failure(
                     conn, module_name, "sab_name", document_url,
-                    "no board name found in the document's own text", source_url=document_url)
+                    "no board name found in the document's text, the directory, "
+                    "or the library title", source_url=document_url)
 
             db.upsert(conn, "sar_documents", {
                 "document_url": document_url,
                 "document_ext": ext,
                 "library_year": row["library_year"],
                 "sab_name": sab_name,
+                "sab_name_source": sab_source,
                 "has_body_text": int(bool(body_text)),
                 **_provenance(fetch_result),
             }, natural_key=["document_url"])
@@ -534,5 +828,8 @@ def run(ctx: ModuleContext) -> None:
             if not ctx.dry_run:
                 conn.commit()
 
+    ctx.phase("resolving board names for documents already read")
+    healed = _reresolve_missing_sab_names(ctx, sab_index)
+
     log.info("sar.run_complete", documents=documents_written, texts_read=texts_read,
-              provider_mentions=provider_mentions)
+              provider_mentions=provider_mentions, sab_names_backfilled=healed)

@@ -283,17 +283,18 @@ TABS: list[TabSpec] = [
         name="11_SAR_Reports",
         description="Safeguarding Adult Reviews read from the National SAR Library, with the board name each document states for itself and workforce concern flags.",
         columns=["document_url", "document_ext", "library_year", "sab_name",
-                  "has_body_text", "concern_terms", "provider_mentions"],
+                  "sab_name_source", "has_body_text", "concern_terms",
+                  "provider_mentions"],
         caveats=[
             "The subject of a review is never named in this export; documents are keyed on their own URL and the title as submitted to the library lives only in a restricted table.",
-            "sab_name is read from the words the document itself uses to name its board, not validated against a fixed list of the ~150 Safeguarding Adults Boards. NULL means no board was named plainly, not that none was involved.",
+            "sab_name_source says how sab_name was obtained: 'document_text' — the document names its board and the name matches the Ann Craft Trust directory; 'document_text_unverified' — the document names a board not in that directory; 'sab_directory' — the document did not name one, but its library title carries a place that resolves to exactly one directory board. NULL source with a NULL name means none of these found a board.",
             "library_year is the year the National SAR Library filed the document under, not a publication date.",
             "Concern terms indicate a word appears anywhere in the document text. They are a finding aid, not a characterisation of what the review found.",
             "The library's coverage is whatever boards chose to submit; an absent board or year is a gap in the library, not evidence that no review took place.",
         ],
         sql="""
             SELECT d.document_url, d.document_ext, d.library_year, d.sab_name,
-                   d.has_body_text,
+                   d.sab_name_source, d.has_body_text,
                    (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM sar_concern_terms t WHERE t.document_url = d.document_url) AS concern_terms,
                    (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM sar_provider_mentions m
