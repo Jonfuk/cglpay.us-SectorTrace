@@ -11,15 +11,19 @@ person, never discovered by a module. Two ways one earns that:
     Charity Commission register for every charity number. The full
     previous-name history was read for each, so a rename could not be
     mistaken for a different legal entity.
+  * The CQC provider IDs were hand-checked on the same date against each
+    provider's current page on cqc.org.uk. The re-registration hazard is
+    real and was checked per provider: Richmond Fellowship's CQC
+    registration is archived (services moved to Waythrough) and Delphi has
+    a live registration under 'Delphi Medical Limited' alongside an
+    archived 'Delphi Medical Consultants Limited' — the live/correct id is
+    the one seeded, with the archived predecessor named in PROVIDER_NOTES.
 
-Everything still missing here — CQC provider IDs, PPONs, the company
-numbers of trading subsidiaries — is left for Modules 3, 4 and 10 to
-discover and write back as 'unverified' pending the same hand check. A
-guessed company number silently mis-attributes contracts, tribunal claims
-and accounts to the wrong legal entity, so it is worse than a NULL. CQC
-provider IDs are held back deliberately: CQC re-registrations mean a
-provider often carries a stale ID alongside a current one, and picking
-the wrong one has the same failure mode.
+Everything still missing here — PPONs, the company numbers of trading
+subsidiaries — is left for Modules 3, 4 and 10 to discover and write back
+as 'unverified' pending the same hand check. A guessed identifier
+silently mis-attributes contracts, tribunal claims and accounts to the
+wrong legal entity, so it is worse than a NULL.
 
 Three provider_keys are historical names of an entity that also appears
 under its current name (addaction→with_you, humankind→waythrough,
@@ -41,10 +45,10 @@ PROVIDER_NOTES: dict[str, str] = {
     "with_you": "Formerly Addaction (renamed 26 Feb 2020). Company 02580377, charity 1001957.",
     "humankind": "Former name of Waythrough: 'Humankind Charity' was the registered name of company 01820492 / charity 515755 from 2018 until 6 Feb 2025 ('DISC' before that). Same legal entity as `waythrough`, where the identifiers are seeded. Distinct from the 2024 group formation with Richmond Fellowship, which stayed separately registered.",
     "waythrough": "The former Humankind entity (company 01820492, charity 515755) renamed 6 Feb 2025 — not a new legal entity. Richmond Fellowship and Aquarius (charity 1014305) sit alongside it in the Waythrough group, each still separately registered.",
-    "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers.",
+    "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers. Its CQC provider registration (1-151675564) was archived on 4 Jun 2024 with the regulated services moved to Waythrough — pre-June-2024 CQC evidence is still RF's.",
     "via": "Formerly Westminster Drug Project (renamed 5 Jun 2023). Company 02807934 ('Via Community Ltd'), charity 1031602. Short trading name; high false-positive risk in free text — match only exact registered variants or the historic 'Westminster Drug Project'.",
     "westminster_drug_project": "Former name of Via: the registered name of company 02807934 / charity 1031602 until 5 Jun 2023 (also historic 'Waltham Forest Drug Project' / 'Wandsworth Drug Project'). Same legal entity as `via`, where the identifiers are seeded.",
-    "delphi_medical": "Private company, not a charity: Delphi Medical Limited, company 06944767. A separately registered 'Delphi Medical Consultants Limited' (06014150) shares the address and is the name CQC currently shows for the provider — reconcile when CQC IDs are pulled; the identifier here refers to 06944767.",
+    "delphi_medical": "Private company, not a charity: Delphi Medical Limited, company 06944767, CQC provider 1-2448282802. A separately registered 'Delphi Medical Consultants Limited' (company 06014150, CQC provider 1-125892841) shares the Burnley address and historically held the substance-misuse registrations; its CQC registration was archived on 15 Nov 2024. Seeded identifiers refer to Delphi Medical Limited.",
     "inclusion": "Not a separate legal entity: a service brand of Midlands Partnership University NHS Foundation Trust (NHS provider, ODS / CQC code RRE — no Companies House or Charity Commission registration). Generic word; high false-positive risk in free-text matching.",
 }
 
@@ -169,6 +173,74 @@ VERIFIED_IDENTIFIERS: list[dict[str, str]] = [
         "scheme": "company_number",
         "identifier": "06944767",
         "role": "private limited company (not a charity)",
+    },
+
+    # CQC provider IDs — hand-checked 2026-08-27 against each provider's
+    # current page on cqc.org.uk. CQC's registered name is kept in `role`
+    # because it often differs from the canonical name and is what the
+    # bulk-directory match in m05 keys on. NHS trusts (inclusion) carry
+    # their ODS code as the provider id. Two archived registrations are
+    # noted rather than seeded stale: see PROVIDER_NOTES for
+    # richmond_fellowship and delphi_medical.
+    {
+        "provider_key": "change_grow_live",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-125892604",
+        "role": "CQC-registered provider ('Change, Grow, Live')",
+    },
+    {
+        "provider_key": "turning_point",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-102642564",
+        "role": "CQC-registered provider ('Turning Point')",
+    },
+    {
+        "provider_key": "with_you",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-101617404",
+        "role": "CQC-registered provider ('We are With You')",
+    },
+    {
+        "provider_key": "waythrough",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126775024",
+        "role": "CQC-registered provider ('Waythrough')",
+    },
+    {
+        "provider_key": "richmond_fellowship",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-151675564",
+        "role": "CQC-registered provider ('Richmond Fellowship (The)'); archived 4 Jun 2024, services moved to Waythrough",
+    },
+    {
+        "provider_key": "via",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126775066",
+        "role": "CQC-registered provider ('Via Community Ltd')",
+    },
+    {
+        "provider_key": "forward_trust",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126776256",
+        "role": "CQC-registered provider ('The Forward Trust')",
+    },
+    {
+        "provider_key": "phoenix_futures",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-101660529",
+        "role": "CQC-registered provider ('Phoenix House')",
+    },
+    {
+        "provider_key": "delphi_medical",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-2448282802",
+        "role": "CQC-registered provider ('Delphi Medical Limited'); predecessor 'Delphi Medical Consultants Limited' (1-125892841) archived 15 Nov 2024",
+    },
+    {
+        "provider_key": "inclusion",
+        "scheme": "cqc_provider_id",
+        "identifier": "RRE",
+        "role": "CQC provider id is the ODS trust code for Midlands Partnership University NHS Foundation Trust",
     },
 ]
 
