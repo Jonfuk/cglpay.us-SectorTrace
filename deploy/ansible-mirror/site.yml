@@ -88,6 +88,9 @@
           - "Role:       {{ 'BETA deployment, branch ' + deploy_git_branch if mirror_role == 'beta' else 'disaster-recovery mirror' }}"
           - "Portal:     https://{{ domain }}/"
           - "Admin UI:   ssh -L 1801:127.0.0.1:1801 <user>@{{ domain }} -N, then http://127.0.0.1:1801/admin"
+          - "PostgreSQL: {{ '5432 open to ' + (postgres_external_allowed_ips | join(', ')) + ' on ' + postgres_public_interface + ' (DOCKER-USER allowlist); all other off-box sources dropped'
+                            if postgres_external_allowed_ips | length > 0
+                            else 'loopback only — reach it over an SSH tunnel' }}"
           - "Stack:      cd {{ state_dir }} && docker compose ps"
           - "Sync:       {{ 'systemctl status sectortrace-mirror-sync.timer' if mirror_recurring_sync_enabled else 'no timer — this box is seeded once, by hand, and left alone' }}"
           - "            sectortrace-mirror sync        (run one now, in the foreground)"

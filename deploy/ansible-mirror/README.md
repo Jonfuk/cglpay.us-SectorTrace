@@ -458,6 +458,39 @@ Changing a password in `vault.yml` does not rotate it on an existing Postgres
 volume: the role-bootstrap SQL only runs against an empty data directory.
 Same as the self-host build — `ALTER ROLE` first, then update the vault.
 
+## Direct PostgreSQL access
+
+By default 5432 is bound to `127.0.0.1` — the self-host build's posture,
+reachable only from on the box or an SSH tunnel. `postgres_external_allowed_ips`
+in [`group_vars/all/vars.yml`](group_vars/all/vars.yml) opens it to specific
+source addresses (CIDR ranges accepted). On the next `./ansible-mirror.sh`
+run, a non-empty list:
+
+- publishes the container's 5432 on `0.0.0.0`
+  (`docker-compose.mirror.yml.j2`);
+- installs `/usr/local/bin/sectortrace-mirror-pg-firewall` and
+  `sectortrace-mirror-pg-firewall.service`, which put an `ACCEPT` for each
+  listed address plus a default-drop for every other off-box source into a
+  dedicated `SECTORTRACE_PG` chain jumped to from the top of `DOCKER-USER`.
+
+**It has to be iptables, not ufw.** A published Docker port bypasses ufw
+entirely — see [`../ansible/README.md`](../ansible/README.md), "What ufw
+doesn't cover". The rules are re-applied at boot and on a Docker restart by
+the unit, because the kernel's tables are not persistent and Docker
+recreates `DOCKER-USER` empty. A reboot before the unit runs fails closed
+(5432 unreachable from off-box).
+
+Check it: `sudo iptables -S SECTORTRACE_PG`.
+
+What this does **not** add: TLS. The session is straight TCP to PostgreSQL —
+`scram-sha-256` keeps the password off the wire (postgres:18), but the
+traffic itself is not encrypted, and a home broadband address that changes
+takes the rule with it. It is a weaker boundary than the SSH tunnel the sync
+modes use; prefer a tunnel or a VPN for anything that is not read-only.
+Point external read-only clients at `sectortrace_reader` / `DATABASE_RO_URL`.
+
+Set the list back to empty and re-run to tear all of it down again.
+
 ## What this box does not have
 
 - **No collection by default.** Nothing crawls a source from here, and

@@ -303,6 +303,62 @@
   until: sectortrace_mirror_health.status is defined and sectortrace_mirror_health.status == 200
   failed_when: sectortrace_mirror_health.status is not defined or sectortrace_mirror_health.status != 200
 
+# --- Direct PostgreSQL access for listed addresses --------------------------
+# postgres_external_allowed_ips is empty in the self-host build and by
+# default here. When it is set, the compose file above already published
+# 5432 on 0.0.0.0; these rules are the allowlist that makes that safe to do.
+# They go in the DOCKER-USER iptables chain because a published Docker port
+# does not pass through ufw (deploy/ansible/README.md, "What ufw doesn't
+# cover"). The script owns one dedicated sub-chain and is idempotent; the
+# unit re-applies it after a reboot or a Docker restart.
+- name: Refuse a PostgreSQL allowlist with nothing to scope the drop to
+  ansible.builtin.assert:
+    that:
+      - postgres_public_interface | length > 0
+    fail_msg: >-
+      postgres_external_allowed_ips is set but postgres_public_interface is
+      empty — ansible_default_ipv4 did not resolve on this host. Set
+      postgres_public_interface in group_vars/all/zz-local.yml to the
+      interface the listed clients reach this box on.
+  when: postgres_external_allowed_ips | length > 0
+
+- name: Install the PostgreSQL firewall script
+  ansible.builtin.template:
+    src: sectortrace-mirror-pg-firewall.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-pg-firewall
+    mode: "0700"
+
+- name: Install the PostgreSQL firewall unit
+  ansible.builtin.template:
+    src: sectortrace-mirror-pg-firewall.service.j2
+    dest: /etc/systemd/system/sectortrace-mirror-pg-firewall.service
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Load the unit before it is enabled or started
+  ansible.builtin.meta: flush_handlers
+
+- name: Apply the PostgreSQL firewall rules now
+  # Runs on every playbook run: the script flushes and refills its own chain,
+  # so this reconciles the live rules with the current allowlist (added
+  # addresses appear, removed ones go, an emptied list tears the chain down).
+  ansible.builtin.command:
+    cmd: /usr/local/bin/sectortrace-mirror-pg-firewall
+  changed_when: true
+
+- name: Enable the PostgreSQL firewall unit at boot when the allowlist is in use
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-pg-firewall.service
+    enabled: true
+  when: postgres_external_allowed_ips | length > 0
+
+- name: Disable the PostgreSQL firewall unit when the allowlist is empty
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-pg-firewall.service
+    enabled: false
+  failed_when: false
+  when: postgres_external_allowed_ips | length == 0
+
 # --- The sync ------------------------------------------------------------------
 - name: Install the SSH tunnel unit
   ansible.builtin.template:

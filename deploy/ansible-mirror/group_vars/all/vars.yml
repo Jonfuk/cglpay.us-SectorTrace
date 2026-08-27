@@ -53,6 +53,46 @@ expose_admin_publicly: false
 admin_allowed_ips:
   - "154.61.155.48"
 
+# --- Direct PostgreSQL access ---------------------------------------------------
+# Source addresses allowed to open a PostgreSQL connection to this box on
+# 5432. Empty (the default the self-host build has) keeps PostgreSQL bound to
+# 127.0.0.1 in docker-compose.yml — reachable only from on the box or through
+# an SSH tunnel. Listing an address here, on the next playbook run:
+#
+#   * publishes the container's 5432 on all IPv4 interfaces
+#     (docker-compose.mirror.yml.j2), and
+#   * writes an accept rule for that address into the DOCKER-USER iptables
+#     chain, with a default-drop for every other off-box source on the public
+#     interface. It has to be iptables, not ufw: a published Docker port does
+#     not pass through ufw at all (deploy/ansible/README.md, "What ufw doesn't
+#     cover"). sectortrace-mirror-pg-firewall(.service) owns those rules and
+#     re-applies them at boot.
+#
+# CIDR ranges are accepted (198.51.100.0/24). This is a genuine exposure and
+# a weaker boundary than the SSH tunnel the sync modes use:
+#
+#   * a home broadband address changes without warning — when it does, the
+#     rule points at whoever holds it next;
+#   * the connection is a straight TCP session to PostgreSQL. The password is
+#     not sent in clear (scram-sha-256 on the postgres:18 image), but nothing
+#     here terminates TLS in front of 5432, so the traffic itself is not
+#     encrypted. Use an SSH tunnel or a VPN if that matters.
+#
+# The role still authenticates every session with a role password; this list
+# only decides which source addresses may attempt one. Prefer the read-only
+# role (sectortrace_reader / DATABASE_RO_URL) for any external client that
+# only reads.
+postgres_external_allowed_ips:
+  - "154.61.155.48"
+
+# The interface the default-drop above matches on — genuinely external
+# inbound traffic, so on-box and container-to-container connections to 5432
+# (the sync container runs network_mode: host and dials 127.0.0.1:5432) are
+# never caught by it. Defaults to this box's primary interface; override in
+# zz-local.yml only on a multi-homed host where the default route is not the
+# interface the listed clients arrive on.
+postgres_public_interface: "{{ ansible_default_ipv4.interface | default('') }}"
+
 # --- Resource sizing -------------------------------------------------------------
 # Derived from the host's actual RAM and CPU count, exactly as in the
 # self-host build — the shared preflight role asserts the budget fits before

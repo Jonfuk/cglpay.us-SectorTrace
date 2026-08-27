@@ -111,10 +111,22 @@ services:
       # that window and everything depending on it refuses to start.
       start_period: 90s
     ports:
+{% if postgres_external_allowed_ips | length > 0 %}
+      # Published on every IPv4 interface: postgres_external_allowed_ips is
+      # set, so this box takes direct PostgreSQL connections. What limits
+      # that to the listed addresses is NOT here and NOT ufw — a published
+      # Docker port bypasses ufw entirely (deploy/ansible/README.md, "What
+      # ufw doesn't cover"). It is the DOCKER-USER iptables rules that
+      # sectortrace-mirror-pg-firewall installs. The explicit 0.0.0.0 keeps
+      # this to IPv4, matching the v4-only allowlist. The sync container
+      # still reaches PostgreSQL at 127.0.0.1:5432 as before.
+      - "0.0.0.0:5432:5432"
+{% else %}
       # Loopback only — and, on this box, also how the sync container
       # reaches it: that one runs with network_mode: host and connects to
       # 127.0.0.1:5432 rather than to the service name.
       - "127.0.0.1:5432:5432"
+{% endif %}
 
 {% if mirror_graph_rebuild %}
   neo4j:
