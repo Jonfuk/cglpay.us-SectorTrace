@@ -96,3 +96,9 @@
              {{ 'nightly S3 snapshot' if mirror_sync_mode == 'snapshot' else ('a direct PostgreSQL copy over the SSH tunnel' if mirror_sync_mode == 'tunnel' else 'a direct PostgreSQL copy from the configured URL') }}"
           - "Archive:    S3 -> local disk at {{ state_dir }}/data/raw
              ({{ 'synced nightly' if mirror_archive_sync else 'sync disabled' }})"
+          - "Extra env:  {{ mirror_env_merge_file }}
+             {{ '— present, merged onto the end of .env this run. Edit it and re-run to change keys.'
+                if mirror_env_merge.stat.exists
+                else '— absent. Create it (see deploy/ansible-mirror/.env.merge.example) to add module '
+                     + 'API keys for `sectortrace-mirror run mNN_...` on this box; it is gitignored and '
+                     + 'survives every redeploy.' }}"

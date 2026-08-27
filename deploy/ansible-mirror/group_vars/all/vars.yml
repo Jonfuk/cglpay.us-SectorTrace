@@ -233,6 +233,29 @@ deploy_git_branch: ""
 # without vanishing at the next timer firing is not a testing database.
 mirror_recurring_sync_enabled: "{{ mirror_role != 'beta' }}"
 
+# --- Extra environment this role does not render ----------------------------
+# env.j2 writes no module API keys, by design: a dr_mirror collects nothing
+# and "a key that cannot be used is a key that should not be on the box"
+# (see env.j2's closing note and the README's "What this box does not
+# have"). A `beta` box is the exception the design already anticipates — a
+# writable checkout you test a branch against, where a queue item may need
+# to exercise one real collection module (`sectortrace-mirror run mNN_...`),
+# and that needs the module's key.
+#
+# Those keys do not belong in the vault (it holds the SOURCE deployment's
+# credentials, not this box's own) and cannot live in env.j2 (rendered from
+# tracked files, overwritten every run). This is the third place: an
+# operator-managed file beside the rendered .env, merged onto the end of it
+# on every playbook run. Later definitions win — for Docker Compose's
+# env_file and for pipeline/config.py's dotenv load alike — so a key here
+# overrides the same key from env.j2. Absent, nothing changes.
+#
+# It sits in state_dir, NOT the checkout: the beta pre-task resets this
+# box's tree to origin/<branch> every run, so the checkout is no place for a
+# persistent local secret. state_dir is 0750 root-owned — the same privacy
+# boundary .env itself relies on. See deploy/ansible-mirror/.env.merge.example.
+mirror_env_merge_file: "{{ state_dir }}/.env.merge"
+
 # How the warehouse gets here. All paths are built; this chooses which one
 # the timer runs, and ansible-mirror.sh asks for it.
 #

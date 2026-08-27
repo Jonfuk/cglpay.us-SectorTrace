@@ -27,6 +27,13 @@ deploy/ansible-mirror/.vault-backups/
 deploy/ansible-mirror/group_vars/all/zz-local.yml
 deploy/ansible-mirror/*.retry
 
+# Operator-managed extra env for a `beta` box: module API keys for modules
+# run on it by hand. It lives at <state_dir>/.env.merge on the box and is
+# merged into the rendered .env on every playbook run; this entry is a
+# backstop against a copy left in the checkout. The tracked
+# deploy/ansible-mirror/.env.merge.example is the template.
+.env.merge
+
 # Data — raw archives and the canonical warehouse are local state, not source
 data/raw/
 data/warehouse.db

@@ -89,6 +89,21 @@ change does not also start crawling live public sources a second time from a
 second box. If a queue item specifically needs to exercise collection, that
 is a deliberate follow-up decision, not this role's default.
 
+That follow-up is a file: **`<state_dir>/.env.merge`**, which for a mirror
+is `/opt/sectortrace-mirror/state/.env.merge`. Put the module API keys (and
+any other per-box environment overrides) there, one `KEY=VALUE` per line,
+and re-run `./ansible-mirror.sh`. On every run `env.j2` appends the file
+verbatim to the end of the rendered `.env`, so a key set there overrides the
+same key from the template. The file is **gitignored** and is **not**
+rendered from a template, so it is the one thing on the box that survives
+both the beta pre-task's `git reset --hard` and the `.env` re-render — set
+it once and every redeploy keeps it. Keep it `0600` and root-owned; it holds
+credentials exactly like `.env`. The playbook's closing summary prints its
+path and whether it was found. Start from
+[`.env.merge.example`](.env.merge.example), which lists the keys
+`pipeline/config.py` asks for (`CHARITY_COMMISSION_API_KEY`,
+`COMPANIES_HOUSE_API_KEY`, `CQC_SUBSCRIPTION_KEY`, …).
+
 ## What the wizard asks
 
 | It asks for | Notes |
@@ -439,9 +454,17 @@ Same as the self-host build — `ALTER ROLE` first, then update the vault.
 
 ## What this box does not have
 
-- **No collection.** Nothing crawls a source from here. No module API keys
-  are written to `.env`: a key that cannot be used is a key that should not
-  be on the box.
+- **No collection by default.** Nothing crawls a source from here, and
+  `env.j2` writes no module API keys: on a `dr_mirror` a key that cannot be
+  used is a key that should not be on the box. A `beta` box that has to
+  exercise one real collection module is the documented exception — put that
+  module's key in `<state_dir>/.env.merge`
+  (`/opt/sectortrace-mirror/state/.env.merge`) and the playbook merges it
+  onto the end of the rendered `.env` on every run. That file is gitignored,
+  `0600`, outside the checkout the beta pre-task resets each run, so it
+  survives every redeploy. See
+  [`.env.merge.example`](.env.merge.example). A `dr_mirror` needs none of
+  this.
 - **No backup timer.** The mirror is a copy of something that is already
   backed up, and its restore path is "sync again". Note what that means the
   moment you promote it: from then on nothing here is backed up by anything.

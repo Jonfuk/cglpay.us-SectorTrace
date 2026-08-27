@@ -148,6 +148,31 @@
     state: directory
     mode: "0755"
 
+# --- Operator-managed .env.merge, read before .env is rendered --------------
+# The one supported way to add environment this role does not generate:
+# module API keys for a `beta` box that has to exercise real collection, or
+# an override for a value env.j2 hard-codes. It lives in state_dir, not the
+# checkout — the beta pre-task resets this box's tree to origin/<branch>
+# every run, and the template below overwrites .env every run, so neither is
+# a place a persistent local secret survives. env.j2 appends its contents to
+# the end of .env, where a later definition of a key wins over env.j2's.
+- name: Check for an operator-managed .env.merge
+  ansible.builtin.stat:
+    path: "{{ mirror_env_merge_file }}"
+  register: mirror_env_merge
+
+- name: Read .env.merge if it is there
+  ansible.builtin.slurp:
+    src: "{{ mirror_env_merge_file }}"
+  register: mirror_env_merge_raw
+  when: mirror_env_merge.stat.exists
+
+- name: Hand its contents to env.j2 (empty string when absent)
+  ansible.builtin.set_fact:
+    mirror_env_merge_text: >-
+      {{ (mirror_env_merge_raw.content | b64decode | trim)
+         if mirror_env_merge.stat.exists else '' }}
+
 - name: Render .env (the always-on containers; no source credentials in it)
   ansible.builtin.template:
     src: env.j2
