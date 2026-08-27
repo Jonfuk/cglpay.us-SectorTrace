@@ -108,6 +108,20 @@ class Settings(BaseSettings):
     # already sitting in review_queue as council_spend_file_robots_disallowed)
     # and is scoped to the domain root only because no narrower transparency
     # path is on file — tighten this prefix if the actual sub-path turns up.
+    #
+    # Third batch, 2026-08-27, clearing the standing *_robots_disallowed
+    # review backlog. Each host below is one those modules recorded a
+    # robots.txt *disallow* against (not a 403 — those raise *_blocked and
+    # stay blocked), and each serves public, OGL-reusable content: m10
+    # ModernGov committee search (cheshireeast), m24 transparency spend files
+    # (wealden), an m09 JSNA page (coventry), and three council FOI
+    # disclosure logs on hosted "/w/webpage/" platforms (adur & worthing,
+    # hertsmere, westmorland & furness). Same footing as the batches above —
+    # an access request pending a reply, prefix-scoped to what the review
+    # items actually show, fetched at 2s/host with the identifying
+    # User-Agent, every use logged and raising a `robots_override_in_use`
+    # item. coventry is scoped to /jsna only; m09 may surface sibling paths
+    # (/public-health, /drug-and-alcohol) that need the same treatment.
     robots_exceptions: tuple[str, ...] = (
         # data.gov.uk's real API host. Its robots.txt disallows /api/
         # wholesale, which reads as aimed at crawlers hitting the CKAN search
@@ -144,6 +158,13 @@ class Settings(BaseSettings):
         "https://moderngov.southwark.gov.uk/",
         "https://democracy.walthamforest.gov.uk/",
         "https://democracy.wandsworth.gov.uk/",
+        # Third batch (2026-08-27) — see the note above the tuple.
+        "https://moderngov.cheshireeast.gov.uk/",
+        "https://www.wealden.gov.uk/UploadedFiles/",
+        "https://www.coventry.gov.uk/jsna",
+        "https://adur-worthing-hr.onmats.com/w/webpage/",
+        "https://hertsmere-foi.oncreate.app/w/webpage/",
+        "https://contactus.digital.westmorlandandfurness.gov.uk/w/webpage/",
         # A handful of the earliest (Dec 2014) files in the m01 CSV archive
         # backfill are hosted on www.dropbox.com rather than CCS's own
         # domain. Dropbox's robots.txt disallows /s/ (shared-link paths) for
