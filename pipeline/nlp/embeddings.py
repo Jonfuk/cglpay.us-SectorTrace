@@ -141,7 +141,13 @@ class SentenceTransformerEmbedder:
             ) from exc
         self.framework_version = getattr(sentence_transformers, "__version__", None)
         self._model = sentence_transformers.SentenceTransformer(self.model_id, device="cpu")
-        self.dimension = int(self._model.get_sentence_embedding_dimension())
+        # Renamed get_sentence_embedding_dimension -> get_embedding_dimension in
+        # sentence-transformers 6.0; the old name is a deprecated alias that
+        # warns and will eventually go. Prefer the new one, fall back for <6.0.
+        _get_dim = getattr(
+            self._model, "get_embedding_dimension", None
+        ) or self._model.get_sentence_embedding_dimension
+        self.dimension = int(_get_dim())
         self.revision_sha = _resolve_revision(self.model_id)
 
     def encode(self, texts) -> list[list[float]]:
