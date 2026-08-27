@@ -264,6 +264,47 @@ uv run pipeline nlp context --source-system committee_paper_promotion --limit 25
 uv run pipeline nlp eval-context
 ```
 
+## What ships now (tranche 034F, first cut) — machine claim candidates
+
+`pipeline/nlp/relations.py` + `pipeline nlp relations` assembles
+(subject, predicate, object) triples from 034D spans and 034E assertion
+status into `document_claim_candidates` (migration `0068`, high-volume by
+design). **Two triggers, and only these:** a controlled concept→predicate
+mapping (`CONCEPT_PREDICATE`, fired only when that concept's phrase is
+actually in the sentence) or a predicate pattern from
+`ontology/patterns/*.yml`. Two spans sharing a sentence is not a claim.
+
+The subject must be a span of the kind the predicate's `subject` allows
+(`workforce.*` claims take the **organisation**, not the ROLE span), with
+documented fallbacks and — for `service` / `workforce` predicates — an
+explicit anaphor ("the service", "staff") recorded in `subject_hint`. The
+assertion is taken at the **trigger**, not the subject: "CGL reports no
+recruitment difficulties" negates the difficulties. `relation_score` ranks
+candidates for a reviewer; it is never multiplied into a figure.
+
+`pipeline/nlp/promote.py` + `pipeline nlp queue-claims` is the narrow policy
+between the high-volume table and `review_queue`: a **primary** slice
+(campaign predicate, score floor, `AFFIRMED`, subject resolves to a
+registered entity), a **contradiction** slice (same subject+predicate
+asserted both ways across documents), a **novel** slice (a
+(subject, predicate) pair the Evidence Graph has never held), and a small
+deterministic **validation** sample. It writes `review_queue` items
+(`item_type='semantic_claim_candidate'`) with the sentence, chunk id,
+offsets, source URL and payload SHA-256 in `context_json`, and marks the
+candidate `queued`.
+
+**Deferred to 034F's second cut:** the approved-candidate → `graph_claims`
+draft write (`extraction_method='nlp_rule_v1'`, detector in `extractor_name`,
+never `promoted_by`) and the `claim_candidate_decisions` writer that records
+a reviewer's *correction*, not just approve/reject. Those integrate with the
+graph review lifecycle and `pipeline/ai_promotion.py`'s actor-separation
+gate and want their own review. Nothing is auto-promoted (decision 4).
+
+```bash
+uv run pipeline nlp relations    --source-system committee_paper_promotion --limit 25
+uv run pipeline nlp queue-claims --source-system committee_paper_promotion
+```
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -276,7 +317,7 @@ earlier ones to be useful.
 | **034C** | deterministic ontology classifier — `document_topics` `ontology_v1` rows over chunked elements; `classify.py` `TOPICS` frozen and documented, not code-coupled; weak-supervision seed for 034G; `keyword_v1` untouched | **shipped** |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
 | **034E** | assertion / context detection into `document_assertions` (migration `0067`) — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`; `assertion_status` and `detector_confidence` separate; stdlib cue tagger always on, medSpaCy `ConText` an optional path (not in the extra) | **shipped** — grow `assertion_cases.json`; wire medSpaCy if its model install is worth it |
-| **034F** | machine claim candidates (`document_claim_candidates`, high volume) via ontology relation patterns — **not** co-occurrence; a selection policy promotes a slice into `review_queue`; approval writes a `graph_claims` draft with the detector in `extractor_name`, never `promoted_by`; review decisions capture corrections, not just approve/reject | planned |
+| **034F** | machine claim candidates (`document_claim_candidates`, migration `0068`) via controlled concept→predicate + pattern triggers — **not** co-occurrence; `promote.py` queues a primary/contradiction/novel/validation slice into `review_queue` | **first cut shipped** — the approved→`graph_claims`-draft write and the `claim_candidate_decisions` writer are the second cut |
 | **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |
 | **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |
 

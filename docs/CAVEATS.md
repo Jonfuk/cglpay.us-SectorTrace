@@ -378,6 +378,16 @@ anyone using it.
   the tagger's confidence in *that class*, never a probability the underlying
   statement is true, and it is never multiplied into anything. Use it to
   filter a review queue, not to score evidence.
+- **Machine claim candidates (BETA-034F, `document_claim_candidates`) are not
+  claims and never become evidence on their own.** They are (subject,
+  predicate, object) triples a rule assembled from spans; the table is
+  high-volume and mostly unreviewed. A narrow policy queues a slice into
+  `review_queue` as `semantic_claim_candidate`, and **only a named person's
+  decision** produces a `graph_claims` draft — which then goes through the
+  existing graph review before it is anything. `relation_score` orders a
+  reviewer's worklist and is not a probability; a candidate's `predicate` is
+  from the closed `relations.yml` vocabulary, so "the layer proposed X" is
+  auditable, but "the layer proposed X" is not "X is true".
 
 ### Public Health Grant (Module 11)
 

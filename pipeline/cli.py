@@ -395,6 +395,52 @@ def nlp_resolve(
         conn.close()
 
 
+@nlp_app.command("relations")
+def nlp_relations(
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Assemble and roll back, writing nothing"),
+) -> None:
+    """Assemble machine (subject, predicate, object) claim candidates from
+    034D spans + 034E assertions into `document_claim_candidates`.
+
+    Controlled-vocabulary triggers only (a concept→predicate mapping or a
+    predicate pattern) — co-occurrence alone never yields a candidate. This
+    table is not evidence and not a claim; fetches nothing.
+    """
+    from pipeline.nlp import relations as nlp_relations_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_relations_mod.run(conn, source_system=source_system, limit=limit,
+                                       dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("queue-claims")
+def nlp_queue_claims(
+    source_system: str = typer.Option(None, help="Only candidates on chunks from this source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum `new` candidates to consider"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Select and roll back, writing nothing"),
+) -> None:
+    """Queue the selected slice of `new` claim candidates into `review_queue`
+    as `item_type='semantic_claim_candidate'`. A policy, not "everything":
+    campaign predicates, an AFFIRMED + score floor, a resolved subject
+    entity, plus contradiction / novel / validation slices.
+    """
+    from pipeline.nlp import promote as nlp_promote_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_promote_mod.run(conn, source_system=source_system, limit=limit,
+                                     dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("context")
 def nlp_context(
     detector: str = typer.Option(

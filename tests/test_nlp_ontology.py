@@ -91,6 +91,16 @@ def test_match_counts_returns_span_counts():
 def test_match_on_empty_text_is_empty():
     assert ontology.load().match("") == []
     assert ontology.load().match_counts("   ") == {}
+    assert ontology.load().match_spans("") == []
+
+
+def test_match_spans_returns_character_offsets():
+    onto = ontology.load()
+    text = "The team relies on agency staff and reports high caseloads."
+    spans = {s.concept_id: s for s in onto.match_spans(text)}
+    assert "workforce.agency_reliance" in spans
+    hit = spans["workforce.caseload"]
+    assert text[hit.char_start:hit.char_end].lower() == "high caseloads"
 
 
 def test_pressure_concepts_are_flagged():

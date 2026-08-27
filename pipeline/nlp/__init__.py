@@ -38,6 +38,14 @@ medSpaCy `ConText` where that optional path is installed. This is what tells
 "no recruitment difficulties" from "recruitment difficulties remain".
 `assertion_status` and `detector_confidence` are stored separately.
 
-Relation-pattern claim candidates and topic clustering land in later
-tranches — see `docs/semantic-analysis.md`.
+Tranche 034F: `relations` — machine (subject, predicate, object) triples
+from spans + assertions into `document_claim_candidates` (migration 0068),
+via the ontology's controlled predicate vocabulary; co-occurrence alone
+never yields a candidate. `promote` — the narrow policy that queues a slice
+into `review_queue` (`item_type='semantic_claim_candidate'`). Nothing is
+auto-promoted; the approved-candidate → `graph_claims` draft write is the
+tranche's second cut.
+
+Topic clustering and the deferred RAG/LLM path land later — see
+`docs/semantic-analysis.md`.
 """

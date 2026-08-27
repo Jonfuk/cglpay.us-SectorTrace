@@ -72,6 +72,17 @@ def _fold_tokens(tokens: list[str]) -> tuple[str, ...]:
     return tuple(_fold(t) for t in tokens)
 
 
+@lru_cache(maxsize=4096)
+def _span_regex(alias: str) -> re.Pattern:
+    """Whole-word, case-insensitive regex for one alias, with an optional
+    trailing `-s` on the last token so `workers`/`worker` both match — the
+    surface-level twin of the `_fold` used for token matching."""
+    parts = [re.escape(tok) for tok in _normalise(alias).split()]
+    if parts:
+        parts[-1] += "s?"
+    return re.compile(r"\b" + r"\s+".join(parts) + r"\b", re.IGNORECASE)
+
+
 @dataclass(frozen=True)
 class Concept:
     id: str
@@ -119,6 +130,15 @@ class Match:
     alias: str
     start_token: int     # index into _normalise(text).split()
     end_token: int       # exclusive
+
+
+@dataclass(frozen=True)
+class ConceptSpan:
+    concept_id: str
+    alias: str            # the ontology surface form that matched
+    text: str             # the exact substring of the source text
+    char_start: int
+    char_end: int
 
 
 @dataclass(frozen=True)
@@ -174,6 +194,27 @@ class Ontology:
         for m in self.match(text):
             counts[m.concept_id] = counts.get(m.concept_id, 0) + 1
         return counts
+
+    def match_spans(self, text: str) -> list[ConceptSpan]:
+        """Every ontology concept named in `text`, as CHARACTER spans into the
+        original text — for stages (034F) that need offsets, not token
+        positions. Whole-word, case-insensitive, with the same shallow `-s`
+        plural fold as `match`. Overlaps are kept."""
+        text = text or ""
+        found: list[ConceptSpan] = []
+        seen: set[tuple[str, int, int]] = set()
+        for concept in self.concepts.values():
+            for alias, alias_tokens in concept.alias_tokens:
+                if not alias_tokens:
+                    continue
+                for m in _span_regex(alias).finditer(text):
+                    key = (concept.id, m.start(), m.end())
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(ConceptSpan(concept.id, alias, m.group(0),
+                                                 m.start(), m.end()))
+        found.sort(key=lambda s: (s.char_start, s.char_end, s.concept_id))
+        return found
 
 
 # --- loading & validation --------------------------------------------------
