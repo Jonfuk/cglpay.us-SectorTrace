@@ -66,6 +66,11 @@ SUPPLIER_NAME_VARIANTS: dict[str, list[str]] = {
                        "The Ley Community"],
     "practice_plus_group": ["Practice Plus Group Health and Rehabilitation Services",
                              "Practice Plus Group", "Care UK Health in Justice"],
+    "compass": ["Compass - Services to Tackle Problem Drug Use",
+                 "Compass - Services to Improve Health and Wellbeing", "Compass"],
+    "kca": ["KCA", "Kent Council on Addictions", "KCA (UK)"],
+    "blue_sky": ["Blue Sky Development and Regeneration", "Blue Sky Services", "Blue Sky"],
+    "recovery_focus": ["Recovery Focus", "Recovery Focus Group"],
 }
 
 # Search terms for tribunal judgments (Module 2) — respondent name variants

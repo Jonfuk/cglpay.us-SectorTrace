@@ -27,11 +27,13 @@ wrong legal entity, so it is worse than a NULL.
 
 Not every tracked provider is a going concern. Some keys are former names
 of an entity now tracked under its current name (addaction→with_you,
-humankind→waythrough, westminster_drug_project→via); some are
-organisations absorbed into another (richmond_fellowship, aquarius,
-action_on_addiction, swanswell, blenheim_cdp, edp_drug_alcohol into the
-Humankind/Waythrough line; ley_community into phoenix_futures) or wound up
-entirely (lifeline_project). PROVIDER_STATUS records that per key —
+humankind→waythrough, westminster_drug_project→via) or a former group
+brand (recovery_focus→waythrough); some are organisations absorbed into
+another (richmond_fellowship, aquarius, action_on_addiction, swanswell,
+blenheim_cdp, edp_drug_alcohol into the Humankind/Waythrough line;
+ley_community into phoenix_futures; kca into with_you; blue_sky into
+forward_trust) or wound up entirely (lifeline_project). PROVIDER_STATUS
+records that per key —
 `status` and, where there is one successor, `superseded_by` — and it is
 seeded onto the `providers` table so the portal can say so plainly. The
 identifiers still live on the current/surviving key; a former or
@@ -50,10 +52,11 @@ TARGET_PROVIDER_KEY = "change_grow_live"
 PROVIDER_NOTES: dict[str, str] = {
     "change_grow_live": "Campaign subject. Charity 1079327; operating company 03861209 was 'Crime Reduction Initiatives' until 2016. Contracts are often held by trading subsidiaries.",
     "addaction": "Former name of With You: the registered name of company 02580377 / charity 1001957 from 1998 until 26 Feb 2020. Same legal entity as `with_you`, where the identifiers are seeded — but do not merge evidence rows: the name on a notice is evidence of when it was used.",
-    "with_you": "Formerly Addaction (renamed 26 Feb 2020). Company 02580377, charity 1001957.",
+    "with_you": "Formerly Addaction (renamed 26 Feb 2020). Company 02580377, charity 1001957. Absorbed KCA (Kent Council on Addictions) as a subsidiary in 2015 — see `kca`.",
     "humankind": "Former name of Waythrough: 'Humankind Charity' was the registered name of company 01820492 / charity 515755 from 2018 until 6 Feb 2025 ('DISC' before that). Same legal entity as `waythrough`, where the identifiers are seeded. Distinct from the 2024 group formation with Richmond Fellowship, which stayed separately registered.",
     "waythrough": "The former Humankind entity (company 01820492, charity 515755) renamed 6 Feb 2025 — not a new legal entity. The Humankind/Waythrough line has absorbed several charities: Blenheim CDP (London, 2019), EDP Drug & Alcohol Services (Devon/Dorset, 2023), and — via the 2024 group formation — Richmond Fellowship and Aquarius, which stayed separately registered. Blenheim and EDP evidence is under their own keys.",
-    "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers. Its CQC provider registration (1-151675564) was archived on 4 Jun 2024 with the regulated services moved to Waythrough — pre-June-2024 CQC evidence is still RF's.",
+    "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers. Its CQC provider registration (1-151675564) was archived on 4 Jun 2024 with the regulated services moved to Waythrough — pre-June-2024 CQC evidence is still RF's. From 2015 until the 2024 merger, RF and Aquarius operated under the group brand 'Recovery Focus' — see `recovery_focus`.",
+    "forward_trust": "Charity 1001701, company 02560474 ('Rehabilitation for Addicted Prisoners Trust' / RAPt until 2017, 'The Addictive Diseases Trust' before that). Has absorbed Blue Sky Development and Regeneration (2017, now run as 'Blue Sky Services') and Action on Addiction (2021) — see `blue_sky`, `action_on_addiction`.",
     "via": "Formerly Westminster Drug Project (renamed 5 Jun 2023). Company 02807934 ('Via Community Ltd'), charity 1031602. Short trading name; high false-positive risk in free text — match only exact registered variants or the historic 'Westminster Drug Project'.",
     "westminster_drug_project": "Former name of Via: the registered name of company 02807934 / charity 1031602 until 5 Jun 2023 (also historic 'Waltham Forest Drug Project' / 'Wandsworth Drug Project'). Same legal entity as `via`, where the identifiers are seeded.",
     "delphi_medical": "Private company, not a charity: Delphi Medical Limited, company 06944767, CQC provider 1-2448282802. A separately registered 'Delphi Medical Consultants Limited' (company 06014150, CQC provider 1-125892841) shares the Burnley address and historically held the substance-misuse registrations; its CQC registration was archived on 15 Nov 2024. Seeded identifiers refer to Delphi Medical Limited.",
@@ -66,6 +69,10 @@ PROVIDER_NOTES: dict[str, str] = {
     "action_on_addiction": "Charity 1117988, company 05947481 ('3 To 1' until 2007). Merged into The Forward Trust in May 2021; the shell company remains registered and the name is retained for some Forward Trust services. Itself formed in 2007 from the Chemical Dependency Centre, Clouds and the original Action on Addiction.",
     "lifeline_project": "Manchester drug and alcohol charity (est. 1971), company 01842240. Entered administration in 2017 after a Charity Commission inquiry into financial controls; services were taken over by Change Grow Live, Humankind and others. Company dissolved 25 Jan 2024; charity (515691) removed from the register, so no live charity number to seed. Appears as a co-respondent in older employment-tribunal judgments — see tests/test_m04_viability.py, which uses it as a real insolvency fixture.",
     "swanswell": "Swanswell Charitable Trust: charity 1074891, company 03692925, CQC provider 1-127628178. Rugby / Warwickshire drug and alcohol charity. Merged into Cranstoun in 2022; CQC registration archived 1 Nov 2021, company dissolved 18 Oct 2022.",
+    "compass": "Compass: national charity (York, est. 1986), charity 518048, company 02054594, CQC provider 1-126775082 (CQC registers it as 'Compass - Services To Improve Health And Wellbeing'). Young-people-specialist plus adult substance misuse and wider health and wellbeing. 'Compass' alone is extremely common (unrelated 'Compass Group', 'Compass Clinic Limited' 1-152987221, 'Compass Wellbeing CIC') — match the full registered name.",
+    "kca": "KCA (Kent Council on Addictions), registered as 'KENT COUNCIL ON ALCOHOLISM': charity 270532, company 01955497 ('KCA (UK)'). South East England's leading substance misuse charity until it became a wholly-owned subsidiary of Addaction on 1 Jan 2015; the shell company was dissolved 25 Apr 2017. Surviving entity is `with_you`. 'KCA' alone is a weak acronym — prefer 'Kent Council on Addictions'.",
+    "blue_sky": "Blue Sky Development and Regeneration: charity 1118372, company 05639379. Social enterprise providing paid work for ex-offenders (grounds maintenance, recycling, catering). Merged into The Forward Trust in 2017 and now runs as 'Blue Sky Services'; the company was dissolved 7 Feb 2023. Surviving entity is `forward_trust`. Employment/regeneration rather than treatment, but part of the Forward Trust group. 'Blue Sky' alone is generic — match the fuller forms.",
+    "recovery_focus": "Not a legal entity: the group brand under which Richmond Fellowship and Aquarius (and formerly DViP, 2Care, CAN, Croftlands Trust, My Time) operated from 2015 until the 2024 merger, when the group name became 'Waythrough'. No Companies House or Charity Commission registration of its own — the registered entities are `richmond_fellowship` and `aquarius`. Appears on older contracts and CQC quality accounts; resolve those to this key, then read across to the two entities.",
     "blenheim_cdp": "Blenheim Community Drug Project: large London drug and alcohol charity, charity 293959, company 01694712, CQC provider 1-516591398. Merged into Humankind in April 2019 (services kept the Blenheim name); company dissolved 26 Apr 2022. Evidence stays under this key; the surviving entity is `waythrough`.",
     "edp_drug_alcohol": "E D P Drug & Alcohol Services: Devon and Dorset charity, charity 297370, company 02145656, CQC provider 1-587977840. Became a Humankind subsidiary in April 2020 and fully merged into it on 1 Jul 2023; the surviving entity is `waythrough`. 'EDP' alone is a high-false-positive acronym — match the full registered name.",
     "bristol_drugs_project": "Independent Bristol charity (est. ~1986): charity 291714, company 01902326, CQC provider 1-126776288. Delivers the Bristol ROADS partnership. 'BDP' is a common acronym elsewhere — match 'Bristol Drugs Project' in full.",
@@ -93,6 +100,12 @@ PROVIDER_STATUS: dict[str, tuple[str, str | None]] = {
     "blenheim_cdp": ("merged", "waythrough"),
     "edp_drug_alcohol": ("merged", "waythrough"),
     "ley_community": ("merged", "phoenix_futures"),
+    "kca": ("merged", "with_you"),
+    "blue_sky": ("merged", "forward_trust"),
+    # A former group brand, not a legal entity — the group name is now
+    # 'Waythrough'; the two registered entities it covered are tracked
+    # under their own keys.
+    "recovery_focus": ("renamed", "waythrough"),
     "lifeline_project": ("dissolved", None),
 }
 
@@ -538,6 +551,52 @@ VERIFIED_IDENTIFIERS: list[dict[str, str]] = [
         "scheme": "cqc_provider_id",
         "identifier": "1-3757899473",
         "role": "CQC-registered provider ('Practice Plus Group Health and Rehabilitation Services Limited')",
+    },
+
+    # Third small batch, 2026-08-27 — Compass (active national charity),
+    # KCA and Blue Sky (absorbed into with_you / forward_trust), and
+    # recovery_focus (a former group brand, no registration of its own).
+    {
+        "provider_key": "compass",
+        "scheme": "charity_number",
+        "identifier": "518048",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "compass",
+        "scheme": "company_number",
+        "identifier": "02054594",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "compass",
+        "scheme": "cqc_provider_id",
+        "identifier": "1-126775082",
+        "role": "CQC-registered provider ('Compass - Services To Improve Health And Wellbeing')",
+    },
+    {
+        "provider_key": "kca",
+        "scheme": "charity_number",
+        "identifier": "270532",
+        "role": "registered charity (England and Wales), 'Kent Council on Alcoholism'; subsidiary of Addaction from 2015",
+    },
+    {
+        "provider_key": "kca",
+        "scheme": "company_number",
+        "identifier": "01955497",
+        "role": "charitable company limited by guarantee ('KCA (UK)'); dissolved 25 Apr 2017",
+    },
+    {
+        "provider_key": "blue_sky",
+        "scheme": "charity_number",
+        "identifier": "1118372",
+        "role": "registered charity (England and Wales); merged into The Forward Trust 2017",
+    },
+    {
+        "provider_key": "blue_sky",
+        "scheme": "company_number",
+        "identifier": "05639379",
+        "role": "charitable company limited by guarantee; dissolved 7 Feb 2023",
     },
 ]
 
