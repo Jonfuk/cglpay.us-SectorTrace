@@ -1,0 +1,268 @@
+"""Chunk embeddings: `document_chunks` -> `document_embeddings`.
+
+034A ships two embedders and no third path:
+
+* ``stub`` -- deterministic, dependency-free, no download. A signed hashed
+  bag-of-words folded into a fixed-width unit vector. It is a *stand-in*, not
+  a good retriever: it lets CI, the retrieval-eval harness and offline
+  development exercise the whole path -- embed, store, cosine, rank, fuse --
+  with no model on disk. Its registry row carries provider ``hash-stub`` and
+  a NULL ``revision_sha``, so nothing downstream can mistake it for a real
+  model.
+* a sentence-transformers id (default ``sentence-transformers/all-MiniLM-L6-v2``),
+  imported lazily, present only with the ``nlp`` extra, first-use download,
+  excluded from the Railway image -- the same pattern as ``documents``/``ocr``.
+  Its resolved revision SHA is recorded on the run and the registry row where
+  the hub exposes one.
+
+The vector is stored as a little-endian float32 blob with its dimension on
+the row: identical bytes in both dialect trees, so exact cosine is computed
+in Python and a pgvector column + ANN index stay a later, benchmark-gated,
+Postgres-only migration. See docs/semantic-analysis.md.
+"""
+from __future__ import annotations
+
+import hashlib
+import math
+import re
+import struct
+
+from pipeline.nlp import models, runs
+
+STUB_MODEL_KEY = "embed:stub"
+STUB_DIMENSION = 256
+ST_DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9'\-]*")
+_DEFAULT_BATCH = 256
+
+
+class EmbeddingUnavailable(RuntimeError):
+    """The requested embedder needs a dependency that is not installed. Raised
+    rather than crashing so a caller can fall back to keyword-only search or
+    tell the operator to `uv sync --extra nlp`."""
+
+
+# --- vector <-> blob, and exact cosine ---------------------------------------
+
+def pack(vector) -> bytes:
+    """A vector -> its on-disk form: little-endian float32, no header. The
+    dimension lives on the row, so this is the whole encoding."""
+    values = list(vector)
+    return struct.pack("<%df" % len(values), *values)
+
+
+def unpack(blob: bytes) -> list[float]:
+    return list(struct.unpack("<%df" % (len(blob) // 4), blob))
+
+
+def cosine(a, b) -> float:
+    """Exact cosine similarity. Vectors are written normalised, but a round
+    trip through float32 can leave the norm a ulp off 1.0, so this does not
+    assume unit length."""
+    dot = na = nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / math.sqrt(na * nb)
+
+
+def _normalise(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in vector))
+    return vector if norm == 0.0 else [x / norm for x in vector]
+
+
+# --- embedders -------------------------------------------------------------
+
+class StubEmbedder:
+    """Signed hashed bag-of-words. Deterministic across machines and Python
+    builds: the bucket and sign come from SHA-1 of the lowercased token, never
+    from Python's salted ``hash()``. Two passages that share vocabulary score
+    close; a paraphrase with no shared words scores near zero. That is enough
+    to exercise ranking and fusion, and not enough to trust as retrieval."""
+
+    model_key = STUB_MODEL_KEY
+    dimension = STUB_DIMENSION
+    provider = "hash-stub"
+    model_id = "hash-stub/signed-bow-256"
+    revision_sha = None
+    framework = "stdlib"
+    framework_version = None
+
+    def encode(self, texts) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in texts:
+            vec = [0.0] * self.dimension
+            for token in _TOKEN.findall((text or "").lower()):
+                digest = hashlib.sha1(token.encode("utf-8")).digest()
+                bucket = int.from_bytes(digest[:4], "big") % self.dimension
+                vec[bucket] += 1.0 if digest[4] & 1 else -1.0
+            out.append(_normalise(vec))
+        return out
+
+    def register(self, conn) -> None:
+        models.upsert_model(
+            conn, model_key=self.model_key, model_provider=self.provider,
+            model_id=self.model_id, revision_sha=None, framework=self.framework,
+            framework_version=self.framework_version, dimension=self.dimension,
+            distance_metric="cosine", normalised=True)
+
+
+class SentenceTransformerEmbedder:
+    """A sentence-transformers model, loaded lazily. Nothing here imports the
+    library until `encode`/`register` is called, so `get_embedder("stub")`
+    stays importable with no extra installed."""
+
+    provider = "sentence-transformers"
+    framework = "sentence-transformers"
+
+    def __init__(self, model_id: str = ST_DEFAULT_MODEL):
+        self.model_id = model_id
+        # A short, stable handle for the registry / embeddings rows. The full
+        # id is still recorded on the registry row's model_id column.
+        self.model_key = "embed:" + model_id.rsplit("/", 1)[-1].lower()
+        self.revision_sha: str | None = None
+        self.framework_version: str | None = None
+        self.dimension: int | None = None
+        self._model = None
+
+    def _load(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            import sentence_transformers  # noqa: PLC0415 - lazy: only with the `nlp` extra
+        except ImportError as exc:  # pragma: no cover - the path without the extra
+            raise EmbeddingUnavailable(
+                f"Embedding model {self.model_id!r} needs the `nlp` extra "
+                "(`uv sync --extra nlp`). Pass --model stub for an offline run."
+            ) from exc
+        self.framework_version = getattr(sentence_transformers, "__version__", None)
+        self._model = sentence_transformers.SentenceTransformer(self.model_id, device="cpu")
+        self.dimension = int(self._model.get_sentence_embedding_dimension())
+        self.revision_sha = _resolve_revision(self.model_id)
+
+    def encode(self, texts) -> list[list[float]]:
+        self._load()
+        vectors = self._model.encode(
+            list(texts), normalize_embeddings=True, convert_to_numpy=True,
+            show_progress_bar=False)
+        return [[float(x) for x in row] for row in vectors]
+
+    def register(self, conn) -> None:
+        self._load()
+        models.upsert_model(
+            conn, model_key=self.model_key, model_provider=self.provider,
+            model_id=self.model_id, revision_sha=self.revision_sha,
+            framework=self.framework, framework_version=self.framework_version,
+            dimension=self.dimension, distance_metric="cosine", normalised=True)
+
+
+def _resolve_revision(model_id: str) -> str | None:
+    """Best effort: the hub commit the weights resolved to. None -- not an
+    error -- when huggingface_hub is absent or the machine is offline; the run
+    still records the framework version and everything else."""
+    try:
+        from huggingface_hub import model_info  # noqa: PLC0415
+        return model_info(model_id).sha
+    except Exception:  # noqa: BLE001 - a provenance nicety, never a failure
+        return None
+
+
+def get_embedder(name: str | None):
+    """`None` / `"stub"` -> the deterministic stub; anything else is taken as a
+    sentence-transformers id."""
+    if not name or name == "stub":
+        return StubEmbedder()
+    return SentenceTransformerEmbedder(name)
+
+
+# --- the stage -----------------------------------------------------------
+
+def _scope_version_ids(conn, source_system: str | None) -> set[str] | None:
+    """The active versions in scope, or None for 'all'. A set so the pending
+    query can filter without re-joining evidence for every chunk."""
+    if not source_system:
+        return None
+    rows = conn.execute(
+        "SELECT v.document_version_id FROM document_versions v "
+        "JOIN document_records d ON d.document_id = v.document_id "
+        "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+        "WHERE v.is_active = 1 AND e.source_system = ?", (source_system,)).fetchall()
+    return {row["document_version_id"] for row in rows}
+
+
+def _pending_chunks(conn, model_key: str, version_ids: set[str] | None,
+                    limit: int | None) -> list:
+    """Live chunks with no vector for this model. The LEFT JOIN ... IS NULL is
+    what makes the stage resume-safe: a re-run fills gaps and re-embeds
+    nothing ("existing but empty is not done")."""
+    sql = (
+        "SELECT dc.document_chunk_id, dc.text FROM document_chunks dc "
+        "LEFT JOIN document_embeddings em ON em.document_chunk_id = dc.document_chunk_id "
+        "AND em.model_key = ? "
+        "WHERE dc.superseded = 0 AND em.document_chunk_id IS NULL")
+    params: list = [model_key]
+    if version_ids is not None:
+        if not version_ids:
+            return []
+        placeholders = ",".join("?" for _ in version_ids)
+        sql += f" AND dc.document_version_id IN ({placeholders})"
+        params.extend(sorted(version_ids))
+    sql += " ORDER BY dc.created_at, dc.document_chunk_id"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def run(conn, *, model: str | None = None, source_system: str | None = None,
+        limit: int | None = None, batch_size: int = _DEFAULT_BATCH,
+        dry_run: bool = False) -> dict:
+    """Embed live `document_chunks` into `document_embeddings`. Bounded by
+    `limit`, safe to repeat, and offline by default (`model="stub"`)."""
+    embedder = get_embedder(model)
+    config = {"model": model or "stub", "model_key": embedder.model_key,
+              "source_system": source_system, "limit": limit, "batch_size": batch_size}
+    # register() may need to load a real model; do it before start_run so a
+    # missing `nlp` extra fails without leaving a dangling 'running' row.
+    embedder.register(conn)
+    run_id = runs.start_run(
+        conn, "embed", config=config, model_key=embedder.model_key,
+        model_revision=getattr(embedder, "revision_sha", None),
+        input_scope={"source_system": source_system, "limit": limit})
+
+    version_ids = _scope_version_ids(conn, source_system)
+    pending = _pending_chunks(conn, embedder.model_key, version_ids, limit)
+    now = runs.utcnow()
+    written = 0
+    try:
+        for start in range(0, len(pending), max(1, batch_size)):
+            batch = pending[start:start + max(1, batch_size)]
+            vectors = embedder.encode([row["text"] for row in batch])
+            for row, vector in zip(batch, vectors):
+                conn.execute(
+                    "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
+                    "embedding, nlp_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
+                    "dimension=excluded.dimension, embedding=excluded.embedding, "
+                    "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at",
+                    (row["document_chunk_id"], embedder.model_key, len(vector),
+                     pack(vector), run_id, now))
+                written += 1
+    except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
+        runs.finish_run(conn, run_id, status="failed", rows_processed=len(pending),
+                        rows_written=written, error=f"{type(exc).__name__}: {exc}")
+        if not dry_run:
+            conn.commit()
+        raise
+    runs.finish_run(conn, run_id, status="ok", rows_processed=len(pending),
+                    rows_written=written)
+    if dry_run:
+        conn.rollback()
+    else:
+        conn.commit()
+    return {"run_id": run_id, "model_key": embedder.model_key,
+            "pending": len(pending), "embedded": written, "dry_run": dry_run}

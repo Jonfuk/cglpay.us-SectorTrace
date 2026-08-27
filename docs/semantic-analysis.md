@@ -55,25 +55,64 @@ graph_claim -> claim candidate -> mention -> chunk
 
 ## What ships now (tranche 034A)
 
-`document_chunks` — paragraph-level units merged from `document_elements` to
-a token target, never split mid-element. A heading flushes the current chunk
-and is remembered as its `preceding_heading_element_id` (the hook for
-section-aware context later). `char_start`/`char_end` are offsets into the
-version's concatenated element text, for mapping a within-chunk span back to
-the whole document.
+**Chunks.** `document_chunks` — paragraph-level units merged from
+`document_elements` to a token target, never split mid-element. A heading
+flushes the current chunk and is remembered as its
+`preceding_heading_element_id` (the hook for section-aware context later).
+`char_start`/`char_end` are offsets into the version's concatenated element
+text, for mapping a within-chunk span back to the whole document.
+
+**Embeddings.** `pipeline/nlp/embeddings.py` writes one vector per (chunk,
+model) into `document_embeddings`. Two embedders and no third path:
+
+* `stub` — a signed hashed bag-of-words, deterministic across machines and
+  Python builds (SHA-1 of the token, never salted `hash()`), no download.
+  It is a stand-in, not a good retriever: it lets CI, the eval harness and
+  offline development exercise embed → store → cosine → rank → fuse with no
+  model on disk. Its registry row is provider `hash-stub` with a NULL
+  `revision_sha`, so nothing can mistake it for a real model.
+* a sentence-transformers id (default `all-MiniLM-L6-v2`), imported lazily,
+  present only with the `nlp` extra, first-use download, Railway-excluded.
+  Its resolved hub revision SHA is recorded on the run and the registry row.
+
+The stage is resume-safe (`LEFT JOIN document_embeddings … IS NULL`): a
+re-run fills gaps and recomputes nothing.
+
+**Hybrid search.** `pipeline/nlp/semantic_search.py`, surfaced at
+`/api/admin/search?mode=keyword|semantic|hybrid` (operator-only;
+`/api/v1/*` is untouched) and `pipeline nlp search`. `keyword` is the
+existing full-text index lifted from the matching *element* to its
+containing *chunk*; `semantic` is exact Python-side cosine over
+`document_embeddings`; `hybrid` (the default) fuses the two ranked lists by
+Reciprocal Rank Fusion (k=60) and degrades to keyword-only when no
+embeddings exist. Metadata filters (`source_system`, published-date range)
+pre-filter the candidate set in every mode.
+
+**Retrieval eval.** `pipeline/nlp/eval.py` + `pipeline nlp eval-retrieval`
+score a mode against a human-marked query set
+(`tests/fixtures/nlp/retrieval_queries.json` — JSON, because there is no
+YAML dependency in the base install and the eval must run in the offline
+suite): Recall@5/10, MRR, nDCG@5/10, averaged over the *marked* queries. A
+marker is a verbatim on-topic passage (content-derived chunk ids are not
+stable enough to hand-write into a fixture). This is the gate for changing
+the embedding model later — no "BGE seems better" guesses. The committed
+set is an 8-query seed with empty markers; growing it to 30–50 with real
+markers is an operator task against the live warehouse.
 
 ```bash
-uv run pipeline nlp chunk --source-system committee_papers --limit 25
-uv run pipeline nlp chunk --dry-run          # build and roll back
+uv run pipeline nlp chunk --source-system committee_paper_promotion --limit 25
+uv run pipeline nlp embed --model stub          # offline; --dry-run to roll back
+uv run pipeline nlp search --mode hybrid "services struggling to recruit enough workers"
+uv run pipeline nlp eval-retrieval --mode hybrid
 ```
 
-`nlp_runs` and `nlp_model_registry` ship with it; `document_embeddings` ships
-as an empty table (its writer is 034B). Migration `0065` is structurally
-identical in both dialect trees — the embedding column is a dialect-neutral
-little-endian float32 blob in each, so exact cosine is computed in Python. A
-pgvector `vector` column and an ANN index are a later Postgres-only
-migration, added **only** if the 034A retrieval benchmark shows exact search
-is too slow, and gated on the server actually having the `vector` extension.
+`nlp_runs` and `nlp_model_registry` carry the provenance. Migration `0065`
+is structurally identical in both dialect trees — the embedding column is a
+dialect-neutral little-endian float32 blob in each, so exact cosine is
+computed in Python. A pgvector `vector` column and an ANN index are a later
+Postgres-only migration, added **only** if the 034A retrieval benchmark
+shows exact search is too slow, and gated on the server actually having the
+`vector` extension.
 
 ## The tranches (BETA-034)
 
@@ -82,7 +121,7 @@ earlier ones to be useful.
 
 | | Scope | State |
 |---|---|---|
-| **034A** | chunks + embeddings + hybrid search + retrieval eval harness | chunking shipped; embeddings/search next |
+| **034A** | chunks + embeddings + hybrid search + retrieval eval harness | **shipped** — populating the 30–50-query gold set against the live warehouse is the remaining operator task |
 | **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`) | planned |
 | **034C** | deterministic ontology classifier — replaces `classify.py` `TOPICS`' vocabulary; weak-supervision seed for 034G; `keyword_v1` rows never reinterpreted | planned |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`). Abstract situations are 034C's / 034G's job, not GLiNER labels. Entity resolution is a separate deterministic step — GLiNER never writes `entity_id` | planned |

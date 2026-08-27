@@ -337,6 +337,17 @@ anyone using it.
   which has no viewstate field. The search is a plain GET on
   `/ieSearchResults2.aspx`. Both faults produced the same symptom: a council
   that looked like it published nothing.
+- **Semantic search over these documents (BETA-034A, `/api/admin/search`,
+  `pipeline nlp search`) returns leads, not findings.** A chunk is retrieved
+  because its wording, its embedding, or both are close to the query — an
+  embedding says two passages are similar, never that a statement in one is
+  true. A vector similarity score is not evidence strength and is never
+  counted, summed or compared across documents. Nothing the layer produces is
+  attributed to a provider or promoted to a claim without a person going
+  through the review queue → `graph_claims` path. The `stub` embedder is a
+  deterministic offline stand-in for CI and development and retrieves poorly
+  by design; only a run with the real model behind the `nlp` extra should be
+  read as retrieval at all.
 
 ### Public Health Grant (Module 11)
 

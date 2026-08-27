@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 
 import typer
 
@@ -321,6 +322,77 @@ def nlp_chunk(
     try:
         result = nlp_chunk_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("embed")
+def nlp_embed(
+    model: str = typer.Option(
+        None, help="Embedder: 'stub' (deterministic, offline, default) or a "
+        "sentence-transformers id (needs `uv sync --extra nlp`)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to embed this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Embed and roll back, writing nothing"),
+) -> None:
+    """Embed live `document_chunks` into `document_embeddings`.
+
+    Resume-safe: only chunks with no vector for the chosen model are
+    processed, so a re-run fills gaps rather than recomputing. Fetches
+    nothing; the stub embedder downloads nothing.
+    """
+    from pipeline.nlp import embeddings
+
+    conn, settings = _document_connection()
+    try:
+        result = embeddings.run(
+            conn, model=model or settings.nlp_embedding_model,
+            source_system=source_system, limit=limit,
+            batch_size=settings.nlp_embed_batch_size, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("search")
+def nlp_search(
+    query: str = typer.Argument(..., help="What to search for"),
+    mode: str = typer.Option("hybrid", help="keyword | semantic | hybrid"),
+    limit: int = typer.Option(10, min=1, max=100),
+    source_system: str = typer.Option(None, help="Restrict to one evidence source_system"),
+    model: str = typer.Option(None, help="Override the embedder for semantic/hybrid modes"),
+) -> None:
+    """Hybrid retrieval over `document_chunks`: a finding aid that writes,
+    promotes and attributes nothing."""
+    from pipeline.nlp import semantic_search
+
+    conn, settings = _document_connection()
+    try:
+        result = semantic_search.search(
+            conn, query, mode=mode, limit=limit, source_system=source_system,
+            model=model or settings.nlp_embedding_model)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-retrieval")
+def nlp_eval_retrieval(
+    queries: Path = typer.Option(
+        None, help="Query set JSON (default: tests/fixtures/nlp/retrieval_queries.json)"),
+    mode: str = typer.Option("hybrid", help="keyword | semantic | hybrid"),
+    model: str = typer.Option(None, help="Override the embedder"),
+) -> None:
+    """Score a retrieval mode against a human-marked query set: Recall@5/10,
+    MRR, nDCG@5/10. The gate for changing the embedding model later."""
+    from pipeline.nlp import eval as nlp_eval
+
+    conn, settings = _document_connection()
+    try:
+        report = nlp_eval.run(
+            conn, queries_path=queries, mode=mode,
+            model=model or settings.nlp_embedding_model)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
     finally:
         conn.close()
 

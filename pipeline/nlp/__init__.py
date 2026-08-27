@@ -8,9 +8,13 @@ or a machine candidate — nothing is attributed to a provider or promoted to
 a claim without a person, which is the existing review queue -> `graph_claims`
 path (migration 0050).
 
-Tranche 034A (this cut): `runs` (per-invocation provenance), `models` (the
-resolved model registry), and `chunk` (content-derived paragraph units over
-`document_elements`). Embeddings, hybrid search, span/assertion/relation
-extraction and topic clustering land in later tranches — see
-`docs/semantic-analysis.md`.
+Tranche 034A: `runs` (per-invocation provenance), `models` (the resolved
+model registry), `chunk` (content-derived paragraph units over
+`document_elements`), `embeddings` (a deterministic offline stub or a
+sentence-transformers model behind the `nlp` extra), `semantic_search`
+(keyword / semantic / hybrid retrieval over chunks, RRF-fused) and `eval`
+(the retrieval-metrics harness that gates changing the embedding model).
+
+Span / assertion / relation extraction and topic clustering land in later
+tranches — see `docs/semantic-analysis.md`.
 """

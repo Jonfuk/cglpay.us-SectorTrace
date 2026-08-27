@@ -290,26 +290,36 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A foundation landed on `beta`.** Migration `0065`
-    (`nlp_runs`, `nlp_model_registry`, `document_chunks`,
-    `document_embeddings` — embedding is a dialect-neutral float32 blob in
-    both trees, pgvector deferred to a later Postgres-only migration).
-    `pipeline/nlp/{runs,models,chunk}.py`, `pipeline nlp chunk` CLI,
-    `nlp_*` settings, `docs/semantic-analysis.md`. `tests/test_nlp_chunk.py`
-    + migration-count bump green. Embeddings model, `/api/admin/search`
-    hybrid search, the retrieval eval harness and the `nlp` optional-deps
-    extra are the rest of 034A and are **not** landed — they cross the
-    "heavy dependency + new network surface + browser-verify" line and
-    want a checkpoint.
-  - next_action: 034A remainder — `pipeline/nlp/embeddings.py` with a
-    deterministic `stub` embedder (CI default, no download) and
-    sentence-transformers behind an `nlp` extra; `semantic_search.py`
-    (FTS + vector + metadata, RRF); `/api/admin/search?mode=…`;
-    `tests/fixtures/nlp/retrieval_queries.yml` + `pipeline nlp eval-retrieval`.
-    Then 034B (ontology) before 034D (GLiNER), per the plan's reorder.
-  - validation_remaining: `uv run python -m pytest` full suite; `ruff`;
-    once embeddings land, `uv sync --extra nlp` and the browser-verify pass
-    on `/api/admin/search` with `/api/v1/*` unchanged.
+  - current_state: **034A complete on `beta`.** The foundation (migration
+    `0065` — `nlp_runs`, `nlp_model_registry`, `document_chunks`,
+    `document_embeddings`; `pipeline/nlp/{runs,models,chunk}.py`;
+    `pipeline nlp chunk`) plus the remainder now landed:
+    `pipeline/nlp/embeddings.py` (deterministic `stub` embedder — signed
+    hashed BoW, no download, CI default — and sentence-transformers behind
+    the new `nlp` extra, lazy import, revision-SHA recorded);
+    `pipeline/nlp/semantic_search.py` (keyword = existing FTS lifted
+    element→chunk; semantic = Python-side exact cosine; hybrid = RRF k=60,
+    degrades to keyword-only without embeddings; `source_system`/date
+    pre-filters); `/api/admin/search?mode=…` via `pipeline/web/semantic.py`
+    (adapter turning `SearchError` into the handler's `QueryError`→400;
+    `/api/v1/*` untouched, pinned by `test_portal_isolation.py`);
+    `pipeline nlp {embed,search,eval-retrieval}`; `pipeline/nlp/eval.py` +
+    `tests/fixtures/nlp/retrieval_queries.json` (JSON, not YAML — no YAML
+    dep in the base install; Recall@5/10, MRR, nDCG@5/10 over marked
+    queries). `nlp_embed_batch_size` setting. `tests/test_nlp_embeddings.py`
+    + `tests/test_nlp_search_eval.py` + the portal-isolation additions
+    green; `ruff` clean.
+  - next_action: (1) `uv sync --extra nlp` and browser-verify `/api/admin/search`
+    in all three modes with a real MiniLM model, `/api/v1/*` payloads
+    unchanged — deferred: this checkout has no browser. (2) Grow
+    `retrieval_queries.json` from the 8-query seed (empty markers) to 30–50
+    campaign queries with human-marked relevant passages, against the live
+    warehouse, and record the baseline metrics. (3) An admin-UI surface for
+    the search endpoint (currently API-only). Then **034B** (SectorTrace
+    ontology) before 034D (GLiNER), per the plan's reorder.
+  - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
+    portal-isolation + migration-equivalence + cli confirmed locally; full
+    run pending); the two browser/data items above.
 
 ### NEXT
 

@@ -124,6 +124,20 @@ graph = [
     "neo4j>=5.20",
 ]
 
+# The semantic-analysis layer's model, local-only, first-use download,
+# excluded from the Railway image -- the same pattern as `documents` and
+# `ocr`. Nothing in `pipeline/nlp/` imports it at module load: chunking needs
+# nothing, and `--model stub` gives CI and offline development a deterministic
+# embedder with no weights on disk. `uv sync --extra nlp` is the opt-in that
+# turns on real embeddings and `--mode semantic` / `hybrid` search.
+#
+# 034A needs only sentence-transformers (it pulls torch + transformers +
+# huggingface_hub). GLiNER, spaCy and medSpaCy join this extra when the
+# entity and assertion tranches (034D/E) land -- see docs/semantic-analysis.md.
+nlp = [
+    "sentence-transformers>=3.0",
+]
+
 # The documentation site. An extra rather than a dependency-group because a
 # collection run and the test suite must both stay runnable without it: the
 # site is built by CI and by whoever is editing docs, and by nobody else.

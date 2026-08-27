@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "The campaign retrieval query set for `pipeline nlp eval-retrieval`.",
+    "These are the questions the evidence base needs to answer from thousands",
+    "of disconnected committee papers and CDP documents. `relevant_markers`",
+    "are verbatim passages a person has read and judged on-topic -- fill them",
+    "in against the live warehouse (`pipeline nlp search --mode hybrid ...`,",
+    "then paste a distinctive sentence from each genuinely relevant chunk).",
+    "A query with no markers yet still runs; it is reported as `unmarked` and",
+    "left out of the averaged metrics. Grow this to 30-50 queries with real",
+    "markers before using the numbers to judge an embedding-model change."
+  ],
+  "queries": [
+    {
+      "id": "recruit-retain",
+      "query": "treatment providers struggling to recruit and retain drug and alcohol workers",
+      "relevant_markers": []
+    },
+    {
+      "id": "pay-below-nhs",
+      "query": "substance misuse staff paid less than equivalent NHS Agenda for Change bands",
+      "relevant_markers": []
+    },
+    {
+      "id": "caseload-pressure",
+      "query": "key workers holding unsafe or unmanageable caseloads",
+      "relevant_markers": []
+    },
+    {
+      "id": "public-health-grant-cut",
+      "query": "public health grant reduction forcing cuts to treatment service budgets",
+      "relevant_markers": []
+    },
+    {
+      "id": "recommissioning",
+      "query": "recommissioning or retendering the adult drug and alcohol treatment contract",
+      "relevant_markers": []
+    },
+    {
+      "id": "agency-spend",
+      "query": "rising agency and locum spend to cover unfilled substance misuse posts",
+      "relevant_markers": []
+    },
+    {
+      "id": "vacancy-rate",
+      "query": "high vacancy rates and staff turnover in commissioned treatment services",
+      "relevant_markers": []
+    },
+    {
+      "id": "tupe-transfer",
+      "query": "TUPE transfer of staff when a treatment contract changes provider",
+      "relevant_markers": []
+    }
+  ]
+}

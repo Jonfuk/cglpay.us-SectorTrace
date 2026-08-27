@@ -239,13 +239,18 @@ class Settings(BaseSettings):
 
     # The semantic-analysis layer (pipeline/nlp): a downstream stage over the
     # document-analysis output, the same "never consulted by collectors" rule
-    # as the block above. 034A ships chunking only; `nlp_embedding_model`
-    # selects the embedder once that tranche lands — "stub" is the
-    # deterministic, no-download default that CI and offline development use,
-    # a real sentence-transformers id (behind the `nlp` extra) is the opt-in.
+    # as the block above. 034A ships chunking, embeddings and hybrid search.
+    # `nlp_embedding_model` selects the embedder: "stub" is the deterministic,
+    # no-download default that CI, the retrieval-eval harness and offline
+    # development use; a real sentence-transformers id (e.g.
+    # "sentence-transformers/all-MiniLM-L6-v2", behind the `nlp` extra) is the
+    # opt-in that turns on `--mode semantic` / `hybrid`. The model name is not
+    # an identity — the resolved revision SHA is recorded on every nlp_run and
+    # the nlp_model_registry row.
     nlp_enabled: bool = True
     nlp_embedding_model: str = "stub"
     nlp_chunk_batch_size: int = 200
+    nlp_embed_batch_size: int = 256
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 

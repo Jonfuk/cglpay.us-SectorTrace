@@ -56,6 +56,7 @@ from pipeline.web import (
     queries,
     resolve,
     review,
+    semantic,
 )
 from pipeline.web.jobs import JobError, JobRegistry, JobStore
 from pipeline.web.ratelimit import TokenBucketLimiter
@@ -1005,6 +1006,21 @@ class Handler(BaseHTTPRequestHandler):
                 search=_str(params, "q") or None,
                 limit=_int(params, "limit", 100),
                 offset=_int(params, "offset", 0))
+
+        # Semantic-analysis retrieval (BETA-034A). A finding aid over parsed
+        # committee papers / CDP documents: keyword, semantic or hybrid search
+        # of `document_chunks`, each result carrying its source URL and page.
+        # Admin-only by the same rule as everything else here -- it reads the
+        # archive, not `restricted_` data, but it is the operator's tool.
+        if path == "/api/admin/search":
+            return semantic.search(
+                conn,
+                query=_str(params, "q") or "",
+                mode=_str(params, "mode") or "hybrid",
+                limit=_int(params, "limit", 20),
+                source_system=_str(params, "source_system") or None,
+                date_from=_str(params, "date_from") or None,
+                date_to=_str(params, "date_to") or None)
 
         if path == "/api/admin/candidates":
             kind = _str(params, "kind") or "cdp_document"

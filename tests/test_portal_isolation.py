@@ -383,8 +383,19 @@ def test_the_api_documentation_answers_at_the_address_a_reader_would_guess(clien
 
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):
     """An operator route answering under /api/v1/ would be published."""
-    for route in ("overview", "schema", "review", "review/facets", "overrides"):
+    for route in ("overview", "schema", "review", "review/facets", "overrides", "search"):
         assert client.get(f"/api/v1/{route}").status_code == 404
+
+
+def test_semantic_search_is_an_operator_route_only(client):
+    """BETA-034A's retrieval finding aid is /api/admin/search. It reads the
+    parsed archive, not restricted_ data, but it is the operator's tool and
+    stays behind the same network-trust boundary as the rest of /api/admin."""
+    # Answers under /api/admin (400 for the missing query, not 404 for a
+    # missing route), and not at all under the public prefix.
+    assert client.get("/api/admin/search").status_code == 400
+    assert client.get("/api/admin/search?q=recruitment").status_code == 200
+    assert client.get("/api/v1/search?q=recruitment").status_code == 404
 
 
 def test_public_responses_are_cacheable_and_operator_responses_are_not(client):
