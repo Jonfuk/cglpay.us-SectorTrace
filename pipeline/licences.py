@@ -173,6 +173,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m29_rough_sleeping": "ogl_v3",
     "m30_statutory_homelessness": "ogl_v3",
     "m31_temporary_accommodation": "ogl_v3",
+    "m32_sab_site_reviews": "authority_varies",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by

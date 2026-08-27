@@ -105,8 +105,9 @@ class TestTheTreesMatch:
         # providers.status / providers.superseded_by so the portal can show
         # when a provider has been renamed, merged or dissolved. 63 adds
         # safeguarding_adults_boards (Module 28's board directory) and
-        # sar_documents.sab_name_source.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 63
+        # sar_documents.sab_name_source. 64 adds sab_site_crawls and
+        # sar_documents.discovered_via (Module 32, per-SAB site crawling).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 64
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

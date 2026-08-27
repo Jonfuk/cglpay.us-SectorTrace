@@ -9,6 +9,12 @@ back to 2015. That is the source this module reads, for the same reason m08
 reads judiciary.uk rather than crawling 150 coroners' courts: one source with
 real coverage beats 150 with none.
 
+That decision has a documented exception: `m32_sab_site_reviews` crawls each
+England board's own site (using the website_url this module stores in
+`safeguarding_adults_boards`) for reviews a board published but never
+submitted here. See docs/m32-sab-site-crawl.md. This module stays the
+aggregator; m32 is the supplement, and depends on it.
+
 THE LIBRARY IS A FLAT LIST, NOT A DATABASE. Every entry the library carries
 is a title (as submitted — very often a bare filename) and a download link,
 grouped only by the year it was added. There is no board-name field, no

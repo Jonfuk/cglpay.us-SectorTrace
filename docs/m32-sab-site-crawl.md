@@ -1,7 +1,23 @@
-# Scope: per-SAB website crawling (proposed Module 32)
+# Module 32 — per-SAB website crawling
 
-**Status:** scoped, not built. Decision points for the project owner are in
-§7.
+**Status:** built (migration `0064`, `pipeline/modules/m32_sab_site_reviews.py`).
+The three decisions in §7 were taken: **hybrid auto-ingest**, **England-only**,
+**with the `sab_site_crawls` state table**. This document is now the design
+record; what shipped matches it, with the notes below.
+
+**As built, notes on the scope:**
+
+* `library_year` on a `sab_website` row is a best-effort year read from the
+  filename or link text, falling back to the crawl year — a rebuild of
+  `sar_documents` to make the column nullable was not worth it, and the SAR
+  export caveat says so.
+* Sub-page following (one hop past the listing) is **not** implemented in the
+  first cut: discovery is the `SAR_PATHS` set plus documents linked directly
+  from those pages. `MAX_PAGES_PER_SAB` is headroom for adding it later.
+* Review-item types shipped: `sab_website_unknown`,
+  `sab_site_collection_failed`, `sab_site_robots_disallowed`,
+  `sab_site_doc_unavailable`, `sab_no_sars_found`, `sab_site_sar_candidate`,
+  `sab_site_sar_board_mismatch`, `possible_duplicate_of_library_sar`.
 
 ## Why this is a new module, not more of m28
 

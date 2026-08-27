@@ -496,6 +496,23 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "column, for the same placeholder reason as m30's own smoke "
               "spec above.",
     ),
+    Smoke(
+        module="m32_sab_site_reviews",
+        produces=("sab_site_crawls", "review_queue"),
+        signal=(("sab_site_crawls", "status"), ("sab_site_crawls", "pages_fetched")),
+        limit=3,
+        precondition="SELECT COUNT(*) FROM safeguarding_adults_boards WHERE nation = 'England'",
+        precondition_note="m28_sar_reports wrote no board directory, so there are "
+                           "no board sites to crawl",
+        note="A discovery module (the m09/m24 shape): it crawls each England "
+              "board's own site for SARs not in the National SAR Library. "
+              "sar_documents is not a signal table -- the hybrid gate "
+              "auto-ingests only a document whose link is unambiguous AND "
+              "whose text names that board, so a --limit 3 run legitimately "
+              "writes only sab_site_crawls rows and review_queue candidates. "
+              "sab_name is always set here (it is the board whose site it "
+              "is), so it is not a signal column either.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

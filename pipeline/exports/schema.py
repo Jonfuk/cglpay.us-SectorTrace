@@ -281,20 +281,21 @@ TABS: list[TabSpec] = [
     ),
     TabSpec(
         name="11_SAR_Reports",
-        description="Safeguarding Adult Reviews read from the National SAR Library, with the board name each document states for itself and workforce concern flags.",
-        columns=["document_url", "document_ext", "library_year", "sab_name",
-                  "sab_name_source", "has_body_text", "concern_terms",
+        description="Safeguarding Adult Reviews from the National SAR Library and, where found, each board's own website, with the board name and workforce concern flags.",
+        columns=["document_url", "document_ext", "discovered_via", "library_year",
+                  "sab_name", "sab_name_source", "has_body_text", "concern_terms",
                   "provider_mentions"],
         caveats=[
             "The subject of a review is never named in this export; documents are keyed on their own URL and the title as submitted to the library lives only in a restricted table.",
-            "sab_name_source says how sab_name was obtained: 'document_text' — the document names its board and the name matches the Ann Craft Trust directory; 'document_text_unverified' — the document names a board not in that directory; 'sab_directory' — the document did not name one, but its library title carries a place that resolves to exactly one directory board. NULL source with a NULL name means none of these found a board.",
-            "library_year is the year the National SAR Library filed the document under, not a publication date.",
+            "discovered_via says where the document was found: 'national_library' or 'scie_library' — the National SAR Library's main index or its SCIE 2015-2018 collection; 'sab_website' — the board's own site, crawled by Module 32.",
+            "sab_name_source says how sab_name was obtained: 'document_text' — the document names its board and the name matches the Ann Craft Trust directory; 'document_text_unverified' — the document names a board not in that directory; 'sab_directory' — the document did not name one, but its library title carries a place that resolves to exactly one directory board; 'sab_website' — the document was found on that board's own site. NULL source with a NULL name means none of these found a board.",
+            "library_year is the year the National SAR Library filed a document under; for a 'sab_website' row it is a best-effort year read from the filename, or the crawl year. Neither is a publication date.",
             "Concern terms indicate a word appears anywhere in the document text. They are a finding aid, not a characterisation of what the review found.",
-            "The library's coverage is whatever boards chose to submit; an absent board or year is a gap in the library, not evidence that no review took place.",
+            "Coverage is whatever boards submitted to the library plus what a bounded crawl of each England board's site could find; an absent board or year is a gap in that, not evidence that no review took place.",
         ],
         sql="""
-            SELECT d.document_url, d.document_ext, d.library_year, d.sab_name,
-                   d.sab_name_source, d.has_body_text,
+            SELECT d.document_url, d.document_ext, d.discovered_via, d.library_year,
+                   d.sab_name, d.sab_name_source, d.has_body_text,
                    (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM sar_concern_terms t WHERE t.document_url = d.document_url) AS concern_terms,
                    (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM sar_provider_mentions m
