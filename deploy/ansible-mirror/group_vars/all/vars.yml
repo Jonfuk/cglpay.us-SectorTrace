@@ -367,6 +367,31 @@ mirror_archive_sync: true
 # mirror only needs to serve the portal.
 mirror_graph_rebuild: true
 
+# Rebuild the semantic-analysis layer (034*: document_chunks ->
+# document_embeddings) from the freshly synced warehouse, in the on-demand
+# documents worker — the only image on this box carrying the `nlp` extra.
+#
+# Off by default, and only worth turning on where the SOURCE deployment
+# cannot embed: a managed source such as Railway does not ship the `nlp`
+# extra, so document_embeddings arrives from every sync empty and semantic /
+# hybrid search on this box has nothing to work with until something fills
+# it. With this true the sync does, straight after the graph rebuild.
+#
+# The cost is real: `nlp embed` is resume-safe (it only touches chunks with
+# no vector for the model) but the warehouse is replaced wholesale every
+# sync, so on a box with recurring sync this re-embeds the whole corpus
+# nightly. On a `beta` box (mirror_recurring_sync_enabled: false, seeded by
+# hand) it is a one-off after each deliberate reseed, which is the case this
+# was added for.
+mirror_nlp_rebuild: false
+
+# The embedder `mirror_nlp_rebuild` passes to `pipeline nlp embed --model`.
+# A sentence-transformers id (downloaded on first use into
+# {{ state_dir }}/nlp-cache and kept there), or "stub" for the deterministic
+# dependency-free stand-in — which needs no weights but is not a real
+# retriever, so it is only useful for proving the path end to end.
+mirror_nlp_embed_model: "sentence-transformers/all-MiniLM-L6-v2"
+
 # How old the newest snapshot in the source's bucket may be before this box
 # calls it stale. This is the check that catches a source whose backup timer
 # has quietly stopped — without it the mirror finds the same file it restored

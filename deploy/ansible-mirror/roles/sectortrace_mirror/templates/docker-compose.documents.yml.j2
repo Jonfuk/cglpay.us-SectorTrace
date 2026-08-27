@@ -24,6 +24,16 @@ services:
       dockerfile: deploy/Dockerfile.documents
     env_file:
       - "{{ state_dir }}/.env"
+    environment:
+      # Every use of this service is `run --rm`, so a container-layer model
+      # cache is downloaded and then thrown away on every invocation. The
+      # `nlp` embedder's first-use download (all-MiniLM-L6-v2, ~90MB, plus
+      # whatever a GLiNER model pulls) has to land somewhere that outlives
+      # the container — point Hugging Face / sentence-transformers at the
+      # bind-mounted cache below. Unset for the OCR batch, which needs none
+      # of this.
+      HF_HOME: /app/nlp-cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/nlp-cache/sentence-transformers
     # The blast-radius limit: parsing and OCR are the spiky part of this
     # deployment. Hitting a cgroup limit kills this container alone and
     # records a retryable failure; without it the kernel's OOM killer
@@ -32,3 +42,8 @@ services:
     cpus: {{ [(ansible_processor_vcpus | int * 0.75) | round(1), 1.0] | max }}
     volumes:
       - "{{ state_dir }}/data:/app/data"
+      # Model weights for the `nlp` layer, kept out of data/ on purpose: it is
+      # not warehouse content, it must survive a warehouse sync, and it is
+      # safe to delete (next run re-downloads). See the state directory tree
+      # in the role's tasks.
+      - "{{ state_dir }}/nlp-cache:/app/nlp-cache"

@@ -27,6 +27,7 @@ sectortrace-mirror — operate the mirror stack
   sectortrace-mirror check-source               compare both warehouses, change neither
   sectortrace-mirror promote --confirm          stop being a mirror; take the source's place
   sectortrace-mirror documents <args>           run in the documents worker instead
+  sectortrace-mirror nlp <args>                 semantic-analysis layer; runs in the documents worker
   sectortrace-mirror psql                       a psql shell on this box's warehouse
   sectortrace-mirror shell                      a shell in the app container
   sectortrace-mirror ps | logs [svc] | restart [svc] | up | down
@@ -152,6 +153,20 @@ EOF_PROMOTE
     # for why running batches here is usually the wrong box.
     documents)
         shift
+        exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    # The semantic-analysis layer (034*, `pipeline nlp …`) needs the `nlp`
+    # extra — sentence-transformers, gliner, torch — which is in the documents
+    # image and deliberately not in the always-on app image, the same split as
+    # the parser/OCR toolchain. Route the whole `nlp` subtree there so
+    # `sectortrace-mirror nlp embed …` runs where its dependencies are rather
+    # than failing in the app container with ModuleNotFoundError. No `shift`:
+    # `nlp` is the first word of the pipeline command, and the documents image
+    # entrypoint is `pipeline`. Model weights persist in {{ state_dir }}/nlp-cache
+    # (bind-mounted by the compose file) so `run --rm` does not re-download
+    # them every time.
+    nlp)
         exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
         ;;
 

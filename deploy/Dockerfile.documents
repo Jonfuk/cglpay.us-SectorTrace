@@ -20,12 +20,20 @@ WORKDIR /app
 # code changes retain Docker's dependency-layer cache. Docling is deliberately
 # omitted: the Unraid batch uses PyMuPDF plus standard-library DOCX/PPTX parsers,
 # and Docling pulls PyTorch plus CUDA libraries for no benefit here.
+#
+# The `nlp` extra (sentence-transformers + gliner, and the torch they share)
+# rides along here and NOT in the always-on app image — the same split as the
+# parser/OCR toolchain: heavy, local-only, first-use model download, no place
+# in an image whose job is to serve already-persisted results. It is what lets
+# `sectortrace-mirror nlp embed` (034A) and the zero-shot span extractor (034D)
+# run in this worker instead of failing in the app container. CPU torch is
+# fine; it is Docling's CUDA tree that is kept out, above.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra graph
+    --extra postgres --extra storage --extra graph --extra nlp
 
 COPY pipeline ./pipeline
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph --extra nlp
 
 # These are the two document packages the PyMuPDF/OCRmyPDF batch actually
 # invokes. Keep them separate from the rich `documents` extra above so this

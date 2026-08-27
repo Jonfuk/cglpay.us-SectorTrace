@@ -136,6 +136,12 @@
     # asks the app container to render it rather than parsing it on the host.
     - data/mirror-state
     - logs
+    # Hugging Face / sentence-transformers model weights for the `nlp` layer,
+    # bind-mounted into the on-demand documents worker. Deliberately NOT under
+    # data/: it is not warehouse content, it must outlive a warehouse sync,
+    # and every `run --rm` of the worker would otherwise re-download it. Safe
+    # to `rm -rf` — the next run rebuilds it. See docker-compose.documents.yml.j2.
+    - nlp-cache
 
 # 0755, unlike everything else here. The postgres entrypoint re-execs itself
 # as the `postgres` user before running these scripts, and that user has to

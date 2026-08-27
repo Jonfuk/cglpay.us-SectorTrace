@@ -276,7 +276,17 @@ running says so and exits rather than starting a second.
 7. **Graph**: `graph rebuild --clear` over the warehouse that just arrived.
    After it moved, never before — a projection built from the previous copy
    is wrong in a way nothing would report.
-8. **Prunes superseded snapshots**, keeping `mirror_superseded_keep`, and
+8. **Semantic-analysis layer** (only when `mirror_nlp_rebuild: true`):
+   `nlp chunk` then `nlp embed` in the documents worker — the one image on
+   this box with the `nlp` extra — rebuilding `document_embeddings` from the
+   warehouse that just arrived. Off by default; turn it on where the source
+   deployment cannot embed (a managed source such as Railway ships no `nlp`
+   extra, so `document_embeddings` arrives from every sync empty). Same
+   after-not-before rule as the graph, and the same cost note: the warehouse
+   is replaced wholesale each sync, so this re-embeds the whole corpus every
+   run — a one-off on a hand-seeded `beta` box, nightly work on a recurring
+   mirror. Model weights persist in `{{ state_dir }}/nlp-cache`.
+9. **Prunes superseded snapshots**, keeping `mirror_superseded_keep`, and
    **writes the metrics file**.
 
 `sectortrace-mirror sync --dry-run` runs the same decisions and changes
@@ -507,11 +517,16 @@ Set the list back to empty and re-run to tear all of it down again.
 - **No backup timer.** The mirror is a copy of something that is already
   backed up, and its restore path is "sync again". Note what that means the
   moment you promote it: from then on nothing here is backed up by anything.
-- **A documents-worker image, built but pointless to run here.** Derived
-  output goes into the warehouse, and the warehouse is replaced at the next
-  sync. It is built because a mirror is also the box you take a source
-  deployment's place with, and an image that has never been built is a bad
-  thing to discover on that day.
+- **A documents-worker image, mostly pointless to run here.** Derived output
+  goes into the warehouse, and the warehouse is replaced at the next sync. It
+  is built because a mirror is also the box you take a source deployment's
+  place with, and an image that has never been built is a bad thing to
+  discover on that day. The one case where running it here earns its keep:
+  `mirror_nlp_rebuild: true`, where the sync itself uses it to rebuild
+  `document_embeddings` a source that ships no `nlp` extra never produced —
+  see "What a sync does", step 8. `sectortrace-mirror nlp <args>` also routes
+  here, for the same reason (the `nlp` extra is in this image, not the
+  always-on app).
 
 ## Everything else
 
