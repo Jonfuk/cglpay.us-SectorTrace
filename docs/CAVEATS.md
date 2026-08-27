@@ -368,6 +368,16 @@ anyone using it.
   The stub does not attempt `LOCATION`, `PROGRAMME` or unknown provider
   names; absence of those spans is a limit of the offline path, not evidence
   they are not there.
+- **Assertion status (BETA-034E, `document_assertions`) is a rule tagger's
+  reading of one sentence, not a verified fact.** `NEGATED` means a negation
+  cue sat near the span, `HISTORICAL` that a past-tense cue did, and so on;
+  the always-on detector is regex cue families, not a parser. It fixes the
+  gross error — "no recruitment difficulties" is no longer indistinguishable
+  from "recruitment difficulties remain" — but a sarcastic, deeply nested or
+  cross-sentence construction can still be misread. `detector_confidence` is
+  the tagger's confidence in *that class*, never a probability the underlying
+  statement is true, and it is never multiplied into anything. Use it to
+  filter a review queue, not to score evidence.
 
 ### Public Health Grant (Module 11)
 

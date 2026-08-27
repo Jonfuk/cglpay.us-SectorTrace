@@ -225,6 +225,45 @@ uv run pipeline nlp resolve --source-system committee_paper_promotion
 uv run pipeline nlp eval-spans
 ```
 
+## What ships now (tranche 034E) — assertion / context detection
+
+`pipeline/nlp/context.py` + `pipeline nlp context` writes one
+`document_assertions` row (migration `0067`) per span: whether its sentence
+**AFFIRMS** the concept, **NEGATES** it, places it in the past
+(**HISTORICAL**), makes it **HYPOTHETICAL** or **CONDITIONAL**, or attributes
+it to a **THIRD_PARTY**. `UNKNOWN` only when the span's sentence cannot be
+located — never a default.
+
+* **`cue`** — the always-on stdlib tagger. Regex cue families, each with a
+  direction and a scope window; a cue modifies the target span if it is on
+  the right side and no termination word (`but`, `however`, `;`, …) breaks
+  the scope first. Precedence when several apply:
+  NEGATED > HISTORICAL > HYPOTHETICAL > CONDITIONAL > THIRD_PARTY.
+* **`medspacy`** — medSpaCy `ConText` where installed. **Not in the `nlp`
+  extra**: spaCy pipeline models don't install as clean dependencies
+  (`pip install medspacy` plus a spaCy model, then `--detector medspacy`).
+  The cue tagger is the guaranteed path and the plan makes it always-on.
+
+`assertion_status` and `detector_confidence` are separate columns: the rule
+tagger can emit `NEGATED` at 0.7, and a low number does not mean "probably
+AFFIRMED", it means the call is soft. `cue_start` / `cue_end` /
+`sentence_sha256` pin exactly which words drove it.
+`document_chunks.preceding_heading_element_id` (from `0065`) is already there
+for section-aware context ("Risks" vs "Actions completed") later, no
+migration needed.
+
+The assertion eval (`pipeline/nlp/context_eval.py`,
+`pipeline nlp eval-context`, `tests/fixtures/nlp/assertion_cases.json`)
+reports accuracy per class and calls out the **hard negatives** separately —
+"No staffing concerns were identified", "Recruitment difficulties had
+resolved", "Other authorities experienced vacancy pressure", … — the
+sentences the whole tranche exists to get right.
+
+```bash
+uv run pipeline nlp context --source-system committee_paper_promotion --limit 25
+uv run pipeline nlp eval-context
+```
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -236,7 +275,7 @@ earlier ones to be useful.
 | **034B** | SectorTrace ontology — stable concept ids, multi-category, controlled predicate vocabulary (`ontology/concepts.yml`, `relations.yml`, `patterns/`) | **shipped** — a starter vocabulary (~80 concepts, ~30 predicates); grown as 034C/F exercise it |
 | **034C** | deterministic ontology classifier — `document_topics` `ontology_v1` rows over chunked elements; `classify.py` `TOPICS` frozen and documented, not code-coupled; weak-supervision seed for 034G; `keyword_v1` untouched | **shipped** |
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
-| **034E** | assertion / context detection — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`, with `assertion_status` and `detector_confidence` stored separately; medSpaCy `ConText` where installed, a stdlib cue tagger always | planned |
+| **034E** | assertion / context detection into `document_assertions` (migration `0067`) — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`; `assertion_status` and `detector_confidence` separate; stdlib cue tagger always on, medSpaCy `ConText` an optional path (not in the extra) | **shipped** — grow `assertion_cases.json`; wire medSpaCy if its model install is worth it |
 | **034F** | machine claim candidates (`document_claim_candidates`, high volume) via ontology relation patterns — **not** co-occurrence; a selection policy promotes a slice into `review_queue`; approval writes a `graph_claims` draft with the detector in `extractor_name`, never `promoted_by`; review decisions capture corrections, not just approve/reject | planned |
 | **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | gated |
 | **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |

@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Labelled sentences for `pipeline nlp eval-context`. `target` is the",
+    "concept/entity the assertion is about; `expected` is one of AFFIRMED,",
+    "NEGATED, HISTORICAL, HYPOTHETICAL, CONDITIONAL, THIRD_PARTY, UNKNOWN.",
+    "Cases marked hard_negative are the ones the tranche exists to get right",
+    "-- their pass/fail is reported separately. Grow this from the live",
+    "warehouse before trusting the per-class numbers."
+  ],
+  "cases": [
+    {"id": "no-concerns", "text": "No staffing concerns were identified during the review.", "target": "staffing concerns", "expected": "NEGATED", "hard_negative": true},
+    {"id": "had-resolved", "text": "Recruitment difficulties had resolved by the end of the year.", "target": "Recruitment difficulties", "expected": "HISTORICAL", "hard_negative": true},
+    {"id": "does-not-relate", "text": "The report does not relate to the commissioned provider.", "target": "commissioned provider", "expected": "NEGATED", "hard_negative": true},
+    {"id": "other-authorities", "text": "Other authorities experienced vacancy pressure over the same period.", "target": "vacancy pressure", "expected": "THIRD_PARTY", "hard_negative": true},
+    {"id": "considered-not-implemented", "text": "The council considered, but did not implement, a funding reduction.", "target": "funding reduction", "expected": "NEGATED", "hard_negative": true},
+
+    {"id": "remains-a-risk", "text": "Recruitment difficulties remain a significant challenge for the service.", "target": "Recruitment difficulties", "expected": "AFFIRMED"},
+    {"id": "high-caseloads-now", "text": "Key workers are currently carrying high caseloads across every team.", "target": "high caseloads", "expected": "AFFIRMED"},
+    {"id": "history-of", "text": "There is a history of high caseloads in the outreach team.", "target": "high caseloads", "expected": "HISTORICAL"},
+    {"id": "previously-reported", "text": "The service previously reported a funding reduction of ten per cent.", "target": "funding reduction", "expected": "HISTORICAL"},
+    {"id": "if-reduced", "text": "If the grant is reduced further, waiting times will increase.", "target": "waiting times", "expected": "CONDITIONAL"},
+    {"id": "proposed-rehab", "text": "The provider proposed a new residential rehabilitation unit for next year.", "target": "residential rehabilitation", "expected": "HYPOTHETICAL"},
+    {"id": "risk-of-overdose", "text": "There is a risk of non-fatal overdose without take-home naloxone.", "target": "non-fatal overdose", "expected": "HYPOTHETICAL"},
+    {"id": "elsewhere", "text": "Elsewhere, providers have moved to a lead-provider model.", "target": "lead-provider model", "expected": "THIRD_PARTY"},
+    {"id": "no-longer", "text": "Agency reliance is no longer a concern following recruitment.", "target": "Agency reliance", "expected": "HISTORICAL"},
+    {"id": "affirmed-ost", "text": "The service delivers opioid substitution treatment to 1,200 people.", "target": "opioid substitution treatment", "expected": "AFFIRMED"}
+  ]
+}

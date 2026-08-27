@@ -115,7 +115,10 @@ class TestTheTreesMatch:
         # 66 adds document_concept_mentions (tranche 034D): span-level entity
         # mentions from GLiNER / the offline stub, with the char offsets
         # 034E/F need. REAL -> double precision is the only dialect change.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 66
+        # 67 adds document_assertions (tranche 034E): AFFIRMED / NEGATED /
+        # HISTORICAL / … per span, from the stdlib cue tagger or medSpaCy
+        # ConText. Same one dialect change (REAL -> double precision).
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 67
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

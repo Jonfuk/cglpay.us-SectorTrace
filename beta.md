@@ -290,7 +290,7 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A–034D complete on `beta`.**
+  - current_state: **034A–034E complete on `beta`.**
     034A — the foundation (migration `0065` — `nlp_runs`,
     `nlp_model_registry`, `document_chunks`, `document_embeddings`;
     `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
@@ -348,19 +348,34 @@ DONE
     weaker stays a lead. `pipeline/nlp/spans_eval.py` +
     `tests/fixtures/nlp/gold_spans.json` (P/R/F1 per label; 4-entry seed) +
     `pipeline nlp eval-spans`. `gliner` added to the `nlp` extra.
-    `tests/test_nlp_{spans,resolve,spans_eval}.py` + migration-count bump
-    (65→66) green; `ruff` clean.
+    034E — migration `0067` (`document_assertions`, both trees). `pipeline/nlp/context.py`
+    + `pipeline nlp context`: one assertion row per span — `AFFIRMED` /
+    `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY`
+    / `UNKNOWN` (UNKNOWN only when the sentence can't be located). Always-on
+    stdlib `cue` tagger: regex cue families with a direction + scope window,
+    termination words break scope, precedence NEGATED > HISTORICAL >
+    HYPOTHETICAL > CONDITIONAL > THIRD_PARTY. `assertion_status` /
+    `detector_confidence` separate columns; `cue_start`/`cue_end`/
+    `sentence_sha256` pin the call. medSpaCy `ConText` is a lazy optional
+    path, **not added to the `nlp` extra** — spaCy pipeline models don't
+    install as clean deps; deferred with a note. `pipeline/nlp/context_eval.py`
+    + `tests/fixtures/nlp/assertion_cases.json` (15-case seed, 5 hard
+    negatives, all passing at 1.0) + `pipeline nlp eval-context`.
+    `tests/test_nlp_context.py` + migration-count bump (66→67) green;
+    `ruff` clean.
   - next_action: (1) `uv sync --extra nlp` + browser-verify `/api/admin/search`
     with a real MiniLM model, `/api/v1/*` unchanged — deferred: no browser
-    here. (2) Grow `retrieval_queries.json` (→30–50) and `gold_spans.json`
-    (→~100) against the live warehouse; record the baselines; then swap the
-    span stub for GLiNER and compare. (3) Grow the ontology vocabulary as
-    034E/F exercise it. (4) Admin-UI surfaces for search, the `ontology_v1`
-    topic filter and the mention/entity views. **Next tranche: 034E** —
-    assertion / context detection (`AFFIRMED` / `NEGATED` / `HISTORICAL` /
-    `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`) into a new
-    `document_assertions` table (migration): medSpaCy `ConText` where the
-    extra is present, a stdlib cue tagger always; hard-negative fixtures.
+    here. (2) Grow `retrieval_queries.json` (→30–50), `gold_spans.json`
+    (→~100) and `assertion_cases.json` against the live warehouse; record
+    baselines; then swap the span stub for GLiNER and compare. (3) Decide
+    whether medSpaCy ConText earns its spaCy-model install; if so, add it to
+    the extra. (4) Admin-UI surfaces. **Next tranche: 034F** — machine claim
+    candidates: `pipeline/nlp/relations.py` assembles triples from spans in
+    one chunk via `relations.yml` patterns + proximity + assertion status
+    (never co-occurrence alone) into a new `document_claim_candidates` table
+    (migration); `pipeline/nlp/promote.py` selects a slice into `review_queue`;
+    approval writes a `graph_claims` draft with the detector in
+    `extractor_name`, never `promoted_by`.
   - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
     portal-isolation + migration-equivalence + cli + ontology + spans/resolve
     confirmed locally; full run pending); the browser/data items above.

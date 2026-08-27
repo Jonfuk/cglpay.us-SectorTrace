@@ -32,6 +32,12 @@ stub or GLiNER behind the `nlp` extra; label set is entities only. `resolve`
 into a `document_entity_mentions` row on an exact name match, and only then.
 Neither ever writes `entity_id` from a model.
 
-Assertion / context detection, relation-pattern claim candidates and topic
-clustering land in later tranches — see `docs/semantic-analysis.md`.
+Tranche 034E: `context` — assertion / context detection into
+`document_assertions` (migration 0067). An always-on stdlib cue tagger, or
+medSpaCy `ConText` where that optional path is installed. This is what tells
+"no recruitment difficulties" from "recruitment difficulties remain".
+`assertion_status` and `detector_confidence` are stored separately.
+
+Relation-pattern claim candidates and topic clustering land in later
+tranches — see `docs/semantic-analysis.md`.
 """

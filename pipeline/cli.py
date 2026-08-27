@@ -395,6 +395,44 @@ def nlp_resolve(
         conn.close()
 
 
+@nlp_app.command("context")
+def nlp_context(
+    detector: str = typer.Option(
+        None, help="'cue' (stdlib, always-on, default) or 'medspacy' (needs a "
+        "separate `pip install medspacy` + a spaCy model)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Classify and roll back, writing nothing"),
+) -> None:
+    """Classify each entity span's assertion status (AFFIRMED / NEGATED /
+    HISTORICAL / HYPOTHETICAL / CONDITIONAL / THIRD_PARTY / UNKNOWN) into
+    `document_assertions`. Fetches nothing.
+    """
+    from pipeline.nlp import context as nlp_context_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_context_mod.run(conn, detector=detector, source_system=source_system,
+                                     limit=limit, dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-context")
+def nlp_eval_context(
+    cases: Path = typer.Option(
+        None, help="Case set JSON (default: tests/fixtures/nlp/assertion_cases.json)"),
+    detector: str = typer.Option(None, help="'cue' (default) or 'medspacy'"),
+) -> None:
+    """Score the assertion detector against labelled sentences, including the
+    hard negatives: accuracy overall and per class, plus a confusion count."""
+    from pipeline.nlp import context_eval
+
+    report = context_eval.run(cases_path=cases, detector=detector)
+    typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+
+
 @nlp_app.command("embed")
 def nlp_embed(
     model: str = typer.Option(
