@@ -178,6 +178,34 @@ def test_extract_sab_name_only_searches_the_opening():
     assert sar.extract_sab_name(text) is None
 
 
+@pytest.mark.parametrize("text,expected", [
+    # Boards that have renamed to a "Partnership" style, and the "Adult
+    # Safeguarding Board" word order — all the same body.
+    ("Published by the Merton Safeguarding Adults Partnership Board.",
+     "Merton Safeguarding Adults Partnership Board"),
+    ("A new SAR commissioned by Suffolk Safeguarding Partnership Board.",
+     "Suffolk Safeguarding Partnership Board"),
+    ("This review was overseen by the Camden Adult Safeguarding Board.",
+     "Camden Adult Safeguarding Board"),
+])
+def test_extract_sab_name_accepts_partnership_and_word_order_variants(text, expected):
+    assert sar.extract_sab_name(text) == expected
+
+
+def test_extract_sab_name_collapses_a_line_wrapped_name():
+    text = "Report of the Manchester Safeguarding\nAdults Board\n\n1. Introduction"
+    assert sar.extract_sab_name(text) == "Manchester Safeguarding Adults Board"
+
+
+def test_extract_sab_name_falls_back_to_the_stated_commissioner():
+    """When the name is not in the strict phrase position, "commissioned by
+    X" is a firmer attribution than a bare mention, so it is used."""
+    text = ("Executive Summary\n\nThis Safeguarding Adults Review was "
+            "commissioned by the Telford and Wrekin Safeguarding Adults "
+            "Board following the death of an adult.")
+    assert sar.extract_sab_name(text) == "Telford and Wrekin Safeguarding Adults Board"
+
+
 # --- provider mentions --------------------------------------------------------------
 
 def test_find_provider_mentions_matches_known_variant():

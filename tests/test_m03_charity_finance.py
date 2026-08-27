@@ -146,6 +146,29 @@ def test_staff_costs_total_rejects_the_pay_band_total():
     assert f["staff_costs_total"] >= f["wages_and_salaries"]
 
 
+def test_fallback_locator_finds_a_page_with_unanticipated_wording():
+    """A note headed "Personnel costs" / "Employee benefit expenses" matches
+    none of DEFAULT_PROFILE's groups; the shared fallback groups still
+    locate it so the parser gets a page to work on."""
+    pages = [
+        "Trustees' report and other narrative.",
+        "Personnel costs\n£’000\nWages and salaries 1,000 900\n"
+        "Average number of employees 50 45",
+    ]
+    located = cf.find_staff_costs_pages(pages, DEFAULT_PROFILE)
+    assert [i for i, _ in located] == [1]
+
+
+def test_explicitly_labelled_total_staff_costs_is_used():
+    note = ("£’000\n"
+            "Wages and salaries 1,000 900\n"
+            "Social security costs 100 90\n"
+            "Total staff costs 1,100 990\n")
+    f = cf.extract_figures_from_text(note, DEFAULT_PROFILE)
+    assert f["staff_costs_total"] == 1_100_000
+    assert not any("staff_costs_total" in p for p in f["_problems"])
+
+
 def test_money_fields_are_null_when_units_unknown():
     """No multiplier -> no monetary values, plus a recorded problem."""
     note = "Wages and salary costs 190,266 174,659\nAverage number of employees 5,715 5,314"

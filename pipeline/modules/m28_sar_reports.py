@@ -89,9 +89,33 @@ _DOCUMENT_EXTENSIONS = (".pdf", ".doc", ".docx", ".odt")
 # the phrase, which covers multi-authority boards ("Bath and North East
 # Somerset Safeguarding Adults Board") without also swallowing an entire
 # preceding sentence.
+#
+# The naming phrase varies more than the first cut allowed for, and 269 of
+# the library's documents were left with a NULL board as a result: boards
+# have renamed to "Safeguarding Adults Partnership Board", some style
+# themselves "... Safeguarding Partnership", and a minority write "Adult
+# Safeguarding Board" in that word order. All name the same body — the
+# partnership that commissioned the review — so all are accepted.
+_SAB_NAME_PHRASE = (
+    r"Safeguarding\s+Adults?\s+Partnership\s+Board"
+    r"|Safeguarding\s+Adults?\s+Partnership"
+    r"|Safeguarding\s+Adults?\s+Board"
+    r"|Safeguarding\s+Partnership\s+Board"
+    r"|Adults?\s+Safeguarding\s+Board")
 _SAB_NAME_RE = re.compile(
     r"\b((?:[A-Z][A-Za-z'\-]*|and|&)(?:\s+(?:[A-Z][A-Za-z'\-]*|and|&)){0,5}?"
-    r"\s+Safeguarding Adults?\s+Board)\b")
+    r"\s+(?:" + _SAB_NAME_PHRASE + r"))\b")
+
+# Fallback, reached only when the phrase above is not found: the review
+# routinely says who set it up ("This review was commissioned by the X
+# Safeguarding Adults Board"). A named commissioner attributes the review
+# more firmly than a bare mention, which is why this is safe to fall back
+# to; it stays inside the opening window for the same reason.
+_SAB_COMMISSIONED_RE = re.compile(
+    r"(?:[Cc]ommissioned|[Ii]nitiated|[Rr]equested|[Pp]repared|[Pp]ublished)\s+"
+    r"(?:by|for|on behalf of)\s+(?:the\s+)?"
+    r"((?:[A-Z][A-Za-z'\-]*|and|&)(?:\s+(?:[A-Z][A-Za-z'\-]*|and|&)){0,6}?"
+    r"\s+(?:" + _SAB_NAME_PHRASE + r"))\b")
 
 # Only the opening of the document is searched. SAR reports state their
 # commissioning board on the cover page or in the first paragraph; searching
@@ -147,11 +171,65 @@ def document_extension(url: str) -> str | None:
     return None
 
 
+# Words that can sit in the capitalised run in front of the naming phrase
+# but are never part of a board's name — report/title vocabulary the greedy
+# prefix would otherwise swallow ("SAFEGUARDING ADULT REVIEW Walsall
+# Safeguarding Adults Partnership"). The leftward walk in _clean_sab_name
+# stops at the first of these.
+_SAB_PREFIX_STOPWORDS = frozenset(
+    "safeguarding adult adults review reviews report reports sar sars "
+    "executive summary serious case overview thematic learning brief "
+    "briefing practitioner proforma final draft published the of "
+    "introduction confidential local".split())
+
+
+def _clean_sab_name(raw: str) -> str | None:
+    """Trim a raw regex capture back to '<place> <naming phrase>'.
+
+    The capitalised-words prefix in `_SAB_NAME_RE` matches greedily across a
+    preceding title ("Bradley Safeguarding Adults Review Havering
+    Safeguarding Adults Board"), so this re-anchors on the *rightmost* start
+    of the naming phrase and keeps only the run of capitalised place words
+    immediately before it, stopping at the first title-vocabulary or
+    lower-case token. A capture with no place word left in front of the
+    phrase is not a usable board name and returns None.
+    """
+    tokens = re.sub(r"\s+", " ", raw).strip().split()
+    lowered = [t.lower() for t in tokens]
+
+    phrase_start = None
+    for i, low in enumerate(lowered):
+        if low != "safeguarding":
+            continue
+        # "Adult Safeguarding Board" word order: the phrase starts one token
+        # earlier, and that "Adult" is part of the name, not a trimmable
+        # prefix word.
+        phrase_start = i - 1 if lowered[i - 1:i] in (["adult"], ["adults"]) else i
+    if not phrase_start:
+        return None
+
+    start = phrase_start
+    while start > 0 and phrase_start - start < 5:
+        prev = tokens[start - 1]
+        low = prev.lower()
+        if low in _SAB_PREFIX_STOPWORDS:
+            break
+        if not (prev[:1].isupper() or low in ("and", "&")):
+            break
+        start -= 1
+    while start < phrase_start and tokens[start].lower() in _SAB_PREFIX_STOPWORDS | {"and", "&"}:
+        start += 1
+    if start == phrase_start:
+        return None
+    return " ".join(tokens[start:])
+
+
 def extract_sab_name(text: str | None) -> str | None:
     if not text:
         return None
-    match = _SAB_NAME_RE.search(text[:_SAB_NAME_SEARCH_CHARS])
-    return match.group(1).strip() if match else None
+    head = text[:_SAB_NAME_SEARCH_CHARS]
+    match = _SAB_NAME_RE.search(head) or _SAB_COMMISSIONED_RE.search(head)
+    return _clean_sab_name(match.group(1)) if match else None
 
 
 def index_concern_terms(text: str, welded: bool = False) -> dict[str, int]:

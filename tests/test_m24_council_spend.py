@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from pipeline.modules import m24_council_spend as spend
 from pipeline.registry import ModuleContext
 
@@ -66,6 +68,19 @@ def test_a_non_file_link_is_not_followed():
     assert _spend_page_urls(html) == []
 
 
+@pytest.mark.parametrize("href,text", [
+    ("/transparency/transparency-fraud-24-25.csv", "Fraud data 2024-25"),
+    ("/transparency/senior-salary-2025-26.csv", "Senior salary information"),
+    ("/transparency/community-grant-awards-over-5000.csv", "Grants to organisations"),
+    ("/transparency/Land_and_Asset_data.xlsx", "Land and asset register"),
+    ("/transparency/controlled-parking-spaces.csv", "Parking spaces"),
+])
+def test_other_transparency_code_datasets_are_not_followed_as_spend(href, text):
+    """These publish under "transparency" too and so pass SPEND_WORDS, but
+    they are not £500 supplier spend and only fail header detection."""
+    assert _spend_page_urls(_page(f'<a href="{href}">{text}</a>')) == []
+
+
 # --- the CSV parser -----------------------------------------------------------
 
 CSV = (
@@ -108,6 +123,20 @@ def test_csv_with_no_rows_is_an_error():
     rows, error = spend._parse_csv(b"", "https://x/s.csv")
     assert rows == []
     assert "no rows" in error
+
+
+@pytest.mark.parametrize("header", [
+    "Supplier Name,Amount (£),Date",
+    "Beneficiary,Transaction Amount,Payment Date",
+    "Merchant Name,Amount GBP,Month",
+    "Payee,Total Amount (net),Period",
+])
+def test_csv_headers_councils_actually_use_are_matched(header):
+    body = (header + "\n\"Change Grow Live\",\"1,000.00\",\"2025-01\"\n").encode()
+    rows, error = spend._parse_csv(body, "https://x/s.csv")
+    assert error is None
+    assert rows and rows[0]["payee"] == "Change Grow Live"
+    assert rows[0]["amount"] == 1000.0
 
 
 # --- the provider match -------------------------------------------------------

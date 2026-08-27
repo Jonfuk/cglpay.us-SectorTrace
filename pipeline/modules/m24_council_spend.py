@@ -96,6 +96,18 @@ SPEND_WORDS = re.compile(
     r"spend|expenditure|payment|payments|supplier|invoice|transparency|"
     r"over-500|over-500|over500", re.IGNORECASE)
 
+# The Local Government Transparency Code mandates several other datasets a
+# council publishes alongside its £500 spend, and "transparency" in the
+# link is enough for SPEND_WORDS to follow them. They have a different
+# schema — no payee/amount pair — so each is fetched only to fail header
+# detection and land in parse_failures. A link whose URL or text carries
+# one of these is not a payments file. (Every term here was observed doing
+# exactly that in the review queue: fraud returns, senior-salary tables,
+# grants-to-VCS lists, asset and land registers, parking-space inventories.)
+NON_SPEND_WORDS = re.compile(
+    r"\bfraud\b|salar|senior[\s_-]?pay|pay[\s_-]?multiple|"
+    r"\bgrants?\b|\bassets?\b|\bland\b|parking", re.IGNORECASE)
+
 _LINK_RE = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
                       re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -107,10 +119,16 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # variations councils actually use.
 _PAYEE_HEADERS = ("supplier", "payee", "vendor", "beneficiary", "creditor",
                   "organisation", "organization", "company", "supplier name",
-                  "payee name", "name of supplier", "supplier organisation")
+                  "payee name", "name of supplier", "supplier organisation",
+                  "vendor name", "beneficiary name", "creditor name",
+                  "supplier / beneficiary", "merchant", "merchant name",
+                  "body name", "trading name", "recipient", "paid to")
 _AMOUNT_HEADERS = ("amount", "value", "net amount", "gross amount", "total",
                    "amount paid", "payment amount", "amount (£)",
-                   "amount excluding vat", "spend", "expenditure", "cost")
+                   "amount excluding vat", "spend", "expenditure", "cost",
+                   "transaction amount", "invoice amount", "total amount",
+                   "payment value", "amount in sterling", "gross value",
+                   "net value", "amount gbp")
 _PERIOD_HEADERS = ("period", "month", "date", "payment date", "invoice date",
                    "financial year", "financial period", "month/year",
                    "date of payment")
@@ -133,7 +151,15 @@ def _normalise_name(name: str) -> str:
 
 
 def _normalise_header(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").lower()).strip()
+    """Lower-case and whitespace-normalise a header cell, and drop a
+    currency/unit qualifier: councils label the money column "Amount (£)",
+    "Value £", "Amount (GBP)", "Amount (net)", and the synonym list should
+    not need a variant for every bracketed form."""
+    text = (value or "").lower().replace("£", " ")
+    text = re.sub(
+        r"[\(\[]\s*(?:gbp|pounds?|sterling|net|gross|excl\.?\s*vat|"
+        r"incl\.?\s*vat|000s?|)\s*[\)\]]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _match_headers(header: list[str], synonyms: tuple[str, ...]) -> int | None:
@@ -196,6 +222,8 @@ def _file_urls_on_page(page_html: str, page_url: str, host: str) -> list[str]:
             continue
         haystack = f"{url} {_link_text(raw_text)}"
         if not SPEND_WORDS.search(haystack):
+            continue
+        if NON_SPEND_WORDS.search(haystack):
             continue
         out.append(url)
     return out

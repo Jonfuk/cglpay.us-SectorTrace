@@ -173,6 +173,27 @@ def extract_pay_bands(page_text: str) -> tuple[list[dict], int | None]:
     return bands, total
 
 
+# Tried for every charity after its own profile's groups. A note that uses
+# wording no profile anticipated ("Employee benefit expenses", "Personnel
+# costs", "Cost of employment") was the whole reason 12 documents located
+# no page at all. This only selects candidate pages — extract_figures_from_text
+# still returns NULL plus a problem for any field the page does not actually
+# carry, so widening the net here cannot invent a figure, only give the
+# parser a page to fail honestly against.
+FALLBACK_LOCATOR_KEYWORDS: list[list[str]] = [
+    ["staff cost"],
+    ["employee", "cost"],
+    ["wages", "salar"],
+    ["personnel cost"],
+    ["employee benefit"],
+    ["cost of employment"],
+    ["employment cost"],
+    ["staff", "remunerat"],
+    ["emoluments"],
+    ["number of employees"],
+]
+
+
 def find_staff_costs_pages(pages: list[str], profile: AccountsProfile) -> list[tuple[int, str]]:
     """Locate the staff-costs note in already-extracted page text.
 
@@ -185,10 +206,11 @@ def find_staff_costs_pages(pages: list[str], profile: AccountsProfile) -> list[t
     happens once, in pipeline/pdftext.py, and is shared with m14 — which was
     re-extracting the same archived files at 16–23 seconds each.
     """
+    keyword_groups = list(profile.locator_keywords) + FALLBACK_LOCATOR_KEYWORDS
     matches: list[tuple[int, str]] = []
     for i, text in enumerate(pages):
         low = (text or "").lower()
-        for group in profile.locator_keywords:
+        for group in keyword_groups:
             if all(k.lower() in low for k in group):
                 matches.append((i, text or ""))
                 break
@@ -276,23 +298,31 @@ def extract_figures_from_text(page_text: str, profile: AccountsProfile) -> dict:
     result["senior_pay_bands_json"] = json.dumps(bands) if bands else None
     result["senior_pay_band_headcount"] = band_total
 
-    # Staff costs total: only accepted if it is at least the wages figure,
-    # since "TOTAL" appears more than once on a two-column page (the pay-band
-    # table has its own). This is a validation, not an inference — a value
-    # failing it is discarded and logged.
-    total_candidates = []
-    for line in page_text.splitlines():
-        m = re.match(r"^\s*TOTAL\s+([\d,]+)", line, re.IGNORECASE)
-        if m:
-            value = _to_number(m.group(1))
-            if value is not None:
-                total_candidates.append(value)
+    # Staff costs total. First an explicitly labelled line ("Total staff
+    # costs 12,345 11,234"): the qualified label removes the ambiguity, so
+    # it is trusted directly — subject only to the same at-least-wages
+    # sanity check when wages is known. Failing that, fall back to a bare
+    # "TOTAL <n>" line, which appears more than once on a two-column page
+    # (the pay-band table has its own) and so is only accepted when it
+    # clears the wages figure. Either way this is extraction or validation,
+    # never inference — a value failing the check is discarded and logged.
     wages = result.get("wages_and_salaries")
     staff_total = None
-    if multiplier and wages:
-        for candidate in total_candidates:
-            if candidate * multiplier >= wages:
-                staff_total = candidate * multiplier
+
+    labelled = _match_labelled_numbers(page_text, profile.staff_costs_total)
+    if labelled and labelled[0] is not None and multiplier:
+        value = labelled[0] * multiplier
+        if wages is None or value >= wages:
+            staff_total = value
+
+    if staff_total is None and multiplier and wages:
+        for line in page_text.splitlines():
+            m = re.match(r"^\s*TOTAL\s+([\d,]+)", line, re.IGNORECASE)
+            if not m:
+                continue
+            value = _to_number(m.group(1))
+            if value is not None and value * multiplier >= wages:
+                staff_total = value * multiplier
                 break
     result["staff_costs_total"] = staff_total
     if staff_total is None:

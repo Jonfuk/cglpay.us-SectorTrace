@@ -64,8 +64,18 @@ class AccountsProfile:
         "average number of full-time equivalents",
         "average number of employees (full time equivalent)",
     ])
+    # Explicitly labelled staff-costs total. Only qualified phrasings — a
+    # bare "total" is left to the fallback scan in extract_figures_from_text,
+    # because "TOTAL" appears more than once on a two-column note (the
+    # pay-band table has its own) and a lone label cannot tell them apart.
     staff_costs_total: list[str] = field(default_factory=lambda: [
-        "total",
+        "total staff costs",
+        "total staff cost",
+        "total employee costs",
+        "total employment costs",
+        "total personnel costs",
+        "total cost of employment",
+        "total emoluments",
     ])
 
     # What `average_employees` means for this charity. 'unknown' is a valid
