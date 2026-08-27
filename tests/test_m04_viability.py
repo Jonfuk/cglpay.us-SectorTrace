@@ -54,6 +54,24 @@ def _run(conn, settings, limit=None):
                           dry_run=False, limit=limit))
 
 
+_SEEDED_FOR_TEST: list[tuple[str, str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _walk_only_test_seeded_companies(monkeypatch):
+    """VERIFIED_IDENTIFIERS now seeds a company number for every tracked
+    provider, and m04 fetches and fully walks every one. Each test here
+    arranges a single company through `_seed(...)`; restrict the walk to
+    the numbers `_seed` recorded so the run does not reach for the other
+    eight. `_seed` often re-asserts CGL's own 03861209, which is already
+    a config-seeded verified row, so filtering the table by status or
+    discovered_by would miss it — track the intent explicitly instead.
+    """
+    _SEEDED_FOR_TEST.clear()
+    monkeypatch.setattr(ch, "_seed_company_numbers",
+                         lambda conn: list(_SEEDED_FOR_TEST))
+
+
 def _allow_all_robots(httpx_mock):
     httpx_mock.add_response(url=f"{BASE}/robots.txt", status_code=200, text="",
                             is_reusable=True)
@@ -99,6 +117,8 @@ def _seed(conn, number="01842240", provider_key="change_grow_live"):
     providers.seed_providers(conn)
     providers.record_discovered_identifier(
         conn, provider_key, "company_number", number, discovered_by="test")
+    _SEEDED_FOR_TEST.append(
+        (provider_key, providers.normalise_identifier("company_number", number)))
 
 
 def test_an_insolvency_history_is_recorded_case_by_case(httpx_mock, settings, conn):

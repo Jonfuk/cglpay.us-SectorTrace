@@ -1,14 +1,31 @@
 """Provider reference config — seeds the `providers` and
 `provider_identifiers` tables on every run.
 
-Only identifiers that are actually verified belong here. CGL's charity
-number is stated explicitly in the project brief, so it's seeded as
-'verified'. Every other provider's charity/company numbers are left for
-Modules 3 and 4 to discover from the Charity Commission and Companies
-House APIs, and are written back as 'unverified' pending human
-confirmation — deliberately NOT guessed here from general knowledge, since
-a wrong company number would silently mis-attribute contracts, tribunal
-claims and accounts to the wrong legal entity.
+Only identifiers that are actually verified belong here — asserted by a
+person, never discovered by a module. Two ways one earns that:
+
+  * CGL's charity number is stated explicitly in the project brief.
+  * The comparators' charity and company numbers were hand-checked on
+    2026-08-27 against the primary registers — Companies House for every
+    company number (the register itself, not an aggregator) and the
+    Charity Commission register for every charity number. The full
+    previous-name history was read for each, so a rename could not be
+    mistaken for a different legal entity.
+
+Everything still missing here — CQC provider IDs, PPONs, the company
+numbers of trading subsidiaries — is left for Modules 3, 4 and 10 to
+discover and write back as 'unverified' pending the same hand check. A
+guessed company number silently mis-attributes contracts, tribunal claims
+and accounts to the wrong legal entity, so it is worse than a NULL. CQC
+provider IDs are held back deliberately: CQC re-registrations mean a
+provider often carries a stale ID alongside a current one, and picking
+the wrong one has the same failure mode.
+
+Three provider_keys are historical names of an entity that also appears
+under its current name (addaction→with_you, humankind→waythrough,
+westminster_drug_project→via). The identifiers live on the current key;
+the historical key stays a bare name variant so a notice bearing the old
+name still resolves to its own row. See PROVIDER_NOTES.
 """
 from __future__ import annotations
 
@@ -19,24 +36,139 @@ TARGET_PROVIDER_KEY = "change_grow_live"
 # provider_key -> human note, for providers where the name alone is
 # ambiguous or the corporate history matters when reading the evidence.
 PROVIDER_NOTES: dict[str, str] = {
-    "change_grow_live": "Campaign subject. Registered charity; contracts are often held by trading subsidiaries.",
-    "addaction": "Former name of With You — treat as the same organisation over time, but do not merge rows: the name on a notice is evidence of when it was used.",
-    "with_you": "Formerly Addaction.",
-    "humankind": "Merged into Waythrough (with Richmond Fellowship) — verify entity identity per document before joining.",
-    "waythrough": "Formed from Humankind / Richmond Fellowship merger.",
-    "richmond_fellowship": "Associated with Waythrough via merger.",
-    "via": "Short trading name; high false-positive risk when matching free text — match only exact registered variants.",
-    "inclusion": "Generic word; part of Midlands Partnership NHS Foundation Trust. High false-positive risk in free-text matching.",
+    "change_grow_live": "Campaign subject. Charity 1079327; operating company 03861209 was 'Crime Reduction Initiatives' until 2016. Contracts are often held by trading subsidiaries.",
+    "addaction": "Former name of With You: the registered name of company 02580377 / charity 1001957 from 1998 until 26 Feb 2020. Same legal entity as `with_you`, where the identifiers are seeded — but do not merge evidence rows: the name on a notice is evidence of when it was used.",
+    "with_you": "Formerly Addaction (renamed 26 Feb 2020). Company 02580377, charity 1001957.",
+    "humankind": "Former name of Waythrough: 'Humankind Charity' was the registered name of company 01820492 / charity 515755 from 2018 until 6 Feb 2025 ('DISC' before that). Same legal entity as `waythrough`, where the identifiers are seeded. Distinct from the 2024 group formation with Richmond Fellowship, which stayed separately registered.",
+    "waythrough": "The former Humankind entity (company 01820492, charity 515755) renamed 6 Feb 2025 — not a new legal entity. Richmond Fellowship and Aquarius (charity 1014305) sit alongside it in the Waythrough group, each still separately registered.",
+    "richmond_fellowship": "In the Waythrough group since the 2024 merger but still a separate registered entity: company 00662712, charity 200453. Do not join its evidence onto Waythrough's identifiers.",
+    "via": "Formerly Westminster Drug Project (renamed 5 Jun 2023). Company 02807934 ('Via Community Ltd'), charity 1031602. Short trading name; high false-positive risk in free text — match only exact registered variants or the historic 'Westminster Drug Project'.",
+    "westminster_drug_project": "Former name of Via: the registered name of company 02807934 / charity 1031602 until 5 Jun 2023 (also historic 'Waltham Forest Drug Project' / 'Wandsworth Drug Project'). Same legal entity as `via`, where the identifiers are seeded.",
+    "delphi_medical": "Private company, not a charity: Delphi Medical Limited, company 06944767. A separately registered 'Delphi Medical Consultants Limited' (06014150) shares the address and is the name CQC currently shows for the provider — reconcile when CQC IDs are pulled; the identifier here refers to 06944767.",
+    "inclusion": "Not a separate legal entity: a service brand of Midlands Partnership University NHS Foundation Trust (NHS provider, ODS / CQC code RRE — no Companies House or Charity Commission registration). Generic word; high false-positive risk in free-text matching.",
 }
 
 # Identifiers asserted here are treated as verified. Keep this list to
 # things that are actually confirmed — see module docstring.
+#
+# Company numbers are stored in the 8-character form Companies House uses,
+# so a module that later re-discovers one (normalised via
+# m04.normalise_company_number) produces the same row rather than a
+# duplicate.
+#
+# Charity numbers are the England & Wales register numbers only. Phoenix
+# Futures is also OSCR-registered (SC039008) and Change Grow Live also
+# holds SC039861; those are left out until m03 can route a Scottish
+# number, since it would otherwise just feed them to the CCEW API and log
+# a review item.
 VERIFIED_IDENTIFIERS: list[dict[str, str]] = [
+    # Campaign subject. Charity number from the project brief; company
+    # number confirmed against Companies House (ex 'Crime Reduction
+    # Initiatives').
     {
         "provider_key": "change_grow_live",
         "scheme": "charity_number",
         "identifier": "1079327",
         "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "change_grow_live",
+        "scheme": "company_number",
+        "identifier": "03861209",
+        "role": "charitable company limited by guarantee",
+    },
+
+    # Comparators — hand-checked 2026-08-27 against the Charity Commission
+    # register and Companies House, previous-name history read for each.
+    {
+        "provider_key": "turning_point",
+        "scheme": "charity_number",
+        "identifier": "234887",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "turning_point",
+        "scheme": "company_number",
+        "identifier": "00793558",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "with_you",
+        "scheme": "charity_number",
+        "identifier": "1001957",
+        "role": "registered charity (England and Wales); 'Addaction' until 2020",
+    },
+    {
+        "provider_key": "with_you",
+        "scheme": "company_number",
+        "identifier": "02580377",
+        "role": "charitable company limited by guarantee; 'Addaction' until 2020",
+    },
+    {
+        "provider_key": "waythrough",
+        "scheme": "charity_number",
+        "identifier": "515755",
+        "role": "registered charity (England and Wales); 'Humankind' until 2025",
+    },
+    {
+        "provider_key": "waythrough",
+        "scheme": "company_number",
+        "identifier": "01820492",
+        "role": "charitable company limited by guarantee; 'Humankind' until 2025",
+    },
+    {
+        "provider_key": "richmond_fellowship",
+        "scheme": "charity_number",
+        "identifier": "200453",
+        "role": "registered charity (England and Wales)",
+    },
+    {
+        "provider_key": "richmond_fellowship",
+        "scheme": "company_number",
+        "identifier": "00662712",
+        "role": "charitable company limited by guarantee",
+    },
+    {
+        "provider_key": "via",
+        "scheme": "charity_number",
+        "identifier": "1031602",
+        "role": "registered charity (England and Wales); 'Westminster Drug Project' until 2023",
+    },
+    {
+        "provider_key": "via",
+        "scheme": "company_number",
+        "identifier": "02807934",
+        "role": "charitable company limited by guarantee; 'Westminster Drug Project' until 2023",
+    },
+    {
+        "provider_key": "forward_trust",
+        "scheme": "charity_number",
+        "identifier": "1001701",
+        "role": "registered charity (England and Wales); 'RAPt' until 2017",
+    },
+    {
+        "provider_key": "forward_trust",
+        "scheme": "company_number",
+        "identifier": "02560474",
+        "role": "charitable company limited by guarantee; 'RAPt' until 2017",
+    },
+    {
+        "provider_key": "phoenix_futures",
+        "scheme": "charity_number",
+        "identifier": "284880",
+        "role": "registered charity (England and Wales); operating name 'Phoenix House'",
+    },
+    {
+        "provider_key": "phoenix_futures",
+        "scheme": "company_number",
+        "identifier": "01626869",
+        "role": "charitable company limited by guarantee ('Phoenix House')",
+    },
+    {
+        "provider_key": "delphi_medical",
+        "scheme": "company_number",
+        "identifier": "06944767",
+        "role": "private limited company (not a charity)",
     },
 ]
 

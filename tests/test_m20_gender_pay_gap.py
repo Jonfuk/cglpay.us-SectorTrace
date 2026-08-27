@@ -69,8 +69,11 @@ def _run(conn, settings, httpx_mock):
 
 def _add_company_number(conn, provider_key: str, number: str) -> None:
     providers.seed_providers(conn)  # the identifier row references providers
+    # CGL's 03861209 (and the other comparators' company numbers) are now
+    # seeded verified by seed_providers; OR IGNORE keeps that row and still
+    # inserts the numbers a test invents.
     conn.execute(
-        "INSERT INTO provider_identifiers (provider_key, scheme, identifier, "
+        "INSERT OR IGNORE INTO provider_identifiers (provider_key, scheme, identifier, "
         "status, role, discovered_by) VALUES (?, 'company_number', ?, "
         "'unverified', 'test', 'm04')",
         (provider_key, providers.normalise_identifier("company_number", number)))
