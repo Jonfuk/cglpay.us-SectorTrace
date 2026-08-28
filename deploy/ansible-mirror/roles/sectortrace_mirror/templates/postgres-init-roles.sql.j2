@@ -62,3 +62,11 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO sectortrace_reader;
 -- restore drops rows into.
 ALTER DEFAULT PRIVILEGES FOR ROLE sectortrace_app IN SCHEMA public
     GRANT SELECT ON TABLES TO sectortrace_reader;
+
+-- Same three extensions as the primary (deploy/ansible). The mirror applies
+-- the identical migration tree, so anything a migration references has to
+-- exist here too. `db.ensure_extensions()` re-runs these on every migrate for
+-- a cluster that predates the custom image.
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS postgis;

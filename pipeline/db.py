@@ -516,6 +516,72 @@ def applied_migrations(conn) -> set[str]:
     return {row["filename"] for row in conn.execute("SELECT filename FROM schema_migrations")}
 
 
+# PostgreSQL extensions the warehouse uses where the server provides them, and
+# does without where it does not. Each backs one feature that has a pure-Python
+# or pure-SQLite fallback:
+#
+#   * vector   — an ANN index for pipeline/nlp semantic search; without it the
+#                search does an exact cosine sweep in Python (embeddings.py).
+#   * pg_trgm  — similarity ranking for the operator's fuzzy-name search and a
+#                GIN index behind the portal's contract text filter; without it
+#                those fall back to LIKE / difflib.
+#   * postgis  — a geometry column and spatial index on `authorities`; without
+#                it centroids are computed with shapely as before.
+#
+# Absence is a degraded deployment, never a failed migrate — Railway's managed
+# role may not be allowed to CREATE EXTENSION, and a fresh dev server may not
+# have the packages installed. `has_extension` is what every dialect fork
+# consults at run time.
+WAREHOUSE_EXTENSIONS = ("vector", "pg_trgm", "postgis")
+
+
+def has_extension(conn, name: str) -> bool:
+    """True when `name` is installed in the connected PostgreSQL database.
+
+    Always False on SQLite. Queried each call rather than cached: it is one
+    indexed catalog lookup, and `ensure_extensions` can change the answer
+    within a single process run.
+    """
+    if backend_of(conn) != "postgres":
+        return False
+    return conn.execute(
+        "SELECT 1 FROM pg_extension WHERE extname = ?", (name,)).fetchone() is not None
+
+
+def ensure_extensions(conn, names: Sequence[str] = WAREHOUSE_EXTENSIONS) -> list[str]:
+    """`CREATE EXTENSION IF NOT EXISTS` for each of `names`, tolerantly.
+
+    Returns the names that are present afterwards. A `CREATE EXTENSION` that
+    fails because the role lacks the privilege (managed PostgreSQL) or the
+    server does not carry the extension (a stock image without the packages)
+    is logged and skipped, not raised: the feature it backs degrades, and
+    `pipeline migrate` still completes. Each statement runs in its own
+    transaction so one refusal does not poison the next.
+
+    A no-op on SQLite.
+    """
+    if backend_of(conn) != "postgres":
+        return []
+
+    from pipeline.catalog import quote
+
+    present: list[str] = []
+    for name in names:
+        try:
+            with conn:
+                conn.execute(f"CREATE EXTENSION IF NOT EXISTS {quote(name)}")
+        except Exception as error:  # noqa: BLE001 - a missing extension is not fatal
+            import structlog
+
+            structlog.get_logger().warning(
+                "db.extension_unavailable", extension=name,
+                error=f"{type(error).__name__}: {error}",
+                note="the feature this backs will use its fallback path")
+            continue
+        present.append(name)
+    return present
+
+
 def reader_role(settings: Settings | None = None) -> str | None:
     """The role `DATABASE_RO_URL` connects as, or None if reads use the owner.
 
@@ -613,6 +679,14 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
         migrations_dir = (settings or get_settings()).migrations_dir
         if backend_of(conn) == "postgres":
             migrations_dir = migrations_dir / "postgres"
+
+    # Before any migration that references an extension can run. Tolerant: a
+    # server that refuses `CREATE EXTENSION` still migrates, and the migrations
+    # that would use one create it `IF NOT EXISTS` and guard their index and
+    # column additions so the DDL is skipped rather than failed. No-op on
+    # SQLite.
+    ensure_extensions(conn)
+
     already = applied_migrations(conn)
     newly_applied: list[str] = []
 

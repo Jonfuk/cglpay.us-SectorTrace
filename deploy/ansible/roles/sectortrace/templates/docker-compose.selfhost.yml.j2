@@ -37,7 +37,13 @@ volumes:
 
 services:
   postgres:
-    image: postgres:18
+    # Stock postgres:18 plus pgvector and postgis — see deploy/postgres/Dockerfile
+    # for why. pg_trgm is already in the base image's contrib set. `build` +
+    # `image` so `docker compose build postgres` tags it and everything else
+    # references the tag.
+    build:
+      context: "{{ repo_root }}/deploy/postgres"
+    image: sectortrace-postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: sectortrace_app
