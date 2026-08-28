@@ -101,6 +101,22 @@ async function loadHealth() {
         : `Applied but no longer in the checkout: ${w.applied_without_file.join(', ')}.`));
   }
 
+  // PostgreSQL only — the list is empty on SQLite. Each feature has a fallback,
+  // so a missing extension is a note, not an alarm: the card says which path
+  // the deployment is on.
+  const exts = data.extensions || [];
+  if (exts.length) {
+    $('health-cards').append(...exts.map((ext) => card(
+      ext.installed ? (ext.version || 'installed') : (ext.available ? 'not installed' : 'absent'),
+      `${ext.name} extension`,
+      ext.installed ? 'good' : null)));
+    const missing = exts.filter((ext) => !ext.installed);
+    if (missing.length) {
+      $('health-cards').append(el('div', { class: 'muted small' },
+        missing.map((ext) => `${ext.name}: ${ext.backs}.`).join(' ')));
+    }
+  }
+
   renderHosts(data.hosts);
 }
 

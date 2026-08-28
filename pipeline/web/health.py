@@ -218,6 +218,51 @@ def warehouse(conn: db.Connection, settings) -> dict:
     }
 
 
+# What each extension buys, for the operator reading the panel. The feature
+# still works without it — this names the fallback so "slow" or "missing" has
+# an explanation rather than a shrug.
+_EXTENSION_BACKS = {
+    "vector": "semantic-search ANN index (else an exact cosine sweep in Python)",
+    "pg_trgm": "fuzzy-name ranking and the portal contract text filter (else LIKE / difflib)",
+    "postgis": "geometry column and spatial index on authorities (else shapely centroids)",
+}
+
+
+def extensions(conn: db.Connection) -> list[dict]:
+    """The extensions the warehouse uses where the server provides them.
+
+    Empty on SQLite. On PostgreSQL, one row per name in
+    `db.WAREHOUSE_EXTENSIONS`: whether the server carries it at all
+    (`available`), whether it is installed in this database (`installed`), and
+    the installed version. `pg_available_extensions` is readable by any role,
+    so this needs none of the privilege `_postgres_integrity` goes without.
+    """
+    if db.backend_of(conn) != "postgres":
+        return []
+
+    names = db.WAREHOUSE_EXTENSIONS
+    placeholders = ",".join("?" for _ in names)
+    seen = {
+        row["name"]: row for row in conn.execute(
+            f"SELECT e.name, e.default_version, i.extversion AS installed_version "
+            f"FROM pg_available_extensions e "
+            f"LEFT JOIN pg_extension i ON i.extname = e.name "
+            f"WHERE e.name IN ({placeholders})", list(names))
+    }
+    out = []
+    for name in names:
+        row = seen.get(name)
+        out.append({
+            "name": name,
+            "available": row is not None,
+            "installed": bool(row and row["installed_version"]),
+            "version": (row["installed_version"] if row else None)
+                        or (row["default_version"] if row else None),
+            "backs": _EXTENSION_BACKS.get(name, ""),
+        })
+    return out
+
+
 def hosts(conn: db.Connection) -> list[dict]:
     """Every source host this warehouse has spoken to, and when it last did.
 
@@ -439,6 +484,7 @@ def health(conn: db.Connection, settings) -> dict:
     """
     return {
         "warehouse": warehouse(conn, settings),
+        "extensions": extensions(conn),
         "hosts": hosts(conn),
         "graph": graph_status(conn),
         "documents": document_status(conn),

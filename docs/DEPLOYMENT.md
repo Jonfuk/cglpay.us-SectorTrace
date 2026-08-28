@@ -62,6 +62,33 @@ is the enforcement point for the portal and the SQL box, replacing SQLite's
 `PRAGMA query_only`: a session setting the application asks for can be
 forgotten by a bug, and a role without `INSERT` cannot be talked into one.
 
+### Extensions
+
+The pipeline uses three PostgreSQL extensions where the server provides them,
+and falls back to a pure-Python or SQLite path where it does not:
+
+| Extension | Backs | Without it |
+| --- | --- | --- |
+| `vector` (pgvector) | the ANN index for `pipeline/nlp` semantic search | an exact cosine sweep in Python |
+| `pg_trgm` | operator fuzzy-name ranking and the portal's contract text filter | `LIKE` / `difflib` |
+| `postgis` | a `geometry` column and GiST index on `authorities` | shapely centroids, no spatial join |
+
+They are created three ways, any one of which is enough:
+
+* the custom image in [`deploy/postgres/Dockerfile`](../deploy/postgres/Dockerfile)
+  (`postgres:18` + `postgresql-18-pgvector` + `postgresql-18-postgis-3`), which
+  `deploy/ansible/` and `deploy/ansible-mirror/` build and run — `pg_trgm` is
+  already in the stock image;
+* `CREATE EXTENSION IF NOT EXISTS` in the Ansible `postgres-init` script, run
+  once as the `sectortrace_app` superuser when the data directory is empty;
+* `db.ensure_extensions()`, which re-runs the same `CREATE EXTENSION IF NOT
+  EXISTS` on every `pipeline migrate` and logs `db.extension_unavailable`
+  (without failing) when the role is not allowed to.
+
+The Health tab shows, per extension, whether the server carries it and which
+version is installed. A migration that adds an extension-backed index or
+column guards the DDL so a server without the extension still migrates.
+
 ### What the Health tab's integrity check covers
 
 `PRAGMA integrity_check` walks every page of a SQLite file. PostgreSQL has no
@@ -289,6 +316,7 @@ development.
 | --- | --- |
 | **The database** | `DATABASE_URL` from the platform. Nothing else changes; `postgres://` URLs are accepted as well as `postgresql://`, which is what Railway and Heroku hand out. |
 | **The migrations** | applied by any command on startup, from `pipeline/migrations/postgres/`. |
+| **The extensions** | `vector`, `pg_trgm`, `postgis`. Railway's PostgreSQL image carries all three behind an extensions env var — enable them on the database service. `db.ensure_extensions()` also runs `CREATE EXTENSION IF NOT EXISTS` for each on the first `pipeline migrate`; if the managed role is allowed to, that is enough on its own. A service without them still runs — each feature has a fallback (see the Extensions section above) — but semantic search does an in-Python cosine sweep and fuzzy operator search is unavailable. `/admin` and `/api/admin/*` are off on Railway anyway (`ADMIN_UI_ENABLED=false`), so `pg_trgm`'s operator half does not apply there; the public contract filter still uses its index. |
 | **The read role** | `DATABASE_RO_URL`. A managed database usually gives one superuser-ish role; creating a `SELECT`-only role is a `CREATE ROLE` + two `GRANT`s and is worth doing rather than pointing both variables at the same user. |
 | **The raw archive** | An S3-compatible bucket, configured through `ARCHIVE_S3_*`. A container filesystem does not survive a redeploy. |
 

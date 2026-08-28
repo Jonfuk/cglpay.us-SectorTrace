@@ -63,7 +63,13 @@ volumes:
 
 services:
   postgres:
-    image: postgres:18
+    # Stock postgres:18 plus pgvector and postgis — see deploy/postgres/Dockerfile.
+    # The mirror runs the same migration tree as the primary, so it needs the
+    # same extensions or a migration that references one would fail here while
+    # succeeding there.
+    build:
+      context: "{{ repo_root }}/deploy/postgres"
+    image: sectortrace-postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: sectortrace_app
