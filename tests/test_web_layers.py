@@ -257,6 +257,28 @@ def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs
     assert "href: `#/authorities/${code}`" in geographyjs
 
 
+def test_the_map_falls_back_to_a_local_style_when_the_basemap_is_unreachable(geographyjs):
+    """Settled decision 6: both front ends render with the network cable
+    unplugged. The CARTO basemap is this page's one documented exception (the
+    test above pins that its URLs stay), but when it cannot be fetched
+    MapLibre never fires 'load' and the choropleth is never added — the reader
+    gets the text alternative only. The offline path swaps to a local
+    no-source style and draws the same layers on it. Pinned against the
+    source, because this suite runs with no browser."""
+    assert "function localMapStyle()" in geographyjs
+    assert "version: 8, sources: {}" in geographyjs
+    # The layer-adding code is shared between the normal and the fallback path
+    # rather than duplicated, and runs at most once.
+    assert "function drawAuthorityLayers()" in geographyjs
+    assert "if (layersDrawn) return; layersDrawn = true;" in geographyjs
+    assert "map.on('load', drawAuthorityLayers);" in geographyjs
+    # The fallback only fires when no style ever loaded — a late tile/glyph
+    # error on a working map must not blank it.
+    assert "map.on('error', () => {" in geographyjs
+    assert "if (styleFallbackTried || layersDrawn || map.isStyleLoaded()) return;" in geographyjs
+    assert "map.setStyle(localMapStyle(), { diff: false });" in geographyjs
+
+
 def test_no_layer_caveat_text_is_hardcoded_in_the_map_page(geographyjs):
     """The layer caveats live in the payload, which reads them from the same
     source as the exports. A sentence written into the page would be a second

@@ -31,16 +31,18 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   `eb1799f`, `fc97e66`, `b64ff10`, `583476d` — identifiers verified, then
   the set expanded 13→21→28→32 with renamed/merged/dissolved status on the
   portal) and three beta.md records (`2b264c2`, `2ca03a6`, next); all
-  project-owner-directed, see Dataset Additions and Recent Commits —
-  going into BETA-028.
-- Twenty-nine items completed across this session and its predecessors:
-  BETA-001 through BETA-027, plus BETA-032 and BETA-033 (BETA-001 on
+  project-owner-directed, see Dataset Additions and Recent Commits. Since
+  then: the 034A–034G semantic-analysis commits (see BETA-034), then
+  BETA-028 and BETA-029 (this commit).
+- Thirty-one items completed across this session and its predecessors:
+  BETA-001 through BETA-029, plus BETA-032 and BETA-033 (BETA-001 on
   `master`). BETA-032 and BETA-033 are out-of-band: the project owner
   gave UI requests directly in an interactive session, then asked to be
   interviewed for further design refinement of the same two pages, rather
-  than going through this queue — see their DONE entries below. The
-  queue's own BETA-028 through BETA-031 were not displaced by either and
-  remain exactly where the §52 reassessment left them. The §52 strategic
+  than going through this queue — see their DONE entries below. BETA-028
+  and BETA-029 were completed 2026-08-28; the queue's remaining
+  BETA-030/031 were not displaced by either and remain where the §52
+  reassessment left them. The §52 strategic
   reassessment below was run 2026-08-26 after four consecutive narrow
   front-end items, and the queue was re-aimed at high-impact front-end
   work per the project owner's direct steer ("prioritise improvements for
@@ -235,40 +237,6 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-028 | The map renders with the network cable unplugged
-  - started: 2026-08-26T17:45:00Z
-  - priority: P1
-  - impact: 4
-  - effort: 2
-  - confidence: 4
-  - risk: 2
-  - area: ui/geography
-  - depends_on: none
-  - files: pipeline/web/static/public/js/pages/geography.js, tests (see below)
-  - branch: beta
-  - last_commit: none yet
-  - objective: When the CARTO basemap style is unreachable, fall back to a
-    locally-defined MapLibre style (background colour, no sources) so the
-    choropleth still draws and settled decision 6 holds on the one page
-    that currently half-breaks it.
-  - current_state: Scoped, not yet implemented. The external basemap is a
-    deliberate, CSP-allowlisted, test-pinned exception
-    (server.py:183-185, tests/test_web_layers.py:253) — the fix must keep
-    those pins true (basemap stays for online readers) and only add the
-    offline path.
-  - next_action: In geography.js, move the layer-adding code out of the
-    `map.on('load')` closure into a named function; listen for 'error'
-    before first successful style load and on it call
-    `map.setStyle(localStyle)` and re-add layers on the next 'load'. Guard
-    against tile-error noise (fallback only fires if the style itself never
-    loaded). Pin the behaviour source-wise in a test.
-  - validation_remaining: ruff; portal suites; live check with the style
-    URL blocked if a browser is available (this checkout has none).
-  - notes: Local style = `{version: 8, sources: {}, layers: [{background}]}`
-    with the theme's background colour; dark/light aware via the existing
-    `isDark()`. test_web_layers.py's assertion that the carto URLs are
-    present in geography.js must keep passing — do not remove the basemap.
-
 - [IN_PROGRESS] BETA-034 | Semantic-analysis layer (pipeline/nlp): evidence-intelligence over the archive
   - started: 2026-08-27
   - priority: P2
@@ -433,25 +401,7 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-029 | Overview stops downloading 500 notices to draw 10 bars
-  - priority: P2
-  - impact: 3
-  - effort: 1
-  - confidence: 5
-  - risk: 1
-  - area: performance/ui
-  - depends_on: none
-  - objective: overview.js's top-contracts section requests
-    `contracts?limit=500` but uses only `value_concentration.largest`
-    (server-computed, top 10) and at most 6 provenance URLs. Request
-    `limit=10` instead; same chart, ~98% less payload on the homepage's
-    biggest transfer.
-  - rationale: §52 finding 4 — the performance section has read "none"
-    for three cycles; this is the cheapest real win in it, found by
-    reading the code, not by guessing.
-  - suggested_first_action: One-line change in overview.js plus a
-    source-pinned assertion (in test_portal_navigation.py's style) that
-    the overview page's contracts call passes a bounded limit.
+_(empty — BETA-030 is the next READY item.)_
 
 ### READY
 
@@ -487,6 +437,84 @@ DONE
     on evidence figures were considered and rejected as theatre.
 
 ### DONE
+
+- [DONE] BETA-028 | The map renders with the network cable unplugged
+  - completed: 2026-08-28
+  - commits: (this commit; `beta`)
+  - result: `geography.js`'s map workspace now has an offline path. The
+    layer-adding code that was inline in the `map.on('load')` closure is
+    lifted into a named `drawAuthorityLayers()` (idempotent via a
+    `layersDrawn` flag), wired to `map.on('load')` unchanged for the normal
+    case. A new `map.on('error')` handler covers the case settled decision 6
+    is about: if the CARTO basemap style itself never loads (offline, CDN
+    down), MapLibre never fires `load` and the choropleth was never added —
+    the reader got the text alternative only. On the first such error the
+    handler calls `map.setStyle(localMapStyle(), { diff: false })` — a
+    `{version: 8, sources: {}, layers: [{background}]}` style in the theme's
+    background colour via the existing `isDark()` — then draws the same
+    authority fill/line and any active point/cluster layers on it once the
+    new style settles (`styledata` + `isStyleLoaded()` re-arm loop).
+  - **The basemap stays for online readers.** The CARTO style URLs are still
+    in `geography.js` (`styleUrl()` untouched), still CSP-allowlisted
+    (`server.py`), and `tests/test_web_layers.py`'s assertion that both
+    positron and dark-matter URLs are present still passes. The fallback is
+    additive.
+  - **Guarded three ways so it can never blank a working map**: fires once
+    (`styleFallbackTried`), only before the authority layers are on
+    (`layersDrawn`), and only while no style has loaded
+    (`!map.isStyleLoaded()`) — so a late tile or glyph 404 on an
+    already-rendered map is ignored. `diff: false` because the failed style
+    left nothing to diff against (MapLibre would warn and full-rebuild
+    anyway). Known limitation, commented in the code: the cluster-count
+    **text** layer needs the CDN's glyphs and will not label in offline
+    mode; the clusters, points and choropleth all draw without it.
+  - validation: full offline suite — **2622 passed, 106 skipped, 34
+    deselected, 0 failed** (the pre-existing `test_documents.py`
+    transformers-cache failures from earlier baselines did not reproduce
+    this run, as BETA-033 also saw). `ruff check pipeline tests` clean. New
+    `tests/test_web_layers.py::test_the_map_falls_back_to_a_local_style_when_the_basemap_is_unreachable`
+    pins the source shape (this suite runs with no browser); the existing
+    positron/dark-matter URL test and `test_portal_isolation.py` still pass.
+  - **Not verified in a live browser** — carried caveat, same as
+    BETA-024/027/033. This session's Browser pane reports
+    `document.hidden: true` / `visibilityState: "hidden"` throughout, and
+    MapLibre GL defers style loading to first paint via
+    `requestAnimationFrame`, so **no** map style (online basemap or the new
+    local fallback) ever finishes loading in this pane — confirmed by
+    driving the online path too: the workspace mounts (canvas + nav
+    controls), the text-alternative list renders all 330 authority rows, no
+    console errors, but `map.isStyleLoaded()` stays false at 5s. The offline
+    fallback needs an eyeball in a foregrounded tab with the CARTO URL
+    blocked; the behaviour is source-pinned in the meantime.
+  - possible follow-up: `docs/CAVEATS.md` / CLAUDE.md decision 6 could now
+    note the `/geography` basemap as a written exception *with* its offline
+    fallback, closing the documentation gap BETA-033 flagged.
+
+- [DONE] BETA-029 | Overview stops downloading 500 notices to draw 10 bars
+  - completed: 2026-08-28
+  - commits: (this commit; `beta`)
+  - result: `overview.js`'s `renderTopContracts()` now fetches
+    `contracts?limit=10` instead of `?limit=500`. Everything the section
+    draws — `value_concentration`, `largest_matched_to_provider` (already
+    top-5 server-side), the corpus-wide concentration line, `matched_to_provider`
+    — is computed in `public_queries.contracts()` over the whole corpus
+    regardless of `limit`; the one limit-bound field it reads is `notices`,
+    used only for the provenance block (deduped, at most 6 URLs shown) and
+    its latest retrieval date. The homepage's single biggest transfer drops
+    ~98% for an identical chart, table and caveat set.
+  - **Minor, disclosed**: the provenance "retrieved" date shown in the
+    finding block is now the max `retrieved_at` over the 10 most-recently-
+    *published* notices rather than over 500 — on the live warehouse this
+    read 2026-08-23 vs the freshness panel's "4 days ago". Still truthful
+    (those notices *were* retrieved then), presentation-only, and exactly
+    the tradeoff §52 finding 4 accepted when it queued this.
+  - validation: full offline suite green (2622 passed, as above); `ruff`
+    clean. New `tests/test_portal_overview.py` pins that the contracts fetch
+    passes a bounded limit (≤ 25). **Verified live** against `./start.sh web`:
+    the network request is now `GET /api/v1/contracts?limit=10`, and the
+    "largest notices in the corpus" section still renders its 1 chart
+    canvas, 5-row data table, concentration line, both caveats and
+    provenance, with zero console errors.
 
 - [DONE] BETA-033 | Overview hero region map, orchestrated page-load and scroll-reveal motion; fixed a dead section found along the way
   - completed: 2026-08-26T23:32:47Z

@@ -103,11 +103,41 @@ export async function render(main) {
     chooser.addEventListener('change', () => { if (chooser.value) select(chooser.value); });
     replace(holder, el('div', { class: 'map-list panel' }, el('h3', { text: selected ? selected.authority_name : 'Explore places' }), el('p', { class: 'small muted', text: selected ? `${selected.value_display} · ${selected.region}` : 'Select a map feature or choose a row below. This text alternative has the same selection actions as the map.' }), chooser, selected ? el('div', { class: 'map-preview-actions' }, el('a', { class: 'btn primary', href: `#/authorities/${selected.code}`, text: 'Open authority' }), el('a', { class: 'btn', href: `#/compare?ons_code=${encodeURIComponent(selected.code)}`, text: 'Compare' })) : null, tableCard('Authority values', [{ title: 'Authority', field: 'authority_name' }, { title: 'Region', field: 'region' }, { title: data.metric_label, field: 'value_display' }], rows, { height: 460, total: rows.length })));
   }
+  // A MapLibre style with no sources: just a themed background. Used only when
+  // the CARTO basemap style cannot be fetched (offline, or the CDN is down).
+  // The choropleth is drawn from GeoJSON the portal serves itself, so it does
+  // not need the basemap — settled decision 6 ("both front ends render with
+  // the network cable unplugged") then holds on this page too, which is the
+  // one page that currently half-breaks it. The cluster-count text layer still
+  // needs the CDN's glyphs and will not label in this mode; the clusters,
+  // points and authority fill/line all draw without it.
+  function localMapStyle() {
+    return { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': isDark() ? '#0b1220' : '#e9eef4' } }] };
+  }
   async function drawWorkspace(holder, data, features, activeLayers) {
     if (!await ensureMapLibre()) { replace(holder, errorCard('Map workspace did not load. Reload this page to retry the map library.')); return; }
     const canvas = el('div', { class: 'map-canvas', role: 'region', 'aria-label': `Interactive map of English authorities showing ${data.metric_label}` }); const preview = el('div', { class: 'map-preview' }, el('strong', { text: 'Select a place' }), el('p', { class: 'small muted', text: 'Use the map or the adjacent table to inspect an authority.' })); replace(holder, el('div', { class: 'map-workspace' }, canvas, preview));
     const map = new window.maplibregl.Map({ container: canvas, style: styleUrl(), bounds: ENGLAND_BOUNDS, fitBoundsOptions: { padding: 36 }, cooperativeGestures: true }); map.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), 'top-left');
-    map.on('load', () => { const values = new Map((data.features || []).map((row) => [row.ons_code, row])); const authorityGeo = { type: 'FeatureCollection', features: englandFeatures(features).map((feature) => ({ ...feature, properties: { ...feature.properties, ...values.get(feature.properties.ons_code), ons_code: feature.properties.ons_code } })) }; map.addSource('authorities', { type: 'geojson', data: authorityGeo }); map.addLayer({ id: 'authority-fill', type: 'fill', source: 'authorities', paint: { 'fill-color': ['case', ['has', 'value'], '#21d4d0', '#4d627b'], 'fill-opacity': ['case', ['has', 'value'], .30, .13] } }); map.addLayer({ id: 'authority-line', type: 'line', source: 'authorities', paint: { 'line-color': isDark() ? '#b2c0d3' : '#4a637c', 'line-width': .7, 'line-opacity': .72 } }); map.on('click', 'authority-fill', (event) => select(event.features?.[0]?.properties?.ons_code)); map.on('mouseenter', 'authority-fill', () => { map.getCanvas().style.cursor = 'pointer'; }); map.on('mouseleave', 'authority-fill', () => { map.getCanvas().style.cursor = ''; }); for (const [key, layer] of activeLayers) addLayer(map, key, layer, authorityGeo); if (state.selected) updatePreview(preview, state.selected, values, data.unit); });
+    let layersDrawn = false; let styleFallbackTried = false;
+    // Lifted out of the map.on('load') closure so the offline path can re-run
+    // it against the local style after setStyle(). Idempotent via layersDrawn.
+    function drawAuthorityLayers() {
+      if (layersDrawn) return; layersDrawn = true;
+      const values = new Map((data.features || []).map((row) => [row.ons_code, row])); const authorityGeo = { type: 'FeatureCollection', features: englandFeatures(features).map((feature) => ({ ...feature, properties: { ...feature.properties, ...values.get(feature.properties.ons_code), ons_code: feature.properties.ons_code } })) }; map.addSource('authorities', { type: 'geojson', data: authorityGeo }); map.addLayer({ id: 'authority-fill', type: 'fill', source: 'authorities', paint: { 'fill-color': ['case', ['has', 'value'], '#21d4d0', '#4d627b'], 'fill-opacity': ['case', ['has', 'value'], .30, .13] } }); map.addLayer({ id: 'authority-line', type: 'line', source: 'authorities', paint: { 'line-color': isDark() ? '#b2c0d3' : '#4a637c', 'line-width': .7, 'line-opacity': .72 } }); map.on('click', 'authority-fill', (event) => select(event.features?.[0]?.properties?.ons_code)); map.on('mouseenter', 'authority-fill', () => { map.getCanvas().style.cursor = 'pointer'; }); map.on('mouseleave', 'authority-fill', () => { map.getCanvas().style.cursor = ''; }); for (const [key, layer] of activeLayers) addLayer(map, key, layer, authorityGeo); if (state.selected) updatePreview(preview, state.selected, values, data.unit);
+    }
+    map.on('load', drawAuthorityLayers);
+    // Settled decision 6: if the basemap style itself never loads, swap to the
+    // local one and draw the choropleth on that. Guarded so a late tile or
+    // glyph error on an already-working map can never blank it: once only,
+    // only before our layers are on, and only while no style has loaded.
+    map.on('error', () => {
+      if (styleFallbackTried || layersDrawn || map.isStyleLoaded()) return;
+      // diff: false — the CARTO style never finished loading, so there is
+      // nothing to diff against and MapLibre would warn and rebuild anyway.
+      styleFallbackTried = true; map.setStyle(localMapStyle(), { diff: false });
+      const whenReady = () => { if (map.isStyleLoaded()) drawAuthorityLayers(); else map.once('styledata', whenReady); };
+      map.once('styledata', whenReady);
+    });
   }
   function addLayer(map, key, layer, authorityGeo) {
     const points = (layer.features || []).filter((row) => row.latitude != null && row.longitude != null && row.ons_code).map((row) => ({ type: 'Feature', properties: row, geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] } }));

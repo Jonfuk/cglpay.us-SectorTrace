@@ -536,7 +536,14 @@ async function renderFreshnessPanel(container) {
 async function renderTopContracts(container, charts) {
   let data;
   try {
-    data = await fetchJSON('contracts', { limit: 500 });
+    // Everything this section draws -- `value_concentration`,
+    // `largest_matched_to_provider` (already top-5), the corpus-wide
+    // concentration line -- is computed server-side over the whole corpus and
+    // does not depend on `limit`. The only limit-bound field read below is
+    // `notices`, and only for provenance (deduped, at most 6 URLs shown) and
+    // its latest retrieval date. So ask for 10, not 500: same chart, and the
+    // homepage's single biggest transfer drops ~98%.
+    data = await fetchJSON('contracts', { limit: 10 });
   } catch (error) {
     replace(container, errorCard(error.message));
     return;
