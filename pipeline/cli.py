@@ -563,6 +563,28 @@ def nlp_embed(
         conn.close()
 
 
+@nlp_app.command("backfill-vectors")
+def nlp_backfill_vectors(
+    limit: int = typer.Option(None, min=1, help="Maximum rows to fill this run"),
+) -> None:
+    """Fill `document_embeddings.embedding_vec` (pgvector, migration 0071) from
+    the stored `embedding` bytea, so semantic search uses the HNSW index
+    instead of a Python cosine sweep.
+
+    PostgreSQL + pgvector only; a no-op otherwise. Resume-safe — re-run to
+    finish an interrupted pass. `pipeline migrate` runs this once when 0071
+    first applies; run it by hand after a large PostgreSQL-to-PostgreSQL sync.
+    """
+    from pipeline.nlp import embeddings
+
+    conn, _ = _document_connection()
+    try:
+        result = embeddings.backfill_vectors(conn, limit=limit)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("search")
 def nlp_search(
     query: str = typer.Argument(..., help="What to search for"),

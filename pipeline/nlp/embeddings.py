@@ -27,11 +27,19 @@ import math
 import re
 import struct
 
+from pipeline import db
 from pipeline.nlp import models, runs
 
 STUB_MODEL_KEY = "embed:stub"
 STUB_DIMENSION = 256
 ST_DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# The dimension the pgvector `embedding_vec` column (migration 0071) is typed
+# to — `all-MiniLM-L6-v2`'s. Only embeddings of this width are mirrored into
+# that column and its HNSW index; the offline `stub` (256) and any future
+# model of a different width are left to the exact Python path until a
+# migration gives them their own column. See docs/semantic-analysis.md.
+VECTOR_COLUMN_DIM = 384
 
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9'\-]*")
 _DEFAULT_BATCH = 256
@@ -54,6 +62,16 @@ def pack(vector) -> bytes:
 
 def unpack(blob: bytes) -> list[float]:
     return list(struct.unpack("<%df" % (len(blob) // 4), blob))
+
+
+def vec_literal(vector) -> str:
+    """A vector as pgvector's text input form: ``[0.1,0.2,...]``.
+
+    Bound as a plain string and cast with ``?::vector`` at the call site, so
+    the pgvector psycopg adapter is not a dependency. ``repr`` on a float
+    round-trips exactly, which the on-disk bytea already guarantees anyway.
+    """
+    return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
 def cosine(a, b) -> float:
@@ -244,19 +262,42 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
     pending = _pending_chunks(conn, embedder.model_key, version_ids, limit)
     now = runs.utcnow()
     written = 0
+
+    # On PostgreSQL with pgvector, fill the ANN column in the same statement so
+    # a fresh embed run needs no separate backfill. Only for the width the
+    # `embedding_vec` column is typed to (migration 0071); the stub and any
+    # other-width model stay on the exact path.
+    with_vec = (db.backend_of(conn) == "postgres"
+                and getattr(embedder, "dimension", None) == VECTOR_COLUMN_DIM
+                and db.has_extension(conn, "vector"))
+    if with_vec:
+        insert_sql = (
+            "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
+            "embedding, embedding_vec, nlp_run_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?::vector, ?, ?) "
+            "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
+            "dimension=excluded.dimension, embedding=excluded.embedding, "
+            "embedding_vec=excluded.embedding_vec, "
+            "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at")
+    else:
+        insert_sql = (
+            "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
+            "embedding, nlp_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
+            "dimension=excluded.dimension, embedding=excluded.embedding, "
+            "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at")
+
     try:
         for start in range(0, len(pending), max(1, batch_size)):
             batch = pending[start:start + max(1, batch_size)]
             vectors = embedder.encode([row["text"] for row in batch])
             for row, vector in zip(batch, vectors):
-                conn.execute(
-                    "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
-                    "embedding, nlp_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
-                    "dimension=excluded.dimension, embedding=excluded.embedding, "
-                    "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at",
-                    (row["document_chunk_id"], embedder.model_key, len(vector),
-                     pack(vector), run_id, now))
+                base = [row["document_chunk_id"], embedder.model_key, len(vector),
+                        pack(vector)]
+                if with_vec:
+                    base.append(vec_literal(vector))
+                base += [run_id, now]
+                conn.execute(insert_sql, tuple(base))
                 written += 1
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
         runs.finish_run(conn, run_id, status="failed", rows_processed=len(pending),
@@ -272,3 +313,50 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
         conn.commit()
     return {"run_id": run_id, "model_key": embedder.model_key,
             "pending": len(pending), "embedded": written, "dry_run": dry_run}
+
+
+def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) -> dict:
+    """Fill `document_embeddings.embedding_vec` from the stored `embedding`
+    bytea for rows that predate the column (migration 0071).
+
+    Idempotent and resume-safe (`WHERE embedding_vec IS NULL`). A no-op unless
+    the warehouse is PostgreSQL with pgvector. Also (re)creates the column and
+    its HNSW index, so a cluster that gained pgvector after 0071 ran is caught
+    up by the next `pipeline nlp backfill-vectors` or `pipeline migrate`.
+
+    Only the `VECTOR_COLUMN_DIM`-wide rows: the column is typed to that width.
+    """
+    backend = db.backend_of(conn)
+    if backend != "postgres" or not db.has_extension(conn, "vector"):
+        return {"backend": backend, "pending": 0, "written": 0,
+                "note": "pgvector not present; nothing to backfill"}
+
+    with conn:
+        conn.execute(
+            f"ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS "
+            f"embedding_vec vector({VECTOR_COLUMN_DIM})")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec "
+            "ON document_embeddings USING hnsw (embedding_vec vector_cosine_ops) "
+            "WHERE embedding_vec IS NOT NULL")
+
+    sql = ("SELECT document_chunk_id, model_key, embedding FROM document_embeddings "
+           "WHERE embedding_vec IS NULL AND dimension = ?")
+    params: list = [VECTOR_COLUMN_DIM]
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    pending = conn.execute(sql, params).fetchall()
+
+    written = 0
+    for start in range(0, len(pending), max(1, batch_size)):
+        chunk = pending[start:start + max(1, batch_size)]
+        conn.executemany(
+            "UPDATE document_embeddings SET embedding_vec = ?::vector "
+            "WHERE document_chunk_id = ? AND model_key = ?",
+            [(vec_literal(unpack(r["embedding"])), r["document_chunk_id"], r["model_key"])
+             for r in chunk])
+        conn.commit()
+        written += len(chunk)
+
+    return {"backend": "postgres", "pending": len(pending), "written": written}

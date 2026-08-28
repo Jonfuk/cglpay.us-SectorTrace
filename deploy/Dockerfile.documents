@@ -33,6 +33,11 @@ RUN uv sync --frozen --no-dev --no-install-project \
     --extra postgres --extra storage --extra graph --extra nlp
 
 COPY pipeline ./pipeline
+# The committed eval query / gold sets, so `nlp eval-retrieval`, `eval-spans`
+# and `eval-context` work on their defaults in this worker — the paths in
+# pipeline/nlp/eval.py resolve to /app/tests/fixtures/nlp. Pass --queries /
+# --gold to point at an operator-marked set instead.
+COPY tests/fixtures/nlp ./tests/fixtures/nlp
 RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph --extra nlp
 
 # These are the two document packages the PyMuPDF/OCRmyPDF batch actually

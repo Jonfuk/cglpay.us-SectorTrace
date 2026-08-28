@@ -175,6 +175,40 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
     model_key = embedder.model_key
 
     filter_sql, filter_params = filters.sql()
+
+    # PostgreSQL + pgvector: order by cosine distance in the database, against
+    # the HNSW index (migration 0071), and take only `depth` rows. The exact
+    # path below pulls every embedding for the model and scores each in a
+    # Python loop -- ~30 s per query at 167k embeddings on the live mirror.
+    if db.backend_of(conn) == "postgres" and db.has_extension(conn, "vector"):
+        literal = embeddings.vec_literal(query_vec)
+        rows = conn.execute(
+            "SELECT em.document_chunk_id AS cid, "
+            "1 - (em.embedding_vec <=> ?::vector) AS score "
+            "FROM document_embeddings em "
+            "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
+            "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
+            "JOIN document_records d ON d.document_id = dv.document_id "
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+            "WHERE em.model_key = ? AND em.embedding_vec IS NOT NULL" + filter_sql
+            + " ORDER BY em.embedding_vec <=> ?::vector LIMIT ?",
+            [literal, model_key, *filter_params, literal, depth]).fetchall()
+        if rows:
+            return model_key, [(row["cid"], float(row["score"])) for row in rows], None
+        backfilled = conn.execute(
+            "SELECT COUNT(*) FROM document_embeddings "
+            "WHERE model_key = ? AND embedding_vec IS NOT NULL", (model_key,)).fetchone()[0]
+        if backfilled == 0:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM document_embeddings WHERE model_key = ?",
+                (model_key,)).fetchone()[0]
+            note = (f"no embeddings for model {model_key!r} -- run `pipeline nlp embed`"
+                    if total == 0
+                    else "pgvector is installed but embedding_vec is empty -- "
+                         "run `pipeline nlp backfill-vectors`")
+            return model_key, [], note
+        return model_key, [], None  # filters matched nothing
+
     rows = conn.execute(
         "SELECT em.document_chunk_id AS cid, em.embedding AS blob "
         "FROM document_embeddings em "
