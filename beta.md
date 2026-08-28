@@ -40,9 +40,10 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   gave UI requests directly in an interactive session, then asked to be
   interviewed for further design refinement of the same two pages, rather
   than going through this queue — see their DONE entries below. BETA-028
-  and BETA-029 were completed 2026-08-28; the queue's remaining
-  BETA-030/031 were not displaced by either and remain where the §52
-  reassessment left them. The §52 strategic
+  and BETA-029 were completed 2026-08-28; the same day the owner added
+  BETA-035 (concise README + GitHub About) directly to NEXT. The queue's
+  BETA-030/031 were not displaced and remain where the §52 reassessment
+  left them. The §52 strategic
   reassessment below was run 2026-08-26 after four consecutive narrow
   front-end items, and the queue was re-aimed at high-impact front-end
   work per the project owner's direct steer ("prioritise improvements for
@@ -401,7 +402,61 @@ DONE
 
 ### NEXT
 
-_(empty — BETA-030 is the next READY item.)_
+- [NEXT] BETA-035 | Concise README + GitHub "About" pointing at the live site and the published docs
+  - priority: P2
+  - impact: 3
+  - effort: 2
+  - confidence: 4
+  - risk: 1
+  - area: docs/repo
+  - depends_on: none
+  - origin: **Not drawn from this queue.** Project owner asked directly on
+    2026-08-28: "update the GitHub documentation such as Readme.md and the
+    about section on GitHub. I would like readme to be concise and outline
+    what the project does, direct viewers to the live site trace.cglpay.us
+    for a demonstration, direct viewers to the automated documentation on
+    GitHub Pages for the documentation."
+  - objective: Cut `README.md` (currently 839 lines) down to a concise
+    landing page: what the project is and the one principle it optimises
+    for (defensible-over-large — `CLAUDE.md` "What this project optimises
+    for"), a "See it live" pointer to **https://trace.cglpay.us**, and a
+    "Full documentation" pointer to the auto-published MkDocs site at
+    **https://jonfuk.github.io/cglpay.us-SectorTrace/**. Keep the `Quick
+    start` (`./start.sh`) so a contributor cloning the repo still has an
+    entry point. Then set the GitHub repo **About** panel — description,
+    website URL (`https://trace.cglpay.us`), and topics — to match.
+  - rationale: The docs site has been auto-built from `master` on every
+    push since `.github/workflows/docs.yml` landed (2026-08-20), and the
+    portal is live, but `README.md` still carries the full CLI reference,
+    module list and operational detail that the published site now owns —
+    so the repo's front page duplicates it, drifts from it, and buries the
+    two things a new visitor actually wants (the demo and the docs).
+  - suggested_first_action: Draft the trimmed `README.md` — lead with a
+    one-paragraph "what this is", then **See it live** (trace.cglpay.us)
+    and **Documentation** (the Pages URL) as the first two sections, then
+    Quick start, then a short "How it's built / settled decisions" gesture
+    that links into the docs rather than restating them. Move anything
+    genuinely repo-only (contributor workflow, `start.sh` argument
+    passthrough) to a short `CONTRIBUTING`-style tail or into `docs/`.
+    Preserve the comments-explain-reasoning house style; do not delete a
+    paragraph that records *why* something is shaped as it is without
+    checking it survives somewhere in `docs/`.
+  - notes:
+    - `mkdocs.yml` already has `site_url` and `repo_url` correct; link the
+      **rendered** site, never the raw `docs/` directory.
+    - The GitHub **About** panel is repo metadata, not a file in the tree.
+      It needs either the project owner in the GitHub web UI or a
+      `gh repo edit --description … --homepage https://trace.cglpay.us
+      --add-topic …` run by a session whose `gh` has repo scope. If this
+      session's `gh` cannot, do the `README.md` half and leave the About
+      change as a one-line owner action in the DONE entry.
+    - `docs/CAVEATS.md` is required reading before anything that produces a
+      figure; a README rewrite produces none, hence risk 1 — but the
+      rewrite must not weaken how the README states the provenance / `NULL`
+      / no-cross-layer-arithmetic discipline, which is part of what makes
+      the project legible to an outsider.
+    - Several sessions share this checkout: stage `README.md` (and any
+      moved files) explicitly, never `git commit -a`.
 
 ### READY
 
