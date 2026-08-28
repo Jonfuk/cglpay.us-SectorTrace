@@ -89,6 +89,18 @@ The Health tab shows, per extension, whether the server carries it and which
 version is installed. A migration that adds an extension-backed index or
 column guards the DDL so a server without the extension still migrates.
 
+`authorities.geom` (migration 0070) is a **derived** column: a PostGIS
+MultiPolygon rebuilt from `authorities.geometry_geojson` — which stays the
+source of truth and the only geometry the SQLite mirror carries — by
+`pipeline/geo.py:refresh_authority_geometry`, run after a migration, after a
+bulk load, and after `m00_geography` writes boundaries. `pgverify` does not
+compare it and `pgsync` / `pgload` do not copy it. Installing PostGIS *after*
+migration 0070 has run is handled: the next `pipeline migrate` (which
+re-runs `CREATE EXTENSION` and then `refresh_authority_geometry`) adds the
+column, the GiST index and the data. Postcode → authority lookup is a
+separate decision, gated on the archive cost of an ONS postcode-directory
+source rather than on PostGIS.
+
 ### What the Health tab's integrity check covers
 
 `PRAGMA integrity_check` walks every page of a SQLite file. PostgreSQL has no

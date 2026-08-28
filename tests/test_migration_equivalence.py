@@ -129,7 +129,13 @@ class TestTheTreesMatch:
         # extension is absent; on SQLite they are plain btrees of the same
         # names, because SQLite's fuzzy path is difflib and its object
         # inventory still has to match. No new tables or columns.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 69
+        # 70 adds authorities boundary geometry. On PostgreSQL, a PostGIS
+        # `geom` MultiPolygon column (via ALTER TABLE, which this test's
+        # column parser does not read) plus a GiST index, both inside a
+        # PostGIS-present guard; the value is derived from `geometry_geojson`.
+        # On SQLite, only the index NAME as an inert btree — SQLite has no
+        # geometry type and keeps using shapely over `geometry_geojson`.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 70
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

@@ -217,8 +217,10 @@ def _preflight(source, target: sqlite3.Connection) -> list[str]:
             "the SQLite tree builds tables PostgreSQL does not have: "
             + ", ".join(extra))
     for table in sorted(theirs & ours):
-        here = [c["name"] for c in catalog.columns_of(target, table)]
-        there = [c["name"] for c in catalog.columns_of(source, table)]
+        # portable_columns drops any PostgreSQL-only derived column
+        # (authorities.geom) — it has no SQLite counterpart by design.
+        here = pgload.portable_columns(target, table)
+        there = pgload.portable_columns(source, table)
         if here != there:
             problems.append(
                 f"{table}: columns differ. PostgreSQL {there}, SQLite {here}")
@@ -307,7 +309,10 @@ def refresh(settings: Settings | None = None, *, destination: Path | None = None
                     + "\n  - ".join(problems))
 
             for table in pgload.load_order(source):
-                columns = [c["name"] for c in catalog.columns_of(source, table)]
+                # Drops authorities.geom: PostGIS geometry has no SQLite
+                # storage class, and geometry_geojson (which is copied) is the
+                # source of truth the mirror keeps.
+                columns = pgload.portable_columns(source, table)
                 if on_table:
                     on_table(table, None)
                 written = _copy_table(source, new, table, columns)

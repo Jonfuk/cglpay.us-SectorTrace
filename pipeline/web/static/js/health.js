@@ -117,6 +117,17 @@ async function loadHealth() {
     }
   }
 
+  // PostGIS only. `geom` is derived from `geometry_geojson`; the two counts
+  // should agree and `invalid` should be zero.
+  const g = data.geometry;
+  if (g) {
+    const behind = g.with_geom !== g.with_geojson;
+    $('health-cards').append(
+      card(`${num(g.with_geom)} / ${num(g.with_geojson)}`, 'authority geom built',
+        behind ? 'bad' : 'good'),
+      card(num(g.invalid), 'invalid boundaries', g.invalid ? 'bad' : 'good'));
+  }
+
   renderHosts(data.hosts);
 }
 

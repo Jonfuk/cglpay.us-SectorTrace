@@ -714,6 +714,14 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
             structlog.get_logger().info("db.reader_granted", role=granted,
                                          after=len(newly_applied))
 
+        # Keep authorities.geom in step with geometry_geojson after a schema
+        # change — migration 0070's own backfill runs before any rows exist on
+        # the migrate-then-collect path. A no-op unless PostgreSQL + PostGIS.
+        # Deferred import: pipeline.geo imports this module.
+        from pipeline import geo
+
+        geo.refresh_authority_geometry(conn)
+
     return newly_applied
 
 

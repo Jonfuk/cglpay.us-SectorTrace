@@ -72,6 +72,30 @@ class LoadError(RuntimeError):
 # database claiming it had run migrations it had not.
 SOURCE_ONLY_TABLES = frozenset({"schema_migrations"})
 
+# Columns present only in the PostgreSQL tree and derived there from a column
+# both trees carry. They are not part of a cross-backend copy or schema
+# comparison: SQLite has no matching type, and the value is rebuilt on the
+# PostgreSQL side (pipeline/geo.py) rather than carried across.
+#
+# authorities.geom is a PostGIS MultiPolygon built from geometry_geojson by
+# migration 0070 where PostGIS is present; absent otherwise, in which case
+# filtering it out is a harmless no-op.
+PG_DERIVED_COLUMNS: dict[str, frozenset[str]] = {
+    "authorities": frozenset({"geom"}),
+}
+
+
+def portable_columns(conn, table: str) -> list[str]:
+    """`table`'s column names, minus any PostgreSQL-only derived column.
+
+    Use wherever a column list has to mean the same thing on both backends —
+    a schema-parity check, or a row copy in either direction.
+    """
+    dropped = PG_DERIVED_COLUMNS.get(table, frozenset())
+    return [c["name"] for c in catalog.columns_of(conn, table)
+            if c["name"] not in dropped]
+
+
 # Load-order edges that are not foreign keys.
 #
 # Each of these is a trigger from 0030, 0033 or 0048 asking whether a decision
@@ -280,8 +304,8 @@ def preflight(source: sqlite3.Connection, target) -> list[str]:
             "The two schemas are not the same schema.")
 
     for table in sorted(source_tables & target_tables):
-        in_source = [c["name"] for c in catalog.columns_of(source, table)]
-        in_target = [c["name"] for c in catalog.columns_of(target, table)]
+        in_source = portable_columns(source, table)
+        in_target = portable_columns(target, table)
         if in_source != in_target:
             problems.append(
                 f"{table}: columns differ. source {in_source}, "
@@ -384,7 +408,11 @@ def copy_table(source: sqlite3.Connection, target, table: str) -> int:
     is what makes an interrupted run leave whole tables rather than partial
     ones.
     """
-    columns = [c["name"] for c in catalog.columns_of(target, table)]
+    # `portable_columns` drops any PostgreSQL-only derived column (authorities.geom):
+    # SQLite has no value to send for it, and it is rebuilt afterwards by
+    # pipeline/geo.py. COPY names the remaining columns explicitly, so PostgreSQL
+    # fills the skipped one with its default.
+    columns = portable_columns(target, table)
     types = _column_types(target, table)
     missing = [c for c in columns if c not in types]
     if missing:
@@ -627,6 +655,14 @@ def migrate(source: sqlite3.Connection, target, *, settings: Settings | None = N
             on_table(table, expected, written)
 
     sequences = reset_sequences(target)
+    target.commit()
+
+    # authorities.geom is derived, not copied (portable_columns drops it), so
+    # rebuild it from the geometry_geojson that just landed. No-op unless the
+    # target is PostgreSQL with PostGIS.
+    from pipeline import geo
+
+    geo.refresh_authority_geometry(target)
     target.commit()
 
     # A run that was told to load some of the tables has not finished the

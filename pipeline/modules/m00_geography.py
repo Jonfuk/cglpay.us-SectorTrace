@@ -520,6 +520,12 @@ def run(ctx: ModuleContext) -> None:
         # had no commit of its own at all.
         if not ctx.dry_run:
             conn.commit()
+            # Rebuild the derived PostGIS geometry from the geojson just
+            # written. No-op unless the warehouse is PostgreSQL with PostGIS;
+            # see pipeline/geo.py.
+            from pipeline import geo
+
+            geo.refresh_authority_geometry(conn)
 
         # --- Historical vintages: detect retirements and resolve successors ---
         # Snapshots are pooled by calendar epoch across both series so a
