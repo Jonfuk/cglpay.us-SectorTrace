@@ -578,6 +578,7 @@ function renderItem(item) {
       timeNode(item.last_decided_at),
       item.last_note ? ` — “${item.last_note}”` : '') : null,
     item.decision_count > 1 ? historyBlock(item.id, item.decision_count) : null,
+    nameMatchBlock(item),
     resolveForm(item),
     el('div', { class: 'actions' },
       note,
@@ -647,6 +648,55 @@ function resolveForm(item) {
       el('button', { class: 'btn', onclick: check }, 'Check'),
       el('button', { class: 'btn primary', onclick: save }, `Save ${spec.label}`)),
     status);
+}
+
+/* A ranked shortlist for the two item types that name something unresolved —
+ * an `unmatched_buyer_name` against `authorities`, a `possible_group_company`
+ * against known companies and providers. Lazy-loaded on open, like the
+ * history block. It is a suggestion to confirm: nothing here writes, and the
+ * override still goes in by hand (pipeline/buyer_name_overrides.py). Absent
+ * for every other type, and — being under /api/admin — absent entirely on a
+ * hosted deployment with the operator UI off. */
+const FUZZY_MATCH_TYPES = {
+  unmatched_buyer_name: 'authority',
+  possible_group_company: 'company / provider',
+};
+
+function nameMatchBlock(item) {
+  if (!(item.item_type in FUZZY_MATCH_TYPES)) return null;
+  const out = el('div', { class: 'muted small', text: 'loading…' });
+  const details = el('details', { class: 'history' },
+    el('summary', { text: `Similar ${FUZZY_MATCH_TYPES[item.item_type]} names` }), out);
+
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = '1';
+    try {
+      const res = await api(`/api/admin/review/${item.id}/name-matches`);
+      if (!res.matches || !res.matches.length) {
+        return replace(out, el('div', { class: 'muted small',
+          text: res.note || 'No close matches — resolve by hand.' }));
+      }
+      replace(out, el('div', {},
+        el('div', { class: 'muted small', text:
+          `ranked by ${res.method === 'pg_trgm' ? 'trigram similarity'
+            : 'difflib (pg_trgm not installed)'} — a suggestion to confirm, `
+          + 'not a resolution' }),
+        el('table', {},
+          el('thead', {}, el('tr', {},
+            el('th', { text: 'Score' }), el('th', { text: 'Match' }),
+            el('th', { text: 'Id' }), el('th', { text: 'In' }))),
+          el('tbody', {}, res.matches.map((m) => el('tr', {},
+            el('td', { class: 'num', text: m.score.toFixed(2) }),
+            el('td', { text: m.name }),
+            el('td', { class: 'mono', text: String(m.id) }),
+            el('td', { class: 'muted small', text: m.target }))))));
+    } catch (e) {
+      replace(out, el('div', { class: 'bad small', text: e.message }));
+    }
+  });
+
+  return details;
 }
 
 /** Context comes out of the database as a JSON string. Pretty-print it when it

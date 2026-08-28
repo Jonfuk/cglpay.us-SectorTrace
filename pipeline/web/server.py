@@ -51,6 +51,7 @@ from pipeline.web import (
     census,
     claims,
     health,
+    name_matches,
     public_export,
     public_queries,
     queries,
@@ -1140,6 +1141,15 @@ class Handler(BaseHTTPRequestHandler):
             # count would silently skip whatever was trimmed.
             lines, next_index = job.since(_int(params, "after", -1))
             return {**job.head(), "log": lines, "next": next_index}
+
+        match = re.fullmatch(r"/api/admin/review/(\d+)/name-matches", path)
+        if match:
+            # Operator aid: candidate targets for an unmatched name, ranked by
+            # trigram similarity (pg_trgm) or difflib. Ranks, does not resolve.
+            try:
+                return name_matches.suggestions(conn, int(match.group(1)))
+            except name_matches.NameMatchError as exc:
+                raise ApiError(str(exc), status=404) from None
 
         match = re.fullmatch(r"/api/review/(\d+)", path)
         if match:
