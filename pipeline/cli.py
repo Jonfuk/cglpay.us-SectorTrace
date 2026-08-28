@@ -572,8 +572,9 @@ def nlp_backfill_vectors(
     instead of a Python cosine sweep.
 
     PostgreSQL + pgvector only; a no-op otherwise. Resume-safe — re-run to
-    finish an interrupted pass. `pipeline migrate` runs this once when 0071
-    first applies; run it by hand after a large PostgreSQL-to-PostgreSQL sync.
+    finish an interrupted pass. The deploy runs this once after the app reports
+    healthy (it is deliberately not on the health-gated `pipeline migrate`
+    path); run it by hand after a large PostgreSQL-to-PostgreSQL sync.
     """
     from pipeline.nlp import embeddings
 

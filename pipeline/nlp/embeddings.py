@@ -315,6 +315,24 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
             "pending": len(pending), "embedded": written, "dry_run": dry_run}
 
 
+def _ensure_vector_index(conn) -> None:
+    """Create the HNSW index on `embedding_vec` if it is absent, single-threaded.
+
+    Serial build only: pgvector's *parallel* build reserves a /dev/shm segment
+    the size of maintenance_work_mem before it counts rows, which overflows the
+    container's shm_size and aborts the build with "could not resize shared
+    memory segment ... No space left on device" (see migrations/postgres/0071).
+    A serial build uses backend-private memory and needs no /dev/shm. SET LOCAL
+    scopes the setting to this transaction.
+    """
+    with conn:
+        conn.execute("SET LOCAL max_parallel_maintenance_workers = 0")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec "
+            "ON document_embeddings USING hnsw (embedding_vec vector_cosine_ops) "
+            "WHERE embedding_vec IS NOT NULL")
+
+
 def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) -> dict:
     """Fill `document_embeddings.embedding_vec` from the stored `embedding`
     bytea for rows that predate the column (migration 0071).
@@ -322,7 +340,16 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
     Idempotent and resume-safe (`WHERE embedding_vec IS NULL`). A no-op unless
     the warehouse is PostgreSQL with pgvector. Also (re)creates the column and
     its HNSW index, so a cluster that gained pgvector after 0071 ran is caught
-    up by the next `pipeline nlp backfill-vectors` or `pipeline migrate`.
+    up by the next `pipeline nlp backfill-vectors` or a mirror sync.
+
+    A full catch-up (no `limit`) drops the HNSW index, fills the column, then
+    builds the index once: inserting rows one at a time into a live HNSW index
+    is pgvector's slowest path — each `UPDATE` pays a graph insertion — so on
+    the one-time fill of a populated table this is a single serial build rather
+    than N indexed writes. While the index is dropped, semantic search falls
+    back to a sequential scan (semantic_search handles that); on the mirror this
+    runs during the sync, off any query path. A `limit`ed run keeps the index in
+    place, so a resume-by-limit pass does not rebuild the whole graph each time.
 
     Only the `VECTOR_COLUMN_DIM`-wide rows: the column is typed to that width.
     """
@@ -335,17 +362,6 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         conn.execute(
             f"ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS "
             f"embedding_vec vector({VECTOR_COLUMN_DIM})")
-        # Serial index build — pgvector's parallel HNSW build reserves a
-        # /dev/shm segment the size of maintenance_work_mem before counting
-        # rows, which overflows the container's shm_size and aborts the build
-        # (see migrations/postgres/0071). The index is filled incrementally
-        # below, so parallelism gains nothing here. SET LOCAL scopes it to this
-        # transaction.
-        conn.execute("SET LOCAL max_parallel_maintenance_workers = 0")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec "
-            "ON document_embeddings USING hnsw (embedding_vec vector_cosine_ops) "
-            "WHERE embedding_vec IS NOT NULL")
 
     sql = ("SELECT document_chunk_id, model_key, embedding FROM document_embeddings "
            "WHERE embedding_vec IS NULL AND dimension = ?")
@@ -354,6 +370,20 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         sql += " LIMIT ?"
         params.append(limit)
     pending = conn.execute(sql, params).fetchall()
+
+    if not pending:
+        # Nothing to fill — but make sure the index exists for the inline-insert
+        # path (embeddings.run). Never drop a populated index to rebuild it over
+        # no new rows.
+        _ensure_vector_index(conn)
+        return {"backend": "postgres", "pending": 0, "written": 0}
+
+    rebuild = limit is None
+    if rebuild:
+        with conn:
+            conn.execute("DROP INDEX IF EXISTS idx_document_embeddings_vec")
+    else:
+        _ensure_vector_index(conn)  # keep the index; a limited run inserts into it
 
     written = 0
     for start in range(0, len(pending), max(1, batch_size)):
@@ -366,4 +396,6 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         conn.commit()
         written += len(chunk)
 
+    if rebuild:
+        _ensure_vector_index(conn)
     return {"backend": "postgres", "pending": len(pending), "written": written}

@@ -722,13 +722,16 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
 
         geo.refresh_authority_geometry(conn)
 
-        # And fill document_embeddings.embedding_vec from the stored bytea the
-        # first time migration 0071 lands (or after a later pgvector install).
-        # A no-op unless PostgreSQL + pgvector; bounded — resume-safe on
-        # `embedding_vec IS NULL`.
-        from pipeline.nlp import embeddings as _embeddings
-
-        _embeddings.backfill_vectors(conn)
+        # NB: document_embeddings.embedding_vec is *not* backfilled here. It was,
+        # once — and on a populated warehouse the first 0071 apply then filled
+        # 167k rows into a fresh HNSW index inside `pipeline migrate`, which the
+        # app runs before it binds its port. That blocked the deploy's health
+        # gate long enough to fail it (and, before the serial-build fix, crashed
+        # outright on a small /dev/shm). Migration 0071 creates the empty index;
+        # embeddings.run keeps it current inline; the one-time catch-up of
+        # pre-existing rows is a post-health deploy step (`nlp backfill-vectors`,
+        # ansible) and the mirror sync's rebuild — never the request-serving
+        # startup path. `backfill_vectors` stays idempotent for those callers.
 
     return newly_applied
 

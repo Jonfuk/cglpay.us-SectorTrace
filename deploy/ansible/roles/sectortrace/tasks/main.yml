@@ -154,6 +154,21 @@
   until: sectortrace_health.status is defined and sectortrace_health.status == 200
   failed_when: sectortrace_health.status is not defined or sectortrace_health.status != 200
 
+# The one-time catch-up of document_embeddings.embedding_vec for rows that
+# predate migration 0071. Deliberately *after* the health gate, never inside
+# `pipeline migrate`: on a populated warehouse this fills six figures of rows
+# and builds the pgvector HNSW index, and that must not sit between the app
+# starting and it serving — that coupling failed a mirror's health gate once
+# (see pipeline/db.py:apply_migrations). Idempotent and resume-safe: a no-op
+# once every row has its vector, and `nlp embed` writes embedding_vec inline
+# for rows built after 0071, so this only ever clears the pre-0071 backlog.
+- name: Backfill pgvector embedding_vec (one-time; a no-op once filled)
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml exec -T app python -m pipeline nlp backfill-vectors
+    chdir: "{{ state_dir }}"
+  register: sectortrace_backfill
+  changed_when: false
+
 - name: Install the offsite backup script
   ansible.builtin.template:
     src: sectortrace-backup-offsite.sh.j2
