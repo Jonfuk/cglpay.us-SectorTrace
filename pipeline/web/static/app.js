@@ -690,7 +690,7 @@ function nameMatchBlock(item) {
             el('td', { class: 'num', text: m.score.toFixed(2) }),
             el('td', { text: m.name }),
             el('td', { class: 'mono', text: String(m.id) }),
-            el('td', { class: 'muted small', text: m.target }))))));
+            el('td', { class: 'muted small', text: m.target })))))));
     } catch (e) {
       replace(out, el('div', { class: 'bad small', text: e.message }));
     }
