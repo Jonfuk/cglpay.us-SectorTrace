@@ -263,6 +263,33 @@ def extensions(conn: db.Connection) -> list[dict]:
     return out
 
 
+def geometry_status(conn: db.Connection) -> dict | None:
+    """Whether the derived PostGIS geometry kept up with its source.
+
+    `authorities.geom` (migration 0070) is built from `geometry_geojson` by
+    `pipeline/geo.py`. `with_geom` should equal `with_geojson`, and `invalid`
+    should be zero — `ST_MakeValid` runs in the derivation, so a non-zero
+    count is a boundary PostGIS still cannot repair. Returns None on SQLite,
+    on a PostgreSQL server without PostGIS, or before migration 0070's column
+    exists.
+    """
+    if db.backend_of(conn) != "postgres" or not db.has_extension(conn, "postgis"):
+        return None
+    has_column = conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() "
+        "  AND table_name = 'authorities' AND column_name = 'geom'").fetchone()
+    if not has_column:
+        return None
+    row = conn.execute(
+        "SELECT COUNT(*) FILTER (WHERE geometry_geojson IS NOT NULL) AS with_geojson, "
+        "       COUNT(*) FILTER (WHERE geom IS NOT NULL) AS with_geom, "
+        "       COUNT(*) FILTER (WHERE geom IS NOT NULL AND NOT ST_IsValid(geom)) AS invalid "
+        "FROM authorities").fetchone()
+    return {"with_geojson": row["with_geojson"], "with_geom": row["with_geom"],
+            "invalid": row["invalid"]}
+
+
 def hosts(conn: db.Connection) -> list[dict]:
     """Every source host this warehouse has spoken to, and when it last did.
 
@@ -485,6 +512,7 @@ def health(conn: db.Connection, settings) -> dict:
     return {
         "warehouse": warehouse(conn, settings),
         "extensions": extensions(conn),
+        "geometry": geometry_status(conn),
         "hosts": hosts(conn),
         "graph": graph_status(conn),
         "documents": document_status(conn),
