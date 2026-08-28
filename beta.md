@@ -34,16 +34,15 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   project-owner-directed, see Dataset Additions and Recent Commits. Since
   then: the 034A–034G semantic-analysis commits (see BETA-034), then
   BETA-028 and BETA-029 (this commit).
-- Thirty-one items completed across this session and its predecessors:
-  BETA-001 through BETA-029, plus BETA-032 and BETA-033 (BETA-001 on
-  `master`). BETA-032 and BETA-033 are out-of-band: the project owner
+- Thirty-two items completed across this session and its predecessors:
+  BETA-001 through BETA-029 plus BETA-032, BETA-033 and BETA-035 (BETA-001
+  on `master`). BETA-032 and BETA-033 are out-of-band: the project owner
   gave UI requests directly in an interactive session, then asked to be
   interviewed for further design refinement of the same two pages, rather
-  than going through this queue — see their DONE entries below. BETA-028
-  and BETA-029 were completed 2026-08-28; the same day the owner added
-  BETA-035 (concise README + GitHub About) directly to NEXT. The queue's
-  BETA-030/031 were not displaced and remain where the §52 reassessment
-  left them. The §52 strategic
+  than going through this queue — see their DONE entries below. BETA-028,
+  BETA-029 and BETA-035 (concise README + GitHub About, owner-directed)
+  were all completed 2026-08-28. The queue's BETA-030/031 were not
+  displaced and remain where the §52 reassessment left them. The §52 strategic
   reassessment below was run 2026-08-26 after four consecutive narrow
   front-end items, and the queue was re-aimed at high-impact front-end
   work per the project owner's direct steer ("prioritise improvements for
@@ -402,61 +401,7 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-035 | Concise README + GitHub "About" pointing at the live site and the published docs
-  - priority: P2
-  - impact: 3
-  - effort: 2
-  - confidence: 4
-  - risk: 1
-  - area: docs/repo
-  - depends_on: none
-  - origin: **Not drawn from this queue.** Project owner asked directly on
-    2026-08-28: "update the GitHub documentation such as Readme.md and the
-    about section on GitHub. I would like readme to be concise and outline
-    what the project does, direct viewers to the live site trace.cglpay.us
-    for a demonstration, direct viewers to the automated documentation on
-    GitHub Pages for the documentation."
-  - objective: Cut `README.md` (currently 839 lines) down to a concise
-    landing page: what the project is and the one principle it optimises
-    for (defensible-over-large — `CLAUDE.md` "What this project optimises
-    for"), a "See it live" pointer to **https://trace.cglpay.us**, and a
-    "Full documentation" pointer to the auto-published MkDocs site at
-    **https://jonfuk.github.io/cglpay.us-SectorTrace/**. Keep the `Quick
-    start` (`./start.sh`) so a contributor cloning the repo still has an
-    entry point. Then set the GitHub repo **About** panel — description,
-    website URL (`https://trace.cglpay.us`), and topics — to match.
-  - rationale: The docs site has been auto-built from `master` on every
-    push since `.github/workflows/docs.yml` landed (2026-08-20), and the
-    portal is live, but `README.md` still carries the full CLI reference,
-    module list and operational detail that the published site now owns —
-    so the repo's front page duplicates it, drifts from it, and buries the
-    two things a new visitor actually wants (the demo and the docs).
-  - suggested_first_action: Draft the trimmed `README.md` — lead with a
-    one-paragraph "what this is", then **See it live** (trace.cglpay.us)
-    and **Documentation** (the Pages URL) as the first two sections, then
-    Quick start, then a short "How it's built / settled decisions" gesture
-    that links into the docs rather than restating them. Move anything
-    genuinely repo-only (contributor workflow, `start.sh` argument
-    passthrough) to a short `CONTRIBUTING`-style tail or into `docs/`.
-    Preserve the comments-explain-reasoning house style; do not delete a
-    paragraph that records *why* something is shaped as it is without
-    checking it survives somewhere in `docs/`.
-  - notes:
-    - `mkdocs.yml` already has `site_url` and `repo_url` correct; link the
-      **rendered** site, never the raw `docs/` directory.
-    - The GitHub **About** panel is repo metadata, not a file in the tree.
-      It needs either the project owner in the GitHub web UI or a
-      `gh repo edit --description … --homepage https://trace.cglpay.us
-      --add-topic …` run by a session whose `gh` has repo scope. If this
-      session's `gh` cannot, do the `README.md` half and leave the About
-      change as a one-line owner action in the DONE entry.
-    - `docs/CAVEATS.md` is required reading before anything that produces a
-      figure; a README rewrite produces none, hence risk 1 — but the
-      rewrite must not weaken how the README states the provenance / `NULL`
-      / no-cross-layer-arithmetic discipline, which is part of what makes
-      the project legible to an outsider.
-    - Several sessions share this checkout: stage `README.md` (and any
-      moved files) explicitly, never `git commit -a`.
+_(empty — BETA-030 is the next READY item.)_
 
 ### READY
 
@@ -492,6 +437,74 @@ DONE
     on evidence figures were considered and rejected as theatre.
 
 ### DONE
+
+- [DONE] BETA-035 | Concise README + GitHub "About" pointing at the live site and the published docs
+  - completed: 2026-08-28
+  - commits: `208aeec` (`beta`)
+  - origin: **Not drawn from this queue.** Project owner asked directly on
+    2026-08-28 (see the pre-DONE entry's `origin` for the verbatim ask),
+    then followed up mid-work: "Can you also include a link to the campaign
+    site on the readme."
+  - result: `README.md` cut from **840 lines to 177**. New shape: a title,
+    a two-part "what it is" (one paragraph + the four disciplines —
+    provenance-or-`NULL`, layers-stay-separate, nothing-becomes-evidence-
+    without-a-person, personal-data-in-`restricted_`), then **See it live**
+    (`https://trace.cglpay.us` the portal, `https://cglpay.us` the campaign
+    it supports), then **Documentation**
+    (`https://jonfuk.github.io/cglpay.us-SectorTrace/`) with a six-row
+    table into the key method docs, then Quick start, the module table,
+    a short "How it works", Development, Licence.
+  - **What was deliberately kept**, because `tests/test_docs_coverage.py`
+    pins it against the code: every registered `mNN_` module named (the
+    module table, descriptions trimmed to one clause each — 33 modules,
+    `test_every_registered_module_appears_in_the_readme`); all five export
+    targets and the literal `ten CSV tabs`
+    (`test_readme_documents_every_export_target`); both `./start.sh` and
+    `start.cmd` (`test_readme_documents_both_entry_points`).
+  - **What was cut**, and where the reasoning still lives: the run-order /
+    dependency-wave mechanics (the CLI prints its resolved order; comments
+    in `runner.py`/`parallel.py`), the write-slot discipline
+    (`pipeline/db.py`'s own comment, `CLAUDE.md` settled decision 10,
+    `tests/test_write_slot_discipline.py`), the export-provenance and
+    bundle internals, the full PostgreSQL cutover/sync procedures
+    (`docs/DEPLOYMENT.md`, `docs/BACKUP.md`,
+    `pipeline/migrations/postgres/README.md`), and the live-smoke-test
+    rationale (`docs/`… no — it is in `tests/test_integration_smoke.py`'s
+    docstring; acceptable, it is a contributor-only concern). Nothing that
+    was *only* in the README's prose was dropped without a home.
+  - **README.md is also the docs-site home page** — `scripts/gen_ref_pages.py`
+    copies it verbatim into `index.md` at build, and `scripts/mkdocs_hooks.py`
+    rewrites its `docs/*.md` links to internal site links (and `CLAUDE.md`,
+    source paths → GitHub blob URLs). Verified: `mkdocs build --strict`
+    passes and the built `site/index.html` carries the new copy with
+    `CAVEATS/`, `SOURCES/` … resolved internally and the three headline
+    URLs intact.
+  - GitHub **About**: `gh repo edit --homepage https://trace.cglpay.us`
+    run (this session's `gh` has `repo` scope) — the About "website" now
+    points at the portal. The description and the eleven topics were
+    already accurate and left unchanged.
+  - **Found in passing, unrelated**: `mkdocs build --strict` was **already
+    aborting on `beta`** (not caused by this work — reproduced on `beta`
+    HEAD with the change stashed) because `docs/semantic-analysis.md` (034)
+    and `docs/m32-sab-site-crawl.md` were in neither the nav nor
+    `mkdocs_hooks.UNPUBLISHED`. They are in-progress design/spec registers,
+    the same category as `upgrade-roadmap.md` and `public-portal-ui-spec.md`
+    already in that tuple ("a published page reads as settled; these are
+    not"), so both were added to `UNPUBLISHED`. The CI `docs` workflow only
+    *publishes* from `master` but its `build` job runs on any PR, so a
+    beta→master PR would have failed on this.
+  - validation: `uv run python -m pytest` full offline suite — **2602
+    passed, 109 skipped, 34 deselected, 1 failed**; the one failure
+    (`test_parallel.py::test_different_hosts_are_fetched_concurrently`, a
+    `elapsed < 0.5s` timing assertion that got 0.57s) is the flaky
+    concurrency test from BETA-007's baseline — **passed in isolation
+    immediately after** (0.49s), and this change is docs-only. `ruff check
+    pipeline tests scripts` clean. `mkdocs build --strict` clean.
+    `tests/test_docs_coverage.py` + `test_register_links.py` green (21).
+  - possible follow-up: `docs/semantic-analysis.md` could move from
+    `UNPUBLISHED` into the nav once 034 is no longer IN_PROGRESS — it is a
+    genuine subsystem design doc, only excluded now because it is not
+    settled.
 
 - [DONE] BETA-028 | The map renders with the network cable unplugged
   - completed: 2026-08-28
