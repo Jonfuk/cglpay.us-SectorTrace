@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     cache_enabled: bool = False
     cache_ttl_seconds: float = 300.0
     cache_max_entries: int = 512
+    # A longer backstop for near-static public routes (currently /api/v1/
+    # boundaries -- authority geometry, rewritten only by an m00 run that
+    # happens about never). A completed run still invalidates it the instant
+    # the geometry changes, so this only governs how long a *non-job* write
+    # (a hand-edit) can go unnoticed; a day is short enough to catch that and
+    # long enough that the large GeoJSON is parsed once daily rather than every
+    # few minutes. See pipeline/web/server.py `_cache_ttl`.
+    cache_static_ttl_seconds: float = 86400.0
 
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural

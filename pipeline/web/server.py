@@ -303,6 +303,31 @@ def _str(params: dict[str, list[str]], name: str, default: str = "") -> str:
     return (params.get(name, [default])[0] or "").strip()
 
 
+# Public routes whose payload changes only on a rare collection run, not on the
+# minute-to-minute cadence the default TTL is sized for. They still invalidate
+# on a completed run like everything else; the long TTL is only their backstop.
+# A set so a second near-static route (authorities is the obvious next one)
+# joins by name rather than by another branch.
+_NEAR_STATIC_ROUTES = frozenset({"boundaries"})
+
+
+def _cache_ttl(path: str, settings: Settings) -> float:
+    """How long a public payload may be served before it is recomputed.
+
+    Most /api/v1/* answers move when a module runs, and the completed run drops
+    them the instant they do (bump_version), so the TTL is only a backstop for
+    a write that never went through a job. A near-static route can carry a much
+    longer one: boundaries is authority geometry, parsed out of the warehouse
+    into a large GeoJSON on every miss and changed only by an m00 run, so a day
+    means it is built once daily instead of every few minutes -- without ever
+    outliving a real change, which the version bump still clears at once.
+    """
+    route = path[len("/api/v1/"):].rstrip("/")
+    if route in _NEAR_STATIC_ROUTES:
+        return settings.cache_static_ttl_seconds
+    return settings.cache_ttl_seconds
+
+
 def _cache_key(path: str, params: dict[str, list[str]]) -> str:
     """A stable cache key for a public read: the route and its query.
 
@@ -787,7 +812,7 @@ class Handler(BaseHTTPRequestHandler):
                 # with the export and admin branches for a microsecond.
                 payload = self.cache.get_or_compute(
                     _cache_key(path, params),
-                    self.settings.cache_ttl_seconds,
+                    _cache_ttl(path, self.settings),
                     lambda: self._get(path, params, conn))
             else:
                 payload = self._get(path, params, conn)

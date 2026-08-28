@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from pipeline.web.cache import InProcessCache, NullCache, get_cache
 from pipeline.web.jobs import JobRegistry
+from pipeline.web.server import _cache_ttl
 
 
 def test_a_hit_returns_the_stored_value_without_recomputing():
@@ -103,6 +104,24 @@ def test_get_cache_is_null_unless_enabled():
     assert isinstance(get_cache(on), InProcessCache)
 
 
+# --- per-route TTL ------------------------------------------------------------
+
+
+def test_boundaries_gets_the_long_static_ttl():
+    settings = SimpleNamespace(cache_ttl_seconds=300.0,
+                                cache_static_ttl_seconds=86400.0)
+    assert _cache_ttl("/api/v1/boundaries", settings) == 86400.0
+    # A trailing slash names the same route.
+    assert _cache_ttl("/api/v1/boundaries/", settings) == 86400.0
+
+
+def test_other_routes_get_the_default_ttl():
+    settings = SimpleNamespace(cache_ttl_seconds=300.0,
+                                cache_static_ttl_seconds=86400.0)
+    assert _cache_ttl("/api/v1/contracts", settings) == 300.0
+    assert _cache_ttl("/api/v1/summary", settings) == 300.0
+
+
 # --- the registry wiring ------------------------------------------------------
 
 
@@ -126,6 +145,14 @@ def test_a_finished_run_invalidates_the_cache():
 def test_a_failed_run_does_not_invalidate():
     """A run that changed nothing has nothing to invalidate for, and the cache
     stays warm rather than being dropped by a run that never committed."""
+    # The failing job logs its traceback. Route logging to the tmp file the
+    # autouse fixture points at, as the rest of the suite does, so the log does
+    # not fall through to a raw console writer -- otherwise a Windows dev
+    # console (cp1252) raises mid-emit on the rich traceback.
+    from pipeline import logging_conf
+
+    logging_conf.configure_logging()
+
     calls = []
     registry = JobRegistry(invalidate=lambda: calls.append(1))
 
@@ -133,7 +160,8 @@ def test_a_failed_run_does_not_invalidate():
         raise RuntimeError("collection failed")
 
     job = registry.start("run", "doomed", {}, work=boom, thread_names=set())
-    _wait_until(lambda: job.state == "failed")
+    _wait_until(lambda: job.finished_at is not None)
+    assert job.state == "failed"
     assert calls == []
 
 
