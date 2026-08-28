@@ -110,7 +110,14 @@ postgres_effective_cache_mb: "{{ (ansible_memtotal_mb | int * 0.5) | int }}"
 postgres_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.00125) | int, 4] | max, 32] | min }}"
 postgres_maintenance_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.05) | int, 64] | max, 1024] | min }}"
 postgres_max_connections: 100
-postgres_shm_size_mb: 256
+# /dev/shm for parallel workers. Kept at least maintenance_work_mem with
+# headroom: a parallel index build reserves a /dev/shm segment that size up
+# front (pgvector's HNSW build did exactly this and a flat 256MB
+# under-provisioned it against a tuned maintenance_work_mem, crash-looping the
+# app during `pipeline migrate` — see migrations/postgres/0071). The migrations
+# now build serially so they no longer depend on this, but a manual REINDEX
+# still would.
+postgres_shm_size_mb: "{{ (postgres_maintenance_work_mem_mb | int) + 256 }}"
 
 neo4j_heap_mb: "{{ [[(ansible_memtotal_mb | int * 0.12) | int, 512] | max, 4096] | min }}"
 neo4j_pagecache_mb: "{{ [(neo4j_heap_mb | int * 0.5) | int, 256] | max }}"

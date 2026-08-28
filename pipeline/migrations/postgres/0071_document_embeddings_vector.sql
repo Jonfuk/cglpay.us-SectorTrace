@@ -29,6 +29,18 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
         ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS embedding_vec vector(384);
+        -- Build the HNSW index single-threaded. pgvector's *parallel* build
+        -- reserves a shared-memory segment the size of maintenance_work_mem in
+        -- /dev/shm before it counts rows, so even this empty partial index
+        -- tries to grab ~maintenance_work_mem of shared memory. The container's
+        -- /dev/shm (compose `shm_size`) is smaller than that on a tuned box, and
+        -- the build dies with "could not resize shared memory segment ... No
+        -- space left on device", failing `pipeline migrate` and the app with it.
+        -- A serial build uses backend-private memory and needs no /dev/shm; the
+        -- index is built empty here and filled incrementally by the backfill, so
+        -- the parallel path never bought anything anyway. SET LOCAL scopes this
+        -- to the migration's transaction.
+        SET LOCAL max_parallel_maintenance_workers = 0;
         CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec
             ON document_embeddings USING hnsw (embedding_vec vector_cosine_ops)
             WHERE embedding_vec IS NOT NULL;

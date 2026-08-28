@@ -335,6 +335,13 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         conn.execute(
             f"ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS "
             f"embedding_vec vector({VECTOR_COLUMN_DIM})")
+        # Serial index build — pgvector's parallel HNSW build reserves a
+        # /dev/shm segment the size of maintenance_work_mem before counting
+        # rows, which overflows the container's shm_size and aborts the build
+        # (see migrations/postgres/0071). The index is filled incrementally
+        # below, so parallelism gains nothing here. SET LOCAL scopes it to this
+        # transaction.
+        conn.execute("SET LOCAL max_parallel_maintenance_workers = 0")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec "
             "ON document_embeddings USING hnsw (embedding_vec vector_cosine_ops) "
