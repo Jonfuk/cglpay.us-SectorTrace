@@ -30,6 +30,11 @@ from pipeline.nlp.spans import _UNSAFE_PROVIDER_VARIANTS
 
 STAGE = "resolve"
 
+# Element ids per DELETE. Well under psycopg's 65535-parameter hard limit,
+# and SQLite's default SQLITE_MAX_VARIABLE_NUMBER (999 before 3.32, 32766
+# after) — one statement, both engines.
+_DELETE_BATCH = 900
+
 
 def _provider_index() -> dict[str, str]:
     """normalised full variant -> provider_key. Whole-string, not whole-token:
@@ -109,11 +114,16 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
     element_ids = sorted({m["document_element_id"] for m in mentions})
     resolved = 0
     try:
-        if element_ids:
-            placeholders = ",".join("?" for _ in element_ids)
+        # Batched: one `?` per element id, and a full-corpus resolve carries
+        # more distinct elements than psycopg's 65535-parameter ceiling. The
+        # DELETE only clears this run's own prior `%+alias` rows so the write
+        # below is idempotent, so splitting it across statements is harmless.
+        for start in range(0, len(element_ids), _DELETE_BATCH):
+            batch = element_ids[start:start + _DELETE_BATCH]
+            placeholders = ",".join("?" for _ in batch)
             conn.execute(
                 f"DELETE FROM document_entity_mentions WHERE match_method LIKE '%+alias' "
-                f"AND document_element_id IN ({placeholders})", element_ids)
+                f"AND document_element_id IN ({placeholders})", batch)
 
         for m in mentions:
             method = f"{m['extractor_name']}+alias"
