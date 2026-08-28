@@ -78,10 +78,14 @@ SOURCE_ONLY_TABLES = frozenset({"schema_migrations"})
 # PostgreSQL side (pipeline/geo.py) rather than carried across.
 #
 # authorities.geom is a PostGIS MultiPolygon built from geometry_geojson by
-# migration 0070 where PostGIS is present; absent otherwise, in which case
-# filtering it out is a harmless no-op.
+# migration 0070; document_embeddings.embedding_vec is a pgvector copy of the
+# `embedding` bytea by migration 0071. Both are present only where the
+# extension is, and rebuilt on the PostgreSQL side (pipeline/geo.py,
+# pipeline/nlp/embeddings.py) — where absent, filtering them out is a harmless
+# no-op.
 PG_DERIVED_COLUMNS: dict[str, frozenset[str]] = {
     "authorities": frozenset({"geom"}),
+    "document_embeddings": frozenset({"embedding_vec"}),
 }
 
 
@@ -657,12 +661,14 @@ def migrate(source: sqlite3.Connection, target, *, settings: Settings | None = N
     sequences = reset_sequences(target)
     target.commit()
 
-    # authorities.geom is derived, not copied (portable_columns drops it), so
-    # rebuild it from the geometry_geojson that just landed. No-op unless the
-    # target is PostgreSQL with PostGIS.
+    # Rebuild the columns portable_columns dropped from the copy, from the
+    # source columns that did come across. No-op unless the target has the
+    # matching extension.
     from pipeline import geo
+    from pipeline.nlp import embeddings
 
     geo.refresh_authority_geometry(target)
+    embeddings.backfill_vectors(target)
     target.commit()
 
     # A run that was told to load some of the tables has not finished the

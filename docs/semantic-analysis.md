@@ -109,10 +109,22 @@ uv run pipeline nlp eval-retrieval --mode hybrid
 `nlp_runs` and `nlp_model_registry` carry the provenance. Migration `0065`
 is structurally identical in both dialect trees — the embedding column is a
 dialect-neutral little-endian float32 blob in each, so exact cosine is
-computed in Python. A pgvector `vector` column and an ANN index are a later
-Postgres-only migration, added **only** if the 034A retrieval benchmark
-shows exact search is too slow, and gated on the server actually having the
-`vector` extension.
+computed in Python.
+
+**The pgvector migration shipped (`0071`).** The gate was "only if exact
+search is too slow", and on the live mirror it is: at **167,779** embeddings
+one `--mode semantic` query took **~30 s** — `_semantic_ranked` pulls every
+row for the model and scores each with a per-element Python loop, and it
+grows linearly. `0071` adds `document_embeddings.embedding_vec`, a pgvector
+`vector(384)` copy of the bytea, with an HNSW index; `_semantic_ranked` gets
+a PostgreSQL-with-`vector` branch that orders by `<=>` against the index and
+returns only `depth` rows. Everything else is unchanged: the bytea stays the
+source of truth and the only thing SQLite (and a Postgres server without the
+extension) holds, the exact Python path is the fallback, and
+`embedding_vec` is filled from the bytea by
+`pipeline nlp backfill-vectors` (run once automatically when `0071` first
+applies). A model of a different width is a new migration — which is already
+how a model change is handled, gated on the retrieval eval.
 
 ## What ships now (tranche 034B) — the ontology
 

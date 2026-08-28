@@ -48,6 +48,34 @@ def test_pack_unpack_round_trips_little_endian_float32():
         assert math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-6)
 
 
+def test_vec_literal_is_pgvector_text_form():
+    assert embeddings.vec_literal([0.0, 1.0, -0.5]) == "[0.0,1.0,-0.5]"
+    # Whatever the bytea holds is what the literal must carry — same float32
+    # values, exactly, so the derived column cannot disagree with its source.
+    stored = embeddings.unpack(embeddings.pack([0.1, -0.2, 0.333333]))
+    literal = embeddings.vec_literal(stored)
+    assert literal.startswith("[") and literal.endswith("]")
+    assert [float(x) for x in literal[1:-1].split(",")] == stored
+
+
+def test_backfill_vectors_is_a_noop_without_pgvector(conn, settings):
+    _seed_version(conn, settings, _ELEMENTS)
+    nlp_chunk.run(conn, source_system="committee_paper_promotion")
+    embeddings.run(conn, model="stub")
+    result = embeddings.backfill_vectors(conn)
+    assert result["backend"] == "sqlite"
+    assert result["written"] == 0
+
+
+def test_stub_run_does_not_write_embedding_vec(conn, settings):
+    # The column does not exist on SQLite, and the stub is 256-wide anyway —
+    # `run` must not reference embedding_vec on this path.
+    _seed_version(conn, settings, _ELEMENTS)
+    nlp_chunk.run(conn, source_system="committee_paper_promotion")
+    result = embeddings.run(conn, model="stub")
+    assert result["embedded"] > 0
+
+
 def test_cosine_is_one_for_identical_and_near_zero_for_disjoint():
     a = embeddings.StubEmbedder().encode(["recruitment and retention pressure"])[0]
     b = embeddings.StubEmbedder().encode(["recruitment and retention pressure"])[0]

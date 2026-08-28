@@ -135,7 +135,13 @@ class TestTheTreesMatch:
         # PostGIS-present guard; the value is derived from `geometry_geojson`.
         # On SQLite, only the index NAME as an inert btree — SQLite has no
         # geometry type and keeps using shapely over `geometry_geojson`.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 70
+        # 71 adds document_embeddings.embedding_vec — a pgvector vector(384)
+        # copy of the `embedding` bytea, with an HNSW index, inside a
+        # pgvector-present guard (ALTER TABLE again, unseen by the column
+        # parser). SQLite keeps the exact Python cosine path; only the index
+        # NAME here, inert. The measurement that opened this gate: one exact
+        # semantic query over 167,779 embeddings took ~30 s on the mirror.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 71
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

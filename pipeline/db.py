@@ -722,6 +722,14 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
 
         geo.refresh_authority_geometry(conn)
 
+        # And fill document_embeddings.embedding_vec from the stored bytea the
+        # first time migration 0071 lands (or after a later pgvector install).
+        # A no-op unless PostgreSQL + pgvector; bounded — resume-safe on
+        # `embedding_vec IS NULL`.
+        from pipeline.nlp import embeddings as _embeddings
+
+        _embeddings.backfill_vectors(conn)
+
     return newly_applied
 
 
