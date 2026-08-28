@@ -74,10 +74,12 @@ if os.name == "nt":
 UNPUBLISHED = (
     "admin-ui-plan.md",
     "document-analysis.md",
+    "m32-sab-site-crawl.md",
     "mysociety-access-request.md",
     "public-portal-ui-spec.md",
     "public-ui-refinement-backlog.md",
     "review-queue-improvements.md",
+    "semantic-analysis.md",
     "unraid-document-worker.md",
     "upgrade-audit-prompt.md",
     "upgrade-roadmap.md",
