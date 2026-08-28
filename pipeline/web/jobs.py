@@ -302,12 +302,18 @@ class JobRegistry:
     """
 
     def __init__(self, strategy: ThreadStrategy | None = None,
-                  store: JobStore | None = None) -> None:
+                  store: JobStore | None = None,
+                  invalidate: Callable[[], None] | None = None) -> None:
         self._strategy = strategy or ThreadStrategy()
         self._lock = threading.Lock()
         self._jobs: dict[int, Job] = {}
         self._running: int | None = None
         self._store = store
+        # Called when a run finishes, to drop any read cache the warehouse it
+        # just wrote has made stale. Optional and decoupled: the registry does
+        # not import the cache module, it is handed a callback (bump_version),
+        # so a registry built without one -- most tests -- is unaffected.
+        self._invalidate = invalidate
         self._next_id = 1
         if store is not None:
             for job in store.load():
@@ -367,6 +373,20 @@ class JobRegistry:
                     self._running = None
             if self._store is not None:
                 self._store.finish(finished)
+            # A finished run may have written rows the public cache now
+            # disagrees with. Only on success -- a failed or interrupted run
+            # changed nothing worth invalidating for -- and errors are
+            # swallowed for the reason the rest of this class swallows them: a
+            # cache that cannot be dropped is a stale answer for a few minutes
+            # until the TTL lapses, which must never be the reason a job's
+            # completion callback raises. Over-invalidation (a dry run, an
+            # export job) only costs a repopulate, so the test is deliberately
+            # coarse.
+            if self._invalidate is not None and finished.state == "finished":
+                try:
+                    self._invalidate()
+                except Exception:  # pragma: no cover - defensive, like _write
+                    log.warning("web.cache_invalidate_failed", job=finished.id)
 
         job.append("info", f"started: {label}")
         log.info("web.job_started", job=job.id, kind=kind, label=label, **args)

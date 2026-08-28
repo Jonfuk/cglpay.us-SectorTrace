@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     api_rate_limit_per_minute: float = 120.0
     api_rate_limit_burst: float = 40.0
 
+    # A short-lived, in-process cache over the public API's derived responses
+    # (/api/v1/*). Optional and in-memory by deliberate choice (settled
+    # decision 6): no external store, nothing to run, nothing to unplug. Off by
+    # default so a checkout and the offline suite behave byte-identically until
+    # it is turned on. A completed pipeline run invalidates it (the job
+    # registry calls bump_version); the TTL is only a backstop for a write that
+    # does not go through a job. See pipeline/web/cache.py — the seam is the one
+    # an optional shared store (Valkey) would slot into unchanged.
+    cache_enabled: bool = False
+    cache_ttl_seconds: float = 300.0
+    cache_max_entries: int = 512
+
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural
     # config modules will extend. Contracts Finder documents a harsh

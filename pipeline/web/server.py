@@ -59,6 +59,7 @@ from pipeline.web import (
     review,
     semantic,
 )
+from pipeline.web.cache import Cache, NullCache, get_cache
 from pipeline.web.jobs import JobError, JobRegistry, JobStore
 from pipeline.web.ratelimit import TokenBucketLimiter
 
@@ -302,6 +303,21 @@ def _str(params: dict[str, list[str]], name: str, default: str = "") -> str:
     return (params.get(name, [default])[0] or "").strip()
 
 
+def _cache_key(path: str, params: dict[str, list[str]]) -> str:
+    """A stable cache key for a public read: the route and its query.
+
+    Query-parameter *order* never changes an answer, so the keys are sorted and
+    two requests that differ only in key order share an entry. Repeated-value
+    order is *not* sorted, because it can matter -- /api/v1/compare?ons_code=A&
+    ons_code=B draws its series in that order -- so [A,B] and [B,A] are kept as
+    distinct keys rather than risk one request being served the other's
+    payload. Caching both costs an entry; conflating them would be a wrong
+    answer, which this project never trades for a smaller cache.
+    """
+    items = sorted((name, list(values)) for name, values in params.items())
+    return path + "?" + json.dumps(items, separators=(",", ":"))
+
+
 def _claim_id(body: dict) -> int:
     """The claim id a write route was sent, as an int, or a refusal.
 
@@ -358,7 +374,8 @@ class Handler(BaseHTTPRequestHandler):
     _responded = False
 
     def __init__(self, *args, settings: Settings, jobs: JobRegistry,
-                 rate_limiter: TokenBucketLimiter | None = None, **kwargs):
+                 rate_limiter: TokenBucketLimiter | None = None,
+                 cache: Cache | None = None, **kwargs):
         self.settings = settings
         # Shared across every request: the whole point of the registry is that
         # a run started by one request is visible to the next.
@@ -368,6 +385,11 @@ class Handler(BaseHTTPRequestHandler):
         # client opened a new connection, which is exactly what a scraper
         # working around it would do.
         self.rate_limiter = rate_limiter
+        # Shared for the same reason again: an in-process cache is only worth
+        # having if the entry one request populates is there for the next.
+        # NullCache when unset, so a Handler built without one behaves exactly
+        # as it did before the cache existed.
+        self.cache = cache if cache is not None else NullCache()
         super().__init__(*args, **kwargs)
 
     # --- plumbing -------------------------------------------------------------
@@ -751,7 +773,25 @@ class Handler(BaseHTTPRequestHandler):
             # same numbers. Operator answers stay no-store: the review queue
             # changes as you work on it.
             max_age = PUBLIC_MAX_AGE if path.startswith("/api/v1/") else None
-            self._send_json(self._get(path, params, conn), max_age=max_age)
+            if path.startswith("/api/v1/"):
+                # The server-side twin of that max-age header: an in-process
+                # cache over the same derived payloads, so a warehouse hot with
+                # a page's worth of chart requests answers most of them without
+                # touching the aggregates again. Only /api/v1/* (public,
+                # read-only, guard_columns-checked, invalidated by a completed
+                # run); operator routes fall through and are recomputed every
+                # time, because the queue changes as you work on it. NullCache
+                # unless CACHE_ENABLED, so this is a no-op by default. The
+                # connection is still opened above -- the cache saves the query,
+                # not the connect, and moving the check earlier would tangle
+                # with the export and admin branches for a microsecond.
+                payload = self.cache.get_or_compute(
+                    _cache_key(path, params),
+                    self.settings.cache_ttl_seconds,
+                    lambda: self._get(path, params, conn))
+            else:
+                payload = self._get(path, params, conn)
+            self._send_json(payload, max_age=max_age)
         finally:
             conn.close()
 
@@ -1711,14 +1751,21 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
         )
         if settings.api_rate_limit_enabled else None
     )
+    # NullCache unless CACHE_ENABLED; shared across every request thread. Its
+    # bump_version is handed to the registry so a completed run drops the
+    # public read cache -- the one event that changes what /api/v1/* returns.
+    # When the cache is off this is a no-op, so the wiring is unconditional.
+    cache = get_cache(settings)
     # The registry is given a store, so the job list opens showing what this
     # warehouse has been asked to do rather than only what has happened since
     # the last restart. A run killed by a crash reappears as interrupted.
     server = ThreadingHTTPServer(
         (host, port),
         partial(Handler, settings=settings,
-                 jobs=JobRegistry(store=JobStore(settings)),
-                 rate_limiter=rate_limiter))
+                 jobs=JobRegistry(store=JobStore(settings),
+                                   invalidate=cache.bump_version),
+                 rate_limiter=rate_limiter,
+                 cache=cache))
     # Sockets held by request threads must not keep the process alive after
     # Ctrl-C; a review UI that needs killing twice is a review UI people leave
     # running by accident.
