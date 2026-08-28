@@ -26,44 +26,36 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). `beta` is now at `583476d` — eight out-of-queue
-  commits after BETA-033: five on the provider entity model (`9b3fe06`,
-  `eb1799f`, `fc97e66`, `b64ff10`, `583476d` — identifiers verified, then
-  the set expanded 13→21→28→32 with renamed/merged/dissolved status on the
-  portal) and three beta.md records (`2b264c2`, `2ca03a6`, next); all
-  project-owner-directed, see Dataset Additions and Recent Commits. Since
-  then: the 034A–034G semantic-analysis commits (see BETA-034), then
-  BETA-028 and BETA-029 (this commit).
-- Thirty-two items completed across this session and its predecessors:
-  BETA-001 through BETA-029 plus BETA-032, BETA-033 and BETA-035 (BETA-001
-  on `master`). BETA-032 and BETA-033 are out-of-band: the project owner
-  gave UI requests directly in an interactive session, then asked to be
-  interviewed for further design refinement of the same two pages, rather
-  than going through this queue — see their DONE entries below. BETA-028,
-  BETA-029 and BETA-035 (concise README + GitHub About, owner-directed)
-  were all completed 2026-08-28. The queue's BETA-030/031 were not
-  displaced and remain where the §52 reassessment left them. The §52 strategic
-  reassessment below was run 2026-08-26 after four consecutive narrow
-  front-end items, and the queue was re-aimed at high-impact front-end
-  work per the project owner's direct steer ("prioritise improvements for
-  the front end web ui… mind blowing").
-- Baseline: full `uv run python -m pytest` run once, after BETA-007 (the
-  first change this cycle touching core server code) — **2342 passed, 106
-  skipped, 30 deselected, 3 failed**, all three confirmed pre-existing and
-  unrelated (see BETA-007's Testing Decisions): a flaky concurrency test that
-  passes in isolation, and two document-parsing tests broken by a corrupted
-  `transformers` package cache file in this checkout's `.venv` (an optional
-  ML dependency for document OCR, nothing to do with anything this session
-  touched). Not investigated further — pre-existing environment state, not
-  this cycle's problem to fix.
+  directly, not `beta`). As reconciled on 2026-08-29, local `beta` and
+  `origin/beta` are both at **`d2c4bc7`**. The commits since the last journal
+  update include the completed map and overview work (`6d1be0e`), PostgreSQL
+  extension/trigram/PostGIS/pgvector acceleration, public-route caching, and
+  a web-renderer fix; see Recent Commits.
+- **Last completed queue item: BETA-037. Current work: BETA-038. Next:
+  BETA-039.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+  selected for this round and is DEFERRED; BETA-031 is DEFERRED because
+  BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
+  pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
+  approved twelve-item round is BETA-038 through BETA-049.
+- Recent feature commits record the full offline suite green up to **2615
+  passed**. BETA-035's earlier documentation run recorded the known flaky
+  concurrency timing test once and then passing in isolation. This journal-
+  only reconciliation does not claim a new application test run.
 
 ## Architectural Summary
 
 Stdlib Python HTTP server (`pipeline/web/server.py`), SQLite by default with
-an optional PostgreSQL backend (`DATABASE_URL`), 31 collection modules
-(`m00`–`m30`) each writing their own tables, a public evidence portal at `/`
+an optional PostgreSQL backend (`DATABASE_URL`), 33 collection modules
+(`m00`–`m32`) each writing their own tables, a public evidence portal at `/`
 and an operator UI at `/admin`, vanilla JS front ends (no framework, no build
 step — see settled decision 6 in `CLAUDE.md`).
+
+PostgreSQL can now opt into managed `pg_trgm`, PostGIS and pgvector
+capabilities without changing SQLite's portable path. Trigram matching and
+vector ANN acceleration are capability-gated; pgvector backfill is explicit,
+not a web-startup side effect. Public GET responses can use the optional
+process-local LRU with route-specific TTLs. None of these mechanisms changes
+the evidence model or promotes machine-derived material.
 
 **Deployment (updated after BETA-003):** production is **Railway** (per the
 project owner directly, and per `docs/DEPLOYMENT.md`'s existing "Somewhere
@@ -98,6 +90,14 @@ unusually well-reasoned, explicit boundary on exactly those things
 (`docs/CAVEATS.md`, `CLAUDE.md` settled decisions 1–10, the roadmap's own
 "Rejected" table). Proposing more of that surface without a concrete,
 evidenced need would be scope-seeking, not product judgement.
+
+The 2026-08-29 round keeps that boundary and concentrates on trustworthy
+access to evidence already collected: queue/release integrity, better
+contract and document discovery, source context, a public dataset catalogue,
+deterministic commissioning views, careful provider comparison, an admin-only
+semantic review workflow, an exact API contract, and accessibility/performance
+guardrails. It adds no speculative dataset and does not unblock semantic claim
+publication.
 
 ## Comparable Product Research (2026-08-26, per the project owner's request)
 
@@ -237,7 +237,30 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-034 | Semantic-analysis layer (pipeline/nlp): evidence-intelligence over the archive
+- [IN_PROGRESS] BETA-038 | Queue integrity validator
+  - started: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: engineering/ci
+  - depends_on: none
+  - objective: Add a dependency-free validator for this queue that fails on
+    duplicate item IDs, invalid states, item/state-heading mismatches, more
+    than one `IN_PROGRESS` item, or a missing `next_action` on current work.
+  - rationale: This handoff file is operational infrastructure. Its stale
+    status header and queue markers survived several completed commits, so
+    prose review alone is not a sufficient integrity control.
+  - suggested_first_action: Specify the parser contract against this file's
+    existing Markdown shape, add focused fixtures for each failure mode, then
+    run it in CI without introducing a Markdown-parser dependency.
+  - next_action: Implement the validator and CI check; report optional missing
+    historical metadata as warnings so old DONE history remains valid.
+
+### BLOCKED
+
+- [BLOCKED] BETA-034 | Semantic-analysis layer (pipeline/nlp): evidence-intelligence over the archive
   - started: 2026-08-27
   - priority: P2
   - impact: 5
@@ -246,6 +269,13 @@ DONE
   - risk: 3
   - area: nlp/pipeline
   - depends_on: pipeline/documents (document_elements), pipeline/graph (graph_claims)
+  - blocked_by: A successful human-review corpus reported by
+    `pipeline nlp gate-034g`; current code makes the gate measurable but
+    cannot substitute for named reviewers and representative decisions.
+  - resume_when: Every gate category meets its positive/negative, source,
+    subject, year-spread, held-out and inter-reviewer-agreement thresholds.
+  - alternative_work_available: BETA-038 through BETA-049 can proceed without
+    weakening or bypassing this gate.
   - origin: **Not drawn from this queue.** Project owner via `/plan` on
     2026-08-27, after two rounds of steering (clinical-NLP vs
     evidence-intelligence framing; then a detailed pre-implementation
@@ -258,8 +288,13 @@ DONE
     or a machine candidate until a person promotes it through the existing
     review queue → `graph_claims` path. Staged A–H; ship and stop per
     letter.
-  - current_state: **034A–034F complete on `beta`** (034F bar the held
-    `graph_claims` write — see `context_034f_graph`). 034G/H are gated.
+  - current_state: **034A–034F and the read-only 034G gate checker are complete
+    on `beta`; 034G training and 034H remain gated.** The latest resolver
+    batching work is `194ea33`. PostgreSQL semantic search now also has the
+    pgvector follow-up series: `c8d43fb` (ANN search/index), `1a1118e` (serial
+    HNSW build) and `777828a` (explicit backfill, removed from web startup).
+    These improve execution but do not satisfy the human-review gate. 034F
+    still withholds the `graph_claims` write — see `context_034f_graph`.
     034A — the foundation (migration `0065` — `nlp_runs`,
     `nlp_model_registry`, `document_chunks`, `document_embeddings`;
     `pipeline/nlp/{runs,models,chunk}.py`; `pipeline nlp chunk`) plus the
@@ -378,7 +413,9 @@ DONE
     NOT scheduled. When taken it must set the detector in
     `extractor_name`/`extractor_version`, leave `confidence` for the
     reviewer, `review_status='draft'`, never `promoted_by`.
-  - next_action: **034G** (SetFit few-shot classifiers) is **gated**;
+  - next_action: Keep this item BLOCKED while reviewers build the corpus;
+    rerun `pipeline nlp gate-034g` after each review tranche. **034G**
+    (SetFit few-shot classifiers) is **gated**;
     `pipeline nlp gate-034g` now reports exactly how far off it is. Closing
     the gate is reviewer labour: (a) `uv sync --extra nlp` and run the chain
     on the live warehouse with a real embedder + `--extractor gliner`;
@@ -395,17 +432,217 @@ DONE
     `retrieval_queries.json` / `gold_spans.json` / `assertion_cases.json`
     from the live warehouse; decide on medSpaCy; admin-UI surfaces for
     search / topics / mentions / the claim-candidate worklist.
-  - validation_remaining: `uv run python -m pytest` full offline suite (nlp +
-    migration-equivalence + cli + docs confirmed locally; full run pending);
-    the browser/data items above.
+  - validation_remaining: The later PostgreSQL/search series recorded the full
+    offline suite green up to 2615 passed. Still outstanding: build and review
+    the live representative corpus until `gate-034g` succeeds; browser-verify
+    admin semantic search; expand the evaluation fixtures from live data; and
+    exercise the extension paths against a disposable PostgreSQL instance.
 
 ### NEXT
 
-_(empty — BETA-030 is the next READY item.)_
+- [NEXT] BETA-039 | Release identity and beta smoke gate
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 2
+  - area: web/release
+  - depends_on: BETA-038
+  - objective: Expose a safe `GET /api/v1/meta` release identity containing
+    revision, build time, environment, latest migration, latest data timestamp
+    and capability flags; show it in the portal footer/admin UI and verify it
+    with a read-only beta smoke gate.
+  - rationale: A beta is not auditable if reviewers cannot tell which build,
+    schema and optional capabilities they are exercising. `/health` remains
+    the deliberately plain `ok` liveness endpoint.
+  - suggested_first_action: Define the stable response schema and inject build
+    metadata at deployment, then add GET-only smoke assertions that cannot
+    mutate production or trigger collection.
+
+- [NEXT] BETA-040 | Contract search and pagination
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: api/contracts/ui
+  - depends_on: BETA-039
+  - objective: Add `q`, `limit`, `offset` and `since_retrieved_at` to
+    `/api/v1/contracts`, matching buyer and supplier names case-insensitively,
+    with URL-backed portal search, show-more pagination and export/filter
+    parity apart from pagination parameters.
+  - rationale: Contract evidence is already valuable but hard to interrogate;
+    server-side filtering avoids oversized transfers and makes a shared result
+    set linkable and reproducible.
+  - suggested_first_action: Lock the request/response and export-parity tests,
+    then use existing PostgreSQL trigram indexes with a SQLite scan fallback
+    and stable ordering.
+
+- [NEXT] BETA-041 | Ranked, faceted document search
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: api/documents/search/ui
+  - depends_on: BETA-039
+  - objective: Extend public document search with `source_system`,
+    `document_type`, `year_from`, `year_to` and `since_retrieved_at` facets,
+    ranked results and stable pagination across PostgreSQL and SQLite.
+  - rationale: The existing search proves demand but offers little corpus
+    control. Facets and honest relevance ranking make results useful without
+    implying that ranking is evidential confidence.
+  - suggested_first_action: Define an explicit public-source allowlist and
+    stable tie-breakers, then implement PostgreSQL `websearch_to_tsquery` plus
+    `ts_rank_cd` and the equivalent SQLite FTS5 path.
+
+- [NEXT] BETA-042 | Document evidence-context view
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 4
+  - risk: 3
+  - area: api/documents/ui
+  - depends_on: BETA-041
+  - objective: Add `GET /api/v1/documents/{id}?element_id&context=` and a
+    portal view that places a matched element in bounded surrounding context
+    from the active document version.
+  - rationale: Snippets locate a hit but often omit the qualifiers needed to
+    interpret it. Bounded context improves scrutiny while avoiding republication
+    of whole copyrighted documents.
+  - suggested_first_action: Specify active-version and public-allowlist rules,
+    clamp context to at most three elements either side, and test boundary,
+    superseded-version and unauthorised-source cases.
+
+- [NEXT] BETA-043 | Public dataset catalogue
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: metadata/api/ui
+  - depends_on: BETA-039
+  - objective: Publish a validated registry and list/detail views describing
+    each dataset's title, publisher, official URL, evidence layer, geography,
+    cadence, public tables, licence and caveat, with exact counts and freshness.
+  - rationale: Readers should be able to discover what the system contains and
+    its limitations without reverse-engineering module names or README prose.
+  - suggested_first_action: Design the registry schema and a validation test
+    requiring every registered module to map to catalogue metadata before
+    building the API and portal views.
 
 ### READY
 
-- [READY] BETA-030 | Copy-citation button in the provenance drawer
+- [READY] BETA-044 | Commissioning-relationship detail and timeline
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: graph/api/ui
+  - depends_on: BETA-039
+  - objective: Add a relationship-detail endpoint, drawer and dated timeline
+    for deterministic provider-to-authority `AWARDED_TO` contract edges already
+    present in the evidence graph.
+  - rationale: The relationship explorer shows connections but not the source
+    events behind them. A narrow deterministic timeline adds explanatory value
+    without inventing organisational continuity.
+  - suggested_first_action: Define the endpoint from existing awarded-contract
+    provenance only; omit missing dates and never manufacture `REGISTERED_AS`,
+    claim or signal edges.
+
+- [READY] BETA-045 | Provider comparison enhancements
+  - priority: P2
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: api/providers/ui
+  - depends_on: BETA-039, BETA-043
+  - objective: Let readers compare two to four providers across clearly
+    separated Living Wage, latest gender pay gap, provider-pay and recent NHS
+    advert layers, while keeping the API well-defined for larger selections.
+  - rationale: Side-by-side evidence can reveal where follow-up is warranted,
+    but unlike measures must not be collapsed into a score, rank or synthetic
+    difference.
+  - suggested_first_action: Specify a structured JSON response/export that
+    preserves layer-specific units, dates and caveats; refuse flat CSV and add
+    tests prohibiting rankings, conversions, ratios and composite scores.
+
+- [READY] BETA-046 | Admin semantic-search workbench
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: admin/nlp/ui
+  - depends_on: BETA-039, BETA-034 (implemented search foundation only)
+  - objective: Surface the existing keyword, semantic and hybrid search modes
+    in an admin-only workbench with filters, score components, facets, excerpts,
+    sources, model identity and fallback state.
+  - rationale: The search backend exists but cannot be evaluated efficiently by
+    reviewers. An explicit diagnostic UI makes model behaviour inspectable
+    without exposing experimental semantics to the public portal.
+  - suggested_first_action: Browser-verify the existing admin API contract,
+    then build a keyboard-accessible view that labels relevance and fallback
+    behaviour without presenting either as evidence confidence.
+
+- [READY] BETA-047 | Semantic claim review and gate dashboard
+  - priority: P2
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: admin/nlp/review
+  - depends_on: BETA-034, BETA-046
+  - objective: Add admin candidate list/detail/decision/gate endpoints and a
+    keyboard-operable review dashboard with filters, named reviewer decisions,
+    ontology validation and live gate progress.
+  - rationale: BETA-034 is blocked on human review labour; a careful workbench
+    makes that labour feasible while preserving individual accountability.
+  - suggested_first_action: Wrap existing candidate and decision functions in
+    authenticated admin routes; permit only individual decisions into
+    `claim_candidate_decisions`, with no bulk approval, `graph_claims` write,
+    SetFit training or public AI output.
+
+- [READY] BETA-048 | OpenAPI 3.1 specification
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: api/docs
+  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045
+  - objective: Serve `/api/openapi.json` as an OpenAPI 3.1 description of all
+    public routes, parameters, pagination, errors, provenance and examples.
+  - rationale: A precise machine-readable contract makes the public API safer
+    to reuse and provides a testable inventory of what is intentionally public.
+  - suggested_first_action: Introduce a compact route-spec structure and an
+    exact route/spec parity test; keep it additive and avoid a framework
+    migration or generated client toolchain.
+
+- [READY] BETA-049 | Accessibility and performance guardrails
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: web/quality/ci
+  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045, BETA-046, BETA-047
+  - objective: Add repeatable mobile/desktop, light/dark, keyboard, reduced-
+    motion, accessibility and performance checks for the round's public and
+    admin surfaces.
+  - rationale: Search and comparison features are not complete if they regress
+    focus, live-region announcements, readable labels, payload bounds or query
+    plans. Guardrails make these constraints part of delivery, not cleanup.
+  - suggested_first_action: Establish representative journeys and budgets,
+    require focus/live-region/text-node rules, route limits/pagination, local
+    assets, PostgreSQL plan checks and cache assertions, then fix all critical
+    or serious findings before completion.
+
+### DEFERRED
+
+- [DEFERRED] BETA-030 | Copy-citation button in the provenance drawer
   - priority: P2
   - impact: 4
   - effort: 2
@@ -418,10 +655,12 @@ _(empty — BETA-030 is the next READY item.)_
     on the clipboard in one action — the researcher's most common manual
     step, made one click. Uses navigator.clipboard with a fallback;
     degrades to invisible when neither is available.
+  - deferred_reason: Not selected for the approved 2026-08-29 round; retain as
+    a bounded future convenience rather than displacing higher-impact work.
+  - reconsider_when: The BETA-038–049 round is complete or user research makes
+    citation-copy friction a demonstrated priority.
 
-### RESEARCH
-
-- [RESEARCH] BETA-031 | Homepage first impression: is the hero earning its place?
+- [DEFERRED] BETA-031 | Homepage first impression: is the hero earning its place?
   - priority: P2
   - question: The overview hero is deliberately conservative (its own
     header comment explains why two requested headline numbers are
@@ -435,8 +674,68 @@ _(empty — BETA-030 is the next READY item.)_
     hero adds comprehension or just pixels. The "mind blowing" steer is
     satisfied by clarity plus speed, not by animation; count-up numbers
     on evidence figures were considered and rejected as theatre.
+  - deferred_reason: Superseded by the BETA-033 homepage hero, region map and
+    motion treatment; the original research question has been answered in
+    shipped work.
+  - reconsider_when: New user evidence identifies a concrete comprehension
+    problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-037 | Optional public API LRU caching and route-specific TTLs
+  - completed: 2026-08-29
+  - commits: `aeebdf3`, `e654e80` (`beta`)
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: web/performance
+  - depends_on: none
+  - objective: Reduce repeated public GET query and serialization work with an
+    optional bounded in-process LRU, while letting near-static routes retain
+    responses longer than frequently changing ones.
+  - rationale: The portal is read-heavy and process-local caching provides a
+    useful low-complexity speedup without changing response contracts or
+    requiring shared infrastructure.
+  - suggested_first_action: Completed — implement cache keys, bounds,
+    invalidation/bypass rules and configuration, then assign and test
+    route-specific TTL classes.
+  - result: Added the optional public API response cache, cache diagnostics and
+    route-specific TTL configuration. Private/admin and unsafe requests remain
+    outside the public cache path; caching is deploy-time configurable.
+  - validation: Dedicated cache tests cover hits, expiry, eviction, disabled
+    mode, route TTL selection and relevant job invalidation behaviour.
+
+- [DONE] BETA-036 | PostgreSQL extensions, trigram matching, PostGIS and pgvector acceleration
+  - completed: 2026-08-29
+  - commits: `d613cb0`, `9bc056a`, `460725b`, `5df2307`, `cc0e869`,
+    `c6aec04`, `c8d43fb`, `f11da76`, `1a1118e`, `777828a` (`beta`)
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: database/postgresql/search
+  - depends_on: PostgreSQL deployment path; BETA-034 embedding schema
+  - objective: Provision and capability-gate `pg_trgm`, PostGIS and pgvector;
+    accelerate fuzzy name matching, authority geometry and semantic vector
+    search without breaking SQLite or PostgreSQL instances lacking an option.
+  - rationale: These workloads were already present and had clear PostgreSQL-
+    native acceleration paths. Explicit capability detection keeps portability
+    and honest degradation instead of making extensions hidden requirements.
+  - suggested_first_action: Completed — add deployment plumbing and health
+    visibility first, then land independent migrations and fallback-tested
+    consumers for trigram, geometry and vector capabilities.
+  - result: Extension-aware deployment and health reporting; trigram indexes
+    plus operator fuzzy-name search; PostGIS authority geometry; pgvector
+    storage, backfill and ANN search. HNSW construction is serial for small
+    `/dev/shm`, and vector backfill/index creation is explicit rather than a
+    health-gated web-startup side effect.
+  - validation: Migration-equivalence and focused name-match, geography and
+    embedding tests were added; feature commits recorded the full offline suite
+    green up to 2615 passed. A disposable live PostgreSQL extension matrix is
+    still valuable operational validation and is recorded under Known Issues.
 
 - [DONE] BETA-035 | Concise README + GitHub "About" pointing at the live site and the published docs
   - completed: 2026-08-28
@@ -502,13 +801,13 @@ _(empty — BETA-030 is the next READY item.)_
     pipeline tests scripts` clean. `mkdocs build --strict` clean.
     `tests/test_docs_coverage.py` + `test_register_links.py` green (21).
   - possible follow-up: `docs/semantic-analysis.md` could move from
-    `UNPUBLISHED` into the nav once 034 is no longer IN_PROGRESS — it is a
-    genuine subsystem design doc, only excluded now because it is not
+    `UNPUBLISHED` into the nav once BETA-034 is complete — it is a genuine
+    subsystem design doc, only excluded now because the gated design is not
     settled.
 
 - [DONE] BETA-028 | The map renders with the network cable unplugged
   - completed: 2026-08-28
-  - commits: (this commit; `beta`)
+  - commits: `6d1be0e` (`beta`)
   - result: `geography.js`'s map workspace now has an offline path. The
     layer-adding code that was inline in the `map.on('load')` closure is
     lifted into a named `drawAuthorityLayers()` (idempotent via a
@@ -560,7 +859,7 @@ _(empty — BETA-030 is the next READY item.)_
 
 - [DONE] BETA-029 | Overview stops downloading 500 notices to draw 10 bars
   - completed: 2026-08-28
-  - commits: (this commit; `beta`)
+  - commits: `6d1be0e` (`beta`)
   - result: `overview.js`'s `renderTopContracts()` now fetches
     `contracts?limit=10` instead of `?limit=500`. Everything the section
     draws — `value_concentration`, `largest_matched_to_provider` (already
@@ -1929,6 +2228,23 @@ _(empty — BETA-030 is the next READY item.)_
     twice already for exactly that reason. Do not re-open without new
     information about scheduling, per the roadmap's own P-03 entry.
 
+## Current Priorities
+
+1. **BETA-038 — queue integrity validator (IN_PROGRESS):** make this file's
+   handoff contract mechanically trustworthy before the round adds more state.
+2. **BETA-039 — release identity and beta smoke gate (NEXT):** make every
+   review attributable to a build, schema, data snapshot and capability set.
+3. **BETA-040–043 (NEXT):** improve public access to existing contract,
+   document and dataset evidence before expanding the corpus.
+4. **BETA-044–049 (READY):** deepen deterministic relationships and careful
+   comparison, make experimental semantic workflows reviewable in admin, then
+   publish the API contract and enforce accessibility/performance guardrails.
+
+**Hard boundary:** BETA-034 stays BLOCKED until `gate-034g` succeeds on a
+human-reviewed corpus. BETA-046 may expose the already-built search diagnostic;
+BETA-047 may collect individual named decisions. Neither may train SetFit,
+write `graph_claims`, bulk-approve candidates or publish semantic claims.
+
 ## Candidate Feature Backlog
 
 | Priority | Idea | Impact | Effort | Confidence | Status |
@@ -1953,26 +2269,44 @@ _(empty — BETA-030 is the next READY item.)_
 | P3 | Document search "show more" pagination (offset through both backends) | 2 | 2 | 4 | DONE (BETA-025) |
 | P4 | Quoted-phrase awareness in search snippets/highlights | 1 | 1 | 5 | DONE (BETA-026) |
 | P1 | Command palette: unified search (Ctrl-K) | 5 | 3 | 4 | DONE (BETA-027) |
-| P1 | Map renders with the network cable unplugged | 4 | 2 | 4 | NEXT (BETA-028) |
-| P2 | Overview payload: stop shipping 500 notices for 10 bars | 3 | 1 | 5 | NEXT (BETA-029) |
-| P2 | Copy-citation button in provenance drawer | 4 | 2 | 4 | READY (BETA-030) |
-| P2 | Homepage first-impression visual | 3 | 3 | 3 | RESEARCH (BETA-031) |
+| P1 | Map renders with the network cable unplugged | 4 | 2 | 4 | DONE (BETA-028, `6d1be0e`) |
+| P2 | Overview payload: stop shipping 500 notices for 10 bars | 3 | 1 | 5 | DONE (BETA-029, `6d1be0e`) |
+| P2 | Copy-citation button in provenance drawer | 4 | 2 | 4 | DEFERRED (BETA-030; not selected) |
+| P2 | Homepage first-impression visual | 3 | 3 | 3 | DEFERRED (BETA-031; superseded by BETA-033) |
+| P2 | Overview and pay page visual polish | 4 | 3 | 5 | DONE (BETA-032) |
+| P2 | Overview hero region map and motion treatment | 4 | 3 | 5 | DONE (BETA-033) |
+| P2 | Semantic-analysis layer over the document archive | 5 | 5 | 3 | BLOCKED (BETA-034; `gate-034g`) |
+| P2 | Concise README, live-site links and GitHub About | 3 | 2 | 5 | DONE (BETA-035) |
+| P1 | PostgreSQL extension and search acceleration | 5 | 5 | 4 | DONE (BETA-036) |
+| P2 | Optional public API LRU and route TTLs | 4 | 3 | 5 | DONE (BETA-037) |
+| P1 | Queue integrity validator | 5 | 2 | 5 | IN_PROGRESS (BETA-038) |
+| P1 | Release identity and beta smoke gate | 5 | 2 | 5 | NEXT (BETA-039) |
+| P1 | Contract search and pagination | 5 | 3 | 5 | NEXT (BETA-040) |
+| P1 | Ranked, faceted document search | 5 | 4 | 4 | NEXT (BETA-041) |
+| P1 | Document evidence-context view | 5 | 3 | 4 | NEXT (BETA-042) |
+| P1 | Public dataset catalogue | 5 | 4 | 4 | NEXT (BETA-043) |
+| P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | READY (BETA-044) |
+| P2 | Provider comparison enhancements | 4 | 4 | 4 | READY (BETA-045) |
+| P2 | Admin semantic-search workbench | 4 | 3 | 5 | READY (BETA-046) |
+| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | READY (BETA-047) |
+| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
+| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |
 
-This table is not kept current for every cycle's smaller items — see the
-note on `docs/upgrade-roadmap.md`'s own staleness pattern (Questions
-Requiring Human Input #2/BETA-002/BETA-008) for why that's a deliberate,
-disclosed gap rather than an oversight. The Autonomous Work Queue above is
-authoritative; this table is for skimming only, and BLOCKED/RESEARCH items
-in the queue are the reliable source for what's actually pending.
+This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
+Queue above remains authoritative for scope, dependencies and state.
 
 ## Features Under Investigation
 
-None currently — BETA-002/003/004 above are investigation-shaped but not yet
-started.
+BETA-006 remains RESEARCH-only and must not restart without new operational
+scheduling information. BETA-034's remaining model work is BLOCKED, not an
+open-ended investigation; its resumption condition is the explicit gate.
 
 ## Implemented Features
 
-- BETA-001, BETA-007, BETA-009, BETA-017 (see DONE above).
+See the authoritative DONE queue above. The most recent completed additions
+are BETA-036 (PostgreSQL extension/search acceleration) and BETA-037 (optional
+public-route LRU caching and TTLs), following BETA-035's documentation work and
+BETA-028/029 at `6d1be0e`.
 
 ## Dataset Additions
 
@@ -2187,6 +2521,34 @@ LAN Postgres was hand-seeded at the 21-provider stage and will catch up
 on the next module run.
 
 ## Architecture Decisions
+
+**Decision (2026-08-29): the approved BETA-038–049 round improves access,
+reviewability and release confidence before adding more datasets.** Contract
+and document discovery, bounded source context and a public catalogue make the
+existing evidence base more useful without widening it speculatively.
+
+**Decision (2026-08-29): BETA-034 is BLOCKED on the human-review gate, not on
+more model or infrastructure code.** `194ea33` and the pgvector follow-ups
+improve completed machinery, but SetFit, `graph_claims` writes and public
+semantic claims remain out of scope until `pipeline nlp gate-034g` succeeds.
+BETA-046 may diagnose existing search; BETA-047 may record individual named
+review decisions only.
+
+**Decision (2026-08-29): commissioning timelines contain only existing,
+provenanced `AWARDED_TO` contract events.** Missing dates are omitted and no
+`REGISTERED_AS`, continuity, claim or signal edge is inferred. This keeps
+BETA-044 inside the graph's deterministic evidence layer.
+
+**Decision (2026-08-29): provider comparison preserves evidence layers.**
+BETA-045 may place Living Wage, gender pay gap, provider-pay and NHS-advert
+evidence side by side, but may not rank providers, calculate cross-layer
+differences/ratios, convert unlike measures or emit a composite score. Export
+is structured JSON; a flat CSV that would erase those boundaries is refused.
+
+**Decision (2026-08-29): release identity is additive and read-only.**
+`/health` remains plain `ok`; BETA-039 adds `/api/v1/meta` and GET-only beta
+smoke checks. It does not authorise a production deployment or a write against
+the production-backed development configuration.
 
 **Decision: BETA-001 landed on `master`, not `beta`.** See its DONE entry.
 
@@ -2475,6 +2837,17 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Known Issues
 
+- BETA-034 cannot advance to SetFit or claim publication until named human
+  reviewers produce a representative corpus and `pipeline nlp gate-034g`
+  succeeds. pgvector acceleration does not change this evidence gate.
+- The new PostgreSQL extension paths have focused and migration-equivalence
+  coverage, but should still be exercised against a disposable live PostgreSQL
+  instance with the extension matrix enabled before relying on them in a new
+  deployment.
+- A beta release has no self-identifying public metadata or automated GET-only
+  smoke gate yet. BETA-039 is NEXT specifically to close that ambiguity; until
+  then confirm the deployed revision out of band and remember this checkout's
+  `.env` points at production data.
 - **2026-08-26: `refs/heads/beta` was found corrupted** (a file of spaces,
   not a SHA) immediately after the BETA-027 commit, blocking `git push`,
   `git log` and `git status` ("your current branch appears to be broken";
@@ -2588,6 +2961,27 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `d2c4bc7` — close a missing parenthesis in the operator name-match renderer;
+  reconciled `beta` / `origin/beta` HEAD for this handoff.
+- `777828a` — move pgvector backfill off health-gated web startup and make
+  index construction an explicit one-time operation (BETA-036).
+- `1a1118e` — build the pgvector HNSW index serially for small `/dev/shm`
+  deployments (BETA-036).
+- `e654e80` — assign longer TTLs to near-static public routes (BETA-037).
+- `aeebdf3` — optional bounded in-process LRU caching for public API responses
+  (BETA-037).
+- `f11da76` / `c8d43fb` — merge and implementation of pgvector ANN semantic
+  search acceleration (BETA-036).
+- `194ea33` — keep batch semantic entity resolution idempotent below backend
+  bind-parameter limits (BETA-034 current state).
+- `c6aec04` / `cc0e869` — merge and implementation of PostGIS authority
+  geometry (BETA-036).
+- `5df2307` / `460725b` — merge and implementation of trigram indexes and
+  operator fuzzy-name search (BETA-036).
+- `9bc056a` / `d613cb0` — merge and implementation of PostgreSQL extension
+  provisioning/capability plumbing (BETA-036).
+- `6d1be0e` — BETA-028 offline map fallback and BETA-029 overview payload
+  reduction; both queue items DONE.
 - `583476d` — add Compass, KCA, Blue Sky, Recovery Focus (set now 32):
   Compass an active charity, the other three merged/renamed into With You
   / Forward Trust / the Waythrough line (out-of-queue,
@@ -2672,55 +3066,37 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Revision after the §52 reassessment, 2026-08-26T16:30Z. Five questions,
-answerable without conversational history.)*
+*(Handoff snapshot reconciled against `beta` at `d2c4bc7`, 2026-08-29.)*
 
-**What is currently being worked on?** This paragraph was written before
-BETA-027 finished and was not updated at the time — BETA-027 is now DONE
-(see above; not re-verified live by this note). Per the queue markers
-above, BETA-028 (offline map fallback) is the item marked IN_PROGRESS;
-this session did not touch it and cannot confirm how far it got.
+**What is currently being worked on?** BETA-038, the dependency-free queue
+integrity validator. It should make duplicate IDs, invalid states,
+state-heading mismatches, multiple current items and a missing current
+`next_action` fail locally and in CI while warning, not failing, on optional
+metadata absent from historical DONE entries.
 
-**What was the last successful change?** BETA-033 (`5adc5e6`,
-2026-08-26T23:32Z): the Overview hero's England region map, orchestrated
-page-load and scroll-reveal motion on the Overview and Pay pages, and a
-pre-existing dead-section bug fixed along the way — out-of-band from this
-queue, the same interactive session's follow-up to BETA-032. See its DONE
-entry above, in particular the settled-decision-6 finding: reusing
-`/geography`'s live map for the hero was rejected specifically because it
-depends on a CDN basemap and a 14MB boundary payload, the exact gap
-BETA-028 below exists to close. Whoever picks up BETA-028 may find
-`scripts/generate_region_outline.py`'s dissolve-and-simplify approach (or
-its output asset) directly useful for an offline fallback, rather than
-something to re-derive. Before BETA-033: BETA-032 (`ef1a4c4`); before
-that, BETA-027 (`8da06a6`), the command palette.
+**What was the last successful queue item?** BETA-037 (`aeebdf3`, `e654e80`):
+optional bounded public-API LRU caching with route-specific TTLs. Immediately
+before it, BETA-036 delivered PostgreSQL extension plumbing plus trigram,
+PostGIS and pgvector acceleration and follow-up hardening. The branch and
+remote are reconciled at `d2c4bc7`.
 
-**What should happen next?** Whichever of BETA-028/029/030/031 the queue
-above still shows as not DONE, in that order — this note cannot confirm
-which, only that neither BETA-032 nor BETA-033 touched any of them. The
-project owner may continue interviewing for further Overview/Pay design
-work (BETA-033's own possible follow-up notes a deferred Pay-page
-signature visual) — that could land directly as further commits rather
-than through this queue, the same way BETA-032/033 did — check `git log`
-for anything after `5adc5e6` before assuming the queue below is still the
-single source of truth. A live-browser eyeball of BETA-033's motion work
-(count-up, page-load sequence, scroll reveal) is still owed — this
-session's browser pane could not composite frames for any of the three
-sessions that have now hit this same limitation (BETA-024, BETA-027,
-BETA-032/033).
+**What should happen next?** BETA-039: add the safe release-identity endpoint,
+surface it in footer/admin, and establish a GET-only beta smoke gate. Keep
+`/health` plain `ok`; do not deploy production or exercise write routes merely
+to complete the smoke check. Then proceed through BETA-040–043 in queue order.
 
-**What is blocked and why?**
-1. BETA-011 (AI-authored evidence promotion) — waiting on the project
-   owner to specify which candidate type it applies to first.
-2. BETA-005 (WDTK robots.txt exception) — time-boxed to 2026-09-10 or an
-   earlier mySociety reply.
-3. BETA-006 (`--jobs 4` re-evaluation) — refused twice for operational/
-   scheduling reasons; do not restart without new scheduling information.
+**What is blocked and why?** BETA-034 is blocked pending a successful
+human-review corpus from `pipeline nlp gate-034g`. `194ea33` and the pgvector
+follow-up commits are recorded improvements to its current implementation, not
+permission to bypass the gate. BETA-011 and BETA-005 retain their older blockers
+in the queue; BETA-006 remains research-only absent new scheduling information.
 
-**What are the highest-value upcoming items?** BETA-027 (the front door),
-BETA-028 (make decision 6 true on the map page), BETA-029 (homepage
-payload), BETA-030 (copy citation). A project-owner decision on BETA-011's
-candidate type would unblock the queue's most sensitive item.
+**Which constraints must survive the round?** Public document context remains
+bounded and allowlisted; commissioning timelines use only provenanced
+`AWARDED_TO` events; provider comparisons preserve unlike evidence layers and
+use structured JSON rather than a flattening CSV; semantic tools remain admin-
+only and individually reviewed; accessibility and performance guardrails close
+the round.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
