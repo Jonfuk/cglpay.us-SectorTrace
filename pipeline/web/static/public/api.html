@@ -361,6 +361,35 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-document_tables" data-route="document_tables">
+    <h3><code>/api/v1/document_tables</code></h3>
+    <p>
+      Tables detected in a parsed document, so evidence that sits in a table
+      can be read as a grid rather than as a flattened text snippet. Each
+      table is the grid the parser wrote to <code>document_tables</code> — its
+      page number, row and column counts, an extraction status
+      (<code>structured</code>, <code>markdown_only</code>, <code>empty</code>)
+      and a preview. <strong>No cell is re-detected or reconstructed.</strong>
+      A <code>markdown_only</code> or <code>empty</code> status means the
+      parse did not produce a structured grid. <code>table_id</code> returns
+      one table with its full grid, its nearest caption, and the surrounding
+      elements for page context; the client builds the CSV from exactly those
+      cells.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>document_id</code></td><td>A document from <a href="#route-document_search">document search</a>.</td></tr>
+        <tr><td><code>table_id</code></td><td>One <code>document_table_id</code> from the list, for the full grid.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Documents are gated by the same source allowlist as document search.
+      The source document is the authority for anything the parse got wrong.
+    </p>
+    <p><code>/api/v1/document_tables?document_id=…</code></p>
+  </article>
+
   <article class="apiroute" id="route-source_link" data-route="source_link">
     <h3><code>/api/v1/source_link</code></h3>
     <p>

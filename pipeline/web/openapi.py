@@ -111,6 +111,18 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/document_tables": {
+        "surface": "document_tables",
+        "summary": "Tables detected in a parsed document — the grid the parser "
+                   "wrote, its page number, extraction status and a preview. "
+                   "No cell is re-detected or reconstructed. `table_id` "
+                   "returns one table with its full grid, caption and "
+                   "surrounding element context.",
+        "parameters": [
+            _p("document_id", desc="A document_id from /api/v1/document_search."),
+            _p("table_id", desc="One document_table_id for the full grid."),
+        ],
+    },
     "/api/v1/source_link": {
         "surface": "source_link",
         "summary": "Whether a source URL was live, redirected or gone at the "

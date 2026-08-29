@@ -126,7 +126,8 @@ for _page in ("overview", "pay", "contracts", "geography", "treatment", "provide
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
               "revisions", "pathfinder", "timeline",
-              "cooccurrence", "discrepancies", "diary", "links"):
+              "cooccurrence", "discrepancies", "diary", "links",
+              "doctables"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1629,6 +1630,17 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "document_tables":
+            # BETA-099: tables detected in a parsed document -- the grid the
+            # parser wrote to document_tables, its page context and
+            # extraction status. No cell is re-detected. `table_id` -> one
+            # table with its full grid and context.
+            from pipeline.web import doc_tables
+            tid = _str(params, "table_id")
+            if tid:
+                return doc_tables.table_detail(conn, tid)
+            return doc_tables.tables(conn, _str(params, "document_id"))
+
         if route == "source_link":
             # BETA-100: whether a source URL was live / redirected / gone at
             # the last fetch, and whether a checksum-verified archive copy is

@@ -1415,6 +1415,20 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .lk-overview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .lk-overview li { display: flex; align-items: baseline; gap: var(--space-2); }
 
+/* BETA-099: document table extraction viewer. The grid the parser wrote,
+ * never a reconstruction. */
+.dt-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dt-input { min-width: 280px; padding: var(--space-1) var(--space-2); }
+.dt-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.dt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.dt-item { border-left: 3px solid var(--border-subtle); padding: var(--space-1) var(--space-3); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.dt-preview { flex-basis: 100%; }
+.dt-scroll { overflow-x: auto; }
+.dt-grid { border-collapse: collapse; font-size: 13px; }
+.dt-grid th, .dt-grid td { border: 1px solid var(--border-subtle); padding: 2px 8px; text-align: left; vertical-align: top; }
+.dt-grid th { background: var(--bg-elevated, rgba(127,127,127,0.08)); }
+.dt-md pre { white-space: pre-wrap; overflow-x: auto; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

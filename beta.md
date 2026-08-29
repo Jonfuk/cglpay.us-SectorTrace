@@ -297,20 +297,20 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-099 | Document table extraction viewer
-  - priority: P1
-  - impact: 5
+- [IN_PROGRESS] BETA-103 | Parser replay sandbox
+  - priority: P2
+  - impact: 4
   - effort: 5
   - confidence: 3
   - risk: 4
-  - area: public/documents
-  - depends_on: BETA-042, BETA-081
-  - objective: Display tables detected in parsed documents with page context,
-    original structure, extraction status and a structured download.
-  - next_action: Read the Docling `table` elements already in
-    `document_elements` (text + metadata_json), render the grid where the
-    parse produced one and mark it partial where it did not; CSV of what was
-    extracted, never a reconstruction.
+  - area: admin/document diagnostics
+  - depends_on: BETA-060, BETA-082, BETA-085, BETA-087
+  - objective: Replay one parser against one archived object and compare its
+    non-persisted proposed output with the stored normalised output and
+    warnings.
+  - next_action: An isolated read-only replay — parse the archived bytes in
+    memory, never write to the warehouse, and diff the proposed elements /
+    tables / warnings against the stored active version.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -550,6 +550,48 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-099 | Document table extraction viewer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: public/documents
+  - depends_on: BETA-042, BETA-081
+  - objective: Display tables detected in parsed documents with page context,
+    original structure, extraction status and a structured download.
+  - result: New `pipeline/web/doc_tables.py`. `tables(conn, document_id)` —
+    every `document_tables` row for the active version of an
+    allowlist-gated document, each with its page number, row/column counts,
+    a 3-row preview, a `reading_room_link` and an `extraction_status`:
+    `structured` (`table_json` parses to a non-empty grid), `markdown_only`
+    (only the parser's markdown), or `empty`. `table_detail(conn,
+    document_table_id)` — the **full grid straight from `table_json`** (no
+    cell is re-detected or reconstructed), the nearest preceding
+    heading/caption element, the surrounding elements for page context, and
+    the document's source URL as the authority for anything the parse got
+    wrong. New additive public route `/api/v1/document_tables` (`document_id`
+    for the list, `table_id` for one) on the frozen surface, OpenAPI,
+    `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/document_tables`. New `/doctables` route +
+    page ("Document tables"): a document_id input, a per-table list (page,
+    dimensions, status badge, preview), and a detail view rendering the grid
+    with a client-built **Download CSV** (a Blob of exactly those cells), the
+    parser markdown in a `<details>`, and the surrounding-element context.
+    Linked from the footer nav. `styles.css` gained a `.dt-*` block.
+  - validation: New `tests/test_web_doc_tables.py` (5 — the list reports the
+    page and per-table status (structured vs markdown_only); the detail
+    returns the `table_json` grid verbatim with its caption and the "parser's
+    own extraction" note; a non-allowlisted source is refused; unknown
+    document / table raise; the route is in the OpenAPI doc).
+    `test_portal_isolation` / `test_portal_navigation` / `test_web_openapi` /
+    `test_portal_offline_reading` / `test_portal_design_system` green;
+    `ruff` clean. Browser-verified on `#/doctables?doc=…&table=…`: "Table on
+    page 4", caption "Table 8: pay by staff group", the 3×2 grid (Staff
+    group / Median pay / Recovery worker 24500 / Team leader 31200), a
+    Download CSV action and a "HEADING: Table 8…" context line.
 
 - [DONE] BETA-100 | Source-link resilience checker
   - completed: 2026-08-29
@@ -5408,11 +5450,11 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | DONE (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | DONE (BETA-098) |
-| P1 | Document table extraction viewer | 5 | 5 | 3 | IN_PROGRESS (BETA-099) |
+| P1 | Document table extraction viewer | 5 | 5 | 3 | DONE (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | DONE (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
-| P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
+| P2 | Parser replay sandbox | 4 | 5 | 3 | IN_PROGRESS (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
