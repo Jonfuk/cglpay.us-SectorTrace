@@ -1240,6 +1240,12 @@ class Handler(BaseHTTPRequestHandler):
                      "staleness": artefacts.staleness(
                          self.settings, conn, listed["files"])}
 
+        if path == "/api/admin/url-overlaps":
+            # Candidate URL overlap signals (BETA-057): one canonical URL
+            # appearing in more than one source table. A lead, not proof.
+            from pipeline.web import url_overlaps
+            return url_overlaps.overlaps(conn, limit=_int(params, "limit", 200))
+
         if path == "/api/admin/aliases":
             # Human alias-resolution workflow (BETA-056): unmatched names for
             # one scheme with their append-only decision history.

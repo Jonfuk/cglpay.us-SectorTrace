@@ -395,6 +395,53 @@ function loadAll() {
   loadFreshness();
   loadCompleteness();
   loadArchiveAudits();
+  loadUrlOverlaps();
+}
+
+/* BETA-057: one canonical URL appearing in more than one source table. A
+ * lead a reviewer looks at — not a merge instruction. Loaded lazily on the
+ * <details> first-expand because it scans several tables. */
+async function loadUrlOverlaps() {
+  const holder = $('url-overlaps');
+  if (!holder) return;
+  const details = holder.closest('details');
+  if (details && !details.open) {
+    if (!details.dataset.wired) {
+      details.dataset.wired = '1';
+      details.addEventListener('toggle', () => {
+        if (details.open && !details.dataset.loaded) {
+          details.dataset.loaded = '1';
+          loadUrlOverlaps();
+        }
+      });
+    }
+    return;
+  }
+
+  holder.replaceChildren(el('p', { class: 'muted small', text: 'Scanning…' }));
+  let data;
+  try { data = await api('/api/admin/url-overlaps'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'bad small', text: e.message })); return; }
+
+  const groups = data.overlaps || [];
+  if (!groups.length) {
+    return holder.replaceChildren(el('p', { class: 'muted small',
+      text: `No overlaps found across ${data.scanned} URLs.` }));
+  }
+
+  holder.replaceChildren(
+    el('p', { class: 'muted small',
+      text: `${data.total} overlap(s) over ${data.scanned} URLs` }),
+    ...groups.map((g) => el('details', {},
+      el('summary', { class: 'small' },
+        el('strong', { text: g.canonical_url }), ' ',
+        el('span', { class: 'muted', text: `· ${g.distinct_sources} sources` })),
+      el('table', {}, el('tbody', {}, g.occurrences.map((o) => el('tr', {},
+        el('td', { class: 'muted small', text: o.table }),
+        el('td', { class: 'small', text: o.role }),
+        el('td', { class: 'num', text: String(o.row_count) }),
+        el('td', {}, el('a', { href: o.raw_url, target: '_blank', rel: 'noopener',
+          class: 'small', text: o.raw_url })))))))));
 }
 
 /* BETA-060: the append-only archive-audit history. Read-only — recording one

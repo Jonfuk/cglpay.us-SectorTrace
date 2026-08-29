@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-056. Current
-  work: BETA-057. Next: BETA-061, BETA-062.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-057. Current
+  work: BETA-061. Next: BETA-062, BETA-063.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,29 +272,32 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-057 | Candidate URL overlap signals
-  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-056 completed
+- [IN_PROGRESS] BETA-061 | Candidate-promotion campaign workspace
+  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-057 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 3
-  - effort: 3
+  - priority: P1
+  - impact: 5
+  - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: data-quality/review
-  - depends_on: BETA-052
-  - objective: Show when a conservatively canonicalised URL appears across
-    source tables or workflow roles.
-  - rationale: Overlap can expose duplicate discovery or related evidence, but
-    it is not proof that records should be merged, discarded or reprioritised.
-  - suggested_first_action: Define fixtures for fragments, tracking parameters,
-    redirects and genuinely distinct documents before writing the normaliser.
-  - next_action: Add a conservative URL canonicaliser (strip fragment, sort
-    and drop known tracking params, lowercase host, keep path/query
-    otherwise — never follow a redirect) with fixture tests; a
-    `GET /api/admin/url-overlaps` that groups a canonical URL appearing in
-    more than one source table / review role, with counts and the raw URLs;
-    an admin panel; a caveat that overlap is a lead, never proof to merge,
-    discard or reprioritise.
+  - risk: 3
+  - area: evidence-promotion
+  - depends_on: BETA-052, BETA-054
+  - objective: Provide a campaign workspace for CDP documents, committee papers
+    and FOI/SAR candidates with filters, previews, session progress and explicit
+    promote/reject/reset actions.
+  - rationale: Candidate promotion is a separate audited human act from general
+    review-queue decisions and needs a focused workflow rather than unattended
+    batching.
+  - suggested_first_action: Reuse the existing promotion API through the shared
+    typed presenters; retain one-candidate-at-a-time confirmation and prohibit
+    `promote all`.
+  - next_action: Reuse the existing `/api/admin/candidates` list and
+    `/api/admin/candidates/promote|reject|reset` endpoints (one candidate at
+    a time already — pipeline/promote.py) behind a dedicated Candidates-tab
+    "campaign" view with a kind filter (cdp_document / committee_paper /
+    foi_request), a per-candidate preview reusing BETA-052's typed context,
+    a session-progress line, and no `promote all` control; source-pin tests
+    that batching stays forbidden.
 
 ### BLOCKED
 
@@ -478,25 +481,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-061 | Candidate-promotion campaign workspace
-  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-060 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: evidence-promotion
-  - depends_on: BETA-052, BETA-054
-  - objective: Provide a campaign workspace for CDP documents, committee papers
-    and FOI/SAR candidates with filters, previews, session progress and explicit
-    promote/reject/reset actions.
-  - rationale: Candidate promotion is a separate audited human act from general
-    review-queue decisions and needs a focused workflow rather than unattended
-    batching.
-  - suggested_first_action: Reuse the existing promotion API through the shared
-    typed presenters; retain one-candidate-at-a-time confirmation and prohibit
-    `promote all`.
-
 - [NEXT] BETA-062 | Human-readable document titles
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-056 completed
   - priority: P2
@@ -513,6 +497,23 @@ DONE
     remain explainable rather than being presented as source text.
   - suggested_first_action: Add fixtures for blank, misleading, duplicated and
     personal-name-heavy metadata, then specify deterministic precedence.
+
+- [NEXT] BETA-063 | PostgreSQL extension readiness gate
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-057 completed
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: database/deployment
+  - depends_on: BETA-036, BETA-039
+  - objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
+    version, extensions, operator classes, expected indexes and active fallbacks;
+    exercise core and extension-enabled disposable PostgreSQL paths in CI.
+  - rationale: BETA-036 has focused coverage but its optional extension matrix
+    has not yet been proven in a disposable live PostgreSQL deployment.
+  - suggested_first_action: Codify the trigram, PostGIS and pgvector capability
+    matrix and its fallback expectations.
 
 ### READY### READY
 
@@ -561,6 +562,50 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-057 | Candidate URL overlap signals
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: data-quality/review
+  - depends_on: BETA-052
+  - objective: Show when a conservatively canonicalised URL appears across
+    source tables or workflow roles.
+  - result: New `pipeline/url_canon.py` — `canonical(url)`: lowercases
+    scheme + host, drops the fragment, drops known tracking params
+    (`utm_*`, `gclid`, `fbclid`, `mc_cid`, …), sorts the remaining query,
+    strips one trailing slash, drops a default port. It deliberately does
+    **not** resolve `..`, add/remove `www`, collapse `/index.html`, touch
+    percent-encoding, or follow a redirect — every one of those turns
+    "probably the same" into a wrong merge, and this feeds a *signal* not an
+    identity decision. A non-http value comes back stripped, unchanged.
+    New `pipeline/web/url_overlaps.py` — `overlaps(conn)` scans a fixed
+    `(table, url column, role)` list (contract notice pages, PFD/CDP/
+    committee/SAR/FOI/charity/pay-page/data.gov.uk URLs, review-item raw
+    values), groups by `url_canon.canonical`, and returns only the canonical
+    URLs that appear in **more than one** source table, with each
+    occurrence's table/role/raw URL/row count, sorted by distinct-source
+    count. Read-only (source scan test). Caveat: an overlap is a lead — the
+    same document discovered twice, or two rows about one page — never proof
+    to merge, discard or reprioritise.
+  - api/ui: `GET /api/admin/url-overlaps` (admin only); a lazily-loaded
+    "URL overlaps" `<details>` panel in the Health tab, one collapsible
+    group per canonical URL.
+  - validation: New `tests/test_url_canon.py` (7 — fragment dropped,
+    tracking vs real params, query sorted, case + trailing slash, default
+    vs real port, and the explicit "does not resolve `..` / touch `www` /
+    collapse `index.html`" refusals) and `tests/test_web_url_overlaps.py`
+    (5 — a URL in two tables is one overlap while a URL in one is not, two
+    spellings that canonicalise the same are grouped, the caveat wording,
+    the read-only source scan, the admin-only route). Full offline suite
+    green — **2815 passed, 109 skipped, 35 deselected, 0 failed**. `ruff`
+    clean. Browser-verified against a seeded scratch warehouse: the Health
+    panel shows one overlap group (`https://docs.gov.uk/r/7` across
+    `contracts` and `pfd_reports`), expandable to the two raw spellings,
+    zero console errors.
 
 - [DONE] BETA-056 | Human alias-resolution workflow
   - completed: 2026-08-29
@@ -3242,13 +3287,13 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | DONE (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | DONE (BETA-056) |
-| P2 | Candidate URL overlap signals | 3 | 3 | 4 | IN_PROGRESS (BETA-057) |
+| P2 | Candidate URL overlap signals | 3 | 3 | 4 | DONE (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
-| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | NEXT (BETA-061) |
+| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | IN_PROGRESS (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | NEXT (BETA-062) |
-| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |
+| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | NEXT (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | Approved successor backlog (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | Approved successor backlog (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | Approved successor backlog (BETA-066) |
