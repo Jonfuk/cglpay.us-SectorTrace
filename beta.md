@@ -32,8 +32,9 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-047. Current work: BETA-048. Next:
-  BETA-049.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-048. Current work: BETA-049 (the final
+  item of the BETA-038–049 round). Next: BETA-050 once BETA-049 is DONE.**
+  BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,29 +272,33 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-048 | OpenAPI 3.1 specification
-  - promoted_from: NEXT on 2026-08-29 after BETA-047 completed
+- [IN_PROGRESS] BETA-049 | Accessibility and performance guardrails
+  - promoted_from: NEXT on 2026-08-29 after BETA-048 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
   - risk: 2
-  - area: api/docs
-  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045
-  - objective: Serve `/api/openapi.json` as an OpenAPI 3.1 description of all
-    public routes, parameters, pagination, errors, provenance and examples.
-  - rationale: A precise machine-readable contract makes the public API safer
-    to reuse and provides a testable inventory of what is intentionally public.
-  - suggested_first_action: Introduce a compact route-spec structure and an
-    exact route/spec parity test; keep it additive and avoid a framework
-    migration or generated client toolchain.
-  - next_action: Add a `pipeline/web/openapi.py` that builds an OpenAPI 3.1
-    document from a compact per-route spec table covering every
-    `PUBLIC_API_ROUTES` / pattern / `export`; serve it at `/api/openapi.json`
-    (static-map dispatch, GET only); a parity test binding the spec's paths to
-    `test_portal_isolation.PUBLIC_API_ROUTES|PATTERNS|EXTRA` in both
-    directions; document the route on `api.html` and in `<noscript>`.
+  - area: web/quality/ci
+  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045, BETA-046, BETA-047
+  - objective: Add repeatable mobile/desktop, light/dark, keyboard, reduced-
+    motion, accessibility and performance checks for the round's public and
+    admin surfaces.
+  - rationale: Search and comparison features are not complete if they regress
+    focus, live-region announcements, readable labels, payload bounds or query
+    plans. Guardrails make these constraints part of delivery, not cleanup.
+  - suggested_first_action: Establish representative journeys and budgets,
+    require focus/live-region/text-node rules, route limits/pagination, local
+    assets, PostgreSQL plan checks and cache assertions, then fix all critical
+    or serious findings before completion.
+  - next_action: Add offline guardrail tests over the BETA-038–048 surfaces —
+    new public pages (`#/catalogue`, provider compare) and admin tabs
+    (Search, Claim review) declare an `aria-live` status region and reach
+    the DOM as text nodes; every new `/api/v1/*` route bounds its result set
+    (`limit` cap or a documented complete-export); the new admin JS carries
+    no external asset reference; the frozen public static surface has no new
+    remote URL. Fix any finding before marking DONE.
 
 ### BLOCKED
 
@@ -477,31 +482,13 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-049 | Accessibility and performance guardrails
-  - promoted_from: READY on 2026-08-29 after BETA-047 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 2
-  - area: web/quality/ci
-  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045, BETA-046, BETA-047
-  - objective: Add repeatable mobile/desktop, light/dark, keyboard, reduced-
-    motion, accessibility and performance checks for the round's public and
-    admin surfaces.
-  - rationale: Search and comparison features are not complete if they regress
-    focus, live-region announcements, readable labels, payload bounds or query
-    plans. Guardrails make these constraints part of delivery, not cleanup.
-  - suggested_first_action: Establish representative journeys and budgets,
-    require focus/live-region/text-node rules, route limits/pagination, local
-    assets, PostgreSQL plan checks and cache assertions, then fix all critical
-    or serious findings before completion.
+_(empty — BETA-049 is the final item of the BETA-038–049 round. When it is
+DONE, promote BETA-050 to IN_PROGRESS and BETA-051, BETA-052 and BETA-058 to
+NEXT, per the delivery sequence in the Approved successor round subsection.)_
 
 ### READY
 
-_(empty — BETA-049 is the last item of the BETA-038–049 round; the
-BETA-050–067 successor round is promoted per its delivery sequence once
-BETA-049 is DONE.)_
+_(empty — see NEXT.)_
 
 ### DEFERRED
 
@@ -544,6 +531,48 @@ BETA-049 is DONE.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-048 | OpenAPI 3.1 specification
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: api/docs
+  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045
+  - objective: Serve `/api/openapi.json` as an OpenAPI 3.1 description of all
+    public routes, parameters, pagination, errors, provenance and examples.
+  - result: New `pipeline/web/openapi.py` — a compact hand-maintained
+    `ROUTES` table (one entry per public route, each carrying a `surface`
+    field that is its verbatim string in `test_portal_isolation.py`) and a
+    `document()` that assembles the OpenAPI 3.1 dict: `openapi: "3.1.0"`,
+    `info` (with the "GET only, no CORS, personal data unreachable, nothing
+    inferred" contract and the OGL licence), `servers`, `paths` (GET per
+    route with typed `parameters` and the shared `200`/`400`/`404`
+    responses), and `components.schemas.Error` (`{error: string}`). No
+    framework, no generated client — a dict and `json.dumps`.
+  - route: Served at `GET /api/openapi.json` in `server.py`'s `_serve_api`,
+    before the warehouse connection is opened (it reads nothing) — a sibling
+    of the `/api` HTML page, deliberately **not** a `/api/v1/*` route.
+    GET/HEAD only; `POST` and `/api/v1/openapi.json` are 404. `PUBLIC_MAX_AGE`
+    cache header, like the rest of the read API.
+  - parity: New `tests/test_web_openapi.py` (7 tests) — the decisive one binds
+    `{spec["surface"] for spec in openapi.ROUTES.values()}` to
+    `PUBLIC_API_ROUTES | PUBLIC_API_PATTERNS | PUBLIC_API_EXTRA` with `==`
+    in both directions, so a new `/api/v1/` route that nobody described, or a
+    described route the server dropped, fails. Also: every `{param}` path
+    lines up with a `PUBLIC_API_PATTERNS` regex and a plain path with a
+    route/EXTRA name; valid 3.1 shape; every path var is a declared `path`
+    parameter; and the served bytes equal `openapi.document()`.
+  - api-doc: `api.html` gains an informational `/api/openapi.json` article
+    (no `data-route` attribute, so the frozen-surface parity test ignores
+    it); the `<noscript>` list gains its line (the `/api/v1/([a-z_]+)` regex
+    the offline-reading test uses cannot match it, so exact-equality holds).
+  - validation: Full offline suite green — **2726 passed, 109 skipped, 34
+    deselected, 0 failed**. `ruff check pipeline tests` clean.
+    Browser-verified against the scratch warehouse: `/api/openapi.json`
+    serves `openapi 3.1.0` with 26 paths, GET 200 / HEAD 200 / POST 404.
 
 - [DONE] BETA-047 | Semantic claim review and gate dashboard
   - completed: 2026-08-29
@@ -2647,8 +2676,8 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Provider comparison enhancements | 4 | 4 | 4 | DONE (BETA-045) |
 | P2 | Admin semantic-search workbench | 4 | 3 | 5 | DONE (BETA-046) |
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | DONE (BETA-047) |
-| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | IN_PROGRESS (BETA-048) |
-| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | NEXT (BETA-049) |
+| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | DONE (BETA-048) |
+| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | IN_PROGRESS (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | Approved successor backlog (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | Approved successor backlog (BETA-052) |

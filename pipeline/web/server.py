@@ -53,6 +53,7 @@ from pipeline.web import (
     claims,
     health,
     name_matches,
+    openapi,
     public_export,
     public_queries,
     queries,
@@ -796,6 +797,13 @@ class Handler(BaseHTTPRequestHandler):
         # has no use for a connection.
         if path == "/api/admin/exports/file":
             return self._download_export(params)
+
+        # The OpenAPI 3.1 description of the public API (BETA-048). A static
+        # document — no warehouse read — and a sibling of `/api` (the HTML
+        # page), not a `/api/v1/*` route. `tests/test_web_openapi.py` binds
+        # its paths to the frozen public surface.
+        if path == "/api/openapi.json":
+            return self._send_json(openapi.document(), max_age=PUBLIC_MAX_AGE)
 
         conn = queries.readonly_connection(self.settings)
         try:
