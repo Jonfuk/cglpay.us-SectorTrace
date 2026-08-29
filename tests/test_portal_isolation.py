@@ -46,6 +46,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/recent.js",
     "/js/notebook.js",
     "/js/savedsearch.js",
+    "/js/journey.js",
     "/js/pages/overview.js",
     "/js/pages/pay.js",
     "/js/pages/contracts.js",

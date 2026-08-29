@@ -323,6 +323,7 @@ const ROUTES = {
   '/revisions': () => import('/js/pages/revisions.js'),
   '/pathfinder': () => import('/js/pages/pathfinder.js'),
   '/timeline': () => import('/js/pages/timeline.js'),
+  '/journey': () => import('/js/journey.js'),
 };
 
 /* One <title> per route. Until now all thirteen shared index.html's static
@@ -354,6 +355,7 @@ const ROUTE_TITLES = {
   '/revisions': 'Compare revisions',
   '/pathfinder': 'Relationship pathfinder',
   '/timeline': 'Coverage timeline',
+  '/journey': 'Research journey',
 };
 
 let disposeCurrent = null;
@@ -479,6 +481,13 @@ async function render() {
     // #main carries tabindex="-1" for exactly this; preventScroll keeps the
     // reader where they were instead of jumping the viewport to the top.
     if (navigating) main.focus({ preventScroll: true });
+
+    // BETA-094: record this visit on the local research trail. Loaded on
+    // demand so app.js and journey.js do not import each other; a failure
+    // here must never stop a page rendering.
+    import('/js/journey.js')
+      .then((m) => m.recordVisit({ hash: hereHash, route: base.replace(/^\//, ''), label: routeLabel }))
+      .catch(() => {});
 
     // BETA-077: restore scroll for a URL we have seen before (back/forward,
     // or a breadcrumb to a list); a fresh navigation starts at the top.

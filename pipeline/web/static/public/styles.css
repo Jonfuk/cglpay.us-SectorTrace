@@ -1357,6 +1357,17 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .tl-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .tl-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-accent); text-decoration: none; }
 
+/* BETA-094: visual research journey. A branching trail of visited routes;
+ * a branch indents under its parent, checkpoints carry a diamond. */
+.jr-tree { display: flex; flex-direction: column; gap: 2px; }
+.jr-branch { border-left: 1px solid var(--border-subtle); padding-left: var(--space-2); }
+.jr-node { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 2px 0; }
+.jr-node.jr-current .jr-link { font-weight: 700; }
+.jr-node.jr-current::before { content: "▸ "; color: var(--accent-amber); }
+.jr-diamond { color: var(--accent-amber); }
+.jr-checkpoint .jr-link { color: var(--accent-amber); }
+.jr-name { font-size: 12px; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

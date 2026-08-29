@@ -297,19 +297,19 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-094 | Visual research journey
-  - priority: P2
-  - impact: 4
-  - effort: 3
+- [IN_PROGRESS] BETA-095 | Entity co-occurrence explorer
+  - priority: P1
+  - impact: 5
+  - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: public/research continuity
-  - depends_on: BETA-072, BETA-077, BETA-088
-  - objective: Render the current local session as a branching trail of
-    searches, entities, documents and comparisons with named checkpoints.
-  - next_action: Define a bounded local event model (public identifiers only,
-    guarded) that records route visits as a branching trail, with named
-    checkpoints and prune-to-cap.
+  - risk: 4
+  - area: public/documents
+  - depends_on: BETA-041, BETA-042, BETA-081
+  - objective: Find documents or notices in which two or more selected tracked
+    entities occur together and expose each exact passage or structured field.
+  - next_action: Restrict v1 to verified entity aliases and same-record
+    co-occurrence; label results as location, never as an asserted
+    relationship.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -549,6 +549,50 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-094 | Visual research journey
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: public/research continuity
+  - depends_on: BETA-072, BETA-077, BETA-088
+  - objective: Render the current local session as a branching trail of
+    searches, entities, documents and comparisons with named checkpoints.
+  - result: New portal module `js/journey.js` — one bounded, guarded
+    `localStorage` key `sectortrace.journey` (`SCHEMA_VERSION = 1`, 150-event
+    cap). Each route visit is a node `{id, hash, route, label, at, parent,
+    name}`; `parent` is **the node the reader was on**, so navigating back to
+    an earlier page and then somewhere new makes a branch rather than a
+    straight line. Revisiting an exact hash re-points `current` without
+    adding a node. `checkpoint(id, name)` names a step. `_prune()` drops only
+    the oldest *leaf* nodes that are neither named nor on the path from
+    `current` to the root, so the shape and the checkpoints survive the cap.
+    Only a hash route, the label the portal already shows, a timestamp and
+    the parent id are stored. The router (`app.js render()`) calls
+    `recordVisit()` after a successful render, loaded on demand and
+    `.catch()`-guarded so it can never block a page; the `/journey` route is
+    itself not recorded.
+  - api/ui: no API — entirely local. New `/journey` route + page ("Research
+    journey"): the trail as an indented tree, each node a link to its hash,
+    checkpoints marked with a diamond and the current node with a caret, a
+    "checkpoint / rename" control per node and a "Clear trail" action.
+    Module registered in `server.py` and `test_portal_isolation`; linked from
+    the footer nav. `styles.css` gained a `.jr-*` block.
+  - validation: New `tests/test_portal_journey.py` (5 — the store is
+    versioned, bounded and guarded and dispatches `journeychange`; a new
+    node's parent is `state.current` and a revisit re-points rather than
+    duplicates, and `/journey` is not recorded; prune keeps checkpoints and
+    the current path and drops only leaves; recording is wired into the
+    router and `.catch`-guarded; the route and module are registered).
+    `test_portal_isolation` / `test_portal_navigation` /
+    `test_portal_design_system` green; `ruff` clean. Browser-verified: a
+    browse of `#/pay → #/contracts → #/pay?provider=cgl`, back to `#/pay`,
+    then `#/geography` produces a tree `pay → {contracts → pay?provider=cgl,
+    geography}` — geography branches off `pay`, not off the last node — and
+    naming the contracts node renders "◆ the money trail" in the tree.
 
 - [DONE] BETA-097 | Temporal coverage navigator
   - completed: 2026-08-29
@@ -5173,8 +5217,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | DONE (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | DONE (BETA-093) |
-| P2 | Visual research journey | 4 | 3 | 4 | IN_PROGRESS (BETA-094) |
-| P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |
+| P2 | Visual research journey | 4 | 3 | 4 | DONE (BETA-094) |
+| P1 | Entity co-occurrence explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-095) |
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
