@@ -91,12 +91,22 @@ a:hover { text-decoration-color: currentColor; }
 .topbar {
   display: flex; align-items: center; gap: var(--space-6);
   padding: var(--space-3) var(--space-6);
+  position: sticky; top: 0; z-index: 40;
+  flex-wrap: wrap;
+}
+/* The glass background lives on a pseudo-element, not on `.topbar` itself.
+   `backdrop-filter` on `.topbar` makes it the containing block for every
+   descendant with `position: fixed` -- which is what the mobile section
+   drawer (`#portal-nav`, an `offcanvas-lg`) uses. It was being sized against
+   the 64px topbar instead of the viewport, so opening the menu on a phone
+   showed a 32px sliver of clipped links (BETA-069). Moving the filter here
+   lets the drawer escape to the viewport while keeping the effect. */
+.topbar::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
   background: color-mix(in srgb, var(--bg-base) 88%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border-subtle);
-  position: sticky; top: 0; z-index: 40;
-  flex-wrap: wrap;
 }
 .brand { display: flex; align-items: center; gap: var(--space-2); text-decoration: none; color: inherit; }
 .brand-mark {
@@ -136,8 +146,10 @@ a:hover { text-decoration-color: currentColor; }
 }
 .adminlink:hover { color: var(--text-secondary); border-color: var(--border-accent); }
 
-/* "Find your council" (W-17): a navigator in the top bar, not a filter.
-   Right-aligned with the admin links; the list drops below the input. */
+/* "Find your council" (W-17): a navigator, not a filter. It lives inside the
+   section drawer (BETA-069); on desktop the `margin-left: auto` here lifts it
+   to the right of the nav row, level with the palette button, so the wide
+   topbar layout is unchanged. The list drops below the input. */
 .findcouncil { position: relative; margin-left: auto; }
 .findcouncil input { min-width: 190px; }
 .findcouncil .typeahead-list { min-width: 260px; right: 0; left: auto; }
@@ -727,14 +739,20 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
   .portal-nav .lens-menu { order: 0; }
   .portal-nav .lens-menu-panel { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 100%; margin: 4px 0 8px; box-shadow: none; }
-  .findcouncil { order: 3; margin-left: auto; }
-  .findcouncil input { min-width: 0; width: min(35vw, 150px); }
+  /* BETA-069: the council navigator sits in the drawer as a full-width row.
+     It used to ride the topbar flex here at `min(35vw, 150px)`, which is what
+     clipped past the right viewport edge at 390px. `order` puts it above the
+     theme control without moving it in the DOM, where `margin-left: auto`
+     still needs it last so the desktop topbar layout is unchanged. */
+  .portal-nav .findcouncil { width: 100%; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 1; }
+  .portal-nav .findcouncil input { flex: 1; min-width: 0; width: auto; }
+  .portal-nav .findcouncil .typeahead-list { left: 0; right: 0; min-width: 0; }
   /* Was `display: none` outright below 900px, with nothing replacing it --
      a phone reader had no way to override "system" theme at all. Now it
-     sits in the offcanvas nav like any other item, below the lens menu,
-     with a top rule instead of the desktop left rule. */
+     sits in the offcanvas nav like any other item, below the council
+     navigator, with a top rule instead of the desktop left rule. */
   .topbar > .theme-control { display: none; }
-  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); }
+  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 2; }
   .filterbar.offcanvas.is-mobile-filter { position: fixed; top: 0; right: 0; bottom: 0; visibility: hidden; transform: translateX(100%); width: min(92vw, 380px); height: 100%; flex-direction: column; }
   .filterbar.offcanvas.is-mobile-filter:not(.show) { display: none; }
   .filterbar.offcanvas.is-mobile-filter.show { visibility: visible; transform: none; }
@@ -761,16 +779,16 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .portal-nav .mainnav { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
   .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
   .portal-nav .lens-menu-panel { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 100%; margin: 4px 0 8px; box-shadow: none; }
-  .findcouncil { order: 3; margin-left: auto; }
-  .findcouncil input { min-width: 0; width: min(24vw, 170px); }
+  .portal-nav .findcouncil { width: 100%; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 1; }
+  .portal-nav .findcouncil input { flex: 1; min-width: 0; width: auto; }
+  .portal-nav .findcouncil .typeahead-list { left: 0; right: 0; min-width: 0; }
   .topbar > .theme-control { display: none; }
-  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); }
+  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 2; }
 }
 
 @media (max-width: 340px) {
   .topbar { gap: 6px; padding-left: 10px; padding-right: 10px; }
   .brand-text { font-size: 16px; }
-  .findcouncil input { width: 88px; }
   .palette-open { padding: 6px 8px; }
   .menu-toggle { padding-left: 6px; padding-right: 6px; }
 }

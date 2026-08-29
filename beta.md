@@ -297,23 +297,25 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-069 | Rebuild the mobile public header
+- [IN_PROGRESS] BETA-070 | Workforce pay explorer
   - priority: P1
   - impact: 5
-  - effort: 3
-  - confidence: 5
-  - risk: 1
-  - area: public/responsive shell
-  - depends_on: BETA-049
-  - objective: At phone widths show only brand, menu and search; move council
-    lookup, navigation and theme selection into the drawer; remove clipping,
-    horizontal overflow and the duplicated campaign-lens label.
-  - next_action: Pin the 390x844, 768x1024 and desktop header layouts in
-    browser tests before changing the shared shell.
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/workforce
+  - depends_on: BETA-043, BETA-049
+  - objective: Create one focused interface for salary bands, statutory
+    benchmarks, workforce census measures, provider pay pages, job adverts,
+    gender-pay-gap filings and Living Wage evidence, filtered by role,
+    provider, source, year and pay unit.
+  - next_action: Inventory the exact fields, units, coverage and caveats of
+    each pay source and define explicit source-group panels before composing
+    any cross-source screen.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068 is complete, see DONE. The remaining items are being
-delivered in the approved wave order.)_
+on 2026-08-29. BETA-068–069 are complete, see DONE. The remaining items are
+being delivered in the approved wave order.)_
 
 ### BLOCKED
 
@@ -548,6 +550,51 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-069 | Rebuild the mobile public header
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 1
+  - area: public/responsive shell
+  - depends_on: BETA-049
+  - objective: At phone widths show only brand, menu and search; move council
+    lookup, navigation and theme selection into the drawer; remove clipping,
+    horizontal overflow and the duplicated campaign-lens label.
+  - result: Root cause of the 390px clipping and of a broken section drawer
+    that predated this item: `.topbar` carried `backdrop-filter`, which makes
+    it the containing block for every `position: fixed` descendant — so
+    `#portal-nav` (the `offcanvas-lg` section drawer) was being sized against
+    the 64px topbar, and opening the menu on a phone showed a 32px sliver of
+    clipped links. The glass effect moved to `.topbar::before`
+    (`position: absolute; inset: 0; backdrop-filter`), which keeps the look
+    and lets the drawer escape to the viewport. The council navigator
+    (`.findcouncil`) moved out of the topbar flex row and into the drawer as
+    a full-width row (ordered above the theme control); on desktop
+    `.mainnav`'s `margin-left: auto` places it at the end of the nav row
+    rather than floating centre-right as before — a deliberate, minor change
+    to the wide layout, not a regression. The council field's
+    `width: min(35vw, 150px)` and `width: 88px` rules — the actual clipping —
+    are gone. The overview route no longer prepends its `.route-lens` strip
+    (removed `'/'` from `lensByRoute` in `app.js`): the hero kicker already
+    carries an "Accountability" lens badge and the two stacked into a visible
+    duplicate at phone widths. `initFindCouncil`'s `go()` now closes the
+    drawer after a pick, since the council list uses listbox options rather
+    than the `<a>` elements the drawer's auto-close watches.
+  - api/ui: No API change. Phone topbar is brand + menu + Search only; council
+    lookup, nav and theme selection all live in the drawer. Theme control was
+    already duplicated into the drawer (unchanged).
+  - validation: New `tests/test_portal_header.py` (7 — council finder markup is
+    inside `#portal-nav`, no viewport-unit width rule for the field survives,
+    it is a full-width drawer row, the mobile theme control is in the drawer,
+    the desktop `margin-left: auto` lift is retained, the overview route has
+    no `lensByRoute` entry, the topbar still carries brand/menu/search).
+    Portal + security-header suites green. Browser-verified at 375x812,
+    768x1024 and 1440x900: no horizontal overflow at any width, the drawer
+    now opens full height with every link, the council field fits inside the
+    viewport, no duplicated lens on the overview, no console errors.
 
 - [DONE] BETA-068 | Release compatibility and graceful degradation
   - completed: 2026-08-29
@@ -3736,8 +3783,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | DONE (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | DONE (BETA-067) |
 | P1 | Release compatibility and graceful degradation | 5 | 3 | 5 | DONE (BETA-068) |
-| P1 | Mobile public-header rebuild | 5 | 3 | 5 | IN_PROGRESS (BETA-069) |
-| P1 | Workforce pay explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-070) |
+| P1 | Mobile public-header rebuild | 5 | 3 | 5 | DONE (BETA-069) |
+| P1 | Workforce pay explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-070) |
 | P1 | Responsive public data tables | 5 | 4 | 4 | APPROVED, not queued (BETA-071) |
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | APPROVED, not queued (BETA-072) |
 | P1 | My area context | 5 | 4 | 4 | APPROVED, not queued (BETA-073) |

@@ -412,7 +412,10 @@ async function render() {
       '/claims': ['Safety & legal · Accountability', 'accountability'],
       '/documents': ['Accountability', 'accountability'],
       '/coverage': ['Accountability', 'accountability'], '/authorities': ['Service access · Accountability', 'access'],
-      '/compare': ['Accountability', 'accountability'], '/': ['Accountability', 'accountability'],
+      '/compare': ['Accountability', 'accountability'],
+      // No '/' entry (BETA-069): the overview hero already carries an
+      // "Accountability" lens badge in its kicker, and the extra route-lens
+      // strip above it stacked into a visible duplicate at phone widths.
     };
     const lens = lensByRoute[base];
     if (lens && !main.querySelector(':scope > .route-lens')) {
@@ -595,6 +598,13 @@ async function initFindCouncil() {
     list.hidden = true;
     input.setAttribute('aria-expanded', 'false');
     if (code) location.hash = `#/authorities/${code}`;
+    // BETA-069: the field now lives inside the section drawer. Picking a
+    // council navigates via a listbox option (not an <a>), so the drawer's
+    // link-click auto-close does not fire — close it here.
+    const nav = $('#portal-nav');
+    if (nav?.classList.contains('show')) {
+      window.bootstrap?.Offcanvas.getInstance(nav)?.hide();
+    }
   };
 
   const resetKeyboard = typeaheadKeyboard(input, list);

@@ -79,22 +79,28 @@
           <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
         </select>
       </label>
+      <!--
+        W-17: "find my council". A navigator, not a filter: picking an
+        authority goes straight to its page, which is why it is not in the
+        filter bar -- the filter bar's controls all declare a state key that a
+        page reads (tests/test_portal_controls.py), and a navigator holds no
+        state. A reader who knows their town, not their ONS code, has nowhere
+        else to start.
+
+        BETA-069: it lives inside the section drawer now. At phone widths the
+        topbar carries only brand, menu and search -- the council field used to
+        sit in that row and was clipped past the viewport edge at 390px. On
+        desktop `.mainnav`'s `margin-left: auto` lifts it back to the right of
+        the nav row, so the wide layout is unchanged.
+      -->
+      <div class="findcouncil" role="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="find-council" type="search" placeholder="Find your council"
+               aria-label="Find your council by name" autocomplete="off"
+               role="combobox" aria-expanded="false" aria-controls="find-council-list">
+        <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
+      </div>
     </nav>
-  </div>
-  <!--
-    W-17: "find my council". A navigator, not a filter: picking an authority
-    goes straight to its page, which is why it lives in the top bar rather
-    than the filter bar -- the filter bar's controls all declare a state key
-    that a page reads (tests/test_portal_controls.py), and a navigator holds
-    no state. A reader who knows their town, not their ONS code, has nowhere
-    else to start.
-  -->
-  <div class="findcouncil" role="search">
-    <span class="search-icon" aria-hidden="true">⌕</span>
-    <input id="find-council" type="search" placeholder="Find your council"
-           aria-label="Find your council by name" autocomplete="off"
-           role="combobox" aria-expanded="false" aria-controls="find-council-list">
-    <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
   </div>
   <!--
     The command palette (js/palette.js): one search box for the whole portal —
