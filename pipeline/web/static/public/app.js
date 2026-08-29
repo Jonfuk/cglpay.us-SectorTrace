@@ -319,6 +319,7 @@ const ROUTES = {
   '/changes': () => import('/js/pages/changes.js'),
   '/calendar': () => import('/js/pages/calendar.js'),
   '/notebook': () => import('/js/notebook.js'),
+  '/saved': () => import('/js/savedsearch.js'),
 };
 
 /* One <title> per route. Until now all thirteen shared index.html's static
@@ -346,6 +347,7 @@ const ROUTE_TITLES = {
   '/changes': 'What changed?',
   '/calendar': 'Publication calendar',
   '/notebook': 'Evidence notebook',
+  '/saved': 'Saved searches',
 };
 
 let disposeCurrent = null;
@@ -572,6 +574,12 @@ function renderFilterSummary() {
   if (chips.length) {
     summary.append(el('button', { class: 'filter-clear', type: 'button',
       onclick: () => clearFilters() }, 'Clear all'));
+    // BETA-089: keep this exact search — route plus its whole filter query —
+    // in the local saved-search list. Loaded on demand so app.js and
+    // savedsearch.js do not import each other.
+    summary.append(el('button', { class: 'filter-save', type: 'button',
+      onclick: () => import('/js/savedsearch.js').then((m) => m.promptSave(location.hash)) },
+      'Save search'));
   }
 }
 

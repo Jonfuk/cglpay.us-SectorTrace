@@ -201,6 +201,7 @@
       <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
       <li><code>/api/v1/changes</code> — a derived chronology of what the warehouse recorded changing (release, refreshed, reparsed, superseded, verified); collection, parser and human-review changes stay distinct kinds</li>
       <li><code>/api/v1/publication_calendar</code> — each source's stated vs observed release cadence, last retrieval held here, next-expected date and overdue/unknown status; the stated cadence is never merged with the observed estimate</li>
+      <li><code>/api/v1/feed/changes.atom</code> — the "what changed?" stream as a stable Atom feed for external subscription; same kind/source/since filter as <code>/api/v1/changes</code></li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
       <li><code>/api/v1/safety</code> — HSE enforcement notices served on a tracked provider</li>
       <li><code>/api/v1/safety_legal</code> — one filterable chronology over PFD, SAR, HSE, tribunal and CQC evidence, each event carrying one relationship label; counts by source and relationship, never summed</li>
@@ -237,6 +238,7 @@
     <a href="#/changes" data-route="changes">What changed?</a>
     <a href="#/calendar" data-route="calendar">Publication calendar</a>
     <a href="#/notebook" data-route="notebook">Evidence notebook</a>
+    <a href="#/saved" data-route="saved">Saved searches</a>
     <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
     <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
   </nav>

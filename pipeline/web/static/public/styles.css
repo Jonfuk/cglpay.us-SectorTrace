@@ -1295,6 +1295,16 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .nb-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-amber); }
 .nb-note { width: 100%; margin-top: var(--space-1); font: inherit; padding: var(--space-1) var(--space-2); }
 
+/* BETA-089: saved searches. A local list; "Check" re-runs the query and
+ * compares the count with the last-seen one. */
+.filter-save { margin-left: var(--space-2); }
+.ss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ss-item { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); }
+.ss-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ss-name { font: 600 15px/1.2 var(--display, inherit); background: transparent; border: 1px solid transparent; color: inherit; padding: var(--space-1) var(--space-2); }
+.ss-name:hover, .ss-name:focus { border-color: var(--border-subtle); }
+.ss-new { color: var(--accent-amber); font-weight: 600; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

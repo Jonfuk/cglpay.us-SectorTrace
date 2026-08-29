@@ -45,7 +45,10 @@ def test_every_path_template_lines_up_with_its_surface():
         else:
             tail = path[len("/api/v1/"):] if path.startswith("/api/v1/") else path.split("/api/")[1]
             assert surface in (PUBLIC_API_ROUTES | PUBLIC_API_EXTRA)
-            if surface != "export":
+            # `export` and `feed` are EXTRA surfaces whose path tail is not a
+            # bare name (`export` takes an `endpoint` param; `feed` is
+            # `feed/changes.atom`).
+            if surface not in ("export", "feed"):
                 assert tail == surface, f"{path} tail {tail!r} != surface {surface!r}"
 
 

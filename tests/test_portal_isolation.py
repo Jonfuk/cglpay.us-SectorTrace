@@ -45,6 +45,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/myarea.js",
     "/js/recent.js",
     "/js/notebook.js",
+    "/js/savedsearch.js",
     "/js/pages/overview.js",
     "/js/pages/pay.js",
     "/js/pages/contracts.js",
@@ -127,7 +128,7 @@ PUBLIC_API_PATTERNS = {
 # a `route ==` literal in `_public_api` and would otherwise be absent from
 # every list here. It is part of the same public surface and the documentation
 # must cover it.
-PUBLIC_API_EXTRA = {"export"}
+PUBLIC_API_EXTRA = {"export", "feed"}
 
 # Files the portal is made of. Admin work does not edit these, and no admin
 # module may import from them -- see test_the_admin_ui_does_not_import_portal_code.

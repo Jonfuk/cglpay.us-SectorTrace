@@ -120,7 +120,7 @@ for _module in ("shell", "dom", "context", "theme", "palette", "pipeline",
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
 for _module in ("theme", "components", "palette", "filterstate", "myarea",
-                 "recent", "notebook"):
+                 "recent", "notebook", "savedsearch"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
@@ -875,6 +875,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/v1/export":
                 return self._export(params, conn)
+            if path == "/api/v1/feed/changes.atom":
+                # BETA-089: the "what changed?" stream as a stable Atom feed,
+                # same kind/source/since filter as /api/v1/changes. A raw XML
+                # body, so it goes out here rather than through _send_json.
+                return self._feed_changes(params, conn)
             # Portal answers change only when a module runs, so a short cache
             # keeps chart interactions from re-querying the warehouse for the
             # same numbers. Operator answers stay no-store: the review queue
@@ -953,6 +958,38 @@ class Handler(BaseHTTPRequestHandler):
                           f'attachment; filename="{self._export_name(label, params)}.{fmt}"')
         self.send_header("X-Provenance", json.dumps(provenance, default=str))
         self.send_header("Cache-Control", "no-store")
+        self._send_security_headers()
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _feed_changes(self, params: dict[str, list[str]], conn) -> None:
+        """The change feed as Atom 1.0. Raw XML, cached like the rest of
+        /api/v1/*, with host-independent entry ids so a subscription survives
+        a move between hosts."""
+        from urllib.parse import urlencode
+
+        from pipeline.web import feeds
+
+        proto = (self.headers.get("X-Forwarded-Proto") or "http").split(",")[0].strip()
+        host = self.headers.get("Host") or "localhost"
+        query = {k: v[0] for k, v in params.items() if k in ("kind", "source", "since")}
+        self_url = (f"{proto}://{host}/api/v1/feed/changes.atom"
+                    + (f"?{urlencode(query)}" if query else ""))
+        body = feeds.changes_atom(
+            conn,
+            kind=_str(params, "kind") or None,
+            source=_str(params, "source") or None,
+            since=_str(params, "since") or None,
+            self_url=self_url).encode("utf-8")
+
+        self._responded = True
+        self.send_response(200)
+        self.send_header("Content-Type", "application/atom+xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", f"public, max-age={PUBLIC_MAX_AGE}")
         self._send_security_headers()
         if self.close_connection:
             self.send_header("Connection", "close")

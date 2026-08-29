@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-089 | Saved searches and change alerts
+- [IN_PROGRESS] BETA-092 | Record revision comparison
   - priority: P1
   - impact: 5
-  - effort: 4
+  - effort: 5
   - confidence: 4
   - risk: 3
-  - area: public/search and monitoring
-  - depends_on: BETA-072, BETA-090
-  - objective: Save complete searches locally, show new-match counts after a
-    later release and provide stable Atom feeds for external subscription.
-  - next_action: Store the full filter state per saved search in localStorage
-    (guarded), and compare its result count against the last-seen count using
-    the change feed / release identity from BETA-090.
+  - area: public/version inspection
+  - depends_on: BETA-050, BETA-060, BETA-081, BETA-090
+  - objective: Compare successive procurement notices, documents, provider
+    records and regulatory entries with field-aware and text-aware diffs.
+  - next_action: Prove stable version identity and before/after fixtures for
+    one OCDS notice and one parsed document, then a field-aware diff that
+    labels source amendments apart from parser/normalisation changes.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
 complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
-BETA-097; BETA-088 is complete.)_
+BETA-097; BETA-088 and BETA-089 are complete.)_
 
 ### BLOCKED
 
@@ -549,6 +549,65 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-089 | Saved searches and change alerts
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/search and monitoring
+  - depends_on: BETA-072, BETA-090
+  - objective: Save complete searches locally, show new-match counts after a
+    later release and provide stable Atom feeds for external subscription.
+  - result: New portal module `js/savedsearch.js` — a versioned
+    (`SCHEMA_VERSION = 1`), 50-entry `localStorage` list under
+    `sectortrace.saved_searches`; each entry is a name plus the full `#/...`
+    hash (route + whole filter query), `last_count` and `last_checked`.
+    Every access is try/catch-guarded; only public identifiers are stored.
+    `checkNew(search)` re-runs the route's `/api/v1` count endpoint with the
+    saved params and returns `{count, delta, first}` against `last_count`
+    **without persisting** — `markSeen(id, count)` is the separate, explicit
+    accept. `feedURL(search)` returns the stable Atom URL only for a
+    change-stream search, carrying just `kind`/`source`/`since` through.
+    New backend: `pipeline/web/feeds.py::changes_atom()` renders the BETA-090
+    change feed as Atom 1.0; the feed `<id>` and every entry `<id>` are
+    **host-independent tag URIs** (`tag:trace.cglpay.us,2026:change/<kind>/<sha1>`)
+    derived from the event content, so a subscription survives a move between
+    the dev and production hosts. New raw route
+    `/api/v1/feed/changes.atom` (same `kind`/`source`/`since` filter as
+    `/api/v1/changes`, `application/atom+xml`, cached like the rest of
+    `/api/v1/*`), served at the `_get_public` level beside `/api/v1/export`
+    and added to `PUBLIC_API_EXTRA` (`{"export", "feed"}`), `openapi.ROUTES`,
+    the `<noscript>` list and `api.html`.
+  - api/ui: additive raw route `/api/v1/feed/changes.atom`. New "Save search"
+    button in the filter-bar summary (shown whenever there are shared-filter
+    chips; loads `savedsearch.js` on demand so it and `app.js` do not import
+    each other). New `/saved` route + page ("Saved searches") listing each
+    saved search with its query, a live match-count status (`+N new since
+    last seen` / `no change` / `first check` / `run to see`), Run / Mark
+    seen / Delete, and — for a change-stream search — its copyable Atom URL.
+    `styles.css` gained `.ss-*` + `.filter-save`.
+  - validation: New `tests/test_web_feed.py` (5 — the feed is well-formed
+    Atom parsed by ElementTree; entry ids are identical across two different
+    `self_url` hosts and contain neither host; the `kind` filter reaches both
+    the entries and the feed id; the HTTP route returns
+    `application/atom+xml` with the request host in the self link; it is in
+    the OpenAPI doc and `PUBLIC_API_EXTRA`). New
+    `tests/test_portal_saved_search.py` (5 — the store is versioned, bounded
+    and guarded and dispatches `savedsearchchange`; `checkNew` compares
+    against `last_count` and never calls `setItem`, `markSeen` does;
+    `feedURL` is `changes`-only and carries just the feed params; the save
+    button and the route/module are wired). `test_web_openapi` /
+    `test_portal_isolation` / `test_portal_navigation` green (extended the
+    openapi tail-vs-surface check to skip `feed` like `export`). `ruff`
+    clean. Browser-verified: `/api/v1/feed/changes.atom` returns a valid feed
+    with stable ids and a host-matched self link; on `#/pfd?yearFrom=2020` the
+    "Save search" button appears and saves `{route:pfd, query:yearFrom=2020&yearTo=2024}`;
+    the `#/saved` page shows a change-stream search as "7 matches now (first
+    check)" with its Atom URL, and "Mark seen" then flips it to "no change
+    (7)".
 
 - [DONE] BETA-088 | Evidence notebook
   - completed: 2026-08-29
@@ -4963,10 +5022,10 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Operator action cockpit | 5 | 4 | 4 | DONE (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | DONE (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | DONE (BETA-088) |
-| P1 | Saved searches and change alerts | 5 | 4 | 4 | IN_PROGRESS (BETA-089) |
+| P1 | Saved searches and change alerts | 5 | 4 | 4 | DONE (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
-| P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |
+| P1 | Record revision comparison | 5 | 5 | 4 | IN_PROGRESS (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |

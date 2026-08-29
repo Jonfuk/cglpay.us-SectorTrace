@@ -293,6 +293,18 @@ ROUTES: dict[str, dict] = {
             _p("format", desc="csv (default) or json."),
         ],
     },
+    "/api/v1/feed/changes.atom": {
+        "surface": "feed",
+        "summary": "The \"what changed?\" stream as a stable Atom 1.0 feed for "
+                   "external subscription. Same kind / source / since filter as "
+                   "/api/v1/changes; entry ids are host-independent tag URIs so "
+                   "a subscription survives a move between hosts.",
+        "parameters": [
+            _p("kind", desc="release, refreshed, reparsed, superseded or verified."),
+            _p("source", desc="One source label from the feed."),
+            _SINCE,
+        ],
+    },
 }
 
 

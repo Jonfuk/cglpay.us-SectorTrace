@@ -584,6 +584,33 @@
     <p><a href="/api/v1/publication_calendar"><code>/api/v1/publication_calendar</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-feed" data-route="feed">
+    <h3><code>/api/v1/feed/changes.atom</code></h3>
+    <p>
+      The <a href="#route-changes">“what changed?”</a> stream as a stable
+      <strong>Atom 1.0</strong> feed, for a feed reader or any external
+      subscriber. It takes the same <code>kind</code> / <code>source</code> /
+      <code>since_retrieved_at</code> filter as <code>/api/v1/changes</code>.
+      The feed <code>&lt;id&gt;</code> and every entry <code>&lt;id&gt;</code>
+      are host-independent tag URIs derived from the event's own content, so
+      a subscription keeps working across releases and across the dev and
+      production hosts.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>release, refreshed, reparsed, superseded or verified.</td></tr>
+        <tr><td><code>source</code></td><td>One source label from the feed.</td></tr>
+        <tr><td><code>since</code></td><td>ISO date; keeps dated events on or after it.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>application/atom+xml</code>, not JSON. Up to 100 entries,
+      newest first.
+    </p>
+    <p><a href="/api/v1/feed/changes.atom"><code>/api/v1/feed/changes.atom</code></a></p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>
