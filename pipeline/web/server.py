@@ -126,7 +126,7 @@ for _page in ("overview", "pay", "contracts", "geography", "treatment", "provide
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
               "revisions", "pathfinder", "timeline",
-              "cooccurrence"):
+              "cooccurrence", "discrepancies"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1629,6 +1629,16 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "discrepancies":
+            # BETA-096: fields two or more public sources report differently
+            # for one verified entity. Both values shown, neither resolved or
+            # called an error. A closed registry of comparable field pairs.
+            from pipeline.web import discrepancy
+            return discrepancy.check(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                ons_code=_str(params, "ons_code") or None)
+
         if route == "cooccurrence":
             # BETA-095: documents and records naming two or more selected
             # tracked entities together, with the exact passage or field.

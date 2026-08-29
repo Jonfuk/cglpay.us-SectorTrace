@@ -297,18 +297,20 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-096 | Evidence discrepancy explorer
+- [IN_PROGRESS] BETA-098 | Contract diary and milestone calendar
   - priority: P1
   - impact: 5
-  - effort: 5
-  - confidence: 3
-  - risk: 4
-  - area: public/evidence comparison
-  - depends_on: BETA-043, BETA-070, BETA-075, BETA-076
-  - objective: Surface different values, dates, names or statuses reported by
-    public sources for the same verified entity, field and compatible period.
-  - next_action: Define a closed registry of comparable field pairs; show the
-    disagreement with both sources and never resolve it or label it an error.
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/procurement
+  - depends_on: BETA-050, BETA-072, BETA-076
+  - objective: Present published tender dates, awards, contract periods,
+    amendments, milestones, expected expiries and performance events in
+    calendar and accessible agenda views.
+  - next_action: Build a dated-event agenda from the OCDS notice fields only
+    (published, award, period start/end); mark an expiry as "as published",
+    predict no renewal or completion.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -548,6 +550,52 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-096 | Evidence discrepancy explorer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: public/evidence comparison
+  - depends_on: BETA-043, BETA-070, BETA-075, BETA-076
+  - objective: Surface different values, dates, names or statuses reported by
+    public sources for the same verified entity, field and compatible period.
+  - result: New `pipeline/web/discrepancy.py::check()` — a **closed registry**
+    (`_PROVIDER_CHECKS` / `_AUTHORITY_CHECKS`) of comparable field pairs. For
+    a provider: legal/employer name across SectorTrace's canonical,
+    Companies House, the CQC provider register and a gender-pay-gap filing;
+    company number across the identifier register, Companies House and the
+    filing; plus `_cqc_rating_rows()` — a location whose CQC syndication-API
+    rating and CQC bulk-export rating disagree (the case migration 0055's own
+    comment flags). For an authority: name across ONS geography, procurement
+    notices and NDTMS. A check with ≥2 distinct values across its sources is
+    a `discrepancy` carrying every observation (source, value, `as_of`,
+    `source_url`); one that agrees is listed under `agreed`. **Nothing is
+    reconciled, ranked, or called an error** — the note and caveat say so —
+    and this does no cross-source arithmetic: it adds and averages nothing,
+    it only shows both values. New additive public route
+    `/api/v1/discrepancies` on the frozen surface, OpenAPI, `<noscript>` and
+    `api.html`.
+  - api/ui: additive `/api/v1/discrepancies` (provider_key XOR ons_code).
+    New `/discrepancies` route + page ("Evidence discrepancies"): an entity
+    picker, a finding block, one card per disagreeing field with a
+    source/value/as-of/link table, and an "agree on" list beneath. Linked
+    from the footer nav. `styles.css` gained a `.dx-*` block.
+  - validation: New `tests/test_web_discrepancy.py` (5 — three differing name
+    spellings are surfaced with every source and no discrepancy carries a
+    `correct`/`resolved`/`error`/`canonical` key; an agreeing company number
+    is under `agreed`; disagreeing CQC rating channels are a
+    `cqc_rating:<loc>` discrepancy naming the syndication API and the bulk
+    export; exactly one endpoint and an unknown entity raise; the route is in
+    the OpenAPI doc). `test_portal_isolation` / `test_portal_navigation` /
+    `test_web_openapi` / `test_portal_offline_reading` /
+    `test_portal_design_system` green; `ruff` clean. Browser-verified on
+    `#/discrepancies?provider=cgl`: a "Provider / employer name" card with
+    three spellings (SectorTrace canonical / Companies House / CQC register),
+    each with a source link, and "Company number: 07688213" under the
+    agree-on list.
 
 - [DONE] BETA-095 | Entity co-occurrence explorer
   - completed: 2026-08-29
@@ -5263,9 +5311,9 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Relationship pathfinder | 5 | 4 | 4 | DONE (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | DONE (BETA-094) |
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | DONE (BETA-095) |
-| P1 | Evidence discrepancy explorer | 5 | 5 | 3 | IN_PROGRESS (BETA-096) |
+| P1 | Evidence discrepancy explorer | 5 | 5 | 3 | DONE (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
-| P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
+| P1 | Contract diary and milestone calendar | 5 | 4 | 4 | IN_PROGRESS (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |

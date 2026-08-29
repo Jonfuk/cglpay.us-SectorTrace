@@ -1377,6 +1377,18 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .co-title { font-weight: 600; }
 .co-passage { margin: var(--space-1) 0; padding: var(--space-1) var(--space-3); border-left: 2px solid var(--accent-amber); font-size: 14px; }
 
+/* BETA-096: evidence discrepancy explorer. Both values shown; nothing is
+ * marked right or wrong. */
+.dx-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dx-picker select, .dx-input { padding: var(--space-1) var(--space-2); }
+.dx-input { min-width: 200px; }
+.dx-card { border: 1px solid var(--border-accent); border-radius: var(--radius-md); padding: var(--space-3); margin: var(--space-2) 0; }
+.dx-card h3 { margin: 0 0 var(--space-2); }
+.dx-table { width: 100%; border-collapse: collapse; }
+.dx-table th, .dx-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.dx-agreed { margin: 0; padding-left: var(--space-4); }
+.dx-agreed li { padding: 2px 0; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

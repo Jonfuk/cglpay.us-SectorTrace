@@ -200,6 +200,7 @@
       <li><code>/api/v1/relationship_path</code> — the shortest verified path between two named entities through source-backed graph edges; unconfirmed name-match edges excluded</li>
       <li><code>/api/v1/coverage_timeline</code> — which periods each source holds for one provider or authority, never gap-filled; an absent period is "not collected", not zero</li>
       <li><code>/api/v1/cooccurrence</code> — documents and records naming two or more selected entities together, with the exact passage or field; location, never an asserted relationship</li>
+      <li><code>/api/v1/discrepancies</code> — fields two or more public sources report differently for one entity; both values shown, neither resolved or called an error</li>
       <li><code>/api/v1/document_search</code> — full-text search over published committee papers and community drug partnership documents</li>
       <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
       <li><code>/api/v1/changes</code> — a derived chronology of what the warehouse recorded changing (release, refreshed, reparsed, superseded, verified); collection, parser and human-review changes stay distinct kinds</li>
@@ -248,6 +249,7 @@
     <a href="#/timeline" data-route="timeline">Coverage timeline</a>
     <a href="#/journey" data-route="journey">Research journey</a>
     <a href="#/cooccurrence" data-route="cooccurrence">Co-occurrence explorer</a>
+    <a href="#/discrepancies" data-route="discrepancies">Evidence discrepancies</a>
     <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
     <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
   </nav>

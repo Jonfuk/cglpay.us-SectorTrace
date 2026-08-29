@@ -111,6 +111,19 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/discrepancies": {
+        "surface": "discrepancies",
+        "summary": "Fields that two or more public sources report differently "
+                   "for one verified provider or authority. Both values are "
+                   "shown with their source and date; nothing is reconciled, "
+                   "ranked, or called an error. A closed registry of "
+                   "comparable field pairs. Exactly one of provider_key / "
+                   "ons_code.",
+        "parameters": [
+            _p("provider_key", desc="A provider from /api/v1/providers."),
+            _p("ons_code", desc="An authority from /api/v1/authorities."),
+        ],
+    },
     "/api/v1/cooccurrence": {
         "surface": "cooccurrence",
         "summary": "Documents and records that name two or more selected "

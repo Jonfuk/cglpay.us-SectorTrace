@@ -361,6 +361,38 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-discrepancies" data-route="discrepancies">
+    <h3><code>/api/v1/discrepancies</code></h3>
+    <p>
+      Where two or more public sources report a <em>different</em> value for
+      the same verified entity and field — a provider's legal name across
+      Companies House, the CQC register and a gender-pay-gap filing; a company
+      number; a CQC location's rating from the syndication API versus the bulk
+      export — both values are shown side by side with their source and
+      retrieval date. <strong>Nothing is reconciled, ranked, or called an
+      error.</strong> This is not cross-source arithmetic: it adds and
+      averages nothing, it only lets the reader see both. A closed registry of
+      comparable field pairs decides what is compared; a field whose sources
+      agree is listed as agreeing.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Exactly one of this or <code>ons_code</code>.</td></tr>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entity</code>, <code>discrepancies</code> (each with
+      <code>label</code>, <code>observations</code> [source, value, as_of,
+      source_url] and <code>distinct_values</code>), <code>agreed</code>,
+      <code>checked</code>, <code>note</code> and <code>caveat</code>. Only
+      identity-level fields (name, number, rating) are compared in this
+      version.
+    </p>
+    <p><code>/api/v1/discrepancies?provider_key=change_grow_live</code></p>
+  </article>
+
   <article class="apiroute" id="route-cooccurrence" data-route="cooccurrence">
     <h3><code>/api/v1/cooccurrence</code></h3>
     <p>
