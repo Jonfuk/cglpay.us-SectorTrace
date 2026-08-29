@@ -297,23 +297,25 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-104 | Validation-rule explorer
-  - priority: P2
-  - impact: 4
+- [IN_PROGRESS] BETA-088 | Evidence notebook
+  - priority: P1
+  - impact: 5
   - effort: 4
   - confidence: 4
   - risk: 2
-  - area: admin/data quality
-  - depends_on: BETA-059, BETA-060, BETA-067, BETA-082, BETA-085
-  - objective: Catalogue validation rules with purpose, affected modules and
-    fields, recent pass/failure counts and protected representative failures.
-  - next_action: Add stable rule IDs and a read-only registry; redact
-    restricted values before any failure example reaches the browser.
+  - area: public/research workspace
+  - depends_on: BETA-072, BETA-077, BETA-080
+  - objective: Let readers pin records, passages, charts, providers and
+    authorities into named, reorderable local collections with private notes
+    and lossless JSON import/export.
+  - next_action: Define a versioned, size-bounded local collection schema in
+    localStorage, with only public identifiers stored and every read/write
+    try/catch-guarded for private mode.
 
-_(The first refinement programme BETA-068–087 is complete. The second
-programme BETA-088–106 is now in progress in its own approved wave order:
-wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090,
-BETA-091, BETA-101 and BETA-102 are complete, see DONE.)_
+_(The first refinement programme BETA-068–087 is complete. Wave 1 of the
+second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
+complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
+BETA-097.)_
 
 ### BLOCKED
 
@@ -548,6 +550,59 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-104 | Validation-rule explorer
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: admin/data quality
+  - depends_on: BETA-059, BETA-060, BETA-067, BETA-082, BETA-085
+  - objective: Catalogue validation rules with purpose, affected modules and
+    fields, recent pass/failure counts and protected representative failures.
+  - result: New `pipeline/web/validation.py::rules(conn, today=…)` — a
+    read-only catalogue derived on the request from three enumerable sources,
+    each rule given a **stable id** `<kind>:<scope>`: `trigger:<name>` and
+    `check:<table>:<col>` and `provenance:<table>` from the live SQLite schema
+    (`sqlite_master` + `PRAGMA table_info`), `parse:<module>:<field>` from
+    grouping `parse_failures`, `review:<module>:<type>` from grouping
+    `review_queue`. Each carries a purpose (generic per-kind, overridden by a
+    specific line where warranted — the only hand-kept part, in the new
+    `pipeline/validation_rules.py`), the modules and fields it touches, and
+    recent counts against a 30-day window keyed off an optional `today`.
+    **Failure examples never carry the raw fragment**: each is reduced to its
+    *shape* (`_shape()` — letters→`x`, digits→`9`, punctuation kept, capped),
+    plus the field, reason, source **host only** (no path or query) and date.
+    `RULE_NOTES` keys are pinned to live rule ids so a stale note fails the
+    build. Schema rules are SQLite-only (the payload's `backend` and `note`
+    say so; empty on PostgreSQL). New additive admin route
+    `/api/admin/validation-rules` (network-trust-gated, read-only).
+  - api/ui: additive `/api/admin/validation-rules?today=`. New collapsed
+    "Validation rules" panel on the Health tab (`<details
+    id="validation-panel">`, next to Parse failures) — a search box,
+    kind-filter checkboxes with counts, and a flat card list; each card shows
+    the id, title, purpose, `detail` (CHECK value set / trigger RAISE
+    message / which provenance columns are NOT NULL), recent-count badges,
+    and for parse rules a `<details>` of shape-only examples.
+    `loadValidationRules()` in `health.js`, fetched once when the panel is
+    opened. `styles.css` gained a `.vr-*` block.
+  - validation: New `tests/test_web_validation.py` (7 — rules are typed and
+    every one has a purpose; the promotion triggers carry their specific
+    `RULE_NOTES` purpose and a promotion `detail`; no `RULE_NOTES` key is
+    stale; provenance is one rule per evidence table with an `enforced`
+    boolean; a seeded parse failure becomes a rule whose example is `[x9\\W]`
+    only — no readable content, `raw_fragment` key absent, source reduced to
+    host, `chars` preserved — and `recent` respects `today`; review-queue
+    rows become a gate rule with pending/resolved counts; the HTTP route
+    serves the catalogue). `ruff` clean. Browser-verified on the Health tab:
+    the panel shows kind chips "Trigger (8) · CHECK (5) · Provenance (70) ·
+    Parse failure (1) · Review gate (1)", 85 cards; searching "parse:m08"
+    shows the seeded rule "1 total · 1 in 30d" and its example renders as
+    "xxxx x. xxxxx (xxxx 99) — name not parseable from title ·
+    www.judiciary.uk · 2026-08-25 · 23 chars"; the cdp promotion trigger card
+    shows its migrations/0030 purpose and RAISE message.
 
 - [DONE] BETA-102 | Interactive pipeline and data-lineage map
   - completed: 2026-08-29
@@ -4848,7 +4903,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Responsive admin navigation | 5 | 4 | 5 | DONE (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | DONE (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | DONE (BETA-087) |
-| P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
+| P1 | Evidence notebook | 5 | 4 | 4 | IN_PROGRESS (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
@@ -4864,7 +4919,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
-| P2 | Validation-rule explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-104) |
+| P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |

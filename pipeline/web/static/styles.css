@@ -712,3 +712,17 @@ td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
 .lin-dir h4 { margin: 0 0 4px; }
 .lin-rel { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; font-size: 13px; }
 .lin-rel-label { color: var(--muted); min-width: 120px; }
+
+/* BETA-104: validation-rule explorer. A flat card list — schema rules and
+ * observed rules together, filtered by kind and text. Failure examples show
+ * shape only. */
+#validation-panel > summary { cursor: pointer; }
+.vr-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; }
+.vr-controls #vr-search { min-width: 220px; }
+.vr-kinds { display: flex; flex-wrap: wrap; gap: 10px; }
+.vr-kinds label { display: inline-flex; align-items: center; gap: 3px; }
+.vr-rule { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+.vr-rule-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 2px; }
+.vr-examples { margin-top: 6px; }
+.vr-examples ul { margin: 4px 0 0; padding-left: 18px; }
+.vr-examples li { padding: 1px 0; }

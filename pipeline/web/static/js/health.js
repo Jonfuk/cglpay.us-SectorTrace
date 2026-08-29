@@ -380,6 +380,91 @@ async function loadFailures() {
       : el('tr', {}, el('td', { class: 'empty', text: '—' })))));
 }
 
+/* BETA-104: the validation-rule explorer. Rules are derived on the request —
+ * schema rules from the live schema, observed rules from parse_failures and
+ * review_queue. Failure examples arrive already reduced to their shape. */
+const VR_STATE = { data: null, q: '', kinds: null };
+const VR_KIND_LABEL = {
+  trigger: 'Trigger', check: 'CHECK', provenance: 'Provenance',
+  parse_failure: 'Parse failure', review_gate: 'Review gate',
+};
+
+function vrRuleCard(rule) {
+  const bits = [];
+  if (rule.counts) {
+    if (rule.kind === 'parse_failure') {
+      bits.push(el('span', { class: 'badge type', text: `${rule.counts.total} total` }));
+      if (rule.counts.recent) bits.push(el('span', { class: 'badge pending', text: `${rule.counts.recent} in ${VR_STATE.data.window_days}d` }));
+    } else if (rule.kind === 'review_gate') {
+      if (rule.counts.pending) bits.push(el('span', { class: 'badge pending', text: `${rule.counts.pending} pending` }));
+      bits.push(el('span', { class: 'badge approved', text: `${rule.counts.resolved} resolved` }));
+    }
+  }
+  if (rule.kind === 'provenance') {
+    bits.push(el('span', { class: `badge ${rule.enforced ? 'approved' : 'rejected'}`,
+      text: rule.enforced ? 'enforced' : 'not enforced' }));
+  }
+
+  const examples = (rule.examples || []).length
+    ? el('details', { class: 'vr-examples' },
+        el('summary', { class: 'small', text: `${rule.examples.length} representative failure${rule.examples.length === 1 ? '' : 's'} (shape only)` }),
+        el('ul', { class: 'small' }, ...rule.examples.map((ex) => el('li', {},
+          el('span', { class: 'mono', text: ex.shape || '(empty)' }),
+          el('span', { class: 'muted', text: ` — ${ex.reason || 'no reason'} · ${ex.source_host || 'no host'} · ${(ex.at || '').slice(0, 10)} · ${ex.chars} chars` })))))
+    : null;
+
+  return el('div', { class: 'vr-rule' },
+    el('div', { class: 'vr-rule-head' },
+      el('span', { class: 'badge muted', text: VR_KIND_LABEL[rule.kind] || rule.kind }),
+      el('span', { class: 'mono small', text: ` ${rule.id}` }),
+      ...bits),
+    el('div', { class: 'small', text: rule.title }),
+    rule.purpose ? el('p', { class: 'muted small', text: rule.purpose }) : null,
+    rule.detail ? el('p', { class: 'small mono', text: rule.detail }) : null,
+    rule.reasons?.length ? el('p', { class: 'muted small', text: `reasons: ${rule.reasons.join('; ')}` }) : null,
+    examples);
+}
+
+function vrRender() {
+  const holder = $('validation-rules');
+  const d = VR_STATE.data;
+  if (!holder || !d) return;
+  const q = VR_STATE.q.toLowerCase();
+  const all = [...d.schema_rules, ...d.observed_rules].filter((r) =>
+    VR_STATE.kinds.has(r.kind)
+    && (!q || `${r.id} ${r.title} ${r.purpose}`.toLowerCase().includes(q)));
+  holder.replaceChildren(...(all.length
+    ? all.map(vrRuleCard)
+    : [el('p', { class: 'muted small', text: 'No rules match.' })]));
+}
+
+async function loadValidationRules() {
+  const holder = $('validation-rules');
+  if (!holder || VR_STATE.data) return;
+  let data;
+  try { data = await api('/api/admin/validation-rules'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'muted small', text: 'Validation rules unavailable.' })); return; }
+  VR_STATE.data = data;
+  VR_STATE.kinds = new Set(data.kinds);
+  $('validation-note').textContent = `${data.note} Redaction: ${data.redaction}.`;
+
+  const kindWrap = $('vr-kinds');
+  if (kindWrap && !kindWrap.dataset.filled) {
+    kindWrap.replaceChildren(...data.kinds.map((k) => {
+      const box = el('input', { type: 'checkbox', checked: true,
+        onchange: (e) => { e.target.checked ? VR_STATE.kinds.add(k) : VR_STATE.kinds.delete(k); vrRender(); } });
+      return el('label', { class: 'small' }, box, ` ${VR_KIND_LABEL[k] || k} (${data.counts.by_kind[k] || 0})`);
+    }));
+    kindWrap.dataset.filled = '1';
+  }
+  const search = $('vr-search');
+  if (search && !search.dataset.wired) {
+    search.addEventListener('input', () => { VR_STATE.q = search.value; vrRender(); });
+    search.dataset.wired = '1';
+  }
+  vrRender();
+}
+
 // --- wiring ---------------------------------------------------------------------------
 
 function debounce(fn, ms) {
@@ -613,6 +698,12 @@ export function initHealth() {
 
   $('failure-module').addEventListener('change', loadFailures);
   $('failure-search').addEventListener('input', debounce(loadFailures, 250));
+
+  // BETA-104: fetch the validation-rule catalogue the first time its panel
+  // is opened. Registry-derived plus recent counts — not worth polling.
+  $('validation-panel')?.addEventListener('toggle', (event) => {
+    if (event.target.open) loadValidationRules();
+  });
 
   document.addEventListener('tabshown', (event) => {
     if (event.detail.tab === 'health') loadAll();

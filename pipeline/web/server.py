@@ -1371,6 +1371,15 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import mission_control
             return mission_control.overview(conn, self.settings, self.jobs)
 
+        if path == "/api/admin/validation-rules":
+            # BETA-104: a read-only catalogue of the warehouse's validation
+            # rules — promotion/decision triggers, CHECK and provenance
+            # constraints, and the observed parse_failures / review_queue
+            # gates — each with a purpose and recent counts. Failure examples
+            # are reduced to their shape; the raw fragment never leaves here.
+            from pipeline.web import validation
+            return validation.rules(conn, today=_str(params, "today") or None)
+
         if path == "/api/admin/lineage":
             # BETA-102: one typed graph over the module registry, the dataset
             # catalogue, the live foreign keys and the export tab registry —

@@ -344,6 +344,20 @@
       <div id="completeness-board"></div>
     </div>
 
+    <!-- BETA-104: the warehouse's validation rules — promotion/decision
+         triggers, CHECK and provenance constraints, and the observed
+         parse_failures / review_queue gates. Failure examples are reduced to
+         their shape; the raw fragment never leaves the server. -->
+    <details class="panel" id="validation-panel" style="margin-top: 12px">
+      <summary><h2 style="display:inline">Validation rules</h2></summary>
+      <p class="muted small" id="validation-note"></p>
+      <div class="vr-controls">
+        <input id="vr-search" type="search" placeholder="search rules…">
+        <span id="vr-kinds" class="vr-kinds"></span>
+      </div>
+      <div id="validation-rules"></div>
+    </details>
+
     <div class="panel" style="margin-top: 12px">
       <h2>PostgreSQL capabilities</h2>
       <p class="muted small">Which optional extensions are installed, whether
