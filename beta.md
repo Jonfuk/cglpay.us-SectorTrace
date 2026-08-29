@@ -32,9 +32,9 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-049. Current
-  work: BETA-050 (first item of the approved successor round). Next: BETA-051,
-  BETA-052, BETA-058.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **BETA-038–049 is complete. Last completed queue item: BETA-050. Current
+  work: BETA-051. Next: BETA-052, BETA-058.** BETA-028 and BETA-029 are DONE
+  at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -272,31 +272,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-050 | Procurement lifecycle and performance view
-  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
+- [IN_PROGRESS] BETA-051 | HSE enforcement-notice evidence
+  - promoted_from: NEXT on 2026-08-29 after BETA-050 completed
   - started: 2026-08-29
   - priority: P1
-  - impact: 5
-  - effort: 5
+  - impact: 4
+  - effort: 4
   - confidence: 4
   - risk: 4
-  - area: procurement
-  - depends_on: BETA-040, BETA-044
-  - objective: Group notices sharing an OCID into explicit planning, tender,
-    award, contract, amendment, termination and performance stages; add
-    `GET /api/v1/contracts/process/{ocid}` and a public lifecycle view.
-  - rationale: A defensible procurement history must connect official related
-    notices without turning missing stages into inferred completion, renewal,
-    KPI achievement or supplier performance.
-  - suggested_first_action: Define archived OCDS lifecycle fixtures, then extend
-    m01 for explicit stages, milestones, amendments, performance fields and
-    linked documents.
-  - next_action: Confirm what `contracts` already stores per row about the
-    OCDS release (`ocid`, `notice_id`, tags/stage, amendment fields); add
-    `GET /api/v1/contracts/process/{ocid}` returning the notices that share
-    an OCID grouped into their published stages (never an inferred one),
-    with a "missing stage is not a finding" caveat; a portal lifecycle view;
-    tests + `api.html` + `test_portal_isolation.py`.
+  - area: safety/legal
+  - depends_on: BETA-043, BETA-049
+  - objective: Add module `m33` for organisation-level HSE improvement and
+    prohibition notices, publishing exact tracked-organisation matches through
+    `/api/v1/safety` while excluding individuals.
+  - rationale: Official enforcement notices add attributable safety evidence,
+    but ambiguous names and register limitations require the same human-review
+    and caveat discipline as the rest of the project.
+  - suggested_first_action: Capture offline HSE search/detail fixtures and encode
+    coverage, appeal and withdrawal caveats before defining storage or routes.
+  - next_action: Add migration for `hse_enforcement_notices` + module `m33`
+    (offline fixture-backed parser over the HSE notices register; nothing in
+    CI or tests fetches), a deterministic exact-name match to tracked
+    providers only (individuals excluded), `GET /api/v1/safety` exposing the
+    matched notices with appeal/withdrawal/coverage caveats, licences +
+    docs/SOURCES + docs/CAVEATS + README module table, a catalogue entry
+    (BETA-043), and `test_portal_isolation.py` / openapi updates.
 
 ### BLOCKED
 
@@ -480,24 +480,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-051 | HSE enforcement-notice evidence
-  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
-  - priority: P1
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: safety/legal
-  - depends_on: BETA-043, BETA-049
-  - objective: Add module `m33` for organisation-level HSE improvement and
-    prohibition notices, publishing exact tracked-organisation matches through
-    `/api/v1/safety` while excluding individuals.
-  - rationale: Official enforcement notices add attributable safety evidence,
-    but ambiguous names and register limitations require the same human-review
-    and caveat discipline as the rest of the project.
-  - suggested_first_action: Capture offline HSE search/detail fixtures and encode
-    coverage, appeal and withdrawal caveats before defining storage or routes.
-
 - [NEXT] BETA-052 | Structured review-item context
   - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
   - priority: P1
@@ -579,6 +561,59 @@ Approved successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-050 | Procurement lifecycle and performance view
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: procurement
+  - depends_on: BETA-040, BETA-044
+  - objective: Group notices sharing an OCID into explicit planning, tender,
+    award, contract, amendment, termination and performance stages; add
+    `GET /api/v1/contracts/process/{ocid}` and a public lifecycle view.
+  - result: No `m01` change needed — the data is already collected.
+    `contracts.notice_type` stores the OCDS release `tag` list (comma-joined,
+    written by `m01._extract`), and `contracts.ocid` is the stable
+    cross-release id. New `public_queries.contract_process(conn, ocid)` reads
+    the rows for one OCID and buckets each notice by the stage its **own** tag
+    names — `_OCDS_STAGE` maps the ~14 standard tags to
+    planning / tender / award / contract / amendment / termination /
+    implementation / other, and `_STAGE_PRECEDENCE` picks the most specific
+    when a notice carries several (a `contractAmendment` also tagged
+    `contract` is an amendment). A multi-supplier award notice is one grouped
+    entry with all its suppliers (each flagged `is_tracked_provider` on an
+    exact `supplier_aliases` match). Response: `ocid`, `buyer`,
+    `stage_order`, `stages` (each `stage` / `present` / ordered `notices` —
+    id, `ocds_tags`, title, dates, value, suppliers, source URL, constructed
+    `notice_web_url`), `notice_count`, `date_range`, `caveat`. New
+    `CAVEATS["contract_process"]`: a missing stage is absence of a published
+    notice, never inferred completion, renewal, KPI achievement, supplier
+    performance or organisational continuity.
+  - route: `GET /api/v1/contracts/process/{ocid}`, pattern
+    `contracts/process/([A-Za-z0-9_-]{1,100})` — added to
+    `PUBLIC_API_PATTERNS`, `openapi.ROUTES` (parity test still binds both
+    ways), and an `api.html` article with `data-route` / `data-route-pattern`.
+    `c.ocid` appended to `_NOTICE_SELECT` (the appended-not-inserted column
+    rule) so the notices table and CSV export carry it too.
+  - ui: `contracts.js` — a "Lifecycle" column on the notices table links each
+    row to `#/contracts?ocid=…`; that hash renders `renderProcess`, a
+    dedicated view (hero + OCID + date range, the pinned caveat, one section
+    per stage in fixed lifecycle order, an absent stage drawn as "No notice
+    published for this stage — not evidence the stage did not happen").
+  - validation: New `tests/test_web_contract_process.py` (5 tests) — grouping
+    by the notice's own tag, the most-specific-tag rule, a multi-supplier
+    award as one entry, an absent stage marked `present: false` (not
+    inferred), the fixed `stage_order`, the caveat's forbidden inferences,
+    the unknown-OCID 400, and the frozen-surface pattern pin. Full offline
+    suite green — **2742 passed, 109 skipped, 34 deselected, 0 failed**.
+    `ruff check pipeline tests` clean. Browser-verified against a seeded
+    scratch SQLite warehouse: the lifecycle view groups a
+    planning/tender/award/amendment set correctly, shows the two empty
+    stages with the "not evidence" text, tracked supplier marked ✓, zero
+    console errors.
 
 - [DONE] BETA-049 | Accessibility and performance guardrails
   - completed: 2026-08-29
@@ -2786,8 +2821,8 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | DONE (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | DONE (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | DONE (BETA-049) |
-| P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | IN_PROGRESS (BETA-050) |
-| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | NEXT (BETA-051) |
+| P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | DONE (BETA-050) |
+| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | IN_PROGRESS (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | NEXT (BETA-052) |
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | Approved successor backlog (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | Approved successor backlog (BETA-054) |

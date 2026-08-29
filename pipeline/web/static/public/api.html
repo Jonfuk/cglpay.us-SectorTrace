@@ -546,6 +546,33 @@
     <p><a href="/api/v1/contracts?psr_only=1&amp;year_from=2025"><code>/api/v1/contracts?psr_only=1&amp;year_from=2025</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-contracts-process"
+           data-route="contracts/process/{ocid}"
+           data-route-pattern="contracts/process/([A-Za-z0-9_-]{1,100})">
+    <h3><code>/api/v1/contracts/process/{ocid}</code></h3>
+    <p>
+      The notices that share one OCDS release id (<code>ocid</code>), grouped
+      into the lifecycle stages the notices' own OCDS tags name — planning,
+      tender, award, contract, amendment, termination, implementation. A stage
+      with no notice is drawn as absent, never as an inferred completion: this
+      view computes no completion, renewal, KPI achievement, supplier
+      performance or organisational continuity.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ocid</code></td><td>Required, in the path. The <code>ocid</code> of any notice in the process.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>ocid</code>, <code>buyer</code>, <code>stage_order</code>,
+      <code>stages</code> (each with <code>stage</code>, <code>present</code>
+      and its ordered <code>notices</code> — id, OCDS tags, title, dates,
+      value, suppliers, source URL and constructed <code>notice_web_url</code>),
+      <code>notice_count</code>, <code>date_range</code> and <code>caveat</code>.
+    </p>
+  </article>
+
   <article class="apiroute" id="route-pay" data-route="pay">
     <h3><code>/api/v1/pay</code></h3>
     <p>

@@ -1391,6 +1391,13 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return public_queries.catalogue_detail(conn, match.group(1))
 
+        # The notices that share one OCID, grouped into published OCDS
+        # lifecycle stages (BETA-050). No inferred stage, no computed
+        # completion/performance.
+        match = re.fullmatch(r"contracts/process/([A-Za-z0-9_-]{1,100})", route)
+        if match:
+            return public_queries.contract_process(conn, match.group(1))
+
         # One AWARDED_TO edge and the dated contract notices behind every edge
         # between the same authority and provider (BETA-044).
         match = re.fullmatch(r"relationships/(relationship:[0-9a-f]{64})", route)

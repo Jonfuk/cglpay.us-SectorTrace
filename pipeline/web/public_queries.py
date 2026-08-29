@@ -156,6 +156,15 @@ CAVEATS = {
         "end is not a call-off's end, and none of this is a forecast of what "
         "will be retendered."
     ),
+    "contract_process": (
+        "These are the official notices published under one OCID, grouped by "
+        "the lifecycle stage each notice's own OCDS tag names — never a stage "
+        "inferred from what is missing. A stage with no notice was not "
+        "published to this feed, or has not been collected here: it is not "
+        "evidence that the stage did not happen, that the contract completed, "
+        "was renewed, met its targets, or that the supplier performed. No "
+        "completion, performance or continuity is computed from this view."
+    ),
     "evidence_funnel": (
         "Every candidate, promotion and evidence row in this funnel records "
         "a human decision, and who made it. A zero is zero decisions "
@@ -956,7 +965,11 @@ _NOTICE_SELECT = """
                -- Appended, not inserted. The CSV export takes its column
                -- order from these keys, and a downstream reader who counted
                -- columns should not have them move underneath them.
-               c.source_system, c.notice_web_url
+               c.source_system, c.notice_web_url,
+               -- The OCDS id that links related releases of one procurement
+               -- (BETA-050). Stable across the lifecycle; the process view is
+               -- keyed by it.
+               c.ocid
         FROM contracts c{clause}
         -- NULLS LAST is said rather than left to the engine: SQLite puts them
         -- last under DESC and PostgreSQL puts them first, so the same list
@@ -1187,6 +1200,133 @@ def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
             cursor.close()
 
     return total, rows()
+
+
+# OCDS release tags -> the lifecycle stage they name. The stage a notice
+# belongs to is the one its own `tag` declares (stored in
+# `contracts.notice_type` as a comma-joined string by m01) — this view never
+# infers a stage from the absence of another.
+_OCDS_STAGE: dict[str, str] = {
+    "planning": "planning",
+    "tender": "tender", "tenderAmendment": "tender", "tenderUpdate": "tender",
+    "tenderCancellation": "tender",
+    "award": "award", "awardUpdate": "award", "awardCancellation": "award",
+    "contract": "contract", "contractUpdate": "contract",
+    "contractAmendment": "amendment",
+    "contractTermination": "termination",
+    "implementation": "implementation", "implementationUpdate": "implementation",
+}
+# Display / lifecycle order.
+_STAGE_ORDER: tuple[str, ...] = (
+    "planning", "tender", "award", "contract", "amendment", "termination",
+    "implementation", "other")
+# Classification order: when a notice carries tags mapping to more than one
+# stage, the most specific / latest one wins — a `contractAmendment` also
+# tagged `contract` is an amendment.
+_STAGE_PRECEDENCE: tuple[str, ...] = (
+    "termination", "amendment", "implementation", "contract", "award",
+    "tender", "planning", "other")
+
+
+def _stage_of(notice_type: str | None) -> tuple[str, list[str]]:
+    """The lifecycle stage a notice belongs to, and its raw OCDS tags.
+
+    A notice can carry several tags; `_STAGE_PRECEDENCE` picks the most
+    specific. An unrecognised or absent tag is `other` — surfaced, not dropped.
+    """
+    tags = [t.strip() for t in (notice_type or "").split(",") if t.strip()]
+    stages = {_OCDS_STAGE[t] for t in tags if t in _OCDS_STAGE}
+    for candidate in _STAGE_PRECEDENCE:
+        if candidate in stages:
+            return candidate, tags
+    return "other", tags
+
+
+def contract_process(conn: sqlite3.Connection, ocid: str) -> dict:
+    """The notices that share one OCID, grouped into published lifecycle
+    stages (BETA-050).
+
+    Deterministic and additive: it reads `contracts` rows for `ocid`, buckets
+    each by the stage its own OCDS tag names, and returns them ordered by
+    publication date within each stage. It computes no completion, renewal,
+    performance or continuity — see `CAVEATS["contract_process"]`.
+    """
+    _public(["contracts", "supplier_aliases"])
+
+    rows = _rows(conn, """
+        SELECT c.notice_id, c.supplier_id, c.notice_type, c.notice_web_url,
+               c.buyer_name, c.buyer_ons_code, c.supplier_name_raw,
+               c.title, c.description, c.value_core, c.value_max, c.currency,
+               c.date_published, c.date_start, c.date_end, c.procedure_type,
+               c.source_url, c.retrieved_at, c.source_system,
+               CASE WHEN c.supplier_name_raw IN
+                    (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END
+                    AS supplier_is_tracked
+        FROM contracts c
+        WHERE c.ocid = :ocid
+        ORDER BY c.date_published, c.notice_id, c.supplier_id""",
+        {"ocid": ocid})
+    if not rows:
+        raise QueryError(f"No contract notices for OCID {ocid!r}.")
+
+    # One entry per notice_id; a multi-supplier award is several rows.
+    notices: dict[str, dict] = {}
+    for row in rows:
+        stage, tags = _stage_of(row["notice_type"])
+        entry = notices.setdefault(row["notice_id"], {
+            "notice_id": row["notice_id"],
+            "stage": stage,
+            "ocds_tags": tags,
+            "title": row["title"],
+            "notice_type_raw": row["notice_type"],
+            "date_published": row["date_published"],
+            "date_start": row["date_start"],
+            "date_end": row["date_end"],
+            "procedure_type": row["procedure_type"],
+            "value_core": row["value_core"],
+            "value_max": row["value_max"],
+            "currency": row["currency"],
+            "buyer_name": row["buyer_name"],
+            "buyer_ons_code": row["buyer_ons_code"],
+            "source_url": row["source_url"],
+            "retrieved_at": row["retrieved_at"],
+            "notice_web_url": row["notice_web_url"] or notice_page_url(
+                row["source_system"], row["notice_id"]),
+            "suppliers": [],
+        })
+        if row["supplier_name_raw"]:
+            entry["suppliers"].append({
+                "name": row["supplier_name_raw"],
+                "is_tracked_provider": bool(row["supplier_is_tracked"]),
+            })
+
+    ordered = sorted(
+        notices.values(),
+        key=lambda n: (n["date_published"] or "", n["notice_id"]))
+    by_stage: dict[str, list[dict]] = {}
+    for notice in ordered:
+        by_stage.setdefault(notice["stage"], []).append(notice)
+
+    stages = [
+        {"stage": name, "present": name in by_stage,
+         "notices": by_stage.get(name, [])}
+        for name in _STAGE_ORDER
+    ]
+    published_at = [n["date_published"] for n in ordered if n["date_published"]]
+    buyer = ordered[0]
+    return {
+        "ocid": ocid,
+        "buyer": {"name": buyer["buyer_name"],
+                   "ons_code": buyer["buyer_ons_code"]},
+        "stage_order": list(_STAGE_ORDER),
+        "stages": stages,
+        "notice_count": len(ordered),
+        "date_range": {
+            "earliest": min(published_at) if published_at else None,
+            "latest": max(published_at) if published_at else None,
+        },
+        "caveat": CAVEATS["contract_process"],
+    }
 
 
 def _add_notice_links(notices: list[dict]) -> None:

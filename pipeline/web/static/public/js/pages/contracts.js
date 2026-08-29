@@ -34,6 +34,16 @@ function pageQuery(params) {
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
+
+  // BETA-050: `#/contracts?ocid=…` is the procurement lifecycle view — the
+  // notices that share one OCDS id, grouped by the stage each notice's own
+  // tag names. The whole page is the process, so it replaces the dashboard.
+  const ocid = (params ? params.get('ocid') : null)
+    || new URLSearchParams(location.hash.split('?')[1] || '').get('ocid');
+  if (ocid) {
+    return renderProcess(main, ocid);
+  }
+
   const { q, since } = pageQuery(params);
   const search = { q, since };
   let data, spending;
@@ -465,6 +475,15 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
             + ` title="The API response this row was parsed from">api ↗</a>`
           : ''),
         formatterParams: {}, htmlOutput: true },
+      // BETA-050: the other notices published under this OCID, grouped into
+      // their lifecycle stages. Same-page hash navigation, so it opens the
+      // process view rather than leaving the site.
+      { title: 'Lifecycle', field: 'ocid', width: 90, headerFilter: false,
+        formatter: (c) => (c.getValue()
+          ? `<a href="#/contracts?ocid=${encodeURIComponent(c.getValue())}"`
+            + ` title="The related notices for this procurement, by stage">stages</a>`
+          : ''),
+        formatterParams: {}, htmlOutput: true },
   ];
 
   const countLine = el('p', { class: 'small muted' });
@@ -518,4 +537,80 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
       })),
     countLine, tableSlot, moreSlot));
   paint();
+}
+
+/* BETA-050: the procurement lifecycle view. One OCID, its notices grouped by
+ * the stage each notice's own OCDS tag names — never a stage inferred from
+ * what is missing, and no completion, performance or continuity computed. */
+async function renderProcess(main, ocid) {
+  replace(main, el('div', { class: 'section' },
+    el('div', { class: 'panel' }, el('div', { class: 'shimmer' }))));
+
+  let data;
+  try {
+    data = await fetchJSON(`contracts/process/${encodeURIComponent(ocid)}`);
+  } catch (error) {
+    replace(main, el('div', {},
+      el('div', { class: 'panel' },
+        el('a', { href: '#/contracts' }, '← All contracts')),
+      el('div', { class: 'section' }, errorCard(error.message, () => renderProcess(main, ocid)))));
+    return () => {};
+  }
+
+  const STAGE_LABEL = {
+    planning: 'Planning', tender: 'Tender', award: 'Award', contract: 'Contract',
+    amendment: 'Amendment', termination: 'Termination',
+    implementation: 'Implementation', other: 'Other / untagged',
+  };
+  const range = data.date_range || {};
+
+  const noticeCard = (notice) => el('article', { class: 'claim' },
+    el('div', { class: 'row wrap', style: 'justify-content:space-between;gap:8px;align-items:baseline;' },
+      el('strong', { text: notice.title || notice.notice_id }),
+      el('span', { class: 'small muted',
+        text: [notice.date_published ? isoDate(notice.date_published) : null,
+               ...(notice.ocds_tags || [])].filter(Boolean).join(' · ') })),
+    el('p', { class: 'small muted',
+      text: [
+        (notice.date_start || notice.date_end)
+          ? `period ${[notice.date_start, notice.date_end].filter(Boolean).join(' – ')}` : null,
+        notice.value_core != null
+          ? `published value ${gbp(notice.value_core, { compact: false })}` : null,
+        notice.procedure_type ? `procedure: ${notice.procedure_type}` : null,
+        (notice.suppliers || []).length
+          ? `supplier(s): ${notice.suppliers.map((s) => s.name + (s.is_tracked_provider ? ' ✓' : '')).join(', ')}`
+          : null,
+      ].filter(Boolean).join(' · ') }),
+    el('div', { class: 'row wrap', style: 'gap:8px;' },
+      notice.notice_web_url
+        ? el('a', { href: notice.notice_web_url, target: '_blank', rel: 'noopener' }, 'Notice page')
+        : null,
+      notice.source_url
+        ? el('a', { href: notice.source_url, target: '_blank', rel: 'noopener' }, 'Data source')
+        : null));
+
+  const page = el('div', {},
+    el('div', { class: 'panel' },
+      el('a', { href: '#/contracts' }, '← All contracts')),
+    el('div', { class: 'hero' },
+      el('h1', { text: 'Procurement lifecycle' }),
+      el('p', { class: 'lede' },
+        `${data.notice_count} notice${data.notice_count === 1 ? '' : 's'} `
+        + `published under one OCID by ${data.buyer?.name || 'the buyer'}`
+        + `${range.earliest ? `, ${isoDate(range.earliest)} to ${isoDate(range.latest)}` : ''}.`),
+      el('p', { class: 'small muted' }, el('code', { text: data.ocid }))),
+    pinnedCaveat(data.caveat, 'What this view may and may not do'));
+
+  for (const stage of data.stages || []) {
+    if (!stage.present) {
+      page.append(section(STAGE_LABEL[stage.stage] || stage.stage,
+        'No notice published for this stage — not evidence the stage did not happen.'));
+      continue;
+    }
+    page.append(section(STAGE_LABEL[stage.stage] || stage.stage, null,
+      ...stage.notices.map(noticeCard)));
+  }
+
+  replace(main, page);
+  return () => {};
 }

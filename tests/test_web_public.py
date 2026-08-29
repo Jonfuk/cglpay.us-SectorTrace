@@ -488,7 +488,9 @@ def test_the_export_keeps_its_existing_columns_where_they_were(ro):
     ]
     assert columns[:len(expected_prefix)] == expected_prefix
     assert set(columns[len(expected_prefix):]) == {
-        "source_system", "notice_web_url", "notice_link", "notice_link_basis"}
+        "source_system", "notice_web_url", "notice_link", "notice_link_basis",
+        # BETA-050: the OCDS id, appended so the lifecycle view has a key.
+        "ocid"}
 
 
 # --- the framework-ceiling problem -------------------------------------------

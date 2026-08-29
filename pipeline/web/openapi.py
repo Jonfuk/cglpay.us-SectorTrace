@@ -117,6 +117,13 @@ ROUTES: dict[str, dict] = {
             _p("provider_key"), _p("buyer_ons_code"),
             _p("year_from"), _p("year_to"), _SINCE, _LIMIT, _OFFSET],
     },
+    "/api/v1/contracts/process/{ocid}": {
+        "surface": r"contracts/process/([A-Za-z0-9_-]{1,100})",
+        "summary": "Notices sharing one OCID, grouped into published OCDS "
+                   "lifecycle stages; no stage or performance is inferred.",
+        "parameters": [_p("ocid", where="path", required=True,
+                           desc="An OCDS release id from a contract notice.")],
+    },
     "/api/v1/document_search": {
         "surface": "document_search",
         "summary": "Ranked full-text search over parsed committee papers and CDP documents.",
