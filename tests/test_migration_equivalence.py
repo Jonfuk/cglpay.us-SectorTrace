@@ -151,7 +151,11 @@ class TestTheTreesMatch:
         # run: counts, by-source distribution, unarchived evidence refs,
         # duplicated hashes, a deterministic sample. TEXT/INTEGER ->
         # text/bigint only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 74
+        # 75 adds alias_decisions (append-only human alias-resolution rows)
+        # and the verified_aliases view (latest accepted, non-superseded per
+        # name). TEXT/INTEGER -> text/bigint; CREATE VIEW IF NOT EXISTS ->
+        # CREATE OR REPLACE VIEW.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 75
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

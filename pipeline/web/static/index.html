@@ -167,6 +167,24 @@
       <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>o</kbd> open primary source ·
       <kbd>/</kbd> search · <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
     </p>
+
+    <details class="panel" style="margin-top: 12px">
+      <summary><strong>Alias resolution</strong> <span class="muted small">— resolve unmatched names to a canonical authority / provider</span></summary>
+      <p class="muted small">Every resolution is a named, append-only decision.
+        A fuzzy match is never applied automatically; a correction is a new
+        decision that supersedes the old one.</p>
+      <div class="runbar">
+        <label>Scheme
+          <select id="alias-scheme">
+            <option value="buyer">Buyer name → authority</option>
+            <option value="provider">Company name → provider</option>
+          </select>
+        </label>
+        <button class="btn" id="alias-reload" type="button">Reload</button>
+        <span id="alias-status" class="muted small" aria-live="polite"></span>
+      </div>
+      <div id="alias-list"></div>
+    </details>
   </section>
 
   <!-- Pipeline --------------------------------------------------------------->

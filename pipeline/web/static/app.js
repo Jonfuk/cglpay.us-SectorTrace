@@ -1331,6 +1331,82 @@ function initReviewPresets() {
   });
 }
 
+/* BETA-056: the alias-resolution panel. Resolving an unmatched name is a
+ * named, append-only decision through /api/admin/aliases/decide — the only
+ * path that resolves a name. Nothing here applies a fuzzy match. */
+async function loadAliasList() {
+  const holder = $('#alias-list');
+  if (!holder) return;
+  const scheme = $('#alias-scheme').value;
+  $('#alias-status').textContent = 'Loading…';
+  let data;
+  try { data = await api(`/api/admin/aliases?scheme=${scheme}`); }
+  catch (e) { $('#alias-status').textContent = e.message; return; }
+
+  $('#alias-status').textContent =
+    `${data.items.filter((i) => i.resolved).length} of ${data.count} resolved`;
+
+  const targetLabel = scheme === 'buyer' ? 'ons_code (E########)' : 'provider_key';
+  const rows = data.items.map((item) => {
+    const cid = el('input', { type: 'text', placeholder: targetLabel, 'aria-label': targetLabel });
+    const reason = el('input', { type: 'text', placeholder: 'reason (optional)', 'aria-label': 'reason' });
+    const status = el('span', { class: 'small muted' });
+
+    const decide = async (verdict) => {
+      const by = requireReviewer();
+      if (!by) return;
+      const body = {
+        unmatched_name: item.unmatched_name, target_scheme: scheme,
+        status: verdict, decided_by: by, reason: reason.value.trim() || null,
+      };
+      if (verdict === 'accepted') body.canonical_id = cid.value.trim();
+      const last = (item.decisions || []).filter((d) => d.status === 'accepted').pop();
+      if (last) body.supersedes_id = last.decision_id;
+      try {
+        await post('/api/admin/aliases/decide', body);
+        status.textContent = `recorded: ${verdict}`;
+        loadAliasList();
+      } catch (e) { status.textContent = `refused: ${e.message}`; }
+    };
+
+    return el('div', { class: 'panel' },
+      el('div', { class: 'row', style: 'justify-content:space-between;gap:8px' },
+        el('strong', { text: item.unmatched_name }),
+        el('span', { class: `badge ${item.resolved ? 'approved' : 'pending'}`,
+          text: item.resolved
+            ? `→ ${item.verified.canonical_name} (${item.verified.canonical_id})`
+            : 'unresolved' })),
+      (item.decisions || []).length
+        ? el('div', { class: 'muted small' },
+            `${item.decisions.length} decision(s); latest by `
+            + `${item.decisions[item.decisions.length - 1].decided_by}`)
+        : null,
+      el('div', { class: 'runbar' }, cid, reason,
+        el('button', { class: 'btn approve', onclick: () => decide('accepted') }, 'Accept'),
+        el('button', { class: 'btn reject', onclick: () => decide('rejected') }, 'Reject'),
+        status));
+  });
+
+  holder.replaceChildren(rows.length ? el('div', {}, ...rows)
+    : el('div', { class: 'empty', text: 'No unmatched names of this kind.' }));
+}
+
+function initAliasResolution() {
+  if (!$('#alias-scheme')) return;
+  $('#alias-scheme').addEventListener('change', loadAliasList);
+  $('#alias-reload').addEventListener('click', loadAliasList);
+  // Load lazily on first expand of the <details>.
+  const details = $('#alias-scheme').closest('details');
+  if (details) {
+    details.addEventListener('toggle', () => {
+      if (details.open && !details.dataset.loaded) {
+        details.dataset.loaded = '1';
+        loadAliasList();
+      }
+    });
+  }
+}
+
 // --- database browser -------------------------------------------------------
 
 const browserState = { objects: [], current: null, offset: 0, limit: 50, orderBy: null, desc: false, search: '', reveal: new Set() };
@@ -1656,6 +1732,7 @@ function init() {
   });
 
   initReviewPresets();
+  initAliasResolution();
 
   $('#select-page').addEventListener('change', (e) => {
     for (const item of reviewState.items) {

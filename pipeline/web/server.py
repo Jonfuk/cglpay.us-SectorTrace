@@ -1240,6 +1240,18 @@ class Handler(BaseHTTPRequestHandler):
                      "staleness": artefacts.staleness(
                          self.settings, conn, listed["files"])}
 
+        if path == "/api/admin/aliases":
+            # Human alias-resolution workflow (BETA-056): unmatched names for
+            # one scheme with their append-only decision history.
+            from pipeline.web import alias_resolution
+            return alias_resolution.unresolved(
+                conn, scheme=_str(params, "scheme", "buyer") or "buyer",
+                limit=_int(params, "limit", 100))
+
+        if path == "/api/admin/aliases/verified":
+            from pipeline.web import alias_resolution
+            return alias_resolution.verified(conn)
+
         if path == "/api/admin/archive-audits":
             # The append-only archive audit history (BETA-060). Read-only —
             # recording a new one is the `pipeline archive-audit` CLI.
@@ -1497,7 +1509,36 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/claims/decide": self._decide_claim,
             "/api/admin/claims/reset": self._reset_claim,
             "/api/admin/claim-candidates/decide": self._decide_claim_candidate,
+            "/api/admin/aliases/decide": self._decide_alias,
         }
+
+    def _decide_alias(self, body: dict) -> Any:
+        """Record one human alias-resolution decision (BETA-056).
+
+        One name per request; a named reviewer is required, and an `accepted`
+        decision needs a `canonical_id` that exists. No fuzzy match is ever
+        applied automatically — this is the only path that resolves a name.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import alias_resolution
+            result = alias_resolution.decide(
+                conn,
+                unmatched_name=str(body.get("unmatched_name", "")),
+                target_scheme=str(body.get("target_scheme", "")),
+                status=str(body.get("status", "")),
+                decided_by=str(body.get("decided_by", "")),
+                canonical_id=body.get("canonical_id") or None,
+                reason=body.get("reason") or None,
+                review_item_id=body.get("review_item_id"),
+                supersedes_id=body.get("supersedes_id") or None)
+        except queries.QueryError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.alias_decided", decision_id=result["decision_id"],
+                  status=result["status"])
+        return result
 
     def _decide_claim_candidate(self, body: dict) -> Any:
         """Record one reviewer's judgement on one semantic claim candidate.

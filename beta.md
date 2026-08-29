@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-060. Current
-  work: BETA-056. Next: BETA-057, BETA-061.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-056. Current
+  work: BETA-057. Next: BETA-061, BETA-062.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,33 +272,29 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-056 | Human alias-resolution workflow
-  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-060 completed
+- [IN_PROGRESS] BETA-057 | Candidate URL overlap signals
+  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-056 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 3
-  - risk: 4
-  - area: entity-quality
-  - depends_on: BETA-054
-  - objective: Resolve unmatched buyer and provider names through append-only
-    proposed, accepted, rejected and superseded decisions, then produce a
-    deterministic verified-alias registry.
-  - rationale: Repeated unresolved names reduce coverage, but fuzzy matches must
-    never silently become canonical identity.
-  - suggested_first_action: Design the decision schema and SQLite/PostgreSQL
-    invariants around named reviewer, timestamp, evidence and canonical entity
-    ID; automatic fuzzy application remains forbidden.
-  - next_action: Add a migration for an append-only `alias_decisions` table
-    (decision_id, unmatched_name, target_scheme buyer/provider,
-    canonical_id, status proposed/accepted/rejected/superseded, decided_by,
-    evidence_review_item_id, decided_at, supersedes_id); web helpers to
-    propose / decide one alias at a time (named reviewer required, no fuzzy
-    auto-apply); a `verified_aliases` read view = the latest accepted,
-    non-superseded row per name; an admin panel building on BETA-054's
-    sidecar candidates; tests that a fuzzy match never becomes canonical
-    without an accepted decision.
+  - priority: P2
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: data-quality/review
+  - depends_on: BETA-052
+  - objective: Show when a conservatively canonicalised URL appears across
+    source tables or workflow roles.
+  - rationale: Overlap can expose duplicate discovery or related evidence, but
+    it is not proof that records should be merged, discarded or reprioritised.
+  - suggested_first_action: Define fixtures for fragments, tracking parameters,
+    redirects and genuinely distinct documents before writing the normaliser.
+  - next_action: Add a conservative URL canonicaliser (strip fragment, sort
+    and drop known tracking params, lowercase host, keep path/query
+    otherwise — never follow a redirect) with fixture tests; a
+    `GET /api/admin/url-overlaps` that groups a canonical URL appearing in
+    more than one source table / review role, with counts and the raw URLs;
+    an admin panel; a caveat that overlap is a lead, never proof to merge,
+    discard or reprioritise.
 
 ### BLOCKED
 
@@ -482,22 +478,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-057 | Candidate URL overlap signals
-  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-059 completed
-  - priority: P2
-  - impact: 3
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: data-quality/review
-  - depends_on: BETA-052
-  - objective: Show when a conservatively canonicalised URL appears across
-    source tables or workflow roles.
-  - rationale: Overlap can expose duplicate discovery or related evidence, but
-    it is not proof that records should be merged, discarded or reprioritised.
-  - suggested_first_action: Define fixtures for fragments, tracking parameters,
-    redirects and genuinely distinct documents before writing the normaliser.
-
 - [NEXT] BETA-061 | Candidate-promotion campaign workspace
   - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-060 completed
   - priority: P1
@@ -517,7 +497,24 @@ DONE
     typed presenters; retain one-candidate-at-a-time confirmation and prohibit
     `promote all`.
 
-### READY
+- [NEXT] BETA-062 | Human-readable document titles
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-056 completed
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: documents/public-ux
+  - depends_on: BETA-041, BETA-042
+  - objective: Replace hash-like labels with deterministic display titles while
+    preserving raw source titles and recording `title_basis` as source label,
+    PDF metadata, first heading or filename.
+  - rationale: Search results need readable identity, but a derived title must
+    remain explainable rather than being presented as source text.
+  - suggested_first_action: Add fixtures for blank, misleading, duplicated and
+    personal-name-heavy metadata, then specify deterministic precedence.
+
+### READY### READY
 
 _(empty — Wave 4 of the successor round, BETA-062/063/064/065/066/067, is
 promoted here as Wave 3 lands, per the delivery sequence in the Approved
@@ -564,6 +561,59 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-056 | Human alias-resolution workflow
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 3
+  - risk: 4
+  - area: entity-quality
+  - depends_on: BETA-054
+  - objective: Resolve unmatched buyer and provider names through append-only
+    proposed, accepted, rejected and superseded decisions, then produce a
+    deterministic verified-alias registry.
+  - result: New migration `0075_alias_decisions.sql` (+ postgres pair, count
+    bump 74→75) — `alias_decisions`, one **append-only** row per decision
+    (`decision_id`, `unmatched_name`, `target_scheme` buyer/provider,
+    `canonical_id`, `canonical_name` snapshot, `status`, `decided_by`,
+    `reason`, `review_item_id`, `supersedes_id`, `decided_at`), plus the
+    `verified_aliases` **view** — the latest accepted decision per name that
+    no later row supersedes (`CREATE VIEW IF NOT EXISTS` /
+    `CREATE OR REPLACE VIEW` the only dialect change). New
+    `pipeline/web/alias_resolution.py`: `unresolved()` (the review-queue
+    names for a scheme with their decision history and a `resolved` flag),
+    `verified()`, and `decide()` — the **only** path that resolves a name.
+    It requires a named reviewer, an `accepted` decision needs a
+    `canonical_id` that exists in `authorities` / `providers` (validated), a
+    `rejected` decision must not carry one, and a `supersedes_id` must
+    exist. No row is ever updated or deleted; a correction is a new accepted
+    decision whose `supersedes_id` takes the old one out of the view. A test
+    greps the module: no `name_matches` / `suggestions` call, exactly one
+    `INSERT INTO alias_decisions`, no `UPDATE`/`DELETE`.
+  - api: `GET /api/admin/aliases?scheme=` (unresolved + history),
+    `GET /api/admin/aliases/verified`, `POST /api/admin/aliases/decide`
+    (one name per request; `QueryError` → 400). All admin only.
+  - ui: The Review tab gains an "Alias resolution" `<details>` panel — a
+    scheme switch, and per unmatched name its resolved badge (→ canonical
+    name + id), decision count, and a `canonical_id` + reason + Accept /
+    Reject row. Accept auto-fills `supersedes_id` from the name's last
+    accepted decision, so a correction is one click. The reviewer name
+    comes from the shared box.
+  - validation: New `tests/test_web_alias_resolution.py` (8) — the
+    table/view exist, a named reviewer is required, `accepted` needs a real
+    `canonical_id`, `rejected` must not carry one, accept-then-supersede
+    updates `verified_aliases` while the old row stays in the history,
+    `unresolved` lists the review names with their state, nothing applies a
+    fuzzy match automatically (source scan), and the routes are admin-only
+    with a working accept + a `decided_by`-blank 400. Full offline suite
+    green — **2802 passed, 109 skipped, 35 deselected, 1 pre-existing flaky
+    failure** (`test_db_concurrency` write-slot timing, the one BETA-035
+    recorded; passed in isolation immediately after — unrelated to this
+    append-only change). `ruff` clean. Browser-verified against a seeded scratch warehouse: accepting
+    "Hereford Council" → E06000019 records a decision and the panel shows
+    "→ Herefordshire, County of (E06000019)", zero console errors.
 
 - [DONE] BETA-060 | Raw-archive inventory and integrity trends
   - completed: 2026-08-29
@@ -3191,13 +3241,13 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | DONE (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | DONE (BETA-055) |
-| P1 | Human alias-resolution workflow | 5 | 4 | 3 | IN_PROGRESS (BETA-056) |
-| P2 | Candidate URL overlap signals | 3 | 3 | 4 | NEXT (BETA-057) |
+| P1 | Human alias-resolution workflow | 5 | 4 | 3 | DONE (BETA-056) |
+| P2 | Candidate URL overlap signals | 3 | 3 | 4 | IN_PROGRESS (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | NEXT (BETA-061) |
-| P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |
+| P2 | Human-readable document titles | 4 | 3 | 4 | NEXT (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | Approved successor backlog (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | Approved successor backlog (BETA-065) |
