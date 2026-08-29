@@ -680,3 +680,15 @@ a.jump:hover { border-bottom-style: solid; }
   /* the left list is the dense table on a wide screen; keep its rows tight */
   .review-split .dense td.raw { max-width: 220px; }
 }
+
+/* BETA-101: run-to-run comparison. Two run pickers, a totals strip, and a
+ * per-module diff table. Read-only — the numbers come straight from the
+ * immutable ledger. */
+.rc-pickers { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 6px 0 10px; }
+.rc-pickers label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.rc-pickers select { min-width: 260px; }
+.rc-totals { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.rc-change-added { color: var(--accent); }
+.rc-change-removed, .rc-change-regressed { color: var(--bad, #d9534f); }
+.rc-delta-pos::before { content: "+"; }
+td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }

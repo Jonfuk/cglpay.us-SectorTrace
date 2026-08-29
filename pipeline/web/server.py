@@ -1371,6 +1371,19 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import mission_control
             return mission_control.overview(conn, self.settings, self.jobs)
 
+        if path == "/api/admin/run-comparison":
+            # BETA-101: a per-module diff between two runs — status, rows,
+            # review items, failures, duration and freshness effect — derived
+            # from the immutable ledger. Writes nothing, duplicates no
+            # payloads. No ids -> the two most recent runs.
+            degrade.preflight(conn, "run_ledger")
+            from pipeline import run_ledger
+            try:
+                return run_ledger.compare(
+                    conn, _str(params, "a") or None, _str(params, "b") or None)
+            except ValueError as exc:
+                raise ApiError(str(exc), status=404) from exc
+
         if path == "/api/admin/jobs":
             running = self.jobs.running()
             return {"jobs": [job.head() for job in self.jobs.all()],

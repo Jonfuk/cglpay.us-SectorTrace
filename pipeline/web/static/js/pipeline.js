@@ -404,6 +404,117 @@ async function loadMissionControl() {
       : el('p', { class: 'muted small', text: 'No modules need attention.' }));
 }
 
+/* BETA-101: run-to-run comparison. A per-module diff between two runs —
+ * status, rows, review items, failures, duration and freshness effect —
+ * straight from the immutable ledger. Read-only; nothing here is polled,
+ * because a comparison of two past runs does not change. */
+const RC_CHANGE_CLASS = {
+  added: 'rc-change-added', removed: 'rc-change-removed',
+  regressed: 'rc-change-regressed',
+};
+
+function rcWhen(iso) {
+  return (iso || '').replace('T', ' ').replace(/\..*/, '').replace('+00:00', '');
+}
+function rcMs(ms) {
+  if (ms == null) return '—';
+  if (Math.abs(ms) < 1000) return `${ms} ms`;
+  const s = ms / 1000;
+  return Math.abs(s) < 90 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`;
+}
+function rcDelta(n, { ms = false } = {}) {
+  if (n == null) return el('span', { class: 'muted small', text: '—' });
+  if (n === 0) return el('span', { class: 'muted small', text: '0' });
+  const text = ms ? rcMs(n) : String(n);
+  return el('span', {
+    class: `small ${n > 0 ? 'rc-delta-pos' : ''}`,
+    text: n > 0 ? text : text.replace(/^-/, '−'),
+  });
+}
+
+async function rcPopulatePickers() {
+  const a = $('rc-a');
+  const b = $('rc-b');
+  if (!a || !b || a.dataset.filled) return;
+  let data;
+  try { data = await api('/api/admin/run-ledger?limit=30'); }
+  catch (e) { return; }
+  const runs = data.runs || [];
+  const opt = (value, text) => el('option', { value, text });
+  const label = (r) => `${rcWhen(r.finished_at || r.started_at)} · ${r.origin} · `
+    + `${r.status}${r.dry_run ? ' · dry' : ''} · ${r.module_selector || 'all'}`;
+  a.replaceChildren(opt('', 'auto — second newest run'),
+    ...runs.map((r) => opt(r.run_id, label(r))));
+  b.replaceChildren(opt('', 'auto — newest run'),
+    ...runs.map((r) => opt(r.run_id, label(r))));
+  a.dataset.filled = '1';
+}
+
+async function loadRunComparison() {
+  const holder = $('run-comparison');
+  if (!holder) return;
+  await rcPopulatePickers();
+
+  const a = $('rc-a')?.value || '';
+  const b = $('rc-b')?.value || '';
+  const query = new URLSearchParams();
+  if (a) query.set('a', a);
+  if (b) query.set('b', b);
+
+  let data;
+  try { data = await api(`/api/admin/run-comparison${query.toString() ? `?${query}` : ''}`); }
+  catch (e) {
+    holder.replaceChildren(el('p', { class: 'muted small',
+      text: e.status === 404 ? (e.message || 'Need at least two recorded runs to compare.')
+        : 'Comparison unavailable.' }));
+    return;
+  }
+
+  const head = (r, tag) => el('div', { class: 'small' },
+    el('strong', { text: `${tag}: ` }),
+    el('span', { class: 'mono', text: (r.run_id || '').slice(0, 8) }),
+    el('span', { text: ` ${r.origin} · ${r.status} · ${rcWhen(r.started_at)} · `
+      + `${rcMs(r.duration_ms)}` }),
+    r.revision ? el('span', { class: 'muted mono', text: ` ${r.revision.slice(0, 10)}` }) : null);
+
+  const t = data.totals || {};
+  const badge = (text, kind) => el('span', { class: `badge ${kind || 'type'}`, text });
+  const totals = el('div', { class: 'rc-totals' },
+    badge(`A→B rows +${t.rows_added || 0} / −${t.rows_removed || 0}`, 'approved'),
+    t.status_regressions ? badge(`${t.status_regressions} regressed`, 'rejected') : null,
+    t.status_recoveries ? badge(`${t.status_recoveries} recovered`, 'approved') : null,
+    t.modules_only_in_a ? badge(`${t.modules_only_in_a} only in A`, 'muted') : null,
+    t.modules_only_in_b ? badge(`${t.modules_only_in_b} only in B`, 'muted') : null,
+    badge(`review Δ ${t.review_delta_total > 0 ? '+' : ''}${t.review_delta_total || 0}`, 'type'),
+    badge(`failures Δ ${t.failures_delta_total > 0 ? '+' : ''}${t.failures_delta_total || 0}`, 'type'),
+    badge(`duration Δ ${rcMs(t.duration_delta_ms)}`, 'type'));
+
+  const rows = (data.modules || []).map((m) => el('tr', {},
+    el('td', { class: 'mono small', text: m.module }),
+    el('td', {}, el('span', {
+      class: `badge ${m.change === 'unchanged' ? 'muted' : 'type'} ${RC_CHANGE_CLASS[m.change] || ''}`,
+      text: m.change })),
+    el('td', { class: 'small', text: `${m.status_a} → ${m.status_b}` }),
+    el('td', { class: 'rc-num' }, rcDelta(m.rows_delta)),
+    el('td', { class: 'rc-num' }, rcDelta(m.review_delta)),
+    el('td', { class: 'rc-num' }, rcDelta(m.failures_delta)),
+    el('td', { class: 'rc-num' }, rcDelta(m.elapsed_delta_ms, { ms: true })),
+    el('td', { class: 'muted small', text: m.freshness_effect })));
+
+  holder.replaceChildren(
+    head(data.run_a, 'A'), head(data.run_b, 'B'),
+    el('p', { class: 'muted small', text: data.note }),
+    totals,
+    el('table', {}, el('thead', {}, el('tr', {},
+      el('th', { text: 'module' }), el('th', { text: 'change' }),
+      el('th', { text: 'status A → B' }), el('th', { text: 'rows Δ' }),
+      el('th', { text: 'review Δ' }), el('th', { text: 'failures Δ' }),
+      el('th', { text: 'duration Δ' }), el('th', { text: 'freshness effect' }))),
+      el('tbody', {}, rows.length ? rows
+        : el('tr', {}, el('td', { colspan: '8', class: 'empty',
+            text: 'The two runs touched no modules in common.' })))));
+}
+
 /* BETA-058: the durable run ledger — every module-run, whatever started it. */
 async function loadRunLedger() {
   const holder = $('run-ledger');
@@ -453,18 +564,27 @@ export function initPipeline() {
     $(id).addEventListener('change', () => store.set(key, $(id).value));
   }
 
+  for (const id of ['rc-a', 'rc-b']) {
+    $(id)?.addEventListener('change', loadRunComparison);
+  }
+
   document.addEventListener('tabshown', (event) => {
     if (event.detail.tab !== 'pipeline') return;
     loadModules();
     loadHistory();
     loadMissionControl();
+    loadRunComparison();
   });
 
   // app.js is a classic script and has already routed the opening hash by the
   // time this module -- deferred, like every module -- runs, so the first
   // 'tabshown' for the tab we are on has been and gone. Opening straight to
   // #pipeline has to work.
-  if ($('tab-pipeline').classList.contains('active')) { loadModules(); loadMissionControl(); }
+  if ($('tab-pipeline').classList.contains('active')) {
+    loadModules();
+    loadMissionControl();
+    loadRunComparison();
+  }
 
   // Once at load, whatever tab is showing: a run may already be going, and the
   // pill in the tab strip is how you find out without looking for it.

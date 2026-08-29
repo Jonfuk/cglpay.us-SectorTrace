@@ -297,24 +297,25 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-101 | Run-to-run output comparison
+- [IN_PROGRESS] BETA-102 | Interactive pipeline and data-lineage map
   - priority: P1
   - impact: 5
-  - effort: 4
+  - effort: 5
   - confidence: 4
   - risk: 3
-  - area: admin/operations
-  - depends_on: BETA-058, BETA-082, BETA-085
-  - objective: Compare two pipeline runs by modules, rows added/changed/removed,
-    failures, review items, coverage, durations and freshness effects.
-  - next_action: Define immutable per-module comparison summaries from the run
-    ledger; drill down via links to existing records and logs rather than
-    duplicating full payloads.
+  - area: admin/system understanding
+  - depends_on: BETA-043, BETA-058, BETA-067, BETA-082, BETA-083, BETA-085
+  - objective: Map modules, sources, archives, tables, entity links, APIs,
+    exports and public pages as searchable dependencies with health and
+    consumer details.
+  - next_action: Generate a read-only typed graph from the machine-owned
+    registries and migrations; forbid hand-maintained edges where a registry
+    can supply them.
 
 _(The first refinement programme BETA-068–087 is complete. The second
 programme BETA-088–106 is now in progress in its own approved wave order:
-wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090 and
-BETA-091 are complete, see DONE.)_
+wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090,
+BETA-091 and BETA-101 are complete, see DONE.)_
 
 ### BLOCKED
 
@@ -549,6 +550,59 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-101 | Run-to-run output comparison
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/operations
+  - depends_on: BETA-058, BETA-082, BETA-085
+  - objective: Compare two pipeline runs by modules, rows added/changed/removed,
+    failures, review items, coverage, durations and freshness effects.
+  - result: New `run_ledger.compare(conn, run_a, run_b)` — a per-module diff
+    derived from the immutable ledger, **writing nothing and duplicating no
+    payloads**: each module row carries the numbers the run already recorded
+    (`rows`, `review`, `failures`, `elapsed_ms`) from each side plus their
+    deltas, and the run headers carry `run_id` so a caller links back to the
+    ledger and job logs for the detail. Per module: `status_a`/`status_b`
+    (with `absent` where a run did not touch it), the four deltas, a
+    `duration` delta from `finished_at - started_at`, and a
+    `freshness_effect` read from the B outcome ("advanced — wrote rows in B",
+    "ran in B, no new rows", "no successful run in B"). One headline `change`
+    label per module from an explicit ordered precedence
+    (`added` > `removed` > `regressed` > `recovered` > `rows-changed` >
+    `review-changed` > `slower`/`faster` > `unchanged`) — deterministic, not
+    a score. `totals` are plain operational counts (regressions, recoveries,
+    modules only in A / only in B, rows added/removed, review Δ, failures Δ,
+    duration Δ) — no composite index. With no ids it compares the two most
+    recent runs (B newest). Missing run or fewer than two → `ValueError` →
+    404. New additive admin route `/api/admin/run-comparison?a=&b=`
+    (network-trust-gated, `degrade.preflight` on `run_ledger`); helper
+    `run_ledger.one()` added; `recent()` refactored onto a shared `_hydrate`.
+  - api/ui: additive `/api/admin/run-comparison`. New "Compare two runs"
+    panel on the pipeline tab (`#run-comparison-panel`) — two run pickers
+    (defaulting to auto newest / second-newest), an A/B header line each with
+    `run_id`, revision and duration, a totals badge strip, and a per-module
+    diff table (change label, status A→B, rows/review/failures/duration
+    deltas, freshness effect). `loadRunComparison()` in `pipeline.js`,
+    refreshed on `tabshown` and picker `change` only — a comparison of two
+    past runs does not change, so it is not polled. `styles.css` gained a
+    `.rc-*` block.
+  - validation: `tests/test_run_ledger.py` +6 (defaults to the two most
+    recent runs; per-module added/removed/regressed labels, `rows_removed`
+    and `review_delta_total` totals, `duration_delta_ms` from the timestamps,
+    and the "advanced/no successful run" freshness effect; a named missing
+    run and fewer-than-two both raise; `compare` writes nothing — row count
+    unchanged, note says so; the HTTP route returns the diff and 404s a bad
+    id). `ruff` clean. Browser-verified on the admin pipeline tab against a
+    seeded ledger: the panel shows A/B headers, totals "A→B rows +35 / −60 ·
+    1 regressed · 1 only in B · failures Δ +3", and a three-row table
+    (m12_fingertips added, m05_cqc regressed ok→failed, m01_procurement
+    rows-changed); selecting the runs in the other order inverts every
+    figure ("1 recovered", "removed", "failures Δ -3").
 
 - [DONE] BETA-091 | Source publication calendar
   - completed: 2026-08-29
@@ -4751,8 +4805,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
-| P1 | Run-to-run output comparison | 5 | 4 | 4 | IN_PROGRESS (BETA-101) |
-| P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | APPROVED, not queued (BETA-102) |
+| P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
+| P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | IN_PROGRESS (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |

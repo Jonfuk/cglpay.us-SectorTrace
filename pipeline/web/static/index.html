@@ -248,6 +248,18 @@
       <div id="mission-control"></div>
     </div>
 
+    <!-- BETA-101: compare two runs from the immutable ledger — per module,
+         what changed in status, rows, review items, failures, duration and
+         freshness effect. Read-only; no payloads are duplicated. -->
+    <div class="panel" id="run-comparison-panel">
+      <h2>Compare two runs</h2>
+      <div class="rc-pickers">
+        <label>Baseline (A)<select id="rc-a"></select></label>
+        <label>Later (B)<select id="rc-b"></select></label>
+      </div>
+      <div id="run-comparison"></div>
+    </div>
+
     <div class="split">
       <div class="panel">
         <h2>Modules</h2>
