@@ -61,7 +61,7 @@
           <div><strong>Public money</strong><a href="#/contracts">Contracts</a><a href="#/geography">Council spending</a><a href="#/relationships">Who commissions whom</a></div>
           <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/coverage">Coverage</a></div>
           <div><strong>Safety &amp; legal</strong><a href="#/pfd">Coroners’ reports</a><a href="#/claims">Provider evidence</a></div>
-          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="/api">Downloads &amp; API</a></div>
+          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="#/catalogue">Dataset catalogue</a><a href="/api">Downloads &amp; API</a></div>
         </div>
       </details>
       <!--
@@ -189,6 +189,7 @@
       <li><code>/api/v1/layers</code> — the geography map's overlay layers, each with its own caveats</li>
       <li><code>/api/v1/relationships</code> — one authority or provider's commissioning neighbourhood in the evidence graph</li>
       <li><code>/api/v1/document_search</code> — full-text search over published committee papers and community drug partnership documents</li>
+      <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
       <li><code>/api/v1/claims</code> — what the campaign says, with the evidence behind each claim</li>
       <li><code>/api/v1/freshness</code> — when each source table was last collected</li>
@@ -217,6 +218,7 @@
 <footer class="sitefoot">
   <nav class="sitefoot-nav" aria-label="More resources">
     <a href="#/coverage" data-route="coverage">Coverage &amp; limitations</a>
+    <a href="#/catalogue" data-route="catalogue">Dataset catalogue</a>
     <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
     <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
   </nav>

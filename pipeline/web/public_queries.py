@@ -38,8 +38,10 @@ from typing import Any, Iterator
 from pipeline import catalog, db
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.exports.geojson import LAYER_CAVEATS
+from pipeline.licences import for_module, statement
 from pipeline.notice_urls import notice_page_url
-from pipeline.web import health
+from pipeline.web import datasets, health
+from pipeline.web.datasets import EVIDENCE_LAYERS
 from pipeline.web.queries import QueryError, _run
 
 # Caveats that must travel with particular figures. Kept here, in one place,
@@ -175,6 +177,14 @@ CAVEATS = {
         "table that never shows a date has never been collected — absence of "
         "collection is not evidence of absence, and it is drawn as 'never' "
         "rather than as zero."
+    ),
+    "catalogue": (
+        "This catalogue describes what the portal collects and the single "
+        "limitation that matters most for each source — it is not the full "
+        "caveat set. Row counts and dates are measured against the warehouse "
+        "on each request; a count of zero means that dataset has not been "
+        "collected here, not that the source is empty. Datasets in different "
+        "evidence layers are never added together."
     ),
     "pfd_stubs": (
         "A large part of this corpus publishes only a metadata stub online, "
@@ -664,6 +674,90 @@ def meta(conn: sqlite3.Connection, settings) -> dict:
             "postgres_extensions": extension_state,
         },
     }
+
+
+# --- dataset catalogue ----------------------------------------------------
+
+
+def _table_last_retrieved(conn: sqlite3.Connection, table: str) -> str | None:
+    """MAX(retrieved_at) for a table that has that column, else None.
+
+    The catalogue spans the whole pipeline and the reference and derived
+    tables (`authorities`, `sector_universe`) carry no `retrieved_at`. Ask
+    the schema first so this does not raise on them.
+    """
+    if not any(col["name"] == "retrieved_at"
+               for col in catalog.columns_of(conn, table)):
+        return None
+    return _one(conn, f"SELECT MAX(retrieved_at) AS t FROM {table}").get("t")
+
+
+def _dataset_figures(conn: sqlite3.Connection, ds: "datasets.Dataset") -> dict:
+    """One catalogue row: the static registry entry plus live counts/freshness.
+
+    `_public()` here is the same guard every other function in this file
+    runs — a mistyped table name in `datasets.py` that named a restricted_
+    table would fail the request rather than count its rows.
+    """
+    _public(list(ds.public_tables))
+    counts = catalog.row_counts(conn, ds.public_tables)
+    retrieved = {t: _table_last_retrieved(conn, t) for t in ds.public_tables}
+    dates = [d for d in retrieved.values() if d]
+    licence = for_module(ds.module)
+    return {
+        "dataset_id": ds.dataset_id,
+        "module": ds.module,
+        "title": ds.title,
+        "publisher": ds.publisher,
+        "official_url": ds.official_url,
+        "evidence_layer": ds.evidence_layer,
+        "evidence_layer_label": EVIDENCE_LAYERS.get(
+            ds.evidence_layer, ds.evidence_layer),
+        "geography": ds.geography,
+        "cadence": ds.cadence,
+        "licence": (
+            {"id": licence.id, "name": licence.name, "url": licence.url}
+            if licence else None),
+        "tables": [
+            {"name": t, "rows": counts.get(t, 0),
+             "last_retrieved_at": retrieved.get(t)}
+            for t in ds.public_tables
+        ],
+        "row_count": sum(counts.get(t, 0) for t in ds.public_tables),
+        "last_retrieved_at": max(dates) if dates else None,
+        "caveat": ds.caveat,
+    }
+
+
+def catalogue(conn: sqlite3.Connection) -> dict:
+    """Every dataset the portal serves, with measured counts and freshness.
+
+    The static half — title, publisher, official URL, evidence layer,
+    geography, cadence, licence key, caveat — is `pipeline/web/datasets.py`.
+    The counts and last-retrieved dates are read from the warehouse here so
+    the catalogue can never claim a figure the data does not support.
+    `tests/test_web_catalogue.py` pins that every collecting `mNN_` module
+    has exactly one entry.
+    """
+    return {
+        "datasets": [_dataset_figures(conn, ds) for ds in datasets.DATASETS],
+        "evidence_layers": EVIDENCE_LAYERS,
+        "count": len(datasets.DATASETS),
+        "caveat": CAVEATS["catalogue"],
+    }
+
+
+def catalogue_detail(conn: sqlite3.Connection, dataset_id: str) -> dict:
+    """One dataset, with the full licence statement and its caution."""
+    ds = datasets.BY_ID.get(dataset_id)
+    if ds is None:
+        raise QueryError(f"No dataset {dataset_id!r}.")
+    figures = _dataset_figures(conn, ds)
+    licence = for_module(ds.module)
+    figures["licence_statement"] = statement(licence) if licence else None
+    figures["licence_caution"] = (licence.caution or None) if licence else None
+    figures["caveat_common"] = CAVEATS["catalogue"]
+    return figures
 
 
 def _value_is_concentrated(conn: sqlite3.Connection, threshold: float = 0.5) -> bool:

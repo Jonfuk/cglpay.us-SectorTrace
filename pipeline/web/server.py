@@ -118,7 +118,7 @@ for _module in ("theme", "components", "palette"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
-              "documents"):
+              "documents", "catalogue"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1348,6 +1348,15 @@ class Handler(BaseHTTPRequestHandler):
                 year_to=_str(params, "year_to") or None,
                 since_retrieved_at=_str(params, "since_retrieved_at") or None,
                 limit=_int(params, "limit", 25), offset=_int(params, "offset", 0))
+
+        if route == "catalogue":
+            # The public dataset catalogue (BETA-043): static registry in
+            # pipeline/web/datasets.py, live counts/freshness measured here.
+            return public_queries.catalogue(conn)
+
+        match = re.fullmatch(r"catalogue/([a-z0-9-]{1,64})", route)
+        if match:
+            return public_queries.catalogue_detail(conn, match.group(1))
 
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:

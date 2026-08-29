@@ -377,6 +377,50 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-catalogue" data-route="catalogue">
+    <h3><code>/api/v1/catalogue</code></h3>
+    <p>
+      A registry of every dataset this portal collects: for each, its title,
+      official publisher and source URL, evidence layer, geography, update
+      cadence, licence, the public warehouse tables it writes, and the single
+      limitation that matters most before quoting it. Row counts and
+      last-retrieved dates are measured against the warehouse on each
+      request, so a dataset showing zero rows has not been collected here
+      rather than being empty at source.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>datasets</code> — one row per collecting module, each with
+      <code>dataset_id</code>, <code>module</code>, <code>title</code>,
+      <code>publisher</code>, <code>official_url</code>,
+      <code>evidence_layer</code> (+ <code>evidence_layer_label</code>),
+      <code>geography</code>, <code>cadence</code>, <code>licence</code>,
+      <code>tables</code> (name, rows, <code>last_retrieved_at</code>),
+      <code>row_count</code>, <code>last_retrieved_at</code> and
+      <code>caveat</code> — plus <code>evidence_layers</code> (the layer
+      vocabulary), <code>count</code> and a shared <code>caveat</code>.
+      Datasets in different evidence layers are never added together.
+    </p>
+    <p><a href="/api/v1/catalogue"><code>/api/v1/catalogue</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-catalogue-detail" data-route="catalogue/{dataset_id}"
+           data-route-pattern="catalogue/([a-z0-9-]{1,64})">
+    <h3><code>/api/v1/catalogue/{dataset_id}</code></h3>
+    <p>
+      One catalogue entry, by its <code>dataset_id</code>, with the full
+      licence <code>licence_statement</code> and any <code>licence_caution</code>
+      alongside the same fields the list returns.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>dataset_id</code></td><td>Required, in the path. A <code>dataset_id</code> from the catalogue list; anything else is a 400.</td></tr>
+      </tbody>
+    </table>
+    <p><code>/api/v1/catalogue/procurement-notices</code></p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>

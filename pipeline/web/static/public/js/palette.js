@@ -44,6 +44,7 @@ const PAGES = [
   ['/authorities', 'Authorities', 'One page per local authority'],
   ['/compare', 'Compare authorities', 'Authorities side by side on shared axes'],
   ['/coverage', 'Coverage & limitations', 'What this portal holds, and what it does not'],
+  ['/catalogue', 'Dataset catalogue', 'Every source, its licence, cadence and one key limitation'],
 ];
 
 const MAX_RESULTS = 24;

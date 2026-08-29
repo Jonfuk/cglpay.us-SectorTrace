@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-042. Current work: BETA-043. Next:
-  BETA-044.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-043. Current work: BETA-044. Next:
+  BETA-045.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,27 +271,29 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-043 | Public dataset catalogue
+- [IN_PROGRESS] BETA-044 | Commissioning-relationship detail and timeline
+  - promoted_from: NEXT on 2026-08-29 after BETA-043 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
   - risk: 2
-  - area: metadata/api/ui
+  - area: graph/api/ui
   - depends_on: BETA-039
-  - objective: Publish a validated registry and list/detail views describing
-    each dataset's title, publisher, official URL, evidence layer, geography,
-    cadence, public tables, licence and caveat, with exact counts and freshness.
-  - rationale: Readers should be able to discover what the system contains and
-    its limitations without reverse-engineering module names or README prose.
-  - suggested_first_action: Design the registry schema and a validation test
-    requiring every registered module to map to catalogue metadata before
-    building the API and portal views.
-  - next_action: Design the registry (a checked-in data file or a small
-    module-declared block), a coverage test binding every registered `mNN_`
-    module to catalogue metadata, then the `/api/v1/catalogue` list/detail
-    routes and portal views with exact counts and freshness.
+  - objective: Add a relationship-detail endpoint, drawer and dated timeline
+    for deterministic provider-to-authority `AWARDED_TO` contract edges already
+    present in the evidence graph.
+  - rationale: The relationship explorer shows connections but not the source
+    events behind them. A narrow deterministic timeline adds explanatory value
+    without inventing organisational continuity.
+  - suggested_first_action: Define the endpoint from existing awarded-contract
+    provenance only; omit missing dates and never manufacture `REGISTERED_AS`,
+    claim or signal edges.
+  - next_action: Add `GET /api/v1/relationships/{relationship_id}` reading the
+    `AWARDED_TO` edge, its two entities and the dated contract notices behind
+    it (from `contracts` via `evidence_records`), a relationships.js drawer
+    that opens on an edge, tests, `api.html` + `test_portal_isolation.py`.
 
 ### BLOCKED
 
@@ -475,28 +477,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-044 | Commissioning-relationship detail and timeline
-  - promoted_from: READY on 2026-08-29 after BETA-042 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: graph/api/ui
-  - depends_on: BETA-039
-  - objective: Add a relationship-detail endpoint, drawer and dated timeline
-    for deterministic provider-to-authority `AWARDED_TO` contract edges already
-    present in the evidence graph.
-  - rationale: The relationship explorer shows connections but not the source
-    events behind them. A narrow deterministic timeline adds explanatory value
-    without inventing organisational continuity.
-  - suggested_first_action: Define the endpoint from existing awarded-contract
-    provenance only; omit missing dates and never manufacture `REGISTERED_AS`,
-    claim or signal edges.
-
-### READY
-
-- [READY] BETA-045 | Provider comparison enhancements
+- [NEXT] BETA-045 | Provider comparison enhancements
+  - promoted_from: READY on 2026-08-29 after BETA-043 completed
   - priority: P2
   - impact: 4
   - effort: 4
@@ -513,6 +495,8 @@ DONE
   - suggested_first_action: Specify a structured JSON response/export that
     preserves layer-specific units, dates and caveats; refuse flat CSV and add
     tests prohibiting rankings, conversions, ratios and composite scores.
+
+### READY
 
 - [READY] BETA-046 | Admin semantic-search workbench
   - priority: P2
@@ -626,6 +610,65 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-043 | Public dataset catalogue
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: metadata/api/ui
+  - depends_on: BETA-039
+  - objective: Publish a validated registry and list/detail views describing
+    each dataset's title, publisher, official URL, evidence layer, geography,
+    cadence, public tables, licence and caveat, with exact counts and freshness.
+  - result: New checked-in registry `pipeline/web/datasets.py` — one
+    `Dataset` per collecting `mNN_` module (33 rows), each with a stable
+    kebab-case `dataset_id`, title, publisher, official URL, an
+    `evidence_layer` from an eleven-value controlled vocabulary
+    (`EVIDENCE_LAYERS`), geography, cadence, the portal-safe warehouse tables
+    it writes, and the single limitation that matters most before quoting it.
+    The registry is *static* only — no numbers. `public_queries.catalogue()` /
+    `catalogue_detail()` add the live half at request time: `catalog.row_counts`
+    per table, `MAX(retrieved_at)` for the tables that carry it (`_table_last_retrieved`
+    asks the schema first so `authorities` / `sector_universe` don't raise),
+    and the licence resolved through the existing `pipeline/licences.py`
+    (`for_module` / `statement`), so a zero row count reads as "not collected
+    here" rather than "source empty". Every table name passes the same
+    `_public()` restricted-table guard every other function in that file runs.
+  - api: `GET /api/v1/catalogue` (list + `evidence_layers` vocabulary +
+    shared caveat) and `GET /api/v1/catalogue/{dataset_id}` (adds
+    `licence_statement` and `licence_caution`; unknown id → 400 via
+    `QueryError`). Route pattern `catalogue/([a-z0-9-]{1,64})`. Added to the
+    frozen surfaces: `PUBLIC_API_ROUTES` + `PUBLIC_API_PATTERNS` in
+    `test_portal_isolation.py`, the `api.html` articles (both with
+    `data-route` / `data-route-pattern`), the `<noscript>` list, and
+    `CAVEATS["catalogue"]`.
+  - ui: New portal page `/js/pages/catalogue.js` + route `#/catalogue`
+    (registered in `server.py` STATIC_FILES, app.js `ROUTES`/`ROUTE_TITLES`,
+    the command palette `PAGES`, the footer nav and the lens menu; static
+    path pinned in `test_portal_isolation.py`). List view groups datasets by
+    evidence layer in vocabulary order — so the never-combine-across-layers
+    boundary is visible in the layout — with a card per dataset (caveat,
+    publisher/geography/cadence/holdings, official source link, licence
+    link, Details button). `#/catalogue?dataset=<id>` is the detail view
+    (pinned caveats, source table, per-table row counts and freshness).
+    Values reach the DOM as text nodes; `sourceLink` is imported from
+    `app.js` (a first draft wrongly imported it from `components.js` and the
+    page failed to load — caught in the browser).
+  - validation: New `tests/test_web_catalogue.py` (10 tests) — the coverage
+    bind (every collecting module ↔ exactly one entry, both directions),
+    unique kebab-case ids, known evidence layers, every `public_tables`
+    entry portal-safe, licence + real https URL present, and the served
+    routes: measured counts/freshness against a seeded SQLite warehouse
+    (geography = 1, procurement = 3, an uncollected dataset = 0), the detail
+    licence statement/caution, and the unknown-id 400. Full offline suite
+    green — **2693 passed, 109 skipped, 34 deselected, 0 failed** (320s).
+    `ruff check pipeline tests scripts` clean. Browser-verified against a
+    seeded scratch SQLite warehouse: list groups 33 datasets by layer,
+    detail view renders per-table counts and the NHS-Benchmarking licence
+    caution, zero console errors.
 
 - [DONE] BETA-042 | Document evidence-context view
   - completed: 2026-08-29
@@ -2435,9 +2478,9 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Contract search and pagination | 5 | 3 | 5 | NEXT (BETA-040) |
 | P1 | Ranked, faceted document search | 5 | 4 | 4 | NEXT (BETA-041) |
 | P1 | Document evidence-context view | 5 | 3 | 4 | NEXT (BETA-042) |
-| P1 | Public dataset catalogue | 5 | 4 | 4 | NEXT (BETA-043) |
-| P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | READY (BETA-044) |
-| P2 | Provider comparison enhancements | 4 | 4 | 4 | READY (BETA-045) |
+| P1 | Public dataset catalogue | 5 | 4 | 4 | DONE (BETA-043) |
+| P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | IN_PROGRESS (BETA-044) |
+| P2 | Provider comparison enhancements | 4 | 4 | 4 | NEXT (BETA-045) |
 | P2 | Admin semantic-search workbench | 4 | 3 | 5 | READY (BETA-046) |
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | READY (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
