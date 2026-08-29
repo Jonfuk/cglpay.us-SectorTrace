@@ -125,6 +125,11 @@
       <label>Oldest first <input id="f-oldest" type="checkbox" checked></label>
       <label>Dense rows <input id="f-dense" type="checkbox"></label>
       <label title="Group pending items by module, type and a shared organisation/source token">Cluster view <input id="f-clusters" type="checkbox"></label>
+      <label title="Load a saved filter + note preset">Preset
+        <select id="review-preset"><option value="">—</option></select>
+      </label>
+      <button class="btn ghost" id="review-preset-save" type="button" title="Save current filters + note as a preset">Save preset</button>
+      <button class="btn ghost" id="review-preset-delete" type="button" title="Delete the selected preset" hidden>Delete</button>
     </div>
 
     <div id="review-clusters" hidden></div>
@@ -148,6 +153,7 @@
     <div class="listhead">
       <label class="selectall"><input type="checkbox" id="select-page"> Select page</label>
       <span id="review-count" class="muted"></span>
+      <span id="review-session" class="muted small" aria-live="polite"></span>
       <span class="spacer"></span>
       <span class="muted small">
         Deciding records a judgement. It does not promote anything into a canonical table.
@@ -158,8 +164,8 @@
     <div class="pager" id="review-pager"></div>
     <p class="muted small keys">
       Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>r</kbd> reject ·
-      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search ·
-      <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
+      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>o</kbd> open primary source ·
+      <kbd>/</kbd> search · <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
     </p>
   </section>
 

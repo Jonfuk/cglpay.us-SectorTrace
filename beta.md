@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-054. Current
-  work: BETA-055. Next: BETA-059, BETA-060.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-055. Current
+  work: BETA-059. Next: BETA-060, BETA-056.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,28 +272,32 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-055 | Review-session workflow polish
-  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-054 completed
+- [IN_PROGRESS] BETA-059 | Coverage completion action board
+  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-055 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 2
-  - confidence: 5
-  - risk: 1
-  - area: admin/ux
-  - depends_on: BETA-052
-  - objective: Add next-page prefetch, session progress, saved note/filter
-    presets, a keyboard map and a primary-source shortcut.
-  - rationale: These reduce mechanical work without altering the review audit
-    trail or confirmation boundaries.
-  - suggested_first_action: Pin focus, history and navigation behaviour in
-    browser tests before introducing shortcuts.
-  - next_action: In the admin Review tab — a session-progress line ("N
-    decided this session / M pending"), saved filter+note presets in
-    `localStorage`, a "primary source" shortcut that opens the focused
-    item's `source_url` / sidecar URL in a new tab, and an on-page keyboard
-    map (the existing j/k/a/r keys documented plus the new one); no change
-    to any decision or confirmation path; source-pin tests.
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: admin/coverage
+  - depends_on: BETA-043, BETA-058
+  - objective: Distinguish run needed, review needed, source blocked, not
+    published and complete; add `GET /api/admin/completeness` with links to the
+    relevant run, candidate, review or dataset view.
+  - rationale: Coverage measurements become operationally useful only when each
+    gap has an honest reason and a permitted, non-destructive next action.
+  - suggested_first_action: Map every current completeness state to one reason
+    code and one action destination.
+  - next_action: For each catalogued dataset (`pipeline/web/datasets.py`),
+    derive one reason code — `complete` / `run_needed` (0 rows, never
+    collected) / `review_needed` (pending `review_queue` items for its
+    module) / `not_published` (collected but no public route) / `source_blocked`
+    (a documented robots/appeal gap) — and one non-destructive next
+    destination (a run, the review filter, the dataset catalogue entry).
+    `GET /api/admin/completeness`; an admin Health-tab board; tests that
+    every reason code maps to a permitted action and nothing here deletes
+    or runs anything on its own.
 
 ### BLOCKED
 
@@ -477,23 +481,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-059 | Coverage completion action board
-  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-053 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 2
-  - area: admin/coverage
-  - depends_on: BETA-043, BETA-058
-  - objective: Distinguish run needed, review needed, source blocked, not
-    published and complete; add `GET /api/admin/completeness` with links to the
-    relevant run, candidate, review or dataset view.
-  - rationale: Coverage measurements become operationally useful only when each
-    gap has an honest reason and a permitted, non-destructive next action.
-  - suggested_first_action: Map every current completeness state to one reason
-    code and one action destination.
-
 - [NEXT] BETA-060 | Raw-archive inventory and integrity trends
   - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-054 completed
   - priority: P2
@@ -511,6 +498,24 @@ DONE
   - suggested_first_action: Define immutable summaries and deterministic sampling
     rules; this item measures only and never deletes, compacts or chooses
     retention policy.
+
+- [NEXT] BETA-056 | Human alias-resolution workflow
+  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-055 completed
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 3
+  - risk: 4
+  - area: entity-quality
+  - depends_on: BETA-054
+  - objective: Resolve unmatched buyer and provider names through append-only
+    proposed, accepted, rejected and superseded decisions, then produce a
+    deterministic verified-alias registry.
+  - rationale: Repeated unresolved names reduce coverage, but fuzzy matches must
+    never silently become canonical identity.
+  - suggested_first_action: Design the decision schema and SQLite/PostgreSQL
+    invariants around named reviewer, timestamp, evidence and canonical entity
+    ID; automatic fuzzy application remains forbidden.
 
 ### READY
 
@@ -559,6 +564,45 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-055 | Review-session workflow polish
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/ux
+  - depends_on: BETA-052
+  - objective: Add next-page prefetch, session progress, saved note/filter
+    presets, a keyboard map and a primary-source shortcut.
+  - result: `pipeline/web/static/app.js` + the admin Review tab, all
+    localStorage / client-only, no change to any decision or confirmation
+    path:
+      * **session progress** — `#review-session`, an `aria-live="polite"`
+        line that reads "N decided this session", incremented by
+        `bumpReviewSession` after each successful decide (skipped for an
+        undo, which is itself a recorded decision). It makes no server call
+        and resets on reload — the audit trail is `review_decisions`, not
+        this.
+      * **primary-source shortcut** — the `o` key opens the focused item's
+        primary source (`itemSourceUrl`: a URL key from `context_json`, else
+        a URL `raw_value`) in a new tab; documented in the on-page key hint.
+      * **saved presets** — a "Preset" `<select>` + Save/Delete, storing the
+        current status/module/item_type/search/note under a name in
+        `localStorage` (`cglpay.review.presets`). Loading one applies the
+        filters and reloads the list; it never decides anything.
+      * the key hint gains `<kbd>o</kbd> open primary source`.
+  - validation: New `tests/test_web_review_session.py` (6 source pins) — the
+    session line is a live region, `bumpReviewSession` makes no `/api/` call
+    and is skipped for undo, the `o` shortcut opens a `_blank` window and is
+    documented, `itemSourceUrl` reads context then a URL raw value, presets
+    are localStorage-only (every preset function is server-free), and
+    `applyPreset` reloads the list without touching a decide path. Full
+    offline suite green — **2782 passed, 109 skipped, 35 deselected, 0
+    failed**. `ruff` clean. Browser-verified against a seeded scratch
+    warehouse: a preset saves and appears in the selector, the session line
+    is `aria-live=polite`, the `o` key is in the hint, zero console errors.
 
 - [DONE] BETA-054 | Evidence sidecars and candidate suggestions
   - completed: 2026-08-29
@@ -3061,11 +3105,11 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Structured review-item context | 5 | 2 | 5 | DONE (BETA-052) |
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | DONE (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
-| P2 | Review-session workflow polish | 4 | 2 | 5 | IN_PROGRESS (BETA-055) |
-| P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
+| P2 | Review-session workflow polish | 4 | 2 | 5 | DONE (BETA-055) |
+| P1 | Human alias-resolution workflow | 5 | 4 | 3 | NEXT (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
-| P1 | Coverage completion action board | 5 | 4 | 4 | NEXT (BETA-059) |
+| P1 | Coverage completion action board | 5 | 4 | 4 | IN_PROGRESS (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | NEXT (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |

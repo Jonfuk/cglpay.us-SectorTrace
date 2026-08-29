@@ -1014,6 +1014,7 @@ async function decideItems(ids, decision, note, isUndo) {
     renderCounts();
     renderFocus();
     bumpPendingPill(decision, result.updated.length);
+    if (!isUndo) bumpReviewSession(result.updated.length);
   }
 
   const noun = result.updated.length === 1 ? 'item' : 'items';
@@ -1190,6 +1191,35 @@ async function decideFocused(decision) {
   await decideItems([item.id], decision);
 }
 
+/* BETA-055: the URL a reviewer would open to see the item's primary source —
+ * a context URL key, else the raw value if it is itself a URL. */
+function itemSourceUrl(item) {
+  if (!item) return null;
+  let context = {};
+  try { context = JSON.parse(item.context_json || '{}') || {}; } catch (e) { /* */ }
+  for (const key of ['source_url', 'url', 'page_url', 'source_page', 'notice_web_url',
+                     'document_url', 'report_url', 'written_statement_url']) {
+    if (context[key] && /^https?:\/\//i.test(String(context[key]))) return String(context[key]);
+  }
+  return /^https?:\/\//i.test(String(item.raw_value || '')) ? String(item.raw_value) : null;
+}
+
+function openFocusedSource() {
+  const url = itemSourceUrl(focusedItem());
+  if (!url) return toast('This item has no primary source URL.', true);
+  window.open(url, '_blank', 'noopener');
+}
+
+/* Decisions taken in this browser session — a progress signal, not part of
+ * the audit trail (that is review_decisions). Reset on reload. */
+const reviewSession = { decided: 0 };
+function bumpReviewSession(n) {
+  reviewSession.decided += n;
+  const node = $('#review-session');
+  if (node) node.textContent = reviewSession.decided
+    ? `${reviewSession.decided} decided this session` : '';
+}
+
 document.addEventListener('keydown', (event) => {
   const tag = (event.target.tagName || '').toLowerCase();
   const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
@@ -1208,6 +1238,7 @@ document.addEventListener('keydown', (event) => {
     a: () => decideFocused('approved'),
     r: () => decideFocused('rejected'),
     u: () => decideFocused('pending'),
+    o: openFocusedSource,
     x: () => {
       const item = focusedItem();
       if (!item) return;
@@ -1220,6 +1251,85 @@ document.addEventListener('keydown', (event) => {
   };
   if (keys[event.key]) { event.preventDefault(); keys[event.key](); }
 });
+
+/* BETA-055: saved filter + note presets. localStorage only — a reviewer's
+ * own convenience, never sent to the server and never part of a decision. */
+const PRESET_KEY = 'cglpay.review.presets';
+
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function savePresets(presets) {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch (e) { /* */ }
+}
+
+function refreshPresetOptions() {
+  const select = $('#review-preset');
+  if (!select) return;
+  const current = select.value;
+  const presets = loadPresets();
+  select.replaceChildren(el('option', { value: '', text: '—' }),
+    ...Object.keys(presets).sort().map((name) => el('option', { value: name, text: name })));
+  select.value = presets[current] ? current : '';
+  $('#review-preset-delete').hidden = !select.value;
+}
+
+function applyPreset(preset) {
+  if (!preset) return;
+  $('#f-status').value = preset.status || 'pending';
+  $('#f-module').value = preset.module || '';
+  populateItemTypes($('#f-module').value);
+  $('#f-type').value = preset.item_type || '';
+  $('#f-search').value = preset.search || '';
+  if ('note' in preset) {
+    const box = $('#bulk-note');
+    if (box) box.value = preset.note || '';
+    const mnote = $('#match-note');
+    if (mnote) mnote.value = preset.note || '';
+  }
+  reviewState.offset = 0;
+  selected.clear();
+  loadReview();
+}
+
+function initReviewPresets() {
+  if (!$('#review-preset')) return;
+  refreshPresetOptions();
+
+  $('#review-preset').addEventListener('change', (e) => {
+    $('#review-preset-delete').hidden = !e.target.value;
+    if (e.target.value) applyPreset(loadPresets()[e.target.value]);
+  });
+
+  $('#review-preset-save').addEventListener('click', () => {
+    const name = (window.prompt('Name this preset') || '').trim();
+    if (!name) return;
+    const presets = loadPresets();
+    presets[name] = {
+      status: $('#f-status').value,
+      module: $('#f-module').value,
+      item_type: $('#f-type').value,
+      search: $('#f-search').value.trim(),
+      note: ($('#bulk-note') && $('#bulk-note').value) || '',
+    };
+    savePresets(presets);
+    refreshPresetOptions();
+    $('#review-preset').value = name;
+    $('#review-preset-delete').hidden = false;
+    toast(`Preset "${name}" saved.`);
+  });
+
+  $('#review-preset-delete').addEventListener('click', () => {
+    const name = $('#review-preset').value;
+    if (!name) return;
+    const presets = loadPresets();
+    delete presets[name];
+    savePresets(presets);
+    refreshPresetOptions();
+    toast(`Preset "${name}" deleted.`);
+  });
+}
 
 // --- database browser -------------------------------------------------------
 
@@ -1544,6 +1654,8 @@ function init() {
     renderList();
     renderFocus();
   });
+
+  initReviewPresets();
 
   $('#select-page').addEventListener('change', (e) => {
     for (const item of reviewState.items) {
