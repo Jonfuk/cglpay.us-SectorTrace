@@ -194,6 +194,19 @@ ROUTES: dict[str, dict] = {
                    "(exact name match; individuals excluded; result verbatim).",
         "parameters": [],
     },
+    "/api/v1/cqc_locations": {
+        "surface": "cqc_locations",
+        "summary": "Tracked providers' CQC-registered locations, filtered and "
+                   "paged; not a service map, a count is not coverage, no "
+                   "personal data.",
+        "parameters": [
+            _p("provider_key"), _p("authority_ons_code"),
+            _p("registration_status", desc="One of the facets.registration_status values."),
+            _p("regulated_activity", desc="Contains match on the comma-joined activities."),
+            _p("service_type", desc="Exact gacServiceType name; one of the facets."),
+            _p("rating", desc="Overall rating, API or bulk-export fallback."),
+            _LIMIT, _OFFSET],
+    },
     "/api/v1/claims": {
         "surface": "claims",
         "summary": "Campaign claims with the evidence rows behind each.",

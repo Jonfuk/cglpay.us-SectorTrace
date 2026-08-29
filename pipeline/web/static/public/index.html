@@ -59,7 +59,7 @@
         <div class="lens-menu-panel" role="menu" aria-label="Explore by campaign lens">
           <div><strong>Workforce</strong><a href="#/pay">Pay</a><a href="#/providers">Provider employment</a></div>
           <div><strong>Public money</strong><a href="#/contracts">Contracts</a><a href="#/geography">Council spending</a><a href="#/relationships">Who commissions whom</a></div>
-          <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/coverage">Coverage</a></div>
+          <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/cqc">CQC locations</a><a href="#/coverage">Coverage</a></div>
           <div><strong>Safety &amp; legal</strong><a href="#/pfd">Coroners’ reports</a><a href="#/claims">Provider evidence</a></div>
           <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="#/catalogue">Dataset catalogue</a><a href="/api">Downloads &amp; API</a></div>
         </div>
@@ -193,6 +193,7 @@
       <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
       <li><code>/api/v1/safety</code> — HSE enforcement notices served on a tracked provider</li>
+      <li><code>/api/v1/cqc_locations</code> — tracked providers' CQC-registered locations, filtered and paged; not a service map</li>
       <li><code>/api/v1/claims</code> — what the campaign says, with the evidence behind each claim</li>
       <li><code>/api/v1/freshness</code> — when each source table was last collected</li>
       <li><code>/api/v1/export</code> — any of the above as CSV or JSON</li>

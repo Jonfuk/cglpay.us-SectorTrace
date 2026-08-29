@@ -121,7 +121,7 @@ for _module in ("theme", "components", "palette"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
-              "documents", "catalogue"):
+              "documents", "catalogue", "cqc"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1415,6 +1415,20 @@ class Handler(BaseHTTPRequestHandler):
             # HSE enforcement notices attributed to a tracked provider by
             # exact name match (BETA-051). Individuals excluded at collection.
             return public_queries.safety(conn)
+        if route == "cqc_locations":
+            # BETA-065: tracked providers' CQC-registered locations, filtered
+            # and paginated. Not a service map; a location count is not
+            # coverage. No personal data (registered managers are restricted_).
+            return public_queries.cqc_locations(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                authority_ons_code=_str(params, "authority_ons_code") or None,
+                registration_status=_str(params, "registration_status") or None,
+                regulated_activity=_str(params, "regulated_activity") or None,
+                service_type=_str(params, "service_type") or None,
+                rating=_str(params, "rating") or None,
+                limit=_int(params, "limit", 100),
+                offset=_int(params, "offset", 0))
         if route == "claims":
             return public_queries.claims(conn)
         if route == "freshness":

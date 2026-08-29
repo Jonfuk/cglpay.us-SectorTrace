@@ -55,6 +55,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/relationships.js",
     "/js/pages/documents.js",
     "/js/pages/catalogue.js",
+    "/js/pages/cqc.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -97,6 +98,7 @@ PUBLIC_API_ROUTES = {
     "catalogue",
     "provider_compare",
     "safety",
+    "cqc_locations",
 }
 
 # Route patterns under /api/v1/ that take a parameter.

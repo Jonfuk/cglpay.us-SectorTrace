@@ -783,6 +783,52 @@
     <p><a href="/api/v1/safety"><code>/api/v1/safety</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-cqc_locations" data-route="cqc_locations">
+    <h3><code>/api/v1/cqc_locations</code></h3>
+    <p>
+      CQC-registered locations belonging to a provider this pipeline tracks.
+      CQC registration covers only certain regulated activities — residential
+      detox, inpatient care, some prescribing — so most community drug and
+      alcohol provision is not registered: this is a map of regulated
+      locations, <strong>never a complete service map</strong>, and a count
+      of locations is neither coverage nor quality. Do not rank authorities
+      or providers by it, and do not combine it with any other layer. No
+      personal data: CQC's registered-manager names are held in a restricted
+      table and never reach this route.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Optional. One tracked provider.</td></tr>
+        <tr><td><code>authority_ons_code</code></td><td>Optional. Resolved local authority of the location.</td></tr>
+        <tr><td><code>registration_status</code></td><td>Optional. One of the <code>facets.registration_status</code> values.</td></tr>
+        <tr><td><code>regulated_activity</code></td><td>Optional. Contains match against the comma-joined activities (CQC's activity names contain commas, so the column cannot be split exactly).</td></tr>
+        <tr><td><code>service_type</code></td><td>Optional. An exact gacServiceType name; one of the <code>facets.service_type</code> values.</td></tr>
+        <tr><td><code>rating</code></td><td>Optional. Overall rating, matching the API rating or the bulk-export fallback.</td></tr>
+        <tr><td><code>limit</code></td><td>Optional, default 100, maximum 500.</td></tr>
+        <tr><td><code>offset</code></td><td>Optional. Pages the list; the order is stable.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>results</code> — one row per location with
+      <code>location_id</code>, <code>provider_key</code>,
+      <code>provider_name</code>, <code>location_name</code>,
+      <code>postal_code</code>, <code>latitude</code>, <code>longitude</code>,
+      <code>local_authority_raw</code>, <code>local_authority_ons_code</code>,
+      <code>region</code>, <code>registration_status</code>,
+      <code>overall_rating</code>, <code>overall_rating_date</code>,
+      <code>rating_source</code> (<code>api</code> or <code>bulk_export</code>),
+      <code>regulated_activities</code>, <code>service_types</code> and the
+      source URL — plus <code>total</code>, <code>without_coordinate</code>
+      (rows in the current filter that cannot be placed on a map),
+      <code>facets</code> (a <code>value</code>/<code>count</code> list for
+      <code>registration_status</code>, <code>overall_rating</code>,
+      <code>region</code> and <code>service_type</code>),
+      <code>filters</code> and <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/cqc_locations"><code>/api/v1/cqc_locations</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="claims">
     <h3><code>/api/v1/claims</code></h3>
     <p>

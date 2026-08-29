@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-064. Current
-  work: BETA-065. Next: BETA-066, BETA-067.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-065. Current
+  work: BETA-066. Next: BETA-067.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,37 +272,39 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-065 | CQC regulated-location explorer
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-064 completed
+- [IN_PROGRESS] BETA-066 | Provider predecessor and successor lineage
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-065 completed
   - started: 2026-08-29
-  - priority: P1
+  - priority: P2
   - impact: 4
-  - effort: 4
+  - effort: 3
   - confidence: 4
   - risk: 3
-  - area: public/cqc
-  - depends_on: BETA-045, BETA-049
-  - objective: Add a filterable map, accessible table and paginated
-    `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
-    locations, filtered by provider, authority, status, regulated activity,
-    service type and rating.
-  - rationale: Existing location evidence is difficult to explore, but CQC
-    registration is not a complete service map and location counts are neither
-    coverage nor quality scores.
-  - suggested_first_action: Define the public-column allowlist, map/table parity
-    and missing-coordinate behaviour; exclude every restricted contact field.
-  - next_action: Add a `cqc_locations` public query + `GET /api/v1/cqc_locations`
-    (flat route name, added to the frozen surface in
-    `tests/test_portal_isolation.py` and `openapi.py`) — paginated, filterable
-    by provider_key, authority ons_code, registration status, regulated
-    activity, service type and current rating, over a strict public-column
-    allowlist that excludes every registered-manager / contact field
-    (`guard_columns` + a `_public()` assertion). A portal page under
-    `/js/pages/` with a MapLibre map and an accessible table in parity
-    (same rows, same filters), and a documented behaviour for a location
-    with no coordinate. Caveats: CQC registration is not a service map, and
-    a location count is neither coverage nor quality — no arithmetic against
-    any other layer. Extend `datasets.py`, `api.html`, `CAVEATS.md`.
+  - area: provider-identity
+  - depends_on: BETA-056
+  - objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
+    detail timeline for explicit active, merged, dissolved, predecessor and
+    successor relationships.
+  - rationale: Older evidence remains attached to historical provider entities;
+    users need the verified lineage without inferred ownership or personal
+    officer data.
+  - suggested_first_action: Normalise existing `status` and `superseded_by`
+    configuration into explicit, testable lineage edges with verified identifier
+    roles only.
+  - next_action: Add a `GET /api/v1/providers/(provider_key)/lineage` route
+    (a parameterised addition to the frozen surface in
+    `tests/test_portal_isolation.py` + `openapi.py`) and a
+    `public_queries.provider_lineage(conn, provider_key)` that reads the
+    existing provider `status` / `superseded_by` / predecessor config into
+    explicit, typed lineage edges — `active`, `merged_into`, `dissolved`,
+    `predecessor_of`, `successor_of` — each edge carrying its basis and the
+    identifier role it was verified on (company number / charity number /
+    CQC provider id), never an inferred ownership link and never a personal
+    officer. A timeline block on the portal provider detail page rendering
+    those edges in date order. Fixtures for a clean chain, a fork (two
+    successors) and a cycle guard. Extend `CAVEATS.md` — lineage is the
+    verified administrative record, not a statement about continuity of
+    service or of the workforce.
 
 ### BLOCKED
 
@@ -486,25 +488,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-066 | Provider predecessor and successor lineage
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-063 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 4
-  - risk: 3
-  - area: provider-identity
-  - depends_on: BETA-056
-  - objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
-    detail timeline for explicit active, merged, dissolved, predecessor and
-    successor relationships.
-  - rationale: Older evidence remains attached to historical provider entities;
-    users need the verified lineage without inferred ownership or personal
-    officer data.
-  - suggested_first_action: Normalise existing `status` and `superseded_by`
-    configuration into explicit, testable lineage edges with verified identifier
-    roles only.
-
 - [NEXT] BETA-067 | Capability-documentation consistency checker
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-064 completed
   - priority: P2
@@ -570,6 +553,59 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-065 | CQC regulated-location explorer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/cqc
+  - depends_on: BETA-045, BETA-049
+  - objective: Add a filterable map, accessible table and paginated
+    `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
+    locations, filtered by provider, authority, status, regulated activity,
+    service type and rating.
+  - result: New `public_queries.cqc_locations()` over an explicit column
+    allowlist (`_CQC_LOCATION_COLUMNS`) — no registered-manager or contact
+    field, which live in `restricted_cqc_location_contacts` and are never
+    read here; only `provider_key IS NOT NULL` rows (a location matched to a
+    tracked provider). Six filters: `provider_key`, `authority_ons_code`,
+    `registration_status`, `regulated_activity` (a contains match, because
+    CQC's activity names themselves contain commas and the comma-joined
+    column cannot be split exactly), `service_type` (an exact token match on
+    the comma-free gacServiceType names) and `rating` (matched against the
+    API rating or the bulk-export fallback). The payload carries
+    `results`, `total`, `without_coordinate` (rows in the current filter with
+    no lat/long — listed in the table, not on the map), `facets`
+    (`registration_status`, `overall_rating`, `region`, `service_type`, over
+    the tracked scope), `filters` and `caveat`. `rating_source` is `api` /
+    `bulk_export` / `null` per row.
+  - api/ui: `GET /api/v1/cqc_locations` — a flat route added to the frozen
+    public surface (`test_portal_isolation.py` `PUBLIC_API_ROUTES` +
+    `PUBLIC_STATIC_PATHS`), `openapi.py` `ROUTES`, the `index.html`
+    `<noscript>` list and an `api.html` article. New portal page
+    `/js/pages/cqc.js` (route `/cqc`, in `app.js` `ROUTES` / `ROUTE_TITLES`,
+    a nav link) — page-local filter selects populated from the facets, a
+    MapLibre point map (self-loaded vendor script, same pattern as
+    `geography.js`), an accessible `tableCard` in parity with the map, the
+    without-coordinate note, pagination and provenance. `.cqc-map` style.
+  - validation: New `tests/test_web_cqc_locations.py` (9 — only tracked
+    locations, the column allowlist has no personal field, the bulk-rating
+    fallback and its `rating_source`, each of the six filters narrows
+    correctly (incl. exact-token service type vs substring, and the
+    comma-bearing activity contains-match), `without_coordinate` per filter,
+    facets over the tracked scope, pagination clamp, the "not a service map /
+    neither coverage nor quality" caveat wording, and the public cacheable
+    HTTP route). `test_portal_isolation.py` / `test_web_openapi.py` /
+    `test_portal_controls.py` / `test_portal_tables.py` all still green.
+    `docs/CAVEATS.md` Module 5 section extended. No migration. Full offline
+    suite green — **2857 passed, 113 skipped, 35 deselected, 0 failed**.
+    `ruff` clean. Browser-verified against a seeded scratch warehouse: the
+    page renders the caveat, facet filters (with counts), the map, the
+    parity table with `rating_source`, and the without-coordinate note;
+    selecting rating "Good" narrows to one row; zero console errors.
 
 - [DONE] BETA-064 | Temporary-accommodation B&B breakdown
   - completed: 2026-08-29
@@ -3538,8 +3574,8 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Human-readable document titles | 4 | 3 | 4 | DONE (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | DONE (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | DONE (BETA-064) |
-| P1 | CQC regulated-location explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-065) |
-| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | NEXT (BETA-066) |
+| P1 | CQC regulated-location explorer | 4 | 4 | 4 | DONE (BETA-065) |
+| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | IN_PROGRESS (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | NEXT (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work

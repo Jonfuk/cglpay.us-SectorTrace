@@ -42,7 +42,7 @@ from pipeline.licences import for_module, statement
 from pipeline.notice_urls import notice_page_url
 from pipeline.web import datasets, health
 from pipeline.web.datasets import EVIDENCE_LAYERS
-from pipeline.web.queries import QueryError, _run
+from pipeline.web.queries import QueryError, _run, escape_like
 
 # Caveats that must travel with particular figures. Kept here, in one place,
 # because the same warning has to appear identically wherever a figure does —
@@ -127,6 +127,18 @@ CAVEATS = {
         "CQC registration covers only some service types. Most community drug "
         "and alcohol provision is not CQC-registered, so this is not a "
         "service map and absence does not mean absence of a service."
+    ),
+    "cqc_locations_explorer": (
+        "CQC registration covers only certain regulated activities — "
+        "residential detox, inpatient care, some prescribing. Most community "
+        "drug and alcohol provision is not registered, so this is a map of "
+        "regulated locations, never a complete service map. A location count "
+        "is neither coverage nor quality: do not rank authorities or providers "
+        "by it, and do not combine it with any other layer. A rating is CQC's "
+        "own published judgement as at its last inspection; where the API gave "
+        "none, the bulk export's rating is shown and labelled as such. "
+        "Locations with no coordinate are listed in the table but cannot be "
+        "placed on the map."
     ),
     "ndtms_estimates": (
         "These are modelled estimates published with 95% confidence "
@@ -2326,6 +2338,155 @@ def safety(conn: sqlite3.Connection) -> dict:
         "by_type": by_type,
         "total": len(notices),
         "caveat": CAVEATS["hse_notices"],
+    }
+
+
+# The exact columns the CQC-location explorer publishes. An allowlist, not a
+# `SELECT *`: `cqc_locations` carries no personal data (registered managers
+# are in `restricted_cqc_location_contacts`, a separate table), but naming
+# the columns keeps it that way through a future ALTER.
+_CQC_LOCATION_COLUMNS = (
+    "location_id", "provider_id", "provider_key", "location_name", "postal_code",
+    "latitude", "longitude", "local_authority_raw", "local_authority_ons_code",
+    "region", "registration_status", "registration_date", "last_inspection_date",
+    "overall_rating", "overall_rating_date", "regulated_activities",
+    "service_types", "source_url", "retrieved_at",
+)
+
+_CQC_LOCATION_PAGE = 100
+_CQC_LOCATION_MAX = 500
+
+
+def cqc_locations(conn: sqlite3.Connection, *,
+                  provider_key: str | None = None,
+                  authority_ons_code: str | None = None,
+                  registration_status: str | None = None,
+                  regulated_activity: str | None = None,
+                  service_type: str | None = None,
+                  rating: str | None = None,
+                  limit: int = _CQC_LOCATION_PAGE, offset: int = 0) -> dict:
+    """CQC-registered locations of tracked providers (BETA-065).
+
+    Only `provider_key IS NOT NULL` rows — a location matched to a provider
+    this pipeline tracks. Read-only, no personal data (registered managers
+    live in `restricted_cqc_location_contacts`, never touched here). Every
+    field is CQC's own; `rating_source` names whether the rating came from
+    the API or the bulk-export fallback. This is not a service map and a
+    location count is not coverage — see the caveat.
+
+    `regulated_activity` is a contains match because CQC's activity names
+    themselves contain commas, so the comma-joined column cannot be split
+    unambiguously; `service_type` is an exact token match on the
+    (comma-separated, comma-free) gacServiceType names.
+    """
+    _public(["cqc_locations", "providers"], list(_CQC_LOCATION_COLUMNS)
+            + ["bulk_overall_rating", "bulk_overall_rating_date",
+               "bulk_rating_source_url"])
+
+    where = ["l.provider_key IS NOT NULL"]
+    binds: list = []
+    if provider_key:
+        where.append("l.provider_key = ?")
+        binds.append(provider_key)
+    if authority_ons_code:
+        where.append("l.local_authority_ons_code = ?")
+        binds.append(authority_ons_code)
+    if registration_status:
+        where.append("l.registration_status = ?")
+        binds.append(registration_status)
+    if rating:
+        where.append("COALESCE(l.overall_rating, l.bulk_overall_rating) = ?")
+        binds.append(rating)
+    if regulated_activity:
+        where.append("COALESCE(l.regulated_activities, '') LIKE ? ESCAPE '\\'")
+        binds.append(f"%{escape_like(regulated_activity)}%")
+    if service_type:
+        where.append(
+            "(',' || COALESCE(l.service_types, '') || ',') LIKE ? ESCAPE '\\'")
+        binds.append(f"%,{escape_like(service_type)},%")
+
+    clause = " AND ".join(where)
+    limit = max(1, min(int(limit), _CQC_LOCATION_MAX))
+    offset = max(0, int(offset))
+
+    cols = ", ".join(f"l.{c}" for c in _CQC_LOCATION_COLUMNS)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM cqc_locations l WHERE {clause}", binds).fetchone()[0]
+    without_coordinate = conn.execute(
+        f"SELECT COUNT(*) FROM cqc_locations l WHERE {clause} "
+        "AND (l.latitude IS NULL OR l.longitude IS NULL)", binds).fetchone()[0]
+
+    rows = _rows(conn, f"""
+        SELECT {cols}, p.canonical_name AS provider_name,
+               l.bulk_overall_rating, l.bulk_overall_rating_date
+        FROM cqc_locations l
+        LEFT JOIN providers p ON p.provider_key = l.provider_key
+        WHERE {clause}
+        ORDER BY p.canonical_name, l.location_name, l.location_id
+        LIMIT ? OFFSET ?""", [*binds, limit, offset])
+
+    for row in rows:
+        bulk = row.pop("bulk_overall_rating")
+        bulk_date = row.pop("bulk_overall_rating_date")
+        if row["overall_rating"] is None and bulk is not None:
+            row["overall_rating"] = bulk
+            row["overall_rating_date"] = bulk_date
+            row["rating_source"] = "bulk_export"
+        else:
+            row["rating_source"] = "api" if row["overall_rating"] is not None else None
+
+    # Facets over the base tracked-location scope (the provider_key filter),
+    # not the other selections — so the buckets a reader can switch to stay
+    # visible with their sizes while a selection narrows the table.
+    facet_where = "l.provider_key IS NOT NULL"
+    facet_binds: list = []
+    if provider_key:
+        facet_where += " AND l.provider_key = ?"
+        facet_binds.append(provider_key)
+
+    def _facet(expr: str) -> list[dict]:
+        return _rows(conn, f"""
+            SELECT {expr} AS value, COUNT(*) AS count
+            FROM cqc_locations l WHERE {facet_where} AND {expr} IS NOT NULL
+            GROUP BY value ORDER BY count DESC, value""", facet_binds)
+
+    # Split in Python rather than a recursive CTE: the separator is a plain
+    # comma and this keeps the query dialect-free.
+    service_type_counts: dict[str, int] = {}
+    for row in _rows(conn,
+                     f"SELECT service_types FROM cqc_locations l WHERE {facet_where}",
+                     facet_binds):
+        for token in (row["service_types"] or "").split(","):
+            token = token.strip()
+            if token:
+                service_type_counts[token] = service_type_counts.get(token, 0) + 1
+    service_type_facet = [
+        {"value": value, "count": count}
+        for value, count in sorted(service_type_counts.items(),
+                                    key=lambda kv: (-kv[1], kv[0]))]
+
+    return {
+        "results": rows,
+        "total": total,
+        "without_coordinate": without_coordinate,
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "provider_key": provider_key,
+            "authority_ons_code": authority_ons_code,
+            "registration_status": registration_status,
+            "regulated_activity": regulated_activity,
+            "service_type": service_type,
+            "rating": rating,
+        },
+        "facets": {
+            "registration_status": _facet("l.registration_status"),
+            "overall_rating": _facet(
+                "COALESCE(l.overall_rating, l.bulk_overall_rating)"),
+            "region": _facet("l.region"),
+            "service_type": service_type_facet,
+        },
+        "caveat": CAVEATS["cqc_locations_explorer"],
     }
 
 

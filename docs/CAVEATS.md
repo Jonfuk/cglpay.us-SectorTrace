@@ -199,6 +199,14 @@ anyone using it.
   services. Most community drug and alcohol provision is not CQC-registered.
 - Counting locations per authority does not measure service coverage, and
   absence of a location does not mean absence of a service.
+- **The public CQC-location explorer (`/api/v1/cqc_locations`, the portal's
+  "CQC-registered locations" page, BETA-065) returns only tracked providers'
+  locations, over an explicit column allowlist — no registered-manager or
+  contact field, which live in `restricted_cqc_location_contacts`.** A
+  rating is CQC's own, as at its last inspection; where the API supplied
+  none, the bulk export's rating is shown and labelled `rating_source =
+  bulk_export`. A location count in that view is neither coverage nor
+  quality, and it is never combined with any other layer.
 
 ### Workforce census (Module 6)
 
