@@ -297,19 +297,19 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-105 | Review-outcome analytics
-  - priority: P2
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: admin/review operations
-  - depends_on: BETA-052, BETA-053, BETA-055, BETA-087
-  - objective: Show review decisions over time by source, item type, reason
-    code and evidence age without scoring or ranking reviewers.
-  - next_action: Aggregate review_queue / alias_decisions outcomes by
-    source, item type and month with a minimum group size; omit the reviewer
-    identity entirely.
+- [IN_PROGRESS] BETA-106 | Quality-control sampling workspace
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: admin/review quality
+  - depends_on: BETA-052, BETA-055, BETA-087
+  - objective: Generate reproducible random or stratified samples of
+    previously decided records for append-only second-look findings.
+  - next_action: Seeded deterministic sampling over resolved review_queue /
+    alias_decisions with a recorded manifest (seed, filter, method, ids);
+    the same seed + filter reproduces the same sample.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -549,6 +549,49 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-105 | Review-outcome analytics
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/review operations
+  - depends_on: BETA-052, BETA-053, BETA-055, BETA-087
+  - objective: Show review decisions over time by source, item type, reason
+    code and evidence age without scoring or ranking reviewers.
+  - result: New `pipeline/web/review_analytics.py::analytics(conn, since,
+    min_group)` — aggregates only, **never about people**:
+    `alias_decisions.decided_by` is never selected and there is no
+    per-reviewer axis. `review_queue` is grouped by source (module) ×
+    item type into pending / resolved / total; resolution age is bucketed
+    (`<1 day` / `1-7` / `7-30` / `30+`) over resolved items; a coarse month
+    trend gives created vs resolved; `alias_decisions` is grouped by scheme
+    × status and its `reason` field into reason codes. **Small groups are
+    suppressed**: any fine-grained cell below `min_group` (default 5) reports
+    a `null` count and `suppressed: true`, and `suppressed_groups` totals
+    them, so a single reviewer's thin slice cannot be reconstructed. The note
+    states the contract in words. New additive admin route
+    `/api/admin/review-analytics` (network-trust-gated).
+  - api/ui: additive `/api/admin/review-analytics?since=&min_group=`. New
+    collapsed "Review-outcome analytics" panel on the Health tab
+    (`<details id="review-analytics-panel">`) — the privacy note, the
+    suppressed-group count, and five aggregate tables (by source, resolution
+    age, by month, alias decisions by scheme, alias-decision reasons).
+    `loadReviewAnalytics()` in `health.js`, fetched once on panel open.
+    `styles.css` gained a `.ra-*` block.
+  - validation: New `tests/test_web_review_analytics.py` (6 — by-source
+    aggregates pending and resolved; a group below `min_group` reports a
+    `null` total with `suppressed: true` while a larger one is untouched;
+    the reviewer name and a `decided_by` key never reach the payload;
+    resolution age is bucketed correctly; the note states "aggregates only /
+    no reviewer is named / not people"; the route is registered).
+    `test_web_admin` / `test_admin_navigation` / `test_portal_design_system`
+    green; `ruff` clean. Browser-verified on the Health tab against
+    smoke.db: "Minimum group 5 · 1 group(s) suppressed" (the single
+    4-item `m10_committee_papers/committee_url_unknown` group correctly
+    hidden) and the five sub-tables render.
 
 - [DONE] BETA-103 | Parser replay sandbox
   - completed: 2026-08-29
@@ -5504,8 +5547,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | DONE (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
-| P2 | Review-outcome analytics | 4 | 4 | 4 | IN_PROGRESS (BETA-105) |
-| P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
+| P2 | Review-outcome analytics | 4 | 4 | 4 | DONE (BETA-105) |
+| P1 | Quality-control sampling workspace | 5 | 5 | 3 | IN_PROGRESS (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |

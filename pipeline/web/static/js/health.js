@@ -465,6 +465,58 @@ async function loadValidationRules() {
   vrRender();
 }
 
+/* BETA-105: review-outcome analytics. Aggregates only; small groups
+ * suppressed; no reviewer named. Fetched once when the panel is opened. */
+let reviewAnalyticsLoaded = false;
+async function loadReviewAnalytics() {
+  const holder = $('review-analytics');
+  if (!holder || reviewAnalyticsLoaded) return;
+  let data;
+  try { data = await api('/api/admin/review-analytics'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'muted small', text: 'Unavailable.' })); return; }
+  reviewAnalyticsLoaded = true;
+
+  const table = (caption, cols, rows) => el('div', {},
+    el('h3', { class: 'small', text: caption }),
+    el('table', {}, el('thead', {}, el('tr', {}, ...cols.map((c) => el('th', { text: c })))),
+      el('tbody', {}, ...(rows.length ? rows
+        : [el('tr', {}, el('td', { colspan: String(cols.length), class: 'empty', text: '—' }))]))));
+
+  const srcRows = data.by_source.map((r) => el('tr', {},
+    el('td', { class: 'mono small', text: r.source }),
+    el('td', { class: 'small', text: r.item_type }),
+    el('td', { class: 'small', text: String(r.pending) }),
+    el('td', { class: 'small', text: String(r.resolved) }),
+    el('td', { class: 'small', text: r.suppressed ? `— (< ${data.min_group})` : String(r.total) })));
+
+  const ageRows = data.resolution_age.map((r) => el('tr', {},
+    el('td', { class: 'small', text: r.bucket }), el('td', { class: 'small', text: String(r.n) })));
+
+  const monthRows = data.by_month.slice(-18).map((r) => el('tr', {},
+    el('td', { class: 'mono small', text: r.month }),
+    el('td', { class: 'small', text: String(r.created) }),
+    el('td', { class: 'small', text: String(r.resolved) })));
+
+  const adRows = data.alias_decisions.map((r) => el('tr', {},
+    el('td', { class: 'small', text: r.target_scheme }),
+    el('td', { class: 'small', text: r.status }),
+    el('td', { class: 'small', text: String(r.n) })));
+
+  const reasonRows = data.reason_codes.map((r) => el('tr', {},
+    el('td', { class: 'small', text: r.reason }),
+    el('td', { class: 'small', text: r.suppressed ? `— (< ${data.min_group})` : String(r.n) })));
+
+  holder.replaceChildren(
+    el('p', { class: 'muted small', text: data.note }),
+    el('p', { class: 'small', text: `Minimum group ${data.min_group} · ${data.suppressed_groups} group(s) suppressed` }),
+    el('div', { class: 'ra-grid' },
+      table('Review queue by source', ['module', 'item type', 'pending', 'resolved', 'total'], srcRows),
+      table('Resolution age (resolved items)', ['bucket', 'count'], ageRows),
+      table('Review queue by month', ['month', 'created', 'resolved'], monthRows),
+      table('Alias decisions by scheme', ['scheme', 'status', 'count'], adRows),
+      table('Alias-decision reasons', ['reason', 'count'], reasonRows)));
+}
+
 // --- wiring ---------------------------------------------------------------------------
 
 function debounce(fn, ms) {
@@ -703,6 +755,10 @@ export function initHealth() {
   // is opened. Registry-derived plus recent counts — not worth polling.
   $('validation-panel')?.addEventListener('toggle', (event) => {
     if (event.target.open) loadValidationRules();
+  });
+  // BETA-105: review-outcome analytics, on first open of its panel.
+  $('review-analytics-panel')?.addEventListener('toggle', (event) => {
+    if (event.target.open) loadReviewAnalytics();
   });
 
   document.addEventListener('tabshown', (event) => {

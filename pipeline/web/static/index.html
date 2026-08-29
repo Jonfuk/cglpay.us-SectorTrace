@@ -369,6 +369,17 @@
          triggers, CHECK and provenance constraints, and the observed
          parse_failures / review_queue gates. Failure examples are reduced to
          their shape; the raw fragment never leaves the server. -->
+    <!-- BETA-105: review decisions over time by source, item type, reason and
+         evidence age. Aggregates only; small groups suppressed; no reviewer is
+         named, scored or ranked. -->
+    <details class="panel" id="review-analytics-panel" style="margin-top: 12px">
+      <summary><h2 style="display:inline">Review-outcome analytics</h2></summary>
+      <p class="muted small">Aggregates only. Groups below the minimum are
+        suppressed so no single reviewer's pattern can be reconstructed, and no
+        reviewer is named.</p>
+      <div id="review-analytics"></div>
+    </details>
+
     <details class="panel" id="validation-panel" style="margin-top: 12px">
       <summary><h2 style="display:inline">Validation rules</h2></summary>
       <p class="muted small" id="validation-note"></p>

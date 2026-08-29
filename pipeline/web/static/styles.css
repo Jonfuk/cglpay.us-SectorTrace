@@ -718,6 +718,12 @@ td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
 .rp-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
 .rp-controls #rp-doc { min-width: 260px; }
 
+/* BETA-105: review-outcome analytics. */
+#review-analytics-panel > summary { cursor: pointer; }
+.ra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.ra-grid h3 { margin: 8px 0 4px; }
+.ra-grid table { width: 100%; }
+
 /* BETA-104: validation-rule explorer. A flat card list — schema rules and
  * observed rules together, filtered by kind and text. Failure examples show
  * shape only. */

@@ -1421,6 +1421,16 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import validation
             return validation.rules(conn, today=_str(params, "today") or None)
 
+        if path == "/api/admin/review-analytics":
+            # BETA-105: review decisions over time by source, item type,
+            # reason and evidence age. Aggregates only; small groups
+            # suppressed; no reviewer is named, scored or ranked.
+            from pipeline.web import review_analytics
+            return review_analytics.analytics(
+                conn,
+                since=_str(params, "since") or None,
+                min_group=_int(params, "min_group", 5))
+
         if path == "/api/admin/parser-replay":
             # BETA-103: replay a stdlib parser against one archived object in
             # memory and diff the proposed output against the stored active
