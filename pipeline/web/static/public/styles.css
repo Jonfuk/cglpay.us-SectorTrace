@@ -442,6 +442,20 @@ main:focus { outline: none; }
   color: var(--text-secondary); padding: var(--space-6);
 }
 .chart-error { border-color: rgba(248,113,113,0.4); color: var(--accent-red); }
+
+/* BETA-068: feature-unavailable state. Wider and left-aligned — it carries a
+ * paragraph and an operator diagnostics block, not a one-line message. */
+.unavailable-card { align-items: stretch; text-align: left; color: var(--text-secondary); }
+.unavailable-card > strong { color: var(--accent-red); }
+.unavailable-card p { margin: 0; }
+.unavailable-diag { margin-top: var(--space-2); }
+.unavailable-diag summary { cursor: pointer; color: var(--text-secondary); }
+.unavailable-diag .kv {
+  display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-4);
+  margin-top: var(--space-2);
+}
+.unavailable-diag .kv-key { color: var(--text-tertiary, var(--text-secondary)); }
+.unavailable-diag .kv-val { font-family: var(--font-mono, ui-monospace, monospace); word-break: break-word; }
 .chart-empty code {
   background: var(--bg-base); border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm); padding: 2px 8px; color: var(--accent-teal);

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import socket
 from datetime import datetime, timezone
 from functools import partial
@@ -51,6 +52,7 @@ from pipeline.web import (
     census,
     claim_review,
     claims,
+    degrade,
     health,
     name_matches,
     openapi,
@@ -688,6 +690,13 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/"):
                 return self._serve_api(path, params)
             raise ApiError(f"No route for {path}", status=404)
+        except degrade.FeatureUnavailable as exc:
+            # A capability that cannot be served on this build (BETA-068):
+            # a missing migration, an absent extension, a section timeout.
+            # The reader gets a bounded unavailable state naming the feature,
+            # never the underlying SQL.
+            self._fail(exc.status, exc.message,
+                        detail=self._feature_detail(exc))
         except ApiError as exc:
             self._fail(exc.status, exc.message)
         except JobError as exc:
@@ -710,10 +719,63 @@ class Handler(BaseHTTPRequestHandler):
             # nowhere to report it to.
             log.debug("web.client_disconnected", path=path)
         except Exception as exc:  # pragma: no cover - defensive
+            # Before the generic 500: a raw database error that is really
+            # schema drift (a table or column this build has not migrated in,
+            # a cancelled slow query) becomes a bounded feature-unavailable
+            # state rather than a traceback in the page (BETA-068).
+            drift = degrade.classify_db_error(exc)
+            if drift is not None:
+                log.warning("web.feature_unavailable", path=path,
+                            feature=drift.feature, code=drift.code,
+                            cause=f"{type(exc).__name__}: {exc}")
+                return self._fail(drift.status, drift.message,
+                                   detail=self._feature_detail(drift))
             log.exception("web.unhandled", path=path)
             self._fail(500, f"{type(exc).__name__}: {exc}")
 
-    def _fail(self, status: int, message: str, extra: dict | None = None) -> None:
+    def _feature_detail(self, exc: degrade.FeatureUnavailable) -> dict:
+        """The additive `error_detail` object for a feature-unavailable reply.
+
+        `error` stays the human string the portal and the existing tests
+        read; this rides alongside it with the machine-actionable fields:
+        a stable code, whether a retry is worth offering, the feature name,
+        this build's identity, and a short `ref` also written to the log so
+        an operator can find the cause without the reader ever seeing it.
+        """
+        ref = secrets.token_hex(4)
+        build = {
+            "revision": self.settings.git_revision or None,
+            "build_time": self.settings.build_time or None,
+            "environment": self.settings.environment,
+        }
+        schema: dict[str, Any] = {"available": False}
+        try:
+            conn = queries.readonly_connection(self.settings)
+            try:
+                applied = db.applied_migrations(conn)
+                schema = {
+                    "available": True,
+                    "latest_migration": degrade.max_applied_migration(applied),
+                    "applied_count": len(applied),
+                }
+            finally:
+                conn.close()
+        except Exception:  # pragma: no cover - the DB itself may be the fault
+            pass
+        log.info("web.feature_unavailable.ref", ref=ref, feature=exc.feature,
+                  code=exc.code)
+        return {
+            "code": exc.code,
+            "message": exc.message,
+            "retryable": bool(exc.retryable),
+            "feature": exc.feature,
+            "build": build,
+            "schema": schema,
+            "ref": ref,
+        }
+
+    def _fail(self, status: int, message: str, extra: dict | None = None,
+               detail: dict | None = None) -> None:
         if self._responded:
             # Something went wrong after the reply was already on the wire —
             # a serialisation error part-way through, or the client going
@@ -724,7 +786,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             self._discard_body()
         if self.path.startswith("/api/"):
-            self._send_json({"error": message, **(extra or {})}, status=status)
+            body: dict[str, Any] = {"error": message, **(extra or {})}
+            if detail is not None:
+                body["error_detail"] = detail
+            self._send_json(body, status=status)
         else:
             self._send(status, message.encode("utf-8"), "text/plain; charset=utf-8")
 
@@ -1281,6 +1346,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/run-ledger":
             # The durable run ledger (BETA-058) — every module-run, whatever
             # entry point started it, not only the browser-started jobs.
+            # Preflighted (BETA-068): a checkout without migration 0073 gets a
+            # named unavailable state, not a `no such table: run_ledger`.
+            degrade.preflight(conn, "run_ledger")
             from pipeline import run_ledger
             return {"runs": run_ledger.recent(conn, _int(params, "limit", 20))}
 
@@ -1449,6 +1517,9 @@ class Handler(BaseHTTPRequestHandler):
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
         if route == "document_search":
+            # Preflighted (BETA-068): schema drift on this surface was the
+            # original bug — a `UndefinedTable` where results should be.
+            degrade.preflight(conn, "document_search")
             return public_queries.document_search(
                 conn, query=_str(params, "q") or "",
                 source_system=_str(params, "source_system") or None,

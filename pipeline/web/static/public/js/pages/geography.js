@@ -75,7 +75,7 @@ export async function render(main) {
   async function load() {
     for (const button of metricTabs.querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.metric === state.metric));
     replace(workspace, el('div', { class: 'shimmer', text: 'Loading local evidence map…' }));
-    let data, geo; try { [data, geo] = await Promise.all([fetchJSON('geography', { metric: state.metric, year: state.year }), boundaries()]); } catch (error) { replace(workspace, errorCard(error.message, load)); return; }
+    let data, geo; try { [data, geo] = await Promise.all([fetchJSON('geography', { metric: state.metric, year: state.year }), boundaries()]); } catch (error) { replace(workspace, errorCard(error, load)); return; }
     const years = data.available_years || []; replace(yearSelect, years.map((year) => el('option', { value: year, text: year }))); state.year = data.year || state.year || years[0] || null; yearSelect.value = state.year || ''; writeRouteState(state);
     replace(exportHolder, exportButton('geography', { metric: state.metric, year: state.year })); const activeLayers = [...state.layers].map((key) => [key, layerPayload?.layers?.[key]]).filter(([, layer]) => layer);
     const meta = evidenceMeta({ features: data.features || [], layers: activeLayers.map(([, layer]) => layer) });

@@ -123,7 +123,7 @@ async function runSearch(holder, session) {
     data = await fetchJSON('document_search', { ...requestParams(), offset: 0 });
   } catch (error) {
     replace(holder, el('div', { class: 'section' },
-      errorCard(error.message, () => runSearch(holder, session))));
+      errorCard(error, () => runSearch(holder, session))));
     return;
   }
 
@@ -170,7 +170,7 @@ async function runSearch(holder, session) {
       // The pages already shown stay on screen; the failure and its retry
       // belong to the slot the button came from.
       moreSlot.replaceChildren(
-        errorCard(error.message, () => refreshMore()));
+        errorCard(error, () => refreshMore()));
       return;
     }
     const rows = page.results || [];
@@ -345,7 +345,7 @@ function contextExpander(result, query) {
         { element_id: result.document_element_id, context: 3 });
     } catch (error) {
       loaded = false;
-      body.replaceChildren(errorCard(error.message, () => {
+      body.replaceChildren(errorCard(error, () => {
         details.open = false;
       }));
       return;

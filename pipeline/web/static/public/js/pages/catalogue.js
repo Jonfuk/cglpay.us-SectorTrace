@@ -68,7 +68,7 @@ async function renderList(main) {
     data = await fetchJSON('catalogue');
   } catch (error) {
     replace(main, el('div', { class: 'section' },
-      errorCard(error.message, () => renderList(main))));
+      errorCard(error, () => renderList(main))));
     return () => {};
   }
 
@@ -126,7 +126,7 @@ async function renderDetail(main, id) {
       el('div', { class: 'panel' },
         el('button', { class: 'btn ghost', type: 'button',
           onclick: () => setDataset(null) }, '← All datasets')),
-      errorCard(error.message, () => renderDetail(main, id))));
+      errorCard(error, () => renderDetail(main, id))));
     return () => {};
   }
 

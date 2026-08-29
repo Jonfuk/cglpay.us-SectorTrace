@@ -56,7 +56,7 @@ export async function render(main, { params = null } = {}) {
       fetchJSON('council_spend', filterParams({ limit: 500 })),
     ]);
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main, { params })));
+    replace(main, errorCard(error, () => render(main, { params })));
     return () => {};
   }
 
@@ -520,7 +520,7 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
         limit: PAGE_SIZE, offset: session.notices.length,
       }));
     } catch (error) {
-      moreSlot.replaceChildren(errorCard(error.message, () => paint()));
+      moreSlot.replaceChildren(errorCard(error, () => paint()));
       return;
     }
     session.notices = session.notices.concat(next.notices || []);
@@ -553,7 +553,7 @@ async function renderProcess(main, ocid) {
     replace(main, el('div', {},
       el('div', { class: 'panel' },
         el('a', { href: '#/contracts' }, '← All contracts')),
-      el('div', { class: 'section' }, errorCard(error.message, () => renderProcess(main, ocid)))));
+      el('div', { class: 'section' }, errorCard(error, () => renderProcess(main, ocid)))));
     return () => {};
   }
 

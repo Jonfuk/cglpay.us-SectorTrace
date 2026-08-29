@@ -503,11 +503,75 @@ export function noData(what, command) {
     command ? el('div', { class: 'small' }, 'Run ', el('code', { text: command })) : null);
 }
 
-export function errorCard(message, retry) {
+export function errorCard(errorOrMessage, retry) {
+  // BETA-068: a caller that passes the caught Error through (rather than only
+  // `error.message`) gets the feature-specific unavailable state whenever the
+  // server attached a structured `error_detail` envelope. A bare string, or
+  // an Error without an envelope, renders the plain card below.
+  if (errorOrMessage && typeof errorOrMessage === 'object' && errorOrMessage.detail) {
+    return unavailableCard(errorOrMessage, retry);
+  }
+  const message = (errorOrMessage && typeof errorOrMessage === 'object')
+    ? (errorOrMessage.message || 'Unknown error')
+    : String(errorOrMessage == null ? 'Unknown error' : errorOrMessage);
   return el('div', { class: 'chart-error' },
     el('strong', { text: 'Could not load this.' }),
     el('span', { class: 'small', text: message }),
     retry ? el('button', { class: 'btn', onclick: retry }, 'Retry') : null);
+}
+
+/* BETA-068: a feature-specific unavailable state.
+ *
+ * Live review of the beta showed raw PostgreSQL tracebacks where a section
+ * should be, when a build was missing a migration or an extension. When the
+ * server sends the structured `error_detail` envelope, render the bounded
+ * state: the feature's own message, a Retry only when a retry could plausibly
+ * help, and a collapsed block of build/schema identity plus the diagnostic
+ * `ref` that is also in the server log — enough for an operator to trace the
+ * cause without ever putting SQL in front of the reader. Falls back to the
+ * plain error card when there is no envelope (a network drop, older build).
+ *
+ * Every value reaches the DOM as a text node (constraint 9). */
+export function unavailableCard(error, retry) {
+  const detail = error && error.detail;
+  if (!detail) {
+    return el('div', { class: 'chart-error' },
+      el('strong', { text: 'Could not load this.' }),
+      el('span', { class: 'small', text: (error && error.message) || 'Unknown error' }),
+      retry ? el('button', { class: 'btn', onclick: retry }, 'Retry') : null);
+  }
+
+  const rows = [];
+  const push = (label, value) => {
+    if (value === null || value === undefined || value === '') return;
+    rows.push(el('div', { class: 'kv-row' },
+      el('span', { class: 'kv-key', text: label }),
+      el('span', { class: 'kv-val', text: String(value) })));
+  };
+  push('Feature', detail.feature);
+  push('Code', detail.code);
+  push('Reference', detail.ref);
+  if (detail.build) {
+    push('Build', detail.build.revision);
+    push('Built', detail.build.build_time);
+    push('Environment', detail.build.environment);
+  }
+  if (detail.schema && detail.schema.available) {
+    push('Schema revision', detail.schema.latest_migration);
+    push('Migrations applied', detail.schema.applied_count);
+  }
+
+  return el('div', { class: 'chart-error unavailable-card', role: 'alert' },
+    el('strong', { text: 'This section is unavailable on this build.' }),
+    el('p', { class: 'small', text: detail.message }),
+    detail.retryable && retry
+      ? el('button', { class: 'btn', onclick: retry }, 'Try again')
+      : null,
+    rows.length
+      ? el('details', { class: 'small unavailable-diag' },
+          el('summary', { text: 'Operator diagnostics' }),
+          el('div', { class: 'kv' }, ...rows))
+      : null);
 }
 
 /* Every chart resizes against its own container, not the window. The filter

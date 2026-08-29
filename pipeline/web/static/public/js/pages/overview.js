@@ -37,7 +37,7 @@ export async function render(main) {
   try {
     summary = await fetchJSON('summary');
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 
@@ -545,7 +545,7 @@ async function renderTopContracts(container, charts) {
     // homepage's single biggest transfer drops ~98%.
     data = await fetchJSON('contracts', { limit: 10 });
   } catch (error) {
-    replace(container, errorCard(error.message));
+    replace(container, errorCard(error));
     return;
   }
 

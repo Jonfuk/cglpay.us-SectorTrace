@@ -88,7 +88,7 @@ export async function render(main) {
       data.caveat ? pinnedCaveat(data.caveat, 'About freshness') : null,
       el('div', { class: 'freshness-list' }, freshnessCards)));
   } catch (error) {
-    replace(freshness, errorCard(error.message, () => render(main)));
+    replace(freshness, errorCard(error, () => render(main)));
   }
   return () => {};
 }

@@ -146,7 +146,7 @@ async function renderList(main) {
   try {
     providers = (await fetchJSON('providers')).providers || [];
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderList(main)));
+    replace(main, errorCard(error, () => renderList(main)));
     return () => {};
   }
 
@@ -267,7 +267,7 @@ async function renderOne(main, key) {
   try {
     data = await fetchJSON(`providers/${encodeURIComponent(key)}/timeline`);
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderOne(main, key)));
+    replace(main, errorCard(error, () => renderOne(main, key)));
     return () => {};
   }
 

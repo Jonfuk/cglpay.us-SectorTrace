@@ -65,7 +65,7 @@ export async function render(main, { params = null } = {}) {
         provider_key: state.providers.length ? state.providers : undefined,
       });
     } catch (error) {
-      replace(content, errorCard(error.message, () => render(main, { params })));
+      replace(content, errorCard(error, () => render(main, { params })));
       return () => {};
     }
   }
@@ -172,7 +172,7 @@ async function renderProviderPayLayers(container, providerKeys) {
     data = await fetchJSON('provider_compare', { provider_key: keys });
   } catch (error) {
     container.append(section('Pay evidence side by side', null,
-      errorCard(error.message, () => {})));
+      errorCard(error, () => {})));
     return;
   }
   const order = data.providers.map((p) => p.provider_key);

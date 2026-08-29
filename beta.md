@@ -297,9 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-_(none — BETA-067 completed the prior programme. BETA-068–087 are approved
-below but deliberately remain unqueued until implementation is explicitly
-started.)_
+- [IN_PROGRESS] BETA-069 | Rebuild the mobile public header
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 1
+  - area: public/responsive shell
+  - depends_on: BETA-049
+  - objective: At phone widths show only brand, menu and search; move council
+    lookup, navigation and theme selection into the drawer; remove clipping,
+    horizontal overflow and the duplicated campaign-lens label.
+  - next_action: Pin the 390x844, 768x1024 and desktop header layouts in
+    browser tests before changing the shared shell.
+
+_(Implementation of the approved BETA-068–107 programme was explicitly started
+on 2026-08-29. BETA-068 is complete, see DONE. The remaining items are being
+delivered in the approved wave order.)_
 
 ### BLOCKED
 
@@ -534,6 +548,56 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-068 | Release compatibility and graceful degradation
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/admin reliability
+  - depends_on: BETA-039, BETA-063
+  - objective: Check the build's required schema, tables, extensions and routes
+    before rendering each capability; replace raw database/traceback text with a
+    feature-specific unavailable state carrying retry, build/schema identity and
+    a safe operator diagnostic reference.
+  - result: New `pipeline/web/degrade.py`. `FeatureUnavailable` is the typed
+    refusal a capability raises; `REQUIREMENTS` + `preflight(conn, feature)`
+    declare the migration level, tables and PostgreSQL extensions each named
+    feature needs and check them before the query runs, so a partial
+    deployment fails as `{code: "missing_migration" | "missing_table" |
+    "missing_extension"}` naming the feature rather than as `no such table`
+    from three joins deep. `classify_db_error()` catches a raw
+    `OperationalError` / psycopg `UndefinedTable` / `QueryCanceled` that is
+    really schema drift or a section timeout and converts it to the same
+    bounded state (timeout → `retryable: true`). `server.py` builds the wire
+    envelope: `error` stays the human string the portal and older tests read;
+    additive `error_detail` carries `{code, message, retryable, feature,
+    build, schema, ref}` where `ref` is a short token also written to the log
+    (`web.feature_unavailable`) so an operator can trace the cause without SQL
+    ever reaching the reader. `document_search` and `run-ledger` — the two
+    surfaces that showed raw tracebacks in live review — now preflight.
+  - api/ui: `error_detail` object added beside `error` on any 4xx/5xx it
+    applies to (backward compatible — no existing response default changed).
+    `components.js` gains `unavailableCard()`; `errorCard()` delegates to it
+    whenever the caught error carries `.detail`, and every page catch now
+    passes the error object through, so the feature-specific card with an
+    "Operator diagnostics" disclosure (feature, code, ref, build, schema)
+    renders portal-wide. `app.js` `fetchJSON` attaches `.detail`/`.status` to
+    the thrown error. Retry shown only when `retryable`.
+  - validation: New `tests/test_web_degradation.py` (12 — preflight passes on a
+    full schema, no-ops an unknown feature, names a dropped table, names a
+    build behind on migrations; `classify_db_error` recognises a missing
+    SQLite table and an interrupted query, leaves an unrelated error for the
+    500 path; the wire envelope on a dropped `run_ledger` / `document_elements`
+    carries the full `error_detail` while `error` stays a plain string; a
+    healthy build still answers 200; an ordinary 400 keeps the flat `error`
+    shape with no `error_detail`). Full offline suite + `ruff` clean.
+    Browser-verified against a fresh SQLite warehouse: dropping
+    `document_elements` renders the unavailable card on `#/documents` with
+    feature `document_search`, code `missing_table`, a diagnostic ref, and no
+    SQL text; no console errors on the healthy portal.
 
 - [DONE] BETA-067 | Capability-documentation consistency checker
   - completed: 2026-08-29
@@ -3671,8 +3735,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | DONE (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | DONE (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | DONE (BETA-067) |
-| P1 | Release compatibility and graceful degradation | 5 | 3 | 5 | APPROVED, not queued (BETA-068) |
-| P1 | Mobile public-header rebuild | 5 | 3 | 5 | APPROVED, not queued (BETA-069) |
+| P1 | Release compatibility and graceful degradation | 5 | 3 | 5 | DONE (BETA-068) |
+| P1 | Mobile public-header rebuild | 5 | 3 | 5 | IN_PROGRESS (BETA-069) |
 | P1 | Workforce pay explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-070) |
 | P1 | Responsive public data tables | 5 | 4 | 4 | APPROVED, not queued (BETA-071) |
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | APPROVED, not queued (BETA-072) |

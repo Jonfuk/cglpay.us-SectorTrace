@@ -73,7 +73,7 @@ export async function render(main, { params = null } = {}) {
     data = await fetchJSON('relationships',
       onsCode ? { ons_code: onsCode } : { provider_key: providerKey });
   } catch (error) {
-    replace(contentHolder, errorCard(error.message, () => render(main, { params })));
+    replace(contentHolder, errorCard(error, () => render(main, { params })));
     return () => disposeCharts(charts);
   }
 
@@ -274,7 +274,7 @@ function timelineExpander(pair) {
       data = await fetchJSON(`relationships/${anchor.relationship_id}`);
     } catch (error) {
       loaded = false;
-      body.replaceChildren(errorCard(error.message, () => { details.open = false; }));
+      body.replaceChildren(errorCard(error, () => { details.open = false; }));
       return;
     }
     body.replaceChildren(

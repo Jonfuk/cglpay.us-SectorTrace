@@ -37,7 +37,7 @@ export async function render(main) {
   try {
     data = await fetchJSON('pfd');
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 
@@ -120,7 +120,7 @@ async function renderHse(container) {
     data = await fetchJSON('safety');
   } catch (error) {
     replace(container, section('HSE enforcement notices', null,
-      errorCard(error.message, () => renderHse(container))));
+      errorCard(error, () => renderHse(container))));
     return;
   }
   const notices = data.notices || [];

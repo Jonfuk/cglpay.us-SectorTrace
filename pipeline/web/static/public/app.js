@@ -205,7 +205,15 @@ export async function fetchJSON(endpoint, params = {}, { fresh = false } = {}) {
     let payload = null;
     try { payload = await response.json(); } catch (e) { /* not JSON */ }
     if (!response.ok) {
-      throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+      const err = new Error((payload && payload.error) || `HTTP ${response.status}`);
+      // BETA-068: the server attaches a structured unavailable envelope for a
+      // capability it cannot serve on this build (missing migration, absent
+      // extension, section timeout). Carry it so the route catch can render a
+      // feature-specific state with retry and a diagnostic reference instead
+      // of a bare message.
+      if (payload && payload.error_detail) err.detail = payload.error_detail;
+      err.status = response.status;
+      throw err;
     }
     cache.set(key, payload);
     return payload;
@@ -419,11 +427,19 @@ async function render() {
     // reader where they were instead of jumping the viewport to the top.
     if (navigating) main.focus({ preventScroll: true });
   } catch (error) {
-    replace(main, el('div', { class: 'section' },
-      el('div', { class: 'chart-error' },
+    // components.js imports from this module, so pull the renderer lazily to
+    // keep the module graph acyclic at load time (BETA-068).
+    let card;
+    try {
+      const mod = await import('/js/components.js');
+      card = mod.unavailableCard(error, () => render());
+    } catch (e) {
+      card = el('div', { class: 'chart-error' },
         el('strong', { text: 'This section could not be loaded.' }),
         el('span', { class: 'small', text: error.message }),
-        el('button', { class: 'btn', onclick: () => render() }, 'Retry'))));
+        el('button', { class: 'btn', onclick: () => render() }, 'Retry'));
+    }
+    replace(main, el('div', { class: 'section' }, card));
   }
 }
 

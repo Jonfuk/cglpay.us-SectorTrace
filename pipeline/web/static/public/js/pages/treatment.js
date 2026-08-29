@@ -144,7 +144,7 @@ export async function render(main) {
     try {
       data = await fetchJSON('fingertips', { topic: state.topic, ons_code: state.ons });
     } catch (error) {
-      replace(chartHolder, errorCard(error.message, load));
+      replace(chartHolder, errorCard(error, load));
       return;
     }
 
@@ -203,7 +203,7 @@ async function loadNdtms(container, state, charts) {
   try {
     data = await fetchJSON('ndtms', { ons_code: state.ons });
   } catch (error) {
-    replace(container, section('NDTMS estimates', null, errorCard(error.message,
+    replace(container, section('NDTMS estimates', null, errorCard(error,
       () => loadNdtms(container, state, charts))));
     return;
   }

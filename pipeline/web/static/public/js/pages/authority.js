@@ -60,7 +60,7 @@ async function renderOne(main, code) {
   try {
     data = await fetchJSON(`authorities/${encodeURIComponent(code)}`);
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderOne(main, code)));
+    replace(main, errorCard(error, () => renderOne(main, code)));
     return () => {};
   }
 

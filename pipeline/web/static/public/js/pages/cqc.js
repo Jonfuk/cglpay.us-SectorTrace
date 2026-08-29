@@ -113,7 +113,7 @@ async function rerender() {
   try {
     data = await fetchJSON('cqc_locations', params);
   } catch (error) {
-    _resultsHolder.replaceChildren(errorCard(error.message, rerender));
+    _resultsHolder.replaceChildren(errorCard(error, rerender));
     return;
   }
 
@@ -224,7 +224,7 @@ export async function render(main) {
   try {
     first = await fetchJSON('cqc_locations', { limit: 1 });
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 
