@@ -1,0 +1,351 @@
+"""The closed, public-safe analyst tool catalogue (BETA-109).
+
+Exactly five typed, in-process, side-effect-free tools sit between a natural
+question and the warehouse's existing read-only query code:
+
+  * ``search_document_passages``  — hybrid retrieval over parsed committee and
+    partnership documents (`pipeline.nlp.semantic_search`);
+  * ``inspect_claim_candidates``  — bounded aggregate counts of machine claim
+    candidates by predicate, assertion status and lifecycle;
+  * ``inspect_claim_gate``        — the 034G readiness report
+    (`pipeline.nlp.gate`);
+  * ``inspect_source_coverage``   — the evidence-by-authority coverage summary
+    (`pipeline.web.health.coverage`), reduced to per-column totals;
+  * ``inspect_freshness``         — newest/oldest ``retrieved_at`` per table
+    (`pipeline.web.health.freshness`).
+
+Why a closed catalogue rather than SQL or HTTP access for the model: the
+database already has read-only, caveated, provenance-rich views. The tools
+reuse them and add only argument validation. There is deliberately no
+argument that names a table, a URL, a file path, a SQL fragment or a write —
+`validate_args` rejects those shapes outright, and every wrapper runs on a
+read-only connection.
+
+Each tool returns the same envelope::
+
+    {"tool": ..., "args": <validated>, "caveat": ...,
+     "result_ids": [<result-local identifiers a later answer may cite>],
+     "data": <the tool's own payload>}
+
+``result_ids`` is the whitelist BETA-111's citation check validates against.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import re
+from typing import Any, Callable
+
+TOOL_NAMES = (
+    "search_document_passages",
+    "inspect_claim_candidates",
+    "inspect_claim_gate",
+    "inspect_source_coverage",
+    "inspect_freshness",
+)
+
+_MAX_QUERY_LEN = 400
+_MAX_LIMIT = 20
+_DEFAULT_LIMIT = 8
+
+# A source_system / predicate / table token: lowercase words, digits, dot,
+# hyphen, underscore. Anything with a slash, a scheme, a space, a quote or a
+# semicolon never matches and is rejected — that is the point.
+_TOKEN_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Shapes an argument must never take. Checked on every string value regardless
+# of which field it is, so a model cannot smuggle one in through `query`
+# either (retrieval treats it as literal text anyway; this fails loudly).
+_UNSAFE = (
+    re.compile(r"[a-z]+://", re.I),                       # a URL scheme
+    re.compile(r"\.\./|/etc/|[A-Za-z]:\\\\|~/"),          # a filesystem path
+    re.compile(r"\b(drop|delete|insert|update|alter|create|attach|pragma|"
+               r"truncate|grant|vacuum)\b", re.I),        # a write / DDL verb
+    re.compile(r";\s*\w"),                                # stacked statements
+    re.compile(r"--|/\*"),                                # a SQL comment
+)
+
+
+class ToolError(ValueError):
+    """A bad tool name or bad arguments — surfaced to the caller, never a 500
+    and never a tool execution."""
+
+
+# --- argument schemas ---------------------------------------------------------
+#
+# Deliberately hand-rolled and tiny. A field is (kind, required, extra). No
+# field anywhere is a table name, a URL, a path or a SQL fragment.
+
+_SCHEMAS: dict[str, dict[str, tuple]] = {
+    "search_document_passages": {
+        "query": ("text", True, {"max": _MAX_QUERY_LEN}),
+        "source_system": ("token", False, {}),
+        "date_from": ("date", False, {}),
+        "date_to": ("date", False, {}),
+        "mode": ("enum", False, {"choices": ("keyword", "semantic", "hybrid")}),
+        "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "inspect_claim_candidates": {
+        "source_system": ("token", False, {}),
+        "predicate": ("token", False, {}),
+        "assertion_status": ("enum", False, {
+            "choices": ("AFFIRMED", "NEGATED", "HISTORICAL", "THIRD_PARTY",
+                        "UNKNOWN")}),
+        "status": ("enum", False, {
+            "choices": ("new", "queued", "promoted", "rejected", "superseded")}),
+        "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "inspect_claim_gate": {},
+    "inspect_source_coverage": {
+        "tier": ("enum", False, {"choices": ("upper", "all")}),
+    },
+    "inspect_freshness": {
+        "table": ("token", False, {}),
+    },
+}
+
+
+def tool_accepts(name: str, field: str) -> bool:
+    """Whether tool `name` has an argument called `field` — used by the
+    orchestrator to decide which turn-level filters it may fold in."""
+    return field in _SCHEMAS.get(name, {})
+
+
+def tool_schemas() -> dict:
+    """The catalogue as plain JSON-serialisable metadata, for the router
+    prompt and for `/api/admin/assistant` introspection."""
+    out: dict[str, dict] = {}
+    for name, fields in _SCHEMAS.items():
+        out[name] = {
+            "description": _DESCRIPTIONS[name],
+            "arguments": {
+                field: {"kind": kind, "required": required, **extra}
+                for field, (kind, required, extra) in fields.items()
+            },
+        }
+    return out
+
+
+_DESCRIPTIONS = {
+    "search_document_passages":
+        "Find paragraph-level passages of parsed committee papers and drug "
+        "partnership documents that match a question by wording, embedding "
+        "similarity, or both. Optional source_system / date filters.",
+    "inspect_claim_candidates":
+        "Aggregate counts of machine-extracted claim candidates by predicate, "
+        "assertion status and lifecycle stage. No sentence text; counts only.",
+    "inspect_claim_gate":
+        "The 034G readiness report: whether there are enough human-reviewed "
+        "examples, and spread, to train claim classifiers, and what is missing.",
+    "inspect_source_coverage":
+        "How much evidence of each kind exists for the responsible authorities, "
+        "as per-column covered/total counts. No per-authority detail.",
+    "inspect_freshness":
+        "The newest and oldest retrieved_at per evidence table, and the row "
+        "count — the honest 'how stale is this' signal.",
+}
+
+
+def _check_string(value: str, field: str) -> None:
+    for pattern in _UNSAFE:
+        if pattern.search(value):
+            raise ToolError(
+                f"argument {field!r} has a disallowed shape (URL, path, SQL or "
+                f"write verb)")
+
+
+def _coerce(name: str, field: str, kind: str, value: Any, extra: dict) -> Any:
+    if kind in ("text", "token", "date", "enum"):
+        if not isinstance(value, str):
+            raise ToolError(f"{name}.{field} must be a string")
+        value = value.strip()
+        _check_string(value, field)
+        if not value:
+            raise ToolError(f"{name}.{field} is empty")
+        if kind == "text" and len(value) > extra["max"]:
+            raise ToolError(f"{name}.{field} is longer than {extra['max']} chars")
+        if kind == "token" and not _TOKEN_RE.match(value):
+            raise ToolError(f"{name}.{field} is not a bare identifier")
+        if kind == "date":
+            if not _DATE_RE.match(value):
+                raise ToolError(f"{name}.{field} must be an ISO date (YYYY-MM-DD)")
+            try:
+                _dt.date.fromisoformat(value)
+            except ValueError:
+                raise ToolError(f"{name}.{field} is not a real calendar date") from None
+        if kind == "enum" and value not in extra["choices"]:
+            raise ToolError(
+                f"{name}.{field} must be one of {list(extra['choices'])}")
+        return value
+    if kind == "int":
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise ToolError(f"{name}.{field} must be an integer") from None
+        return max(extra["min"], min(n, extra["max"]))
+    raise ToolError(f"unknown field kind {kind!r}")  # pragma: no cover
+
+
+def validate_args(name: str, args: dict | None) -> dict:
+    """Return the cleaned, bounded argument dict for `name`, or raise
+    `ToolError`. Unknown keys, wrong types and unsafe shapes are all rejected;
+    nothing is executed here."""
+    if name not in _SCHEMAS:
+        raise ToolError(f"unknown tool {name!r}; the catalogue is "
+                        f"{list(TOOL_NAMES)}")
+    args = dict(args or {})
+    schema = _SCHEMAS[name]
+    unknown = sorted(set(args) - set(schema))
+    if unknown:
+        raise ToolError(f"{name} got unknown argument(s) {unknown}")
+
+    cleaned: dict[str, Any] = {}
+    for field, (kind, required, extra) in schema.items():
+        if field not in args or args[field] in (None, ""):
+            if required:
+                raise ToolError(f"{name} requires {field!r}")
+            continue
+        cleaned[field] = _coerce(name, field, kind, args[field], extra)
+    return cleaned
+
+
+# --- the five wrappers ------------------------------------------------------
+#
+# Each takes (conn, settings, **validated args) and returns the tool's own
+# payload plus the `result_ids` a downstream answer may cite. Read-only.
+
+def _t_search(conn, settings, *, query, source_system=None, date_from=None,
+              date_to=None, mode="hybrid", limit=_DEFAULT_LIMIT) -> tuple[dict, list]:
+    from pipeline.nlp import semantic_search
+
+    result = semantic_search.search(
+        conn, query, mode=mode, limit=limit, source_system=source_system,
+        date_from=date_from, date_to=date_to,
+        model=settings.nlp_embedding_model)
+    ids = [r["document_chunk_id"] for r in result.get("results", [])]
+    return result, ids
+
+
+def _t_claim_candidates(conn, settings, *, source_system=None, predicate=None,
+                        assertion_status=None, status=None,
+                        limit=_MAX_LIMIT) -> tuple[dict, list]:
+    where = ["c.superseded = 0"]
+    params: list = []
+    if predicate:
+        where.append("c.predicate = ?")
+        params.append(predicate)
+    if assertion_status:
+        where.append("c.assertion_status = ?")
+        params.append(assertion_status)
+    if status:
+        where.append("c.status = ?")
+        params.append(status)
+    join = ""
+    if source_system:
+        join = (" JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id "
+                " JOIN document_versions v ON v.document_version_id = dc.document_version_id "
+                " JOIN document_records d ON d.document_id = v.document_id "
+                " JOIN evidence_records e ON e.evidence_id = d.evidence_id")
+        where.append("e.source_system = ?")
+        params.append(source_system)
+    rows = conn.execute(
+        "SELECT c.predicate AS predicate, c.assertion_status AS assertion_status, "
+        "c.status AS status, COUNT(*) AS n "
+        f"FROM document_claim_candidates c{join} "
+        f"WHERE {' AND '.join(where)} "
+        "GROUP BY c.predicate, c.assertion_status, c.status "
+        "ORDER BY n DESC, c.predicate LIMIT ?", (*params, limit)).fetchall()
+    groups = [dict(r) for r in rows]
+    total = sum(g["n"] for g in groups)
+    predicates = sorted({g["predicate"] for g in groups if g["predicate"]})
+    data = {
+        "groups": groups,
+        "total_in_groups": total,
+        "predicates": predicates,
+        "filters": {"source_system": source_system, "predicate": predicate,
+                    "assertion_status": assertion_status, "status": status},
+        "caveat": "Counts of machine-extracted candidates, not findings. A "
+                  "candidate is a sentence a model thought asserted something; "
+                  "only human review turns one into evidence.",
+    }
+    return data, predicates
+
+
+def _t_claim_gate(conn, settings) -> tuple[dict, list]:
+    from pipeline.nlp import gate
+
+    report = gate.check(conn)
+    return report, sorted(report.get("categories", {}))
+
+
+def _t_source_coverage(conn, settings, *, tier="upper") -> tuple[dict, list]:
+    from pipeline.web import health
+
+    full = health.coverage(conn, tier=tier)
+    # Reduce the per-authority matrix to the per-column summary — bounded, and
+    # still the answer to "how much X evidence is there". Per-region totals
+    # are a small, non-sensitive aggregate on top.
+    by_region: dict[str, int] = {}
+    for auth in full.get("authorities", []):
+        by_region[auth["region"] or "unknown"] = (
+            by_region.get(auth["region"] or "unknown", 0) + 1)
+    data = {
+        "tier": full["tier"],
+        "authority_count": full["authority_count"],
+        "authorities_by_region": by_region,
+        "columns": full["columns"],
+        "caveat": "Coverage is 'how many responsible authorities have at least "
+                  "one row of this evidence kind', against the tier that is "
+                  "actually responsible for public health — never against all "
+                  "347 authorities.",
+    }
+    return data, [c["label"] for c in full["columns"]]
+
+
+def _t_freshness(conn, settings, *, table=None) -> tuple[dict, list]:
+    from pipeline.web import health
+
+    rows = health.freshness(conn)
+    names = [r["table"] for r in rows]
+    if table is not None:
+        if table not in names:
+            raise ToolError(
+                f"no freshness row for {table!r}; tables are {names}")
+        rows = [r for r in rows if r["table"] == table]
+    data = {
+        "tables": rows,
+        "caveat": "Freshness is the newest retrieved_at of the rows themselves, "
+                  "not when a module last ran. A module can run and fetch "
+                  "nothing new.",
+    }
+    return data, [r["table"] for r in rows]
+
+
+_WRAPPERS: dict[str, Callable] = {
+    "search_document_passages": _t_search,
+    "inspect_claim_candidates": _t_claim_candidates,
+    "inspect_claim_gate": _t_claim_gate,
+    "inspect_source_coverage": _t_source_coverage,
+    "inspect_freshness": _t_freshness,
+}
+
+_CAVEAT_BY_TOOL = {name: fn for name, fn in _WRAPPERS.items()}
+
+
+def run_tool(name: str, args: dict | None, conn, settings) -> dict:
+    """Validate `args`, run one tool read-only, return the standard envelope.
+
+    Raises `ToolError` for a bad name or bad arguments — the caller turns that
+    into a clarification, never a crash. The tool itself is side-effect free;
+    nothing is written, promoted or attributed.
+    """
+    cleaned = validate_args(name, args)
+    data, result_ids = _WRAPPERS[name](conn, settings, **cleaned)
+    caveat = data.get("caveat") if isinstance(data, dict) else None
+    return {
+        "tool": name,
+        "args": cleaned,
+        "caveat": caveat,
+        "result_ids": list(result_ids),
+        "data": data,
+    }

@@ -535,6 +535,44 @@ when the programme is started.)_
 
 ### DONE
 
+- [DONE] BETA-109 | Public-safe read-only analyst tool catalogue
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: nlp/assistant/tools
+  - depends_on: BETA-046, BETA-059, BETA-084, BETA-107
+  - objective: Expose exactly five typed in-process tools to the router:
+    `search_document_passages`, `inspect_claim_candidates`,
+    `inspect_claim_gate`, `inspect_source_coverage` and `inspect_freshness`,
+    each wrapping existing query code and accepting only bounded filters.
+  - result: New `pipeline/assistant/tools.py`. `_SCHEMAS` is a tiny
+    hand-rolled per-tool field spec (kind, required, bounds); no field
+    anywhere is a table name, URL, path or SQL fragment. `validate_args`
+    rejects unknown keys, wrong types, non-bare identifiers, non-calendar
+    dates, bad enums and — via `_UNSAFE` — any string containing a URL
+    scheme, a filesystem path, a SQL comment, stacked statements or a
+    write/DDL verb, and clamps `limit` to 20. The five wrappers are read-only:
+    `search_document_passages` -> `nlp.semantic_search.search`;
+    `inspect_claim_candidates` -> a bounded `GROUP BY predicate, assertion
+    status, status` aggregate (counts only, no sentence text);
+    `inspect_claim_gate` -> `nlp.gate.check`; `inspect_source_coverage` ->
+    `web.health.coverage` reduced to per-column covered/total plus
+    per-region authority counts (no per-authority matrix);
+    `inspect_freshness` -> `web.health.freshness`, optionally one table
+    validated against the returned set. `run_tool` returns a standard
+    envelope `{tool, args, caveat, result_ids, data}` where `result_ids` is
+    the citation whitelist BETA-111 checks against.
+  - api/ui: none directly — used by BETA-110/112.
+  - validation: New `tests/test_assistant_tools.py` (10 — the catalogue is
+    exactly five; bad shapes (URL, path, SQL, bad date, bad enum, unknown
+    key, missing required) raise `ToolError`; `limit` is clamped; an unknown
+    tool name is rejected; each tool returns the envelope and leaves the row
+    counts unchanged; freshness rejects an out-of-result table; every
+    `conn.execute` string literal in the module is a `SELECT`).
+
 - [DONE] BETA-108 | Assistant provenance and run ledger
   - completed: 2026-08-29
   - priority: P1
@@ -5682,7 +5720,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | DONE (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | DONE (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | DONE (BETA-108) |
-| P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |
+| P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | DONE (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |
 | P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | APPROVED, not queued (BETA-111) |
 | P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | APPROVED, not queued (BETA-112) |
