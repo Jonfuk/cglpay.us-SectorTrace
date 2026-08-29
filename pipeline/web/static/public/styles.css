@@ -1340,6 +1340,23 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .pf-table th, .pf-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
 .pf-basis { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
 
+/* BETA-097: temporal coverage navigator. A per-source year grid; a filled
+ * cell is a period held, an empty cell is "not collected" — never a zero. */
+.tl-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.tl-picker select, .tl-picker input { padding: var(--space-1) var(--space-2); }
+.tl-picker input { min-width: 200px; }
+.tl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; border-bottom: 1px solid var(--border-subtle); }
+.tl-row.tl-head { border-bottom: 2px solid var(--border-subtle); font-weight: 600; }
+.tl-source { flex: 0 0 220px; font-size: 14px; }
+.tl-cells { display: flex; flex-wrap: wrap; gap: 3px; }
+.tl-cell { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; font-size: 12px; border-radius: 4px; }
+.tl-year { color: var(--text-muted); }
+.tl-held { background: var(--accent-amber); color: #08111f; font-weight: 600; text-decoration: none; }
+.tl-held:hover { filter: brightness(1.1); }
+.tl-gap { color: var(--text-muted); border: 1px dashed var(--border-subtle); }
+.tl-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.tl-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-accent); text-decoration: none; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

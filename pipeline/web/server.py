@@ -125,7 +125,7 @@ for _module in ("theme", "components", "palette", "filterstate", "myarea",
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
-              "revisions", "pathfinder"):
+              "revisions", "pathfinder", "timeline"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1628,6 +1628,16 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "coverage_timeline":
+            # BETA-097: which periods each source holds for one provider or
+            # authority. Never gap-filled — an absent period stays "not
+            # collected / not published", not a zero.
+            from pipeline.web import coverage_timeline
+            return coverage_timeline.timeline(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                ons_code=_str(params, "ons_code") or None)
+
         if route == "relationship_path":
             # BETA-093: the shortest *verified* path between two entities
             # through v_entity_edges. Unconfirmed name-match edges are

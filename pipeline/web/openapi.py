@@ -111,6 +111,18 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/coverage_timeline": {
+        "surface": "coverage_timeline",
+        "summary": "Which periods each source holds for one provider or "
+                   "authority. Never gap-filled — a period missing from a "
+                   "source's list means it was not published or not collected, "
+                   "not that it is zero. Exactly one of provider_key / "
+                   "ons_code.",
+        "parameters": [
+            _p("provider_key", desc="A provider from /api/v1/providers."),
+            _p("ons_code", desc="An authority from /api/v1/authorities."),
+        ],
+    },
     "/api/v1/relationship_path": {
         "surface": "relationship_path",
         "summary": "The shortest *verified* path between two entities through "

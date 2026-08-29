@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-097 | Temporal coverage navigator
+- [IN_PROGRESS] BETA-094 | Visual research journey
   - priority: P2
   - impact: 4
   - effort: 3
-  - confidence: 5
+  - confidence: 4
   - risk: 2
-  - area: public/navigation and coverage
-  - depends_on: BETA-043, BETA-075, BETA-076, BETA-084
-  - objective: Show exactly which periods each source holds for a selected
-    provider, authority or metric and link every available period to its view.
-  - next_action: Define a shared coverage-interval response (per source, the
-    periods actually held — never gap-filled) and a timeline view that keeps
-    absence distinguishable from a published zero.
+  - area: public/research continuity
+  - depends_on: BETA-072, BETA-077, BETA-088
+  - objective: Render the current local session as a branching trail of
+    searches, entities, documents and comparisons with named checkpoints.
+  - next_action: Define a bounded local event model (public identifiers only,
+    guarded) that records route visits as a branching trail, with named
+    checkpoints and prune-to-cap.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
-second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
-complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
-BETA-097; BETA-088, BETA-089, BETA-092 and BETA-093 are complete.)_
+second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
+BETA-092, BETA-093, BETA-097) is complete. Wave 3 is BETA-094, BETA-095,
+BETA-096, BETA-098, BETA-100.)_
 
 ### BLOCKED
 
@@ -549,6 +549,51 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-097 | Temporal coverage navigator
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/navigation and coverage
+  - depends_on: BETA-043, BETA-075, BETA-076, BETA-084
+  - objective: Show exactly which periods each source holds for a selected
+    provider, authority or metric and link every available period to its view.
+  - result: New `pipeline/web/coverage_timeline.py::timeline()` — for one
+    provider (`provider_key`) or authority (`ons_code`), a closed registry of
+    six source probes each runs one `SELECT DISTINCT <period>` and returns
+    **exactly the periods held** — `charity_financials`, `nhs_job_adverts`,
+    `gender_pay_gap_reports`, `tribunal_cases`, `pfd_provider_mentions` and
+    `contracts`-as-supplier for a provider; `public_health_grants`,
+    `la_revenue_budgets`, `ndtms_la_statistics`, `fingertips_la_values`,
+    `contracts`-as-buyer and `council_spend` for an authority. **Nothing is
+    gap-filled**: a period missing from a source's list stays "not collected /
+    not published", never a zero, and a source that holds nothing for the
+    entity is returned with `held: false` and an empty list, not hidden. The
+    only synthesised value is `span` / `years` — a contiguous year axis for
+    alignment, labelled as the axis. Each source carries a `link` into the
+    view that shows it. New additive public route `/api/v1/coverage_timeline`
+    on the frozen surface, OpenAPI, `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/coverage_timeline` (provider_key XOR ons_code).
+    New `/timeline` route + page ("Coverage timeline"): an entity picker,
+    then a per-source year grid — a filled cell is a period held (a link), a
+    dashed empty cell is "not collected" with an explicit aria-label, never a
+    zero — plus a chip list for sources whose periods are not plain years,
+    and the note pinned beneath. Linked from the footer nav. `styles.css`
+    gained a `.tl-*` block.
+  - validation: New `tests/test_web_coverage_timeline.py` (6 — the held
+    periods are exact with the real 2020/2021 gap preserved while the year
+    axis is contiguous; a source with no data is shown with `held: false`;
+    authority probes read by `ons_code`; exactly one endpoint is required;
+    an unknown entity raises; the route is in the OpenAPI doc).
+    `test_portal_isolation` / `test_portal_navigation` / `test_web_openapi` /
+    `test_portal_offline_reading` / `test_portal_design_system` green;
+    `ruff` clean. Browser-verified on `#/timeline?provider=cgl`: "Charity
+    accounts" shows held cells 18/19/21/22 with five dashed gap cells (2020
+    a genuine gap, not a zero); NHS Jobs / tribunals / PFD show as
+    all-gaps rows rather than being dropped.
 
 - [DONE] BETA-093 | Relationship pathfinder
   - completed: 2026-08-29
@@ -5128,10 +5173,10 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | DONE (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | DONE (BETA-093) |
-| P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
+| P2 | Visual research journey | 4 | 3 | 4 | IN_PROGRESS (BETA-094) |
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |
-| P2 | Temporal coverage navigator | 4 | 3 | 5 | IN_PROGRESS (BETA-097) |
+| P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |

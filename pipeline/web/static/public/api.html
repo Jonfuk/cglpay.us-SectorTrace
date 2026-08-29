@@ -361,6 +361,35 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-coverage_timeline" data-route="coverage_timeline">
+    <h3><code>/api/v1/coverage_timeline</code></h3>
+    <p>
+      For one selected provider or authority, exactly which periods each
+      source holds — so a reader sees a gap before opening a section.
+      <strong>Nothing is gap-filled.</strong> Each source's <code>periods</code>
+      list is the distinct periods the warehouse actually holds for that
+      entity; a period missing from a list means the source did not publish it
+      or this pipeline has not collected it — it is never a zero. The only
+      synthesised value is the <code>years</code> axis, drawn for alignment.
+      A source with an empty list is shown, not hidden: "this source holds
+      nothing for this entity" is itself the answer.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Exactly one of this or <code>ons_code</code>.</td></tr>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entity</code>, <code>span</code> / <code>years</code>
+      (the axis), <code>sources</code> (each with <code>title</code>,
+      <code>period_kind</code>, <code>periods</code>, <code>held</code>,
+      <code>link</code>), <code>note</code> and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/coverage_timeline?provider_key=change_grow_live</code></p>
+  </article>
+
   <article class="apiroute" id="route-relationship_path" data-route="relationship_path">
     <h3><code>/api/v1/relationship_path</code></h3>
     <p>

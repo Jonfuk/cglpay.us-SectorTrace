@@ -322,6 +322,7 @@ const ROUTES = {
   '/saved': () => import('/js/savedsearch.js'),
   '/revisions': () => import('/js/pages/revisions.js'),
   '/pathfinder': () => import('/js/pages/pathfinder.js'),
+  '/timeline': () => import('/js/pages/timeline.js'),
 };
 
 /* One <title> per route. Until now all thirteen shared index.html's static
@@ -352,6 +353,7 @@ const ROUTE_TITLES = {
   '/saved': 'Saved searches',
   '/revisions': 'Compare revisions',
   '/pathfinder': 'Relationship pathfinder',
+  '/timeline': 'Coverage timeline',
 };
 
 let disposeCurrent = null;
