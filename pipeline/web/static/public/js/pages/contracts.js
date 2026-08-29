@@ -13,16 +13,40 @@ import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
 
-export async function render(main) {
+/* BETA-040. The first window the page asks for; "show more" pages the rest by
+ * offset. The charts on this page are computed server-side over the whole
+ * matching corpus regardless of this number (as BETA-029 established for the
+ * overview), so a small first page costs nothing but the table's own tail. */
+const PAGE_SIZE = 100;
+
+/* The contracts page owns two query keys of its own, alongside the global
+ * provider/year filters: a buyer/supplier name search and a retrieved-since
+ * bound. They live in the hash like compare.js's selection, so a searched
+ * view is a shareable link. `offset` is deliberately not URL state — how far
+ * a reader has paged is nobody else's business. */
+function pageQuery(params) {
+  const source = params || new URLSearchParams(location.hash.split('?')[1] || '');
+  return {
+    q: (source.get('q') || '').trim(),
+    since: (source.get('since_retrieved_at') || '').trim(),
+  };
+}
+
+export async function render(main, { params = null } = {}) {
   const charts = [];
+  const { q, since } = pageQuery(params);
+  const search = { q, since };
   let data, spending;
   try {
     [data, spending] = await Promise.all([
-      fetchJSON('contracts', filterParams({ limit: 1000 })),
+      fetchJSON('contracts', filterParams({
+        q: q || undefined, since_retrieved_at: since || undefined,
+        limit: PAGE_SIZE, offset: 0,
+      })),
       fetchJSON('council_spend', filterParams({ limit: 500 })),
     ]);
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error.message, () => render(main, { params })));
     return () => {};
   }
 
@@ -56,6 +80,7 @@ export async function render(main) {
       el('summary', { text: 'How to read a notice' }),
       el('p', { text: 'A published notice is not a payment or a clean sector-spend total. Values can be ceilings, framework values or missing; buyer, provider and date context matters.' }),
       el('p', { text: 'The full filtered notice set is available as a download near the table. Council payment files are shown separately because they record a different kind of published evidence.' })),
+    searchPanel(search),
     el('div', { id: 'shape' }),
     el('div', { id: 'corpus' }),
     el('div', { id: 'breakdown' }),
@@ -67,10 +92,48 @@ export async function render(main) {
   renderCorpus(page.querySelector('#corpus'), data, charts);
   renderBreakdown(page.querySelector('#breakdown'), data, charts);
   renderBuyers(page.querySelector('#buyers'), data, charts);
-  renderNotices(page.querySelector('#notices'), data);
+  renderNotices(page.querySelector('#notices'), data, search);
   renderCouncilSpend(page.querySelector('#notices').parentNode, spending);
 
   return () => disposeCharts(charts);
+}
+
+/* Buyer/supplier name search over the whole matching corpus, server-side, so
+ * the result set is reproducible from the URL — distinct from the table's own
+ * per-column header filters, which only sift the rows already on the page.
+ * Submitting rewrites the hash query, preserving the global provider/year
+ * filters that live there too. */
+function searchPanel(search) {
+  const input = el('input', {
+    type: 'search', name: 'q', value: search.q, autocomplete: 'off',
+    placeholder: 'Search buyer or supplier name',
+    'aria-label': 'Search notices by buyer or supplier name',
+  });
+  const apply = () => {
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    const term = input.value.trim();
+    if (term) params.set('q', term); else params.delete('q');
+    const query = params.toString();
+    location.hash = `#/contracts${query ? `?${query}` : ''}`;
+  };
+  const form = el('form', {
+    class: 'row wrap', style: 'gap:8px;align-items:center;',
+    onsubmit: (event) => { event.preventDefault(); apply(); },
+  },
+    input,
+    el('button', { class: 'btn', type: 'submit', text: 'Search' }),
+    search.q
+      ? el('button', {
+          class: 'btn ghost', type: 'button',
+          onclick: () => { input.value = ''; apply(); },
+        }, 'Clear')
+      : null);
+  return el('div', { class: 'panel' },
+    form,
+    search.since
+      ? el('p', { class: 'small muted' },
+          `Limited to notices retrieved on or after ${search.since}.`)
+      : null);
 }
 
 function renderCouncilSpend(container, data) {
@@ -342,24 +405,26 @@ function renderBuyers(container, data, charts) {
   }));
 }
 
-function renderNotices(container, data) {
-  const notices = data.notices || [];
-  // Not "every notice", which is what this section used to be called: the page
-  // asks for 1,000 of a corpus that is currently 98,636. The count in the
-  // toolbar says which, and the description says why there is a limit at all.
-  replace(container, section(
-    'The notices',
-    notices.length < (data.total || 0)
-      ? 'The most recent notices behind the charts above. The charts are '
-        + 'computed over the whole corpus; this list is the page\'s share of '
-        + 'it. Search a column, or narrow the filters, to reach the rest — or '
-        + 'download the CSV, which carries every row these filters match.'
-      : 'The full list behind the charts above, downloadable with its provenance.',
-    el('div', { class: 'section-action' },
-      exportButton('contracts', filterParams(), 'Download complete filtered set', {
-        total: data.total,
-      })),
-    tableCard('Published notices', [
+function renderNotices(container, data, search = { q: '', since: '' }) {
+  // The charts above are computed over the whole matching corpus; this list is
+  // a window onto it, paged by "show more" (BETA-040). `search.q` narrows both.
+  const exportParams = filterParams({
+    q: search.q || undefined,
+    since_retrieved_at: search.since || undefined,
+  });
+  const session = {
+    notices: [...(data.notices || [])],
+    total: Number(data.total) || 0,
+  };
+
+  const describe = () => session.notices.length < session.total
+    ? 'The most recent notices behind the charts above, newest first. The '
+      + 'charts are computed over the whole matching corpus; this list is the '
+      + 'page\'s share of it. Use "show more", the search above, or the CSV '
+      + 'download, which carries every row these filters match.'
+    : 'The full list behind the charts above, downloadable with its provenance.';
+
+  const columns = [
       { title: 'Published', field: 'date_published', width: 110,
         formatter: (c) => isoDate(c.getValue()) },
       { title: 'Buyer', field: 'buyer_name' },
@@ -400,10 +465,57 @@ function renderNotices(container, data) {
             + ` title="The API response this row was parsed from">api ↗</a>`
           : ''),
         formatterParams: {}, htmlOutput: true },
-    ], notices, {
+  ];
+
+  const countLine = el('p', { class: 'small muted' });
+  const moreSlot = el('div', {});
+  const tableSlot = el('div', {});
+
+  const remaining = () => Math.max(0, session.total - session.notices.length);
+
+  const paint = () => {
+    replace(tableSlot, tableCard('Published notices', columns, session.notices, {
       height: 520,
-      total: data.total,
+      total: session.total,
       exportEndpoint: 'contracts',
-      exportParams: filterParams(),
-    })));
+      exportParams,
+    }));
+    countLine.textContent = remaining()
+      ? `Showing ${num(session.notices.length)} of ${num(session.total)} matching notices.`
+      : `${num(session.notices.length)} matching notice${session.notices.length === 1 ? '' : 's'}.`;
+    moreSlot.replaceChildren();
+    if (!remaining()) return;
+    moreSlot.append(el('button', {
+      class: 'btn ghost', type: 'button', onclick: () => loadMore(),
+    }, `Show ${num(Math.min(PAGE_SIZE, remaining()))} more`));
+  };
+
+  const loadMore = async () => {
+    // Replaced wholesale while the request runs so a second click cannot queue
+    // a duplicate window.
+    moreSlot.replaceChildren(el('span', { class: 'small muted', text: 'Loading…' }));
+    let next;
+    try {
+      next = await fetchJSON('contracts', filterParams({
+        q: search.q || undefined, since_retrieved_at: search.since || undefined,
+        limit: PAGE_SIZE, offset: session.notices.length,
+      }));
+    } catch (error) {
+      moreSlot.replaceChildren(errorCard(error.message, () => paint()));
+      return;
+    }
+    session.notices = session.notices.concat(next.notices || []);
+    session.total = Number(next.total) || session.total;
+    paint();
+  };
+
+  replace(container, section(
+    'The notices',
+    describe(),
+    el('div', { class: 'section-action' },
+      exportButton('contracts', exportParams, 'Download complete filtered set', {
+        total: session.total,
+      })),
+    countLine, tableSlot, moreSlot));
+  paint();
 }

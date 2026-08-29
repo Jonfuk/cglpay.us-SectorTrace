@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-039. Current work: BETA-040. Next:
-  BETA-041.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-040. Current work: BETA-041. Next:
+  BETA-042.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,28 +271,27 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-040 | Contract search and pagination
+- [IN_PROGRESS] BETA-041 | Ranked, faceted document search
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: api/contracts/ui
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: api/documents/search/ui
   - depends_on: BETA-039
-  - objective: Add `q`, `limit`, `offset` and `since_retrieved_at` to
-    `/api/v1/contracts`, matching buyer and supplier names case-insensitively,
-    with URL-backed portal search, show-more pagination and export/filter
-    parity apart from pagination parameters.
-  - rationale: Contract evidence is already valuable but hard to interrogate;
-    server-side filtering avoids oversized transfers and makes a shared result
-    set linkable and reproducible.
-  - suggested_first_action: Lock the request/response and export-parity tests,
-    then use existing PostgreSQL trigram indexes with a SQLite scan fallback
-    and stable ordering.
-  - next_action: Add the params to `public_queries.contracts` + the server
-    route, wire URL-backed search and show-more into the contracts page, and
-    pin export/filter parity.
+  - objective: Extend public document search with `source_system`,
+    `document_type`, `year_from`, `year_to` and `since_retrieved_at` facets,
+    ranked results and stable pagination across PostgreSQL and SQLite.
+  - rationale: The existing search proves demand but offers little corpus
+    control. Facets and honest relevance ranking make results useful without
+    implying that ranking is evidential confidence.
+  - suggested_first_action: Define an explicit public-source allowlist and
+    stable tie-breakers, then implement PostgreSQL `websearch_to_tsquery` plus
+    `ts_rank_cd` and the equivalent SQLite FTS5 path.
+  - next_action: Add the facet params + ranking to `public_queries.document_search`
+    (both backend branches), a `facets` block in the payload, and faceted
+    filters + stable pagination on the documents page.
 
 ### BLOCKED
 
@@ -475,24 +474,6 @@ DONE
     exercise the extension paths against a disposable PostgreSQL instance.
 
 ### NEXT
-
-- [NEXT] BETA-041 | Ranked, faceted document search
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: api/documents/search/ui
-  - depends_on: BETA-039
-  - objective: Extend public document search with `source_system`,
-    `document_type`, `year_from`, `year_to` and `since_retrieved_at` facets,
-    ranked results and stable pagination across PostgreSQL and SQLite.
-  - rationale: The existing search proves demand but offers little corpus
-    control. Facets and honest relevance ranking make results useful without
-    implying that ranking is evidential confidence.
-  - suggested_first_action: Define an explicit public-source allowlist and
-    stable tie-breakers, then implement PostgreSQL `websearch_to_tsquery` plus
-    `ts_rank_cd` and the equivalent SQLite FTS5 path.
 
 - [NEXT] BETA-042 | Document evidence-context view
   - priority: P1
@@ -679,6 +660,48 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-040 | Contract search and pagination
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: api/contracts/ui
+  - depends_on: BETA-039
+  - objective: Add `q`, `limit`, `offset` and `since_retrieved_at` to
+    `/api/v1/contracts`, matching buyer and supplier names case-insensitively,
+    with URL-backed portal search, show-more pagination and export/filter
+    parity apart from pagination parameters.
+  - result: `_contract_filters` gained `q` and `since_retrieved_at`. `q` is a
+    wildcard-escaped substring match over `buyer_name` and `supplier_name_raw`
+    — `ILIKE` on PostgreSQL (the migration-0069 pg_trgm GIN indexes turn it
+    into an index scan) and `LIKE` on SQLite (ASCII case-fold, the documented
+    sequential-scan fallback). `since_retrieved_at` is a lexical `retrieved_at
+    >=` bound. `contracts()` gained `offset` and a `page` block
+    (`limit`/`offset`/`returned`/`q`/`since_retrieved_at`); `total` is still
+    the full matching count so the page can show "N of M". All the page's
+    charts already ran over the filter clause, so they follow `q` too.
+    `all_contract_notices()` (the CSV/JSON stream) also honours `q` /
+    `since_retrieved_at` but takes no `limit`/`offset` — the download is the
+    complete matching set by construction. `_export` now drops `limit`/`offset`
+    from `filters_applied` so an exported file never claims a page was applied.
+  - ui: The contracts page owns two hash keys of its own beside the global
+    provider/year filters — `q` (a buyer/supplier search box, submitted into
+    `#/contracts?q=…`, a shareable link) and `since_retrieved_at` (URL-only,
+    shown as a note). The notices table is now a first page of 100 with a
+    "Show N more" button that pages by offset; the count line reads "Showing
+    100 of M matching notices". Export button and table download carry `q` /
+    `since_retrieved_at`, not the pagination.
+  - validation: `tests/test_web_contract_search.py` (14 tests) — case-insensitive
+    buyer/supplier `q`, wildcard escaping, chart-narrowing, `since_retrieved_at`,
+    `limit`/`offset` windowing and clamping, export parity (honours `q`, ignores
+    pagination, count agrees with the table), and the HTTP surface.
+    `test_portal_tables.py`'s corpus-total pin updated for the paged session.
+    `ruff` clean; browser-verified against a seeded SQLite warehouse (search
+    rewrites the URL and re-renders, "show more" pages then disappears at the
+    end, export links carry the filters, zero console errors).
 
 - [DONE] BETA-039 | Release identity and beta smoke gate
   - completed: 2026-08-29

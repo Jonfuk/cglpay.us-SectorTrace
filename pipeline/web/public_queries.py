@@ -854,7 +854,8 @@ _NOTICE_SELECT = """
         ORDER BY c.date_published DESC NULLS LAST, c.notice_id"""
 
 
-def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only):
+def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only,
+                      q=None, since_retrieved_at=None, *, ilike=False):
     where, params = [], {}
     if provider_key:
         where.append(
@@ -872,14 +873,38 @@ def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only
         params["year_to"] = str(year_to)
     if psr_only:
         where.append("c.psr_basis IS NOT NULL")
+    if q:
+        # BETA-040: case-insensitive substring over the two names a reader
+        # recognises a notice by. On PostgreSQL this is ILIKE, which the
+        # pg_trgm GIN indexes on buyer_name / supplier_name_raw (migration
+        # 0069) turn into an index scan; on SQLite it is LIKE, whose ASCII
+        # case-folding is enough and whose plan is the documented
+        # sequential-scan fallback that same migration describes. A caller's
+        # `%` and `_` are escaped so the term cannot act as a wildcard.
+        op = "ILIKE" if ilike else "LIKE"
+        term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params["contract_q"] = f"%{term}%"
+        where.append(
+            f"(c.buyer_name {op} :contract_q ESCAPE '\\' "
+            f"OR c.supplier_name_raw {op} :contract_q ESCAPE '\\')")
+    if since_retrieved_at:
+        # A plain string comparison, like the year bounds above: retrieved_at
+        # is an ISO-8601 timestamp and sorts lexically. Lets a reader ask
+        # "notices this warehouse has seen since <date>" and get a result set
+        # a shared link reproduces.
+        where.append("c.retrieved_at >= :since_retrieved_at")
+        params["since_retrieved_at"] = since_retrieved_at
     return (f" WHERE {' AND '.join(where)}" if where else ""), params
 
 
 def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=None,
-               year_from=None, year_to=None, psr_only=False, limit=500) -> dict:
+               year_from=None, year_to=None, psr_only=False, q=None,
+               since_retrieved_at=None, limit=500, offset=0) -> dict:
     _public(["contracts", "supplier_aliases", "providers"])
     clause, params = _contract_filters(
-        provider_key, buyer_ons_code, year_from, year_to, psr_only)
+        provider_key, buyer_ons_code, year_from, year_to, psr_only,
+        q=q, since_retrieved_at=since_retrieved_at,
+        ilike=db.backend_of(conn) == "postgres")
 
     totals = _one(conn, f"""
         SELECT COUNT(*) AS total,
@@ -940,8 +965,12 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         GROUP BY c.buyer_name, c.buyer_ons_code
         ORDER BY value_gbp DESC LIMIT 25""", params)
 
-    notices = _rows(conn, _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT :limit",
-                     {**params, "limit": max(1, min(int(limit), 5000))})
+    page_limit = max(1, min(int(limit), 5000))
+    page_offset = max(0, int(offset))
+    notices = _rows(
+        conn,
+        _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT :limit OFFSET :offset",
+        {**params, "limit": page_limit, "offset": page_offset})
     _add_notice_links(notices)
 
     # The overview's "largest notices" list, narrowed to notices matched to a
@@ -977,6 +1006,16 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         "ending_soon": ending_soon(conn, clause, params),
         "top_buyers": top_buyers,
         "notices": notices,
+        # BETA-040: what window of the matching set `notices` is, so the page
+        # can offer "show more" and a reader can tell a short list from a
+        # complete one. `total` above is the count over the same filters.
+        "page": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "returned": len(notices),
+            "q": q or None,
+            "since_retrieved_at": since_retrieved_at or None,
+        },
         "caveats": {
             "value": CAVEATS["contract_value"],
             "value_sum": CAVEATS["contract_value_sum"],
@@ -989,7 +1028,8 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
 
 def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
                           buyer_ons_code=None, year_from=None, year_to=None,
-                          psr_only=False, batch: int = 2000
+                          psr_only=False, q=None, since_retrieved_at=None,
+                          batch: int = 2000
                           ) -> tuple[int, Iterator[dict]]:
     """Every notice matching these filters, counted first and then streamed.
 
@@ -1013,7 +1053,9 @@ def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
     """
     _public(["contracts", "supplier_aliases"])
     clause, params = _contract_filters(
-        provider_key, buyer_ons_code, year_from, year_to, psr_only)
+        provider_key, buyer_ons_code, year_from, year_to, psr_only,
+        q=q, since_retrieved_at=since_retrieved_at,
+        ilike=db.backend_of(conn) == "postgres")
     total = _one(conn, f"SELECT COUNT(*) AS n FROM contracts c{clause}",
                   params).get("n", 0)
 

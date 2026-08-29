@@ -90,13 +90,19 @@ def test_the_count_compares_what_is_shown_against_the_corpus(components):
 
 
 def test_the_table_that_truncates_passes_its_corpus_total():
-    """contracts.js is the call site the finding is about: it asks for 1,000
-    rows of 98,636 and the payload's `total` is the only place the rest is
-    counted. Without this the count says '1,000 rows' and is a lie by
-    omission."""
+    """contracts.js is the call site the finding is about: it shows one page of
+    ~98,636 notices and the payload's `total` is the only place the rest is
+    counted. Without it the count says '100 rows' and is a lie by omission.
+
+    Since BETA-040 the page pages the notices by offset, so the total is held
+    in `session.total` — seeded from `data.total` and refreshed from each
+    "show more" response — and that is what the table and the count line are
+    given."""
     source = (PORTAL / "js" / "pages" / "contracts.js").read_text(encoding="utf-8")
 
-    assert re.search(r"total:\s*data\.total", source), (
+    assert re.search(r"total:\s*Number\(data\.total\)", source), (
+        "the notices session no longer seeds its total from the payload")
+    assert re.search(r"total:\s*session\.total", source), (
         "the notices table does not pass the corpus total to its row count")
     assert "'Every notice'" not in source, (
-        "the section was renamed: 1,000 of 98,636 notices is not every notice")
+        "the section was renamed: one page of ~98,636 notices is not every notice")

@@ -370,6 +370,12 @@ def _contract_query(params: dict[str, list[str]]) -> dict:
         "year_from": _str(params, "year_from") or None,
         "year_to": _str(params, "year_to") or None,
         "psr_only": _flag(params, "psr_only"),
+        # BETA-040. Both callers get these so the download matches the table:
+        # a case-insensitive buyer/supplier name search and a retrieved-since
+        # bound. `limit`/`offset` are the page's alone — the export is always
+        # the complete matching set.
+        "q": _str(params, "q") or None,
+        "since_retrieved_at": _str(params, "since_retrieved_at") or None,
     }
 
 
@@ -841,8 +847,12 @@ class Handler(BaseHTTPRequestHandler):
         if fmt not in ("csv", "json"):
             raise ApiError(f"format must be csv or json, got {fmt!r}.")
 
+        # `limit`/`offset` page the on-screen table (BETA-040); an export is
+        # always the complete matching set, so they are not filters and must
+        # not be written into the file's `filters_applied` line as if they
+        # were.
         filters = {k: v[0] for k, v in params.items()
-                    if k not in ("endpoint", "format")}
+                    if k not in ("endpoint", "format", "limit", "offset")}
 
         if endpoint in public_export.WINDOWED:
             return self._export_complete(endpoint, fmt, filters, params, conn)
@@ -1274,7 +1284,9 @@ class Handler(BaseHTTPRequestHandler):
             return {"authorities": public_queries.authorities(conn)}
         if route == "contracts":
             return public_queries.contracts(
-                conn, **_contract_query(params), limit=_int(params, "limit", 500))
+                conn, **_contract_query(params),
+                limit=_int(params, "limit", 500),
+                offset=_int(params, "offset", 0))
         if route == "pay":
             return public_queries.pay(
                 conn,
