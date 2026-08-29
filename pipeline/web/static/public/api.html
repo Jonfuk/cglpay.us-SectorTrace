@@ -551,6 +551,39 @@
     <p><a href="/api/v1/changes"><code>/api/v1/changes</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-publication_calendar" data-route="publication_calendar">
+    <h3><code>/api/v1/publication_calendar</code></h3>
+    <p>
+      Each source's release cadence, computed on the request. A publisher that
+      has released nothing and a collection here that has not run are different
+      conditions, and freshness alone cannot tell them apart. Every row carries
+      two cadences that are never merged: the publisher's <em>stated</em> period
+      (transcribed in the dataset registry, present only where the source
+      commits to a calendar) and an <em>observed</em> interval — the median gap
+      between the distinct dates this warehouse holds retrieval timestamps for,
+      shown only with three or more such dates and always an estimate.
+      <code>next_expected</code> is projected from whichever basis applies
+      (stated preferred); <code>status</code> is <code>overdue</code>,
+      <code>due</code>, <code>current</code> or <code>unknown</code>.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>today</code></td><td>ISO date to evaluate against; defaults to the server's current date. For reproducible views.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>datasets</code> (each with <code>stated_cadence</code>,
+      <code>stated_cadence_days</code>, <code>observed_interval_days</code>,
+      <code>observed_sample</code>, <code>cadence_basis</code>,
+      <code>last_publication</code>, <code>next_expected</code>,
+      <code>status</code>), <code>counts</code> (<code>by_status</code> and
+      <code>by_basis</code> — never a total), <code>as_of</code>,
+      <code>note</code>, <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/publication_calendar"><code>/api/v1/publication_calendar</code></a></p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>

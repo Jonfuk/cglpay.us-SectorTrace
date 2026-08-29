@@ -61,7 +61,7 @@
           <div><strong>Public money</strong><a href="#/contracts">Contracts</a><a href="#/geography">Council spending</a><a href="#/relationships">Who commissions whom</a></div>
           <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/cqc">CQC locations</a><a href="#/coverage">Coverage</a></div>
           <div><strong>Safety &amp; legal</strong><a href="#/pfd">Coroners’ reports</a><a href="#/claims">Provider evidence</a></div>
-          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="#/catalogue">Dataset catalogue</a><a href="#/changes">What changed?</a><a href="/api">Downloads &amp; API</a></div>
+          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="#/catalogue">Dataset catalogue</a><a href="#/changes">What changed?</a><a href="#/calendar">Publication calendar</a><a href="/api">Downloads &amp; API</a></div>
         </div>
       </details>
       <!--
@@ -200,6 +200,7 @@
       <li><code>/api/v1/document_search</code> — full-text search over published committee papers and community drug partnership documents</li>
       <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
       <li><code>/api/v1/changes</code> — a derived chronology of what the warehouse recorded changing (release, refreshed, reparsed, superseded, verified); collection, parser and human-review changes stay distinct kinds</li>
+      <li><code>/api/v1/publication_calendar</code> — each source's stated vs observed release cadence, last retrieval held here, next-expected date and overdue/unknown status; the stated cadence is never merged with the observed estimate</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
       <li><code>/api/v1/safety</code> — HSE enforcement notices served on a tracked provider</li>
       <li><code>/api/v1/safety_legal</code> — one filterable chronology over PFD, SAR, HSE, tribunal and CQC evidence, each event carrying one relationship label; counts by source and relationship, never summed</li>
@@ -234,6 +235,7 @@
     <a href="#/coverage" data-route="coverage">Coverage &amp; limitations</a>
     <a href="#/catalogue" data-route="catalogue">Dataset catalogue</a>
     <a href="#/changes" data-route="changes">What changed?</a>
+    <a href="#/calendar" data-route="calendar">Publication calendar</a>
     <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
     <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
   </nav>

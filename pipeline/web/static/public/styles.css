@@ -1276,3 +1276,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .chart, .map { display: none; }
   .chart-empty { display: block; border: 1px dashed #888; }
 }
+
+/* BETA-091: source publication calendar. The stated and observed cadences ride
+ * in their own table columns; the row tint only flags where the projected
+ * next-release date has passed, and carries no meaning on its own — the Status
+ * column states it in words. */
+.cal-row-overdue { box-shadow: inset 3px 0 0 var(--accent-amber); }
+.cal-row-due { box-shadow: inset 3px 0 0 var(--border-accent); }
+

@@ -317,6 +317,7 @@ const ROUTES = {
   '/catalogue': () => import('/js/pages/catalogue.js'),
   '/cqc': () => import('/js/pages/cqc.js'),
   '/changes': () => import('/js/pages/changes.js'),
+  '/calendar': () => import('/js/pages/calendar.js'),
 };
 
 /* One <title> per route. Until now all thirteen shared index.html's static
@@ -342,6 +343,7 @@ const ROUTE_TITLES = {
   '/catalogue': 'Dataset catalogue',
   '/cqc': 'CQC-registered locations',
   '/changes': 'What changed?',
+  '/calendar': 'Publication calendar',
 };
 
 let disposeCurrent = null;

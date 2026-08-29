@@ -123,7 +123,7 @@ for _module in ("theme", "components", "palette", "filterstate", "myarea", "rece
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
-              "documents", "catalogue", "cqc", "changes"):
+              "documents", "catalogue", "cqc", "changes", "calendar"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1580,6 +1580,14 @@ class Handler(BaseHTTPRequestHandler):
         match = re.fullmatch(r"catalogue/([a-z0-9-]{1,64})", route)
         if match:
             return public_queries.catalogue_detail(conn, match.group(1))
+
+        if route == "publication_calendar":
+            # BETA-091: each source's stated vs observed release cadence, last
+            # retrieval held here, next-expected date and overdue/unknown
+            # status. Derived on the request; the stated cadence is the only
+            # asserted figure and never merged with the observed estimate.
+            return public_queries.publication_calendar(
+                conn, today=_str(params, "today") or None)
 
         if route == "changes":
             # BETA-090: a derived, filterable chronology of what the warehouse

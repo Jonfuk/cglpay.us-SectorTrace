@@ -297,23 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-091 | Source publication calendar
-  - priority: P2
-  - impact: 4
-  - effort: 3
+- [IN_PROGRESS] BETA-101 | Run-to-run output comparison
+  - priority: P1
+  - impact: 5
+  - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: public/source coverage
-  - depends_on: BETA-043, BETA-059, BETA-084
-  - objective: Show each source's stated or observed release cadence, last
-    publication, next expected window and overdue/unknown status.
-  - next_action: Add nullable cadence and expectation metadata to the dataset
-    catalogue, labelling observed estimates separately from stated dates.
+  - risk: 3
+  - area: admin/operations
+  - depends_on: BETA-058, BETA-082, BETA-085
+  - objective: Compare two pipeline runs by modules, rows added/changed/removed,
+    failures, review items, coverage, durations and freshness effects.
+  - next_action: Define immutable per-module comparison summaries from the run
+    ledger; drill down via links to existing records and logs rather than
+    duplicating full payloads.
 
 _(The first refinement programme BETA-068–087 is complete. The second
 programme BETA-088–106 is now in progress in its own approved wave order:
-wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090 is
-complete, see DONE.)_
+wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090 and
+BETA-091 are complete, see DONE.)_
 
 ### BLOCKED
 
@@ -548,6 +549,65 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-091 | Source publication calendar
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: public/source coverage
+  - depends_on: BETA-043, BETA-059, BETA-084
+  - objective: Show each source's stated or observed release cadence, last
+    publication, next expected window and overdue/unknown status.
+  - result: `Dataset` gained one nullable field, `stated_cadence_days` — the
+    publisher's stated release period in days, set only where the source
+    commits to a calendar in its own `cadence` prose. All 17 judgement calls
+    sit in one auditable block, `datasets._STATED_CADENCE_DAYS`, folded onto
+    the registry with `dataclasses.replace` so no row carries an inline guess.
+    New additive read-only route `/api/v1/publication_calendar`
+    (`public_queries.publication_calendar`), derived per request: for each
+    dataset it reports the **stated** cadence and, separately and never
+    merged, an **observed** interval — the median gap between the distinct
+    `retrieved_at` calendar dates the warehouse holds, computed only with
+    three or more such dates and always labelled an estimate carrying its
+    sample size. `cadence_basis` is `stated` \| `observed` \| `unknown`
+    (stated preferred); `next_expected` is `last_publication + cadence_days`;
+    `status` is `overdue` only past a quarter-cadence grace (min one week),
+    else `due` \| `current` \| `unknown`. `counts` is `by_status` + `by_basis`
+    only — no cross-dataset arithmetic, no headline total. An optional `today`
+    param makes the view reproducible; the `caveat` states an "overdue" row
+    does not tell a stalled publisher apart from a collection that has not
+    run. New `/js/pages/calendar.js` + `/calendar` route ("Publication
+    calendar"): an evidence-health strip, a finding block, status filter
+    chips with per-status counts, and a table with the stated cadence and the
+    observed interval in their own columns; overdue rows take a left-edge
+    tint that only echoes the Status column. Linked from the footer nav and
+    the header lens menu's Accountability group.
+  - api/ui: additive route `/api/v1/publication_calendar` (today). Added to
+    the OpenAPI doc, the `<noscript>` list, `api.html` and
+    `test_portal_isolation` `PUBLIC_API_ROUTES` + the page-module list. New
+    portal page `calendar.js` + route `/calendar`. `styles.css` gained a
+    `.cal-row-*` block.
+  - validation: New `tests/test_web_publication_calendar.py` (5 — stated and
+    observed cadences are separate fields and `counts` has no `total`; a
+    stated cadence projects `next_expected` and flips to `overdue` by a
+    counted margin far in the future; an observed interval needs three dated
+    retrievals and never merges into the stated figure; `today` is
+    deterministic and echoed as `as_of`; the route is in the OpenAPI doc).
+    Updated `tests/test_portal_controls.py` for the BETA-078 single-`layer`
+    atlas state contract that the old assertion still expected as
+    `metric`/`layers`. `test_web_catalogue` / `test_web_openapi` /
+    `test_portal_isolation` / `test_portal_navigation` / `test_beta_queue`
+    green. `ruff` clean. Browser-verified against a seeded warehouse: the
+    page shows status chips "All · 34 / Overdue · 2 / Due · 0 / Unknown · 30
+    / Current · 2"; filtering to Overdue sets `#/calendar?status=overdue` and
+    shows two tinted rows — statutory pay rates ("Annual, each April · ~365
+    d" stated, "too few dated retrievals (n=1)" observed, "Overdue · +515 d")
+    and provider corporate structure ("Continuous" stated, "~30 d est. · n=4"
+    observed, "Overdue · +116 d") — the stated and observed cadences visibly
+    in separate columns.
 
 - [DONE] BETA-090 | "What changed?" evidence feed
   - completed: 2026-08-29
@@ -4681,7 +4741,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
-| P2 | Source publication calendar | 4 | 3 | 4 | IN_PROGRESS (BETA-091) |
+| P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
@@ -4691,7 +4751,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
-| P1 | Run-to-run output comparison | 5 | 4 | 4 | APPROVED, not queued (BETA-101) |
+| P1 | Run-to-run output comparison | 5 | 4 | 4 | IN_PROGRESS (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | APPROVED, not queued (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-104) |

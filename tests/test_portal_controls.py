@@ -183,9 +183,13 @@ def test_workbench_selection_state_has_shareable_url_contracts():
     geography = (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
     compare = (PORTAL / "js" / "pages" / "compare.js").read_text(encoding="utf-8")
     providers = (PORTAL / "js" / "pages" / "providers.js").read_text(encoding="utf-8")
-    for key in ("metric", "year", "layers", "selected"):
+    # BETA-078: the atlas shows one layer at a time with no compositing, so the
+    # shareable state is a single `layer` (with `metric` kept as a read-only
+    # fallback for old links), plus `year` and `selected`.
+    for key in ("layer", "year", "selected"):
         assert f"params.get('{key}')" in geography
         assert f"params.set('{key}'" in geography
+    assert "params.get('metric')" in geography
     assert "params.getAll('ons_code')" in compare
     assert "params.getAll('provider_key')" in compare
     assert "#/providers/${encodeURIComponent(provider.provider_key)}" in providers

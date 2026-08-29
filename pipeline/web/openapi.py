@@ -161,6 +161,18 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("dataset_id", where="path", required=True,
                            desc="A dataset_id from /api/v1/catalogue.")],
     },
+    "/api/v1/publication_calendar": {
+        "surface": "publication_calendar",
+        "summary": "Each source's stated vs observed release cadence, last "
+                   "retrieval held here, next-expected date and "
+                   "overdue/unknown status. The stated cadence is the only "
+                   "asserted figure; the observed interval is a labelled "
+                   "estimate and the two are never merged.",
+        "parameters": [
+            _p("today", desc="ISO date to evaluate against; defaults to the "
+                             "server's current date. For reproducible views."),
+        ],
+    },
     "/api/v1/changes": {
         "surface": "changes",
         "summary": "Derived chronology of what the warehouse recorded changing "

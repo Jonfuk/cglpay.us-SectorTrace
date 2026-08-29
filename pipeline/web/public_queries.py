@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -842,6 +842,163 @@ def catalogue_detail(conn: sqlite3.Connection, dataset_id: str) -> dict:
     figures["licence_caution"] = (licence.caution or None) if licence else None
     figures["caveat_common"] = CAVEATS["catalogue"]
     return figures
+
+
+# --- source publication calendar (BETA-091) ---------------------------------
+#
+# Freshness alone cannot tell a reader why a dataset looks old: a publisher
+# that has released nothing and a collection here that has not run are
+# different conditions. This view keeps them apart. For each dataset it shows,
+# side by side and never merged into one figure:
+#
+#   * the publisher's *stated* cadence — the number transcribed in
+#     `datasets._STATED_CADENCE_DAYS`, or nothing where the source names no
+#     calendar;
+#   * an *observed* interval — the median gap between the distinct calendar
+#     dates this warehouse holds retrieval timestamps for, reported only with
+#     three or more such dates and always labelled an estimate;
+#   * the last retrieval held here, and a next-expected date projected from
+#     whichever basis applies (stated preferred over observed).
+#
+# `status` is "overdue" only when that projected date is past by more than a
+# quarter of the cadence (minimum one week); "due" inside that window;
+# "current" before it; "unknown" with no basis or nothing retrieved. No
+# arithmetic crosses datasets and there is no headline total.
+_CALENDAR_MIN_OBSERVED = 3
+_CALENDAR_STATUS_ORDER = {"overdue": 0, "due": 1, "unknown": 2, "current": 3}
+
+
+def _distinct_retrieval_dates(conn: sqlite3.Connection, table: str) -> list[str]:
+    """Every distinct YYYY-MM-DD this table carries a `retrieved_at` for.
+
+    Ask the schema first — reference tables such as `authorities` have no
+    `retrieved_at` — so this stays quiet on them rather than raising.
+    """
+    if not any(col["name"] == "retrieved_at"
+               for col in catalog.columns_of(conn, table)):
+        return []
+    return [r["d"] for r in _rows(
+        conn,
+        f"SELECT DISTINCT substr(retrieved_at, 1, 10) AS d FROM {table} "
+        "WHERE retrieved_at IS NOT NULL AND retrieved_at <> '' ORDER BY d")]
+
+
+def _observed_interval_days(dates: list[str]) -> int | None:
+    """Median gap in days between consecutive distinct retrieval dates.
+
+    None below `_CALENDAR_MIN_OBSERVED` dates: two points make one gap, and
+    one gap is not a cadence. `dates` arrives sorted ascending.
+    """
+    if len(dates) < _CALENDAR_MIN_OBSERVED:
+        return None
+    gaps: list[int] = []
+    for a, b in zip(dates, dates[1:]):
+        try:
+            delta = (date.fromisoformat(b) - date.fromisoformat(a)).days
+        except ValueError:
+            continue
+        if delta > 0:
+            gaps.append(delta)
+    if len(gaps) < _CALENDAR_MIN_OBSERVED - 1:
+        return None
+    gaps.sort()
+    mid = len(gaps) // 2
+    if len(gaps) % 2:
+        return gaps[mid]
+    return round((gaps[mid - 1] + gaps[mid]) / 2)
+
+
+def publication_calendar(conn: sqlite3.Connection, *,
+                          today: str | None = None) -> dict:
+    """Per-source release cadence, last publication and overdue/unknown status.
+
+    Read-only and derived: the stated cadence is registry metadata, everything
+    else is measured from retrieval history on this request. Stated and
+    observed cadences are reported in separate fields and never combined.
+    """
+    as_of = date.fromisoformat(today) if today else date.today()
+
+    rows: list[dict] = []
+    by_status: dict[str, int] = {}
+    by_basis: dict[str, int] = {}
+    for ds in datasets.DATASETS:
+        _public(list(ds.public_tables))
+        seen: set[str] = set()
+        for t in ds.public_tables:
+            seen.update(_distinct_retrieval_dates(conn, t))
+        dated = sorted(seen)
+        last_pub = dated[-1] if dated else None
+        observed = _observed_interval_days(dated)
+        stated = ds.stated_cadence_days
+
+        if stated is not None:
+            basis, cadence_days = "stated", stated
+        elif observed is not None:
+            basis, cadence_days = "observed", observed
+        else:
+            basis, cadence_days = "unknown", None
+
+        next_expected = None
+        status = "unknown"
+        overdue_by_days = None
+        if cadence_days and last_pub:
+            try:
+                nxt = date.fromisoformat(last_pub) + timedelta(days=cadence_days)
+            except ValueError:
+                nxt = None
+            if nxt is not None:
+                next_expected = nxt.isoformat()
+                grace = max(7, round(cadence_days * 0.25))
+                if as_of <= nxt:
+                    status = "current"
+                elif as_of <= nxt + timedelta(days=grace):
+                    status = "due"
+                else:
+                    status = "overdue"
+                    overdue_by_days = (as_of - nxt).days
+
+        by_status[status] = by_status.get(status, 0) + 1
+        by_basis[basis] = by_basis.get(basis, 0) + 1
+        rows.append({
+            "dataset_id": ds.dataset_id,
+            "title": ds.title,
+            "publisher": ds.publisher,
+            "official_url": ds.official_url,
+            "evidence_layer": ds.evidence_layer,
+            "evidence_layer_label": EVIDENCE_LAYERS.get(
+                ds.evidence_layer, ds.evidence_layer),
+            "stated_cadence": ds.cadence,
+            "stated_cadence_days": stated,
+            "observed_interval_days": observed,
+            "observed_sample": len(dated),
+            "cadence_basis": basis,
+            "cadence_days": cadence_days,
+            "last_publication": last_pub,
+            "next_expected": next_expected,
+            "status": status,
+            "overdue_by_days": overdue_by_days,
+        })
+
+    rows.sort(key=lambda r: (
+        _CALENDAR_STATUS_ORDER.get(r["status"], 9),
+        r["next_expected"] or "9999",
+        r["title"].lower()))
+
+    return {
+        "as_of": as_of.isoformat(),
+        "datasets": rows,
+        "counts": {"by_status": by_status, "by_basis": by_basis},
+        "statuses": list(_CALENDAR_STATUS_ORDER),
+        "note": "The stated cadence is what the publisher says. The observed "
+                "interval is the median gap between retrievals this warehouse "
+                "holds — an estimate, shown only with three or more dated "
+                "retrievals, and never merged with the stated figure.",
+        "caveat": "A next-expected date is projected from the last retrieval "
+                  "here, not a publisher commitment. “Overdue” can mean "
+                  "the source has not released, or that collection here has "
+                  "not run — this view does not tell the two apart, only that "
+                  "the freshness needs explaining.",
+    }
 
 
 # --- "what changed?" evidence feed (BETA-090) ---------------------------------

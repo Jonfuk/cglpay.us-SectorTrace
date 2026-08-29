@@ -27,7 +27,7 @@ Two guarantees hold, both pinned by `tests/test_web_catalogue.py`:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # The layer vocabulary. A dataset belongs to exactly one, and the portal
 # never does arithmetic across two of them (CLAUDE.md settled decision 2).
@@ -55,14 +55,51 @@ class Dataset:
     official_url: str
     evidence_layer: str      # a key of EVIDENCE_LAYERS
     geography: str
-    cadence: str
+    cadence: str             # prose, always present — how the source describes it
     public_tables: tuple[str, ...]
     caveat: str
+    # The publisher's *stated* release period in days, or None when the source
+    # names no calendar (continuous, ad hoc, recomputed on each run). This is
+    # the only cadence number the registry asserts. Everything else the
+    # publication calendar shows — an observed interval, a next-expected date,
+    # an overdue flag — is measured from retrieval history at request time and
+    # labelled as an estimate, never mixed with this stated figure. Set from
+    # `_STATED_CADENCE_DAYS` below so every judgement sits in one auditable
+    # block (BETA-091).
+    stated_cadence_days: int | None = None
+
+
+# The publisher's stated release period, in days, keyed by dataset_id. A key is
+# present only where the source commits to a calendar in its own words (the
+# `cadence` prose): "Annual" is 365, "Quarterly" 91, "Monthly" 30, "Weekly" 7.
+# A source described as continuous, ad hoc, or recomputed on each run has no
+# entry and no stated cadence — its calendar row falls back to an observed
+# estimate or reads "unknown". These are transcriptions of the stated schedule,
+# not observations; keep the two apart (BETA-091).
+_STATED_CADENCE_DAYS: dict[str, int] = {
+    "geography": 365,               # "Annual boundary vintages"
+    "council-spend": 30,            # "Monthly, per authority"
+    "gender-pay-gap": 365,          # "Annual, by snapshot date"
+    "statutory-pay-rates": 365,     # "Annual, each April"
+    "ashe-earnings": 365,           # "Annual"
+    "skills-for-care": 365,         # "Annual"
+    "workforce-census": 365,        # "Annual"
+    "ndtms-annual": 365,            # "Annual"
+    "ndtms-monthly": 30,            # "Monthly, provisional"
+    "public-health-grant": 365,     # "Annual"
+    "la-revenue-budgets": 365,      # "Annual"
+    "charity-finance": 365,         # "Annual filings"
+    "annual-report-narrative": 365,  # "Annual"
+    "cqc-bulk-crosscheck": 7,       # "Weekly"
+    "rough-sleeping": 365,          # "Annual, autumn snapshot"
+    "statutory-homelessness": 91,   # "Quarterly"
+    "temporary-accommodation": 91,  # "Quarterly"
+}
 
 
 # Ordered for the list view: reference first, then the evidence layers roughly
 # in the order the portal's own navigation presents them, comparators last.
-DATASETS: tuple[Dataset, ...] = (
+_DATASETS_RAW: tuple[Dataset, ...] = (
     Dataset(
         "geography", "m00_geography",
         "English local authority geography",
@@ -476,6 +513,14 @@ DATASETS: tuple[Dataset, ...] = (
     ),
 )
 
+
+# Fold the stated cadence in from the one auditable block above. Done here, not
+# inline on each row, so the calendar's judgement calls are in a single place a
+# reader can check against the `cadence` prose.
+DATASETS: tuple[Dataset, ...] = tuple(
+    replace(d, stated_cadence_days=_STATED_CADENCE_DAYS.get(d.dataset_id))
+    for d in _DATASETS_RAW
+)
 
 BY_ID: dict[str, Dataset] = {d.dataset_id: d for d in DATASETS}
 BY_MODULE: dict[str, Dataset] = {d.module: d for d in DATASETS}
