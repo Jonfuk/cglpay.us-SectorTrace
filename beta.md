@@ -297,23 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-074 | Inspectable visualisations
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: public/charts
-  - depends_on: BETA-020, BETA-049, BETA-080
-  - objective: Standardise keyboard-accessible legends, series toggles, value
-    tooltips, appropriate zoom/reset, caveat and missing-period annotations,
-    image saving and direct movement between each chart and its accessible
-    table.
-  - next_action: Extend the shared chart wrapper and prove the contract on
-    time-series, bar and map-backed views.
+- [IN_PROGRESS] BETA-075 | Treatment metric explorer
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/treatment
+  - depends_on: BETA-043, BETA-049, BETA-072
+  - objective: Reframe treatment data around a searchable metric catalogue
+    that exposes definitions, units, confidence intervals, periods,
+    publication coverage, authority/region views and provenance before drawing
+    a chart.
+  - next_action: Build the metric metadata model from existing endpoint fields
+    and catalogue records; preserve missing periods as missing, never zero or
+    interpolated.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–073 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–074 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -549,6 +550,51 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-074 | Inspectable visualisations
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/charts
+  - depends_on: BETA-020, BETA-049, BETA-080
+  - objective: Standardise keyboard-accessible legends, series toggles, value
+    tooltips, appropriate zoom/reset, caveat and missing-period annotations,
+    image saving and direct movement between each chart and its accessible
+    table.
+  - result: The shared `mountChart()` wrapper in `components.js`. The ECharts
+    legend is a canvas and mouse-only, so a chart with 2–12 named series now
+    also gets a row of HTML `<button>` series toggles above it — keyboard- and
+    screen-reader-operable, state carried as `aria-pressed`, each dispatching
+    the same `legendToggleSelect` action (a hidden legend is injected when the
+    chart declared none, so the action lands without changing the drawing).
+    `zoom: true` adds an ECharts toolbox with `dataZoom` + `restore` and a DOM
+    "Reset view" button; opt-in, because a pie or single bar has nothing to
+    zoom. `saveAsImage` is deliberately kept out of the toolbox — the existing
+    DOM "Save image" button (which draws the caption and caveat into the PNG)
+    is the only save path. `missingNote` renders an explicit
+    "no published figure for …" line under the chart rather than closing the
+    gap. `tableHref` renders a "View as table" link, and `tableCard` gains an
+    `anchorId` so it can be the target. Proven on the pay page: the indicative
+    wage line chart (time-series — `zoom`, `missingNote` computed from
+    all-null years, `tableHref`/`anchorId` to `#pay-wage-table`), the
+    advertised-pay scatter (time axis — `zoom`), and every 2-series bar (the
+    gender pay gap chart — auto keyboard toggles). Every other chart inherits
+    the toggles and controls automatically.
+  - api/ui: no API change. New `mountChart` options `zoom`, `seriesToggles`,
+    `tableHref`, `missingNote`; `tableCard` option `anchorId`. New CSS
+    `.chart-series-toggle*`, `.chart-controls`, `.chart-to-table`,
+    `.chart-missing-note`.
+  - validation: `tests/test_portal_charts.py` +5 (series toggles are keyboard
+    buttons with aria-pressed and the ECharts action; zoom/reset opt-in with
+    saveAsImage kept out of the toolbox; missing periods annotated not closed;
+    chart↔table link with `anchorId`; the pay page proves the contract).
+    Chart / table / isolation suites green. `ruff` clean. Browser-verified:
+    the gender-pay-gap chart shows two keyboard toggle buttons; clicking one
+    flips `aria-pressed` and hides the series, clicking again restores it; the
+    control row and save button render; no console errors from the wrapper.
 
 - [DONE] BETA-073 | My area context
   - completed: 2026-08-29
@@ -3980,8 +4026,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Responsive public data tables | 5 | 4 | 4 | DONE (BETA-071) |
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | DONE (BETA-072) |
 | P1 | My area context | 5 | 4 | 4 | DONE (BETA-073) |
-| P2 | Inspectable visualisations | 4 | 3 | 5 | IN_PROGRESS (BETA-074) |
-| P1 | Treatment metric explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-075) |
+| P2 | Inspectable visualisations | 4 | 3 | 5 | DONE (BETA-074) |
+| P1 | Treatment metric explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-075) |
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | APPROVED, not queued (BETA-076) |
 | P2 | Navigation continuity | 4 | 3 | 5 | APPROVED, not queued (BETA-077) |
 | P1 | Unified evidence atlas | 5 | 5 | 4 | APPROVED, not queued (BETA-078) |

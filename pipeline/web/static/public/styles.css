@@ -447,6 +447,20 @@ main:focus { outline: none; }
   opacity: 0.45; transition: opacity 0.15s;
 }
 .chartwrap:hover .chart-save, .chart-save:focus-visible { opacity: 1; }
+
+/* BETA-074: shared chart controls — keyboard series toggles above, a
+   reset / view-as-table / save-image row below, an optional missing-period
+   note under that. */
+.chart-series-toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.chart-series-toggle {
+  font-size: 12px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-accent); background: var(--bg-elevated); color: var(--text-primary);
+}
+.chart-series-toggle[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+.chart-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.chart-controls .chart-save { position: static; opacity: 1; }
+.chart-to-table { text-decoration: none; }
+.chart-missing-note { margin: 6px 0 0; }
 .chart { width: 100%; height: 380px; }
 .chart.tall { height: 520px; }
 .chart.short { height: 260px; }

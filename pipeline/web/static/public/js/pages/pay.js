@@ -375,6 +375,12 @@ function renderWage(container, data, charts) {
     }),
   }));
 
+  // BETA-074: years where every series is missing — flagged as an explicit
+  // note under the chart rather than closing the gap.
+  const allSeries = [...seriesFor('indicative_wage_per_head', 'per head'),
+    ...seriesFor('indicative_wage_per_fte', 'per FTE')];
+  const missingYears = years.filter((_, i) => allSeries.every((s) => s.data[i] == null));
+
   charts.push(mountChart(holder, {
     legend: { top: 0, type: 'scroll' },
     tooltip: {
@@ -383,12 +389,16 @@ function renderWage(container, data, charts) {
     },
     xAxis: { type: 'category', data: years.map(isoDate) },
     yAxis: { type: 'value', name: '£ per employee', axisLabel: { formatter: (v) => gbp(v) } },
-    series: [...seriesFor('indicative_wage_per_head', 'per head'),
-      ...seriesFor('indicative_wage_per_fte', 'per FTE')],
+    series: allSeries,
   }, {
     aria: 'Line chart of indicative wage per employee by financial year. '
       + 'Headcount and full-time-equivalent denominators are shown separately '
       + 'because they differ materially.',
+    zoom: true,
+    tableHref: '#pay-wage-table',
+    missingNote: missingYears.length
+      ? `No published figure for ${missingYears.map(isoDate).join(', ')} — the gap is left open, not filled.`
+      : null,
   }));
 
   // Newest report first. The chart above reads `rows` in ascending year order
@@ -408,7 +418,8 @@ function renderWage(container, data, charts) {
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
     { title: 'Per FTE', field: 'indicative_wage_per_fte',
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
-  ], newestFirst, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300 }));
+  ], newestFirst, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300,
+    anchorId: 'pay-wage-table' }));
 }
 
 // --- 2b. NHS Jobs advertised pay ---------------------------------------------
@@ -487,6 +498,7 @@ function renderAdverts(container, data, charts) {
     height: 'short',
     aria: 'Scatter chart of advertised minimum salary against the date each '
       + 'advert was posted.',
+    zoom: true,
   }));
 
   if (repeats.length) {

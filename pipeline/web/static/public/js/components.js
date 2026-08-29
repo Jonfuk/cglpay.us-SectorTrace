@@ -581,16 +581,37 @@ const observers = new Map();
 
 export function mountChart(container, option, { height = null, aria = null,
                                                  caption = null,
-                                                 caveat: caveatText = null } = {}) {
+                                                 caveat: caveatText = null,
+                                                 zoom = false,
+                                                 seriesToggles = 'auto',
+                                                 tableHref = null,
+                                                 missingNote = null } = {}) {
   registerTheme();
   if (!window.echarts) {
     replace(container, errorCard('Charting library did not load.'));
     return null;
   }
 
+  // BETA-074: zoom/reset via the ECharts toolbox, opt-in per chart because a
+  // pie or a single-series bar has nothing to zoom. `saveAsImage` stays off —
+  // the DOM "Save image" button below draws the caption and caveat into the
+  // file, which the toolbox export cannot.
+  if (zoom && !option.toolbox) {
+    option = {
+      ...option,
+      toolbox: {
+        right: 8, top: 0, itemSize: 13,
+        feature: {
+          dataZoom: { yAxisIndex: 'none', title: { zoom: 'Zoom to a range', back: 'Undo zoom' } },
+          restore: { title: 'Reset view' },
+        },
+      },
+    };
+  }
+
   // role="img" sits on the chart itself rather than on the wrapper, because
-  // the wrapper now also holds a button and the children of an img role are
-  // presentational — a save button inside one is a button no screen reader
+  // the wrapper now also holds buttons and the children of an img role are
+  // presentational — a control inside one is a control no screen reader
   // announces.
   const holder = el('div', {
     class: `chart${height ? ` ${height}` : ''}`,
@@ -601,12 +622,59 @@ export function mountChart(container, option, { height = null, aria = null,
     title: 'Download this chart as an image, with its caption and caveat drawn into it',
     onclick: () => saveChartImage(chart, wrap, { caption, caveat: caveatText }, save),
   }, 'Save image');
-  const wrap = el('div', { class: 'chartwrap' }, holder, save);
+
+  // BETA-074: keyboard-operable series toggles. The ECharts legend is a canvas
+  // and mouse-only; these <button>s dispatch the same legend action and carry
+  // the state as `aria-pressed`, so a keyboard or screen-reader user can hide
+  // a series. Auto-shown when the option has 2+ named series and no explicit
+  // opt-out.
+  const seriesNames = (option.series || [])
+    .map((s) => s && s.name).filter((n) => typeof n === 'string' && n);
+  const wantToggles = seriesToggles === true
+    || (seriesToggles === 'auto' && seriesNames.length >= 2 && seriesNames.length <= 12);
+  const toggleBar = wantToggles
+    ? el('div', { class: 'chart-series-toggles', role: 'group', 'aria-label': 'Show or hide data series' })
+    : null;
+  // `legendToggleSelect` only affects a series ECharts is tracking in a
+  // legend. If the chart declared none, add a hidden one so the buttons work
+  // without changing the drawn chart.
+  if (wantToggles && !option.legend) {
+    option = { ...option, legend: { show: false, data: seriesNames } };
+  }
+
+  const controls = el('div', { class: 'chart-controls' },
+    zoom ? el('button', {
+      class: 'btn tiny', type: 'button', title: 'Reset zoom and hidden series',
+      onclick: () => chart.dispatchAction({ type: 'restore' }),
+    }, 'Reset view') : null,
+    tableHref ? el('a', { class: 'btn tiny chart-to-table', href: tableHref },
+      'View as table') : null,
+    save);
+
+  const wrap = el('div', { class: 'chartwrap' },
+    toggleBar, holder, controls,
+    missingNote
+      ? el('p', { class: 'small muted chart-missing-note', text: missingNote })
+      : null);
   replace(container, wrap);
 
   const chart = window.echarts.init(holder,
     document.documentElement.dataset.bsTheme === 'light' ? 'sectorTraceLight' : 'sectorTrace');
   chart.setOption(option);
+
+  if (toggleBar) {
+    for (const name of seriesNames) {
+      const btn = el('button', {
+        class: 'chart-series-toggle', type: 'button', 'aria-pressed': 'true',
+        onclick: () => {
+          chart.dispatchAction({ type: 'legendToggleSelect', name });
+          const selected = chart.getOption().legend?.[0]?.selected || {};
+          btn.setAttribute('aria-pressed', String(selected[name] !== false));
+        },
+      }, name);
+      toggleBar.append(btn);
+    }
+  }
 
   const observer = new ResizeObserver(() => chart.resize());
   observer.observe(holder);
@@ -882,7 +950,10 @@ export function tableCard(title, columns, rows, options = {}) {
   // it exists (or forever, if the library did not load and the plain-table
   // fallback rendered instead).
   let inst = null;
-  const card = el('div', { class: 'tablecard' });
+  // BETA-074: an id lets a chart's "View as table" link land here (and a
+  // "Back to chart" link ride back).
+  const card = el('div', options.anchorId
+    ? { class: 'tablecard', id: options.anchorId } : { class: 'tablecard' });
 
   const setDensity = (compact) => {
     card.classList.toggle('density-compact', compact);
