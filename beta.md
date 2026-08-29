@@ -297,19 +297,18 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-095 | Entity co-occurrence explorer
+- [IN_PROGRESS] BETA-096 | Evidence discrepancy explorer
   - priority: P1
   - impact: 5
-  - effort: 4
-  - confidence: 4
+  - effort: 5
+  - confidence: 3
   - risk: 4
-  - area: public/documents
-  - depends_on: BETA-041, BETA-042, BETA-081
-  - objective: Find documents or notices in which two or more selected tracked
-    entities occur together and expose each exact passage or structured field.
-  - next_action: Restrict v1 to verified entity aliases and same-record
-    co-occurrence; label results as location, never as an asserted
-    relationship.
+  - area: public/evidence comparison
+  - depends_on: BETA-043, BETA-070, BETA-075, BETA-076
+  - objective: Surface different values, dates, names or statuses reported by
+    public sources for the same verified entity, field and compatible period.
+  - next_action: Define a closed registry of comparable field pairs; show the
+    disagreement with both sources and never resolve it or label it an error.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -549,6 +548,51 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-095 | Entity co-occurrence explorer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: public/documents
+  - depends_on: BETA-041, BETA-042, BETA-081
+  - objective: Find documents or notices in which two or more selected tracked
+    entities occur together and expose each exact passage or structured field.
+  - result: New `pipeline/web/cooccurrence.py::find(conn, keys)` — for 2–5
+    selected provider/supplier keys, every record that names **all** of them
+    in one place. Four record types, each **same-record only**: a
+    `document_elements` passage containing a verified name variant of every
+    key (variants from `supplier_aliases` — the explicit review step, never
+    fuzzy matching; documents gated by the `DOCUMENT_SEARCH_SOURCES`
+    allowlist), a `pfd_report` with ≥2 selected keys in
+    `pfd_provider_mentions`, a `tribunal_case` with ≥2 selected keys as
+    respondent, and a procurement `notice_id` with ≥2 selected keys resolved
+    through `supplier_aliases`. Each result carries the exact passage text or
+    the matched field and a `link` (document hits go straight to the BETA-081
+    reading room `#/documents?doc=…&el=…`). The `note` and `caveat` state
+    plainly that **co-occurrence is location, not a relationship** — two
+    names in one passage may be a list, a comparison, or unrelated — and
+    point to the pathfinder for a verified connection. New additive public
+    route `/api/v1/cooccurrence` (repeated `key` param) on the frozen
+    surface, OpenAPI, `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/cooccurrence`. New `/cooccurrence` route +
+    page ("Co-occurrence explorer"): a comma-separated key input, a finding
+    block, results grouped by record type with the passage quoted verbatim
+    in a `<blockquote>` and an "Open →" link per row. Linked from the footer
+    nav. `styles.css` gained a `.co-*` block.
+  - validation: New `tests/test_web_cooccurrence.py` (5 — a shared coroner
+    report is a `coroner_report` co-occurrence with both matched names and
+    the "location, not a relationship" note; documents match on verified
+    variants, require every entity, and link into the reading room; a passage
+    naming only one entity is not a hit; 2–5 entities enforced; the route is
+    in the OpenAPI doc). `test_portal_isolation` / `test_portal_navigation` /
+    `test_web_openapi` / `test_portal_offline_reading` green; `ruff` clean.
+    Browser-verified on `#/cooccurrence?key=cgl&key=turning_point` against a
+    seeded PFD report: "Coroner reports (1)" with the matched names
+    (`cgl ("Change Grow Live") · turning_point ("Turning Point")`) and the
+    caveat pinned.
 
 - [DONE] BETA-094 | Visual research journey
   - completed: 2026-08-29
@@ -5218,8 +5262,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Record revision comparison | 5 | 5 | 4 | DONE (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | DONE (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | DONE (BETA-094) |
-| P1 | Entity co-occurrence explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-095) |
-| P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |
+| P1 | Entity co-occurrence explorer | 5 | 4 | 4 | DONE (BETA-095) |
+| P1 | Evidence discrepancy explorer | 5 | 5 | 3 | IN_PROGRESS (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |

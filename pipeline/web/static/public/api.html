@@ -361,6 +361,36 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-cooccurrence" data-route="cooccurrence">
+    <h3><code>/api/v1/cooccurrence</code></h3>
+    <p>
+      Documents and records in which two or more selected tracked entities are
+      named <em>together</em> — in one document element, one coroner's report,
+      one tribunal case, or one procurement notice — with the exact passage or
+      structured field for each. Name matching uses only the verified variants
+      in <code>supplier_aliases</code> (the explicit review step), and every
+      structured mention already carries a confirmed <code>provider_key</code>.
+      <strong>Co-occurrence is location, not a relationship.</strong> Two names
+      in one passage may be a list, a comparison, or unrelated; for a verified
+      connection use <a href="#route-relationship_path">the pathfinder</a>.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>key</code></td><td>A provider/supplier key. Repeat the parameter 2–5 times.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entities</code>, <code>results</code> (each with
+      <code>record_type</code>, <code>title</code>, <code>text</code> or
+      <code>matched</code>, and a <code>link</code>), <code>counts</code>
+      (<code>by_record_type</code>), <code>note</code> and <code>caveat</code>.
+      Documents are searched over committee papers and community
+      drug-partnership documents only.
+    </p>
+    <p><code>/api/v1/cooccurrence?key=change_grow_live&amp;key=turning_point</code></p>
+  </article>
+
   <article class="apiroute" id="route-coverage_timeline" data-route="coverage_timeline">
     <h3><code>/api/v1/coverage_timeline</code></h3>
     <p>

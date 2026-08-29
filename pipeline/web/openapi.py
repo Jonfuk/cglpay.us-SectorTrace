@@ -111,6 +111,16 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/cooccurrence": {
+        "surface": "cooccurrence",
+        "summary": "Documents and records that name two or more selected "
+                   "tracked entities together, with the exact passage or "
+                   "structured field. Verified name variants only, same-record "
+                   "only. Co-occurrence is location, not a relationship.",
+        "parameters": [
+            _p("key", desc="A provider/supplier key. Repeat 2–5 times."),
+        ],
+    },
     "/api/v1/coverage_timeline": {
         "surface": "coverage_timeline",
         "summary": "Which periods each source holds for one provider or "
