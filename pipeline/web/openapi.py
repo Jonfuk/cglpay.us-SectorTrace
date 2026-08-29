@@ -244,6 +244,12 @@ ROUTES: dict[str, dict] = {
         "summary": "The geography map's overlay layers, each with its own caveats.",
         "parameters": [],
     },
+    "/api/v1/atlas_layers": {
+        "surface": "atlas_layers",
+        "summary": "Closed registry of the evidence atlas's layers — one shown "
+                   "at a time, no overlay, no composite score.",
+        "parameters": [],
+    },
     "/api/v1/export": {
         "surface": "export",
         "summary": "Any listed endpoint's rows as CSV or JSON, with provenance in the file.",

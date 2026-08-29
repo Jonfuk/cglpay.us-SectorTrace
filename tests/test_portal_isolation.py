@@ -94,6 +94,7 @@ PUBLIC_API_ROUTES = {
     "ndtms",
     "compare",
     "layers",
+    "atlas_layers",
     "pfd",
     "freshness",
     "claims",

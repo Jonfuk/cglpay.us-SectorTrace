@@ -235,15 +235,19 @@ def geographyjs() -> str:
     return (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
 
 
-def test_the_map_toggles_are_built_from_the_payload(geographyjs):
-    """The toggle panel iterates the payload's layers and renders each
-    layer's caveats from the payload — so a layer added to /api/v1/layers
-    gains a toggle here with its caveat by construction, and a layer with no
-    caveats cannot be toggled on at all."""
+def test_the_atlas_selector_is_built_from_the_closed_registry(geographyjs):
+    """BETA-078: one selector, driven by /api/v1/atlas_layers. Exactly one
+    layer is shown at a time — the point layers still come from
+    /api/v1/layers, but there is no multi-overlay checkbox panel — and each
+    layer's caveat is rendered from the registry entry, so a layer added to
+    the registry gains an option here with its caveat by construction."""
+    assert "fetchJSON('atlas_layers')" in geographyjs
     assert "fetchJSON('layers')" in geographyjs
-    assert "Object.entries(layerPayload.layers" in geographyjs
-    assert "layer.caveats.join(' ')" in geographyjs
+    assert "atlas-layer-select" in geographyjs
+    assert "layer.caveat" in geographyjs
     assert "pinnedCaveat" in geographyjs
+    # no multi-select overlay panel survives
+    assert "state.layers.add(" not in geographyjs and "layer-toggle" not in geographyjs
 
 
 def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs):

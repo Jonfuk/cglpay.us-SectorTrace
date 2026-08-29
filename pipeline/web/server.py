@@ -1520,6 +1520,10 @@ class Handler(BaseHTTPRequestHandler):
                 provider_keys=params.get("provider_key", []))
         if route == "layers":
             return public_queries.layers(conn)
+        if route == "atlas_layers":
+            # The closed atlas layer registry (BETA-078): one layer at a time,
+            # no overlay, no composite score. A static manifest.
+            return public_queries.atlas_layers()
         if route == "relationships":
             return public_queries.relationships(
                 conn,

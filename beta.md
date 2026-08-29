@@ -297,23 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-078 | Unified evidence atlas
+- [IN_PROGRESS] BETA-079 | Safety and legal evidence hub
   - priority: P1
   - impact: 5
-  - effort: 5
+  - effort: 4
   - confidence: 4
   - risk: 4
-  - area: public/geography
-  - depends_on: BETA-028, BETA-043, BETA-065, BETA-072
-  - objective: Combine existing geography, CQC, commissioning, funding,
-    treatment and coverage maps behind a layer switcher with a synchronised
-    accessible table.
-  - next_action: Define a closed layer registry with endpoint, legend, units,
-    caveat, geometry key and table columns; render only one evidence layer at
-    a time and forbid composite scoring.
+  - area: public/safety-legal
+  - depends_on: BETA-043, BETA-051, BETA-065
+  - objective: Bring PFD reports, safeguarding reviews, HSE notices, CQC
+    inspections and tribunal evidence into a filterable chronology with
+    source-specific caveats and sensitive-content treatment.
+  - next_action: Define distinct visual and data labels for "addressed to",
+    "named in", "matched to" and "regulated by"; never merge those counts or
+    imply culpability from a mention.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–077 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–078 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -549,6 +549,57 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-078 | Unified evidence atlas
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: public/geography
+  - depends_on: BETA-028, BETA-043, BETA-065, BETA-072
+  - objective: Combine existing geography, CQC, commissioning, funding,
+    treatment and coverage maps behind a layer switcher with a synchronised
+    accessible table.
+  - result: New additive read-only route `/api/v1/atlas_layers`
+    (`public_queries.atlas_layers`) — the **closed layer registry**. Eight
+    entries (six `geography` choropleths, `cqc_locations` points, `coverage`
+    authority-fill), each self-describing: `key`, `label`, `kind`, the
+    `endpoint` that serves it, its `param`/`layer`, `unit`, `legend`,
+    `geometry_key`, `table_columns` and its `caveat`. A `note` states the
+    rule: "Exactly one layer is shown at a time. The atlas performs no
+    arithmetic between layers and produces no composite score." No DB read —
+    it is a manifest. The geography page is rebuilt around it: the six metric
+    tabs and the multi-overlay checkbox panel are replaced by **one
+    `<select>`** driven by the registry. `state.layers` (a Set) becomes
+    `state.layer` (one key); the URL carries `?layer=` (falling back to the
+    old `?metric=` so pre-atlas links still open). `load()` branches on
+    `kind`: a choropleth fetches `geography?metric=<key>` as before; a
+    points / authority layer fetches `layers`, takes the one named sub-layer
+    and draws it alone (a new `coverage-fill` branch in `addLayer`, and a
+    `drawPointList` accessible table built from the registry's
+    `table_columns`). A legend strip shows the active layer's legend + unit;
+    the caveat panel shows only that layer's caveat. The year selector hides
+    for non-choropleth layers.
+  - api/ui: additive route `/api/v1/atlas_layers` (no params) — added to the
+    OpenAPI doc, `<noscript>` list, `api.html` and the `test_portal_isolation`
+    `PUBLIC_API_ROUTES`. URL param `layer` replaces `metric`/`layers` on the
+    geography route (old params still read). New CSS `.atlas-layer-select`,
+    `.atlas-legend`.
+  - validation: New `tests/test_web_atlas_layers.py` (5 — the registry is
+    closed and self-describing; it states the no-composite rule; choropleth
+    layers point at a real `geography` metric; point/authority layers name a
+    `layers` sub-layer; the route is in the OpenAPI doc). Updated
+    `test_web_layers.py` (the map-toggle test now checks the single registry
+    selector and that no multi-overlay panel survives). `test_web_openapi` /
+    `test_portal_isolation` / `test_portal_charts` green. `ruff` clean.
+    Browser-verified: one selector with all 8 layers; a legend strip that
+    updates per layer ("Darker = larger ring-fenced allocation. Unit: gbp.");
+    switching to CQC updates the legend and the accessible-table title and
+    hides the year control; no multi-overlay checkboxes. (The MapLibre canvas
+    itself is not exercised offline — the CARTO basemap 404s and the page
+    falls back to its local style per settled decision 6, unchanged.)
 
 - [DONE] BETA-077 | Navigation continuity
   - completed: 2026-08-29
@@ -4168,8 +4219,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Treatment metric explorer | 5 | 4 | 4 | DONE (BETA-075) |
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | DONE (BETA-076) |
 | P2 | Navigation continuity | 4 | 3 | 5 | DONE (BETA-077) |
-| P1 | Unified evidence atlas | 5 | 5 | 4 | IN_PROGRESS (BETA-078) |
-| P1 | Safety and legal evidence hub | 5 | 4 | 4 | APPROVED, not queued (BETA-079) |
+| P1 | Unified evidence atlas | 5 | 5 | 4 | DONE (BETA-078) |
+| P1 | Safety and legal evidence hub | 5 | 4 | 4 | IN_PROGRESS (BETA-079) |
 | P1 | Shared responsive design system | 4 | 4 | 5 | APPROVED, not queued (BETA-080) |
 | P1 | Document reading room | 5 | 5 | 4 | APPROVED, not queued (BETA-081) |
 | P1 | Pipeline mission control | 5 | 5 | 4 | APPROVED, not queued (BETA-082) |

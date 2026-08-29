@@ -1937,6 +1937,81 @@ GEOGRAPHY_METRICS = {
 }
 
 
+# --- unified evidence atlas (BETA-078) ------------------------------------
+#
+# One closed registry of every layer the atlas can show. Exactly one is drawn
+# at a time — there is no overlay, no arithmetic between layers and no
+# composite score. Each entry carries everything a client needs to render the
+# layer and its accessible table without knowing anything else about it:
+# which existing endpoint serves it, the legend, the unit, the caveat, the
+# GeoJSON property that keys a feature, and the table columns.
+#
+# `kind`:
+#   "choropleth" — an authority fill from /api/v1/geography?metric=<param>
+#   "points"     — markers/clusters from /api/v1/layers, layer <layer>
+#   "authority"  — an authority fill from /api/v1/layers, layer <layer>
+
+def _atlas_choropleth(key: str, legend: str, caveat: str) -> dict:
+    meta = GEOGRAPHY_METRICS[key]
+    return {
+        "key": key, "label": meta["label"], "kind": "choropleth",
+        "endpoint": "geography", "param": {"metric": key}, "unit": meta["unit"],
+        "legend": legend, "geometry_key": "ons_code", "caveat": caveat,
+        "table_columns": ["authority_name", "region", "value"],
+    }
+
+
+def atlas_layers() -> dict:
+    """The closed atlas layer registry (BETA-078). No DB read: this is a
+    manifest the geography workspace uses to offer one layer at a time."""
+    layers = [
+        _atlas_choropleth(
+            "grant_drug_alcohol", "Darker = larger ring-fenced allocation",
+            "The ring-fenced figure is part of the total grant, not additional "
+            "to it. It is never summed with or differenced from the total."),
+        _atlas_choropleth(
+            "grant_total", "Darker = larger total allocation",
+            CAVEATS["grant_not_budget"]),
+        _atlas_choropleth(
+            "grant_per_head", "Darker = higher allocation per head",
+            "Per-head figures use the grant's own published denominator; they "
+            "are not recomputed here."),
+        _atlas_choropleth(
+            "budget_public_health", "Darker = larger budgeted spend",
+            CAVEATS["budget_detail"]),
+        _atlas_choropleth(
+            "treatment_numbers", "Darker = more people in treatment",
+            "A published service-demand figure, not a workforce or need "
+            "figure, and never divided by one."),
+        _atlas_choropleth(
+            "contract_value", "Darker = higher awarded notice value",
+            CAVEATS["contract_value"]),
+        {
+            "key": "cqc_locations", "label": "CQC-registered locations",
+            "kind": "points", "endpoint": "layers", "layer": "cqc_locations",
+            "unit": "one marker per registered location",
+            "legend": "Clusters show a count; a single marker is one location",
+            "geometry_key": "location_id",
+            "table_columns": ["location_name", "region", "overall_rating"],
+            "caveat": " ".join(LAYER_CAVEATS["cqc_locations"]),
+        },
+        {
+            "key": "coverage", "label": "What evidence is held here",
+            "kind": "authority", "endpoint": "layers", "layer": "coverage",
+            "unit": "count of evidence kinds held",
+            "legend": "Darker = more kinds of evidence held for this authority",
+            "geometry_key": "ons_code",
+            "table_columns": ["authority_name", "kinds_held"],
+            "caveat": CAVEATS["coverage_absence"],
+        },
+    ]
+    return {
+        "layers": layers,
+        "note": "Exactly one layer is shown at a time. The atlas performs no "
+                "arithmetic between layers and produces no composite score.",
+    }
+
+
 def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> dict:
     """One value per authority for the choropleth.
 

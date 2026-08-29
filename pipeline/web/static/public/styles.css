@@ -515,6 +515,11 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-078: unified evidence atlas — one layer at a time. */
+.atlas-layer-select { min-width: 240px; }
+.atlas-legend { margin: var(--space-2) 0; }
+.atlas-legend p { margin: 0; color: var(--text-secondary); }
+
 /* BETA-077: route-aware breadcrumb on detail pages, and the recently-viewed
    block on the overview. */
 .breadcrumbs {
