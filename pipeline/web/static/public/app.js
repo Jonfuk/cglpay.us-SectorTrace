@@ -350,8 +350,30 @@ let disposeCurrent = null;
  * on initial load would fight the reader's own starting point). */
 let renderedBase = null;
 
+/* BETA-077 navigation continuity.
+ *
+ * `scrollByHash` remembers where the reader was on each URL, so returning to a
+ * list from a detail page (back button, or a breadcrumb) lands where they left
+ * it rather than at the top. `lastListHash` remembers the *full* hash — filters
+ * and all — of the last bare list route for each base, so a detail page's
+ * "back to Providers" link restores the exact filtered list it was opened
+ * from. Both are session-only and hold no personal data. */
+const scrollByHash = new Map();
+const lastListHash = new Map();
+let lastRenderedHash = null;
+
+const CRUMB_PARENTS = {
+  '/providers': ['Providers', '#/providers'],
+  '/authorities': ['Places', '#/geography'],
+};
+
 async function render() {
   const { path, params } = parseHash();
+  const hereHash = location.hash || '#/';
+  // Save where we were before this render replaces the page.
+  if (lastRenderedHash && lastRenderedHash !== hereHash) {
+    scrollByHash.set(lastRenderedHash, window.scrollY);
+  }
   // Deep dives share their base module: /providers/:key is the providers
   // module with a key, /authorities/:ons_code the authority module with one.
   const base = path.startsWith('/providers/') ? '/providers'
@@ -361,6 +383,9 @@ async function render() {
   document.title = routeLabel ? `${routeLabel} · SectorTrace` : 'SectorTrace';
   const navigating = renderedBase !== null && renderedBase !== base;
   renderedBase = base;
+  // BETA-077: on a bare list route (no `/key` suffix), remember the full hash
+  // — filters included — as the place a detail page opened from.
+  if (path === base) lastListHash.set(base, hereHash);
   // BETA-072: the previous page's match count does not describe this one.
   if (navigating) resultCount = null;
   updateFilterVisibility(base);
@@ -412,11 +437,44 @@ async function render() {
         el('span', { text: lens[0] }));
       main.prepend(cue);
     }
+
+    // BETA-077: a route-aware breadcrumb on a detail page. `path !== base`
+    // means a `/key` suffix — a provider or authority detail. The parent
+    // crumb links back to the exact filtered list the reader came from
+    // (`lastListHash`), falling back to the section's own route. The entity
+    // crumb is read from the page's own <h1> so the router does not need to
+    // know each page's naming.
+    if (path !== base && CRUMB_PARENTS[base]) {
+      const [parentLabel, parentFallback] = CRUMB_PARENTS[base];
+      const parentHref = lastListHash.get(base) || parentFallback;
+      // The <h1>'s first text node — some heroes append status badges to it.
+      const h1 = main.querySelector('.hero h1');
+      const entity = (h1?.firstChild?.nodeType === Node.TEXT_NODE
+        ? h1.firstChild.textContent : h1?.textContent || '').trim();
+      const crumbs = el('nav', { class: 'breadcrumbs', 'aria-label': 'Breadcrumb' },
+        el('a', { href: '#/' }, 'Overview'),
+        el('span', { 'aria-hidden': 'true', text: '›' }),
+        el('a', { href: parentHref }, `Back to ${parentLabel.toLowerCase()}`),
+        entity ? el('span', { 'aria-hidden': 'true', text: '›' }) : null,
+        entity ? el('span', { 'aria-current': 'page', text: entity }) : null);
+      main.prepend(crumbs);
+    }
+
     // The page content changed wholesale, but focus stayed on the nav link
     // that was clicked — a screen reader has no idea anything happened.
     // #main carries tabindex="-1" for exactly this; preventScroll keeps the
     // reader where they were instead of jumping the viewport to the top.
     if (navigating) main.focus({ preventScroll: true });
+
+    // BETA-077: restore scroll for a URL we have seen before (back/forward,
+    // or a breadcrumb to a list); a fresh navigation starts at the top.
+    lastRenderedHash = hereHash;
+    if (scrollByHash.has(hereHash)) {
+      const y = scrollByHash.get(hereHash);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    } else if (navigating) {
+      window.scrollTo(0, 0);
+    }
   } catch (error) {
     // components.js imports from this module, so pull the renderer lazily to
     // keep the module graph acyclic at load time (BETA-068).

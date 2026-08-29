@@ -297,22 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-077 | Navigation continuity
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 1
-  - area: public/navigation
-  - depends_on: BETA-024, BETA-072, BETA-076
-  - objective: Add route-aware breadcrumbs, locally stored recent entities,
-    scroll restoration, meaningful back links and preservation of the
-    originating search/filter context around detail pages.
-  - next_action: Specify history and scroll semantics for list → detail →
-    back, then apply them through the central router.
+- [IN_PROGRESS] BETA-078 | Unified evidence atlas
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: public/geography
+  - depends_on: BETA-028, BETA-043, BETA-065, BETA-072
+  - objective: Combine existing geography, CQC, commissioning, funding,
+    treatment and coverage maps behind a layer switcher with a synchronised
+    accessible table.
+  - next_action: Define a closed layer registry with endpoint, legend, units,
+    caveat, geometry key and table columns; render only one evidence layer at
+    a time and forbid composite scoring.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–076 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–077 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -548,6 +549,54 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-077 | Navigation continuity
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 1
+  - area: public/navigation
+  - depends_on: BETA-024, BETA-072, BETA-076
+  - objective: Add route-aware breadcrumbs, locally stored recent entities,
+    scroll restoration, meaningful back links and preservation of the
+    originating search/filter context around detail pages.
+  - result: The central router (`app.js`) now:
+    * **restores scroll** — `scrollByHash` records `window.scrollY` for each
+      URL as the page is replaced, and a return to a URL it has seen
+      (back/forward, a breadcrumb) restores that position after render; a
+      fresh navigation still starts at the top.
+    * **keeps the originating list** — `lastListHash` records the full hash
+      (filters and all) of the last *bare* list route for each base, so a
+      detail page's breadcrumb links back to the exact filtered list it was
+      opened from, not a bare route.
+    * **draws a route-aware breadcrumb** on a `/key` detail page:
+      "Overview › Back to <section> › <entity>", the entity read from the
+      page's own `<h1>` first text node so the router needs no per-page
+      naming.
+    New `js/recent.js`: `pushRecent({type, id, name})` keeps a capped (12),
+    de-duplicated, most-recent-first local list of viewed providers and
+    authorities — a type, a public id and a name the portal already shows,
+    nothing else, every access guarded for private mode. The provider and
+    authority workbenches call it on load; the overview renders a
+    "Recently viewed" block (`renderRecentList`) below "My area" and drops its
+    `recentchange` listener on dispose.
+  - api/ui: no API change. New served module `/js/recent.js` (server static
+    map + `test_portal_isolation` whitelist). New CSS `.breadcrumbs`,
+    `.recent-list`.
+  - validation: New `tests/test_portal_navigation_continuity.py` (5 — the
+    router restores scroll for a known URL and tops a fresh one; the
+    breadcrumb links back to the originating filtered list via `lastListHash`;
+    `recent.js` is served, guarded and capped; it stores only public
+    identifiers; the detail pages push and the overview shows and cleans up).
+    `test_portal_isolation` / navigation / offline-reading / security-header /
+    my-area suites green. `ruff` clean. Browser-verified: opening a provider
+    renders the breadcrumb "Overview › Back to providers › Change Grow Live"
+    and stores `{type:"provider", id:"cgl", name:"Change Grow Live"}`; the
+    overview then lists it under "Recently viewed" linking to
+    `#/providers/cgl`. (Scroll restoration verified by code inspection — the
+    automation pane could not exercise programmatic scroll.)
 
 - [DONE] BETA-076 | Navigable provider and authority workbenches
   - completed: 2026-08-29
@@ -4118,8 +4167,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Inspectable visualisations | 4 | 3 | 5 | DONE (BETA-074) |
 | P1 | Treatment metric explorer | 5 | 4 | 4 | DONE (BETA-075) |
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | DONE (BETA-076) |
-| P2 | Navigation continuity | 4 | 3 | 5 | IN_PROGRESS (BETA-077) |
-| P1 | Unified evidence atlas | 5 | 5 | 4 | APPROVED, not queued (BETA-078) |
+| P2 | Navigation continuity | 4 | 3 | 5 | DONE (BETA-077) |
+| P1 | Unified evidence atlas | 5 | 5 | 4 | IN_PROGRESS (BETA-078) |
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | APPROVED, not queued (BETA-079) |
 | P1 | Shared responsive design system | 4 | 4 | 5 | APPROVED, not queued (BETA-080) |
 | P1 | Document reading room | 5 | 5 | 4 | APPROVED, not queued (BETA-081) |

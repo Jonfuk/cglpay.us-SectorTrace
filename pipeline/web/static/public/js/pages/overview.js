@@ -24,6 +24,7 @@ import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard,
           lensBadge, timingBadge, findingBlock, revealOnScroll } from '/js/components.js';
 import { renderMyAreaCard } from '/js/myarea.js';
+import { renderRecentList } from '/js/recent.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -64,6 +65,7 @@ export async function render(main) {
           el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
       heroMap),
     el('div', { id: 'my-area' }),
+    el('div', { id: 'recent' }),
     el('div', { id: 'snapshot' }),
     el('div', { id: 'briefing-strip' }),
     el('div', { id: 'explore' }),
@@ -84,6 +86,12 @@ export async function render(main) {
   const onMyAreaChange = () => renderMyAreaCard(myAreaSlot);
   window.addEventListener('myareachange', onMyAreaChange);
 
+  // BETA-077: recently viewed providers and authorities — a trail back.
+  const recentSlot = page.querySelector('#recent');
+  renderRecentList(recentSlot);
+  const onRecentChange = () => renderRecentList(recentSlot);
+  window.addEventListener('recentchange', onRecentChange);
+
   renderCards(page.querySelector('#snapshot'), summary);
   renderBriefingStrip(page.querySelector('#briefing-strip'), summary);
   renderExplore(page.querySelector('#explore'));
@@ -98,6 +106,7 @@ export async function render(main) {
   revealOnScroll(page);
   return () => {
     window.removeEventListener('myareachange', onMyAreaChange);
+    window.removeEventListener('recentchange', onRecentChange);
     disposeCharts(charts);
   };
 }

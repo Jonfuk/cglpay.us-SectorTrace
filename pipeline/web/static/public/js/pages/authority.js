@@ -22,6 +22,7 @@ import { myAreaToggle } from '/js/myarea.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, tableCard, escapeHtml, shareButton,
           findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
+import { pushRecent } from '/js/recent.js';
 
 const TYPE_LABELS = {
   county: 'County council',
@@ -66,6 +67,8 @@ async function renderOne(main, code) {
   }
 
   const authority = data.authority || {};
+  // BETA-077: leave a trail back to this authority.
+  pushRecent({ type: 'authority', id: authority.ons_code || code, name: authority.name || code });
   const type = TYPE_LABELS[authority.type] || authority.type || 'Local authority';
   const page = el('div', {},
     el('div', { class: 'hero' },

@@ -515,6 +515,21 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-077: route-aware breadcrumb on detail pages, and the recently-viewed
+   block on the overview. */
+.breadcrumbs {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: var(--space-3);
+}
+.breadcrumbs a { color: var(--accent-teal); text-decoration: none; }
+.breadcrumbs a:hover { text-decoration: underline; }
+.breadcrumbs [aria-current="page"] { color: var(--text-secondary); }
+.recent-list { margin: var(--space-4) 0; }
+.recent-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); }
+.recent-head h2 { font-size: 15px; margin: 0; }
+.recent-list ul { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.recent-type { color: var(--text-muted); font-size: 12px; }
+
 /* BETA-076: sticky section index on the provider / authority workbenches. */
 .workbench-index {
   position: sticky; top: 60px; z-index: 20; display: flex; gap: 6px;

@@ -16,6 +16,7 @@ import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
           findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
+import { pushRecent } from '/js/recent.js';
 import { chartLabelColor } from '/js/theme.js';
 
 export async function render(main, { path }) {
@@ -274,6 +275,8 @@ async function renderOne(main, key) {
   }
 
   const provider = data.provider || {};
+  // BETA-077: leave a trail back to this entity.
+  pushRecent({ type: 'provider', id: key, name: provider.canonical_name || key });
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('p', {}, el('a', { href: '#/providers' }, '← All providers'),
