@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-053. Current
-  work: BETA-054. Next: BETA-055, BETA-059.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-054. Current
+  work: BETA-055. Next: BETA-059, BETA-060.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,30 +272,28 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-054 | Evidence sidecars and candidate suggestions
-  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-053 completed
+- [IN_PROGRESS] BETA-055 | Review-session workflow polish
+  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-054 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: admin/review
-  - depends_on: BETA-036, BETA-052
-  - objective: Show source excerpts, archive references and ranked candidate
-    entities beside the decision form.
-  - rationale: Side-by-side evidence and alternatives improve decision quality,
-    provided ranking remains a finding aid rather than an automatic verdict.
-  - suggested_first_action: Define sidecars and candidate-generation rules for
-    each supported review type; label rankings as similarity, never preselect a
-    candidate and suppress known false-match patterns.
-  - next_action: Add `/api/review/{id}/sidecar` returning, for the review
-    types that support it, the archived source excerpt / URL and — for
-    name-match types — ranked candidate entities from the existing
-    `name_matches.suggestions` (labelled "similarity N%", never preselected,
-    known false-match patterns suppressed); render it as a panel beside the
-    decision form in the admin Review tab; tests that no candidate is
-    auto-selected and the ranking is labelled as similarity only.
+  - priority: P2
+  - impact: 4
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/ux
+  - depends_on: BETA-052
+  - objective: Add next-page prefetch, session progress, saved note/filter
+    presets, a keyboard map and a primary-source shortcut.
+  - rationale: These reduce mechanical work without altering the review audit
+    trail or confirmation boundaries.
+  - suggested_first_action: Pin focus, history and navigation behaviour in
+    browser tests before introducing shortcuts.
+  - next_action: In the admin Review tab — a session-progress line ("N
+    decided this session / M pending"), saved filter+note presets in
+    `localStorage`, a "primary source" shortcut that opens the focused
+    item's `source_url` / sidecar URL in a new tab, and an on-page keyboard
+    map (the existing j/k/a/r keys documented plus the new one); no change
+    to any decision or confirmation path; source-pin tests.
 
 ### BLOCKED
 
@@ -479,22 +477,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-055 | Review-session workflow polish
-  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-058 completed
-  - priority: P2
-  - impact: 4
-  - effort: 2
-  - confidence: 5
-  - risk: 1
-  - area: admin/ux
-  - depends_on: BETA-052
-  - objective: Add next-page prefetch, session progress, saved note/filter
-    presets, a keyboard map and a primary-source shortcut.
-  - rationale: These reduce mechanical work without altering the review audit
-    trail or confirmation boundaries.
-  - suggested_first_action: Pin focus, history and navigation behaviour in
-    browser tests before introducing shortcuts.
-
 - [NEXT] BETA-059 | Coverage completion action board
   - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-053 completed
   - priority: P1
@@ -511,6 +493,24 @@ DONE
     gap has an honest reason and a permitted, non-destructive next action.
   - suggested_first_action: Map every current completeness state to one reason
     code and one action destination.
+
+- [NEXT] BETA-060 | Raw-archive inventory and integrity trends
+  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-054 completed
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: archive/operations
+  - depends_on: BETA-058
+  - objective: Track archive count, size, source distribution, missing
+    references, duplicate hashes, deterministic hash samples and growth through
+    `pipeline archive audit` and an admin audit-history endpoint.
+  - rationale: A point-in-time size scan cannot reveal integrity drift or future
+    storage pressure.
+  - suggested_first_action: Define immutable summaries and deterministic sampling
+    rules; this item measures only and never deletes, compacts or chooses
+    retention policy.
 
 ### READY
 
@@ -559,6 +559,54 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-054 | Evidence sidecars and candidate suggestions
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/review
+  - depends_on: BETA-036, BETA-052
+  - objective: Show source excerpts, archive references and ranked candidate
+    entities beside the decision form.
+  - result: New `pipeline/web/sidecar.py` + route
+    `GET /api/review/{id}/sidecar` (admin only — 404 under `/api/v1/`). It
+    returns two aids, read-only:
+      * **source** — the passage the item is about, taken from the item's own
+        `context_json` (`sentence` / `evidence_span` / `snippet` /
+        `contravention_text` / `description` / …), its URL, `retrieved_at`
+        and `payload_sha256`. Nothing is re-fetched; an item type that
+        stored no excerpt gets a `note` saying so.
+      * **candidates** — for the two name-match types (`unmatched_buyer_name`,
+        `possible_group_company`), the existing `name_matches.suggestions`
+        trigram/difflib ranking, **relabelled** `similarity_percent` (the raw
+        `score` field is dropped), each with `preselected: false`, and a
+        `suppressed` list holding candidates whose normalised name is a
+        known false match (`council`, `nhs`, `trust`, `limited`, …) so a page
+        of "…Council" rows is not offered as an answer.
+    Caveat: "A similarity percentage ranks candidates for a reviewer to
+    choose from — it does not pick one, nothing is preselected, and
+    approving the item still writes nothing to a canonical table."
+  - ui: `renderItem`'s `nameMatchBlock` is replaced by `sidecarBlock` — a
+    lazily-loaded "Evidence & candidates" `<details>` beside the decision
+    form showing the excerpt (as a `blockquote`), the source link, the
+    retrieval/hash line, and — where supported — the candidate table
+    (Similarity % / Name / Id / In) with the "nothing is selected; pick one
+    by hand" line and the suppressed-count note. (`nameMatchBlock` and the
+    `/api/admin/review/{id}/name-matches` route are left in place, no longer
+    called from the item view.)
+  - validation: New `tests/test_web_review_sidecar.py` (8) — the ranking is
+    relabelled and `preselected` is always false, a generic name lands in
+    `suppressed` not `ranking`, the excerpt comes from the item's own
+    context, an item with none says so, an unknown id is a `QueryError`, the
+    caveat wording, and the route serves under `/api/review` only. Full
+    offline suite green — **2775 passed, 109 skipped, 35 deselected, 0
+    failed**. `ruff` clean. Browser-verified against a seeded scratch
+    warehouse: an `unmatched_buyer_name` item shows the ranked authority
+    table (80% Herefordshire, County of), a `semantic_claim_candidate` item
+    shows the sentence + URL + retrieved/sha, zero console errors.
 
 - [DONE] BETA-053 | Review clusters and informational grouping
   - completed: 2026-08-29
@@ -3012,13 +3060,13 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | DONE (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | DONE (BETA-052) |
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | DONE (BETA-053) |
-| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | IN_PROGRESS (BETA-054) |
-| P2 | Review-session workflow polish | 4 | 2 | 5 | NEXT (BETA-055) |
+| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
+| P2 | Review-session workflow polish | 4 | 2 | 5 | IN_PROGRESS (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | NEXT (BETA-059) |
-| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
+| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | NEXT (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |

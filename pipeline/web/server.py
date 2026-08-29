@@ -1271,6 +1271,14 @@ class Handler(BaseHTTPRequestHandler):
             except name_matches.NameMatchError as exc:
                 raise ApiError(str(exc), status=404) from None
 
+        match = re.fullmatch(r"/api/review/(\d+)/sidecar", path)
+        if match:
+            # Decision support (BETA-054): the item's own source excerpt plus
+            # the ranked candidates, relabelled as similarity and never
+            # preselected.
+            from pipeline.web import sidecar as sidecar_mod
+            return sidecar_mod.sidecar(conn, int(match.group(1)))
+
         match = re.fullmatch(r"/api/review/(\d+)", path)
         if match:
             item = queries.review_item(conn, int(match.group(1)))

@@ -643,7 +643,7 @@ function renderItem(item) {
       timeNode(item.last_decided_at),
       item.last_note ? ` — “${item.last_note}”` : '') : null,
     item.decision_count > 1 ? historyBlock(item.id, item.decision_count) : null,
-    nameMatchBlock(item),
+    sidecarBlock(item),
     resolveForm(item),
     el('div', { class: 'actions' },
       note,
@@ -759,6 +759,68 @@ function nameMatchBlock(item) {
     } catch (e) {
       replace(out, el('div', { class: 'bad small', text: e.message }));
     }
+  });
+
+  return details;
+}
+
+/* BETA-054: the evidence sidecar — the item's own source excerpt, and (for
+ * the name-match types) the ranked candidates relabelled as a similarity
+ * percentage. Loaded lazily on expand. Nothing here is preselected and
+ * approving the item still writes nothing to a canonical table. */
+function sidecarBlock(item) {
+  const body = el('div', { class: 'muted small', text: 'loading…' });
+  const details = el('details', { class: 'history sidecar' },
+    el('summary', { text: 'Evidence & candidates' }), body);
+
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = '1';
+    let data;
+    try { data = await api(`/api/review/${item.id}/sidecar`); }
+    catch (e) { return replace(body, el('div', { class: 'bad small', text: e.message })); }
+
+    const parts = [];
+    const src = data.source || {};
+    if (src.excerpt) {
+      parts.push(el('blockquote', { class: 'ctx-evidence', text: src.excerpt }));
+    }
+    if (src.url) {
+      parts.push(el('div', { class: 'small' }, maybeLink(src.url)));
+    }
+    if (src.retrieved_at || src.payload_sha256) {
+      parts.push(el('div', { class: 'muted small mono',
+        text: [src.retrieved_at ? `retrieved ${src.retrieved_at}` : null,
+               src.payload_sha256 ? `sha ${String(src.payload_sha256).slice(0, 12)}` : null]
+          .filter(Boolean).join(' · ') }));
+    }
+    if (!src.excerpt && !src.url && src.note) {
+      parts.push(el('div', { class: 'muted small', text: src.note }));
+    }
+
+    const cand = data.candidates || {};
+    if (cand.supported) {
+      const rows = (cand.ranking || []).map((m) => el('tr', {},
+        el('td', { class: 'num', text: `${m.similarity_percent}%` }),
+        el('td', { text: m.name }),
+        el('td', { class: 'mono', text: String(m.id) }),
+        el('td', { class: 'muted small', text: m.target })));
+      parts.push(el('div', { class: 'muted small', text:
+        `Candidates ranked by ${cand.method === 'pg_trgm' ? 'trigram similarity'
+          : 'difflib'} — nothing is selected; pick one by hand.` }));
+      parts.push(rows.length
+        ? el('table', {}, el('thead', {}, el('tr', {},
+            el('th', { text: 'Similarity' }), el('th', { text: 'Name' }),
+            el('th', { text: 'Id' }), el('th', { text: 'In' }))),
+            el('tbody', {}, rows))
+        : el('div', { class: 'muted small', text: 'No candidate above the similarity floor.' }));
+      if ((cand.suppressed || []).length) {
+        parts.push(el('div', { class: 'muted small',
+          text: `${cand.suppressed.length} generic name(s) suppressed as known false matches.` }));
+      }
+    }
+    parts.push(el('div', { class: 'muted small', text: data.caveat }));
+    replace(body, el('div', {}, ...parts));
   });
 
   return details;
