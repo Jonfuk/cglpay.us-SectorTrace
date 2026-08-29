@@ -535,6 +535,40 @@ when the programme is started.)_
 
 ### DONE
 
+- [DONE] BETA-110 | Needle routing and confidence gate
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: nlp/assistant/routing
+  - depends_on: BETA-107, BETA-109
+  - objective: Route one analyst question to at most one allowlisted tool
+    using Needle 2's schema-constrained output and calibrated confidence head;
+    validate the returned name and arguments independently before execution.
+  - result: New `pipeline/assistant/routing.py::route(question, …) ->
+    RoutingDecision`. Needle is given only the question and the JSON tool
+    catalogue via a fixed `ROUTER_SYSTEM_PROMPT` — never document text — and
+    asked for `{tool, arguments, confidence}`. The reply is parsed
+    defensively (code-fence / prose tolerated); a null/`none`/`clarify` tool,
+    a name outside `TOOL_NAMES`, arguments that fail `tools.validate_args`
+    (the executor's own function — the router cannot widen a bound), a missing
+    confidence or a confidence below `FROZEN_ROUTING_THRESHOLD` (0.60, frozen
+    in code, re-scored not tuned) all return `outcome="clarify"` with a
+    specific reason and no execution. A dead endpoint / timeout raises
+    `AssistantUnavailable` and is deliberately not caught — nothing runs.
+    `router_prompt_sha256()` hashes the system prompt + catalogue for the
+    ledger. Needle telemetry is off (local endpoint only).
+  - api/ui: none directly — used by BETA-112's service.
+  - validation: New `tests/test_assistant_routing.py` (10, fake adapter — a
+    confident valid route executes; below-threshold, router abstention,
+    unknown tool name and invalid arguments each clarify without executing
+    (invalid args win even above threshold); an unparseable reply fails
+    closed; a dead endpoint propagates `AssistantUnavailable`; the router
+    prompt carries the question + catalogue but no chunk text; a hostile
+    question cannot force execution; the threshold and hash are frozen).
+
 - [DONE] BETA-109 | Public-safe read-only analyst tool catalogue
   - completed: 2026-08-29
   - priority: P1
@@ -5721,7 +5755,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | DONE (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | DONE (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | DONE (BETA-109) |
-| P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |
+| P1 | Needle routing and confidence gate | 5 | 4 | 4 | DONE (BETA-110) |
 | P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | APPROVED, not queued (BETA-111) |
 | P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | APPROVED, not queued (BETA-112) |
 | P1 | Assistant evaluation and release gate | 5 | 5 | 4 | APPROVED, not queued (BETA-113) |

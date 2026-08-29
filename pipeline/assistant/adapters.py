@@ -55,12 +55,17 @@ class _OpenAICompatAdapter:
 
     def generate(self, prompt: str, *, system: str | None = None,
                  max_tokens: int = _DEFAULT_MAX_TOKENS,
-                 temperature: float = 0.0) -> str:
+                 temperature: float = 0.0, timeout: float | None = None) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         client = self._client()
+        if timeout is not None:
+            # A per-call ceiling. The router gets a short one (BETA-112); the
+            # OpenAI client raises on expiry, which `generate` maps to
+            # `AssistantUnavailable` below — i.e. the caller fails closed.
+            client = client.with_options(timeout=timeout)
         try:
             resp = client.chat.completions.create(
                 model=self.model, messages=messages,
