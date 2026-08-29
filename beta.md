@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-051. Current
-  work: BETA-052. Next: BETA-058.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-052. Current
+  work: BETA-058. Next: BETA-053, BETA-054.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,29 +272,30 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-052 | Structured review-item context
-  - promoted_from: NEXT on 2026-08-29 after BETA-051 completed
+- [IN_PROGRESS] BETA-058 | Unified durable run ledger
+  - promoted_from: NEXT on 2026-08-29 after BETA-052 completed
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 2
-  - confidence: 5
-  - risk: 1
-  - area: admin/review
-  - depends_on: none
-  - objective: Render source, entity, reason, evidence and navigation as typed
-    sections while retaining the complete raw JSON under disclosure.
-  - rationale: Reviewers should not have to decode implementation-shaped JSON to
-    make a careful decision, but the lossless underlying context must remain
-    available for audit.
-  - suggested_first_action: Build typed presenters for every current review-item
-    type and validate all derived internal and source links.
-  - next_action: In the admin Review tab (`/admin/app.js` review detail),
-    parse the review item's `context_json` and render typed sections
-    (source URL(s), entity/provider, reason/selection basis, evidence
-    snippet, internal navigation links) per item_type, with the full raw
-    JSON kept under a `<details>`; a source-pin test that every current
-    `item_type` has a presenter and every derived link resolves.
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: operations
+  - depends_on: BETA-039
+  - objective: Record CLI, admin and scheduled executions through one durable
+    model with origin, revision, environment, parent run, timestamps and
+    per-module results; keep full logs in their current storage.
+  - rationale: Browser-started job history alone cannot explain every collection
+    path or support reliable operational handoff.
+  - suggested_first_action: Add a backward-compatible migration and instrument
+    the shared module runner used by every entry point.
+  - next_action: Add a migration for a `run_ledger` table (run_id, origin
+    cli/admin/scheduled, revision, environment, parent_run_id, started_at,
+    finished_at, status, per-module JSON results) that does not disturb the
+    existing `job_runs`; instrument the shared runner
+    (`pipeline/runner.py` / `parallel.py`) so every entry point writes one
+    ledger row; a read view in the admin Pipeline tab and/or `/api/v1/meta`;
+    tests that a CLI run and an admin run both leave a row with origin set.
 
 ### BLOCKED
 
@@ -478,28 +479,44 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-058 | Unified durable run ledger
-  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
+- [NEXT] BETA-053 | Review clusters and informational grouping
+  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-052 completed
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: admin/review
+  - depends_on: BETA-052
+  - objective: Group related items by issue type, source, organisation and shared
+    evidence, with facets and an informational/not-actionable state.
+  - rationale: Coherent batches reduce reviewer navigation without allowing
+    grouping itself to become a judgement.
+  - suggested_first_action: Define deterministic cluster keys and require a
+    transactional recount before every grouped action.
+
+- [NEXT] BETA-054 | Evidence sidecars and candidate suggestions
+  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-052 completed
   - priority: P1
   - impact: 5
   - effort: 4
   - confidence: 4
   - risk: 3
-  - area: operations
-  - depends_on: BETA-039
-  - objective: Record CLI, admin and scheduled executions through one durable
-    model with origin, revision, environment, parent run, timestamps and
-    per-module results; keep full logs in their current storage.
-  - rationale: Browser-started job history alone cannot explain every collection
-    path or support reliable operational handoff.
-  - suggested_first_action: Add a backward-compatible migration and instrument
-    the shared module runner used by every entry point.
+  - area: admin/review
+  - depends_on: BETA-036, BETA-052
+  - objective: Show source excerpts, archive references and ranked candidate
+    entities beside the decision form.
+  - rationale: Side-by-side evidence and alternatives improve decision quality,
+    provided ranking remains a finding aid rather than an automatic verdict.
+  - suggested_first_action: Define sidecars and candidate-generation rules for
+    each supported review type; label rankings as similarity, never preselect a
+    candidate and suppress known false-match patterns.
 
 ### READY
 
-_(empty — Wave 2 of the successor round, BETA-053/054/055/059/060, is promoted
-here as the NEXT items are completed, per the delivery sequence in the
-Approved successor round subsection.)_
+_(empty — Wave 3 of the successor round, BETA-056/057/061/062/063, is promoted
+here as Wave 2 lands, per the delivery sequence in the Approved successor
+round subsection.)_
 
 ### DEFERRED
 
@@ -542,6 +559,47 @@ Approved successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-052 | Structured review-item context
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/review
+  - depends_on: none
+  - objective: Render source, entity, reason, evidence and navigation as typed
+    sections while retaining the complete raw JSON under disclosure.
+  - result: `pipeline/web/static/app.js` — the review item's `context_json`
+    was rendered as one `<pre>` of pretty-printed JSON. New `typedContext(raw)`
+    replaces it: a *generic* key classifier (not a per-`item_type` map, which
+    would rot the first time a module adds a context key) sorts each key into
+    the five things a reviewer needs — **evidence** (`sentence` /
+    `evidence_span` / `snippet` / `contravention_text` / … rendered as a
+    `<blockquote>`), **source** (`*_url` keys, linked when they are `http(s)`),
+    **entity** (`provider_key` / `ons_code` / `register_name` / …),
+    **reason** (`reason` / `selection_reason` / `match_basis` /
+    `relation_score` / `assertion_status` / …) and **other** — then an
+    **Open** section with portal deep-links built only from context values
+    that have the right shape (`/#/providers/<key>`,
+    `/#/authorities/<E########>`, the document search). The complete raw
+    object stays under a `<details class="ctx-raw">` ("Raw context
+    (lossless)"), so nothing is lost for audit. Values reach the DOM through
+    `el()` / text nodes and real anchors — no `innerHTML`. New CSS for
+    `.ctx-typed` / `.ctx-section` / `.ctx-kv` / `.ctx-evidence` / `.ctx-nav`.
+  - validation: New `tests/test_web_review_context.py` (5 source-pin tests) —
+    `renderItem` uses `typedContext` and no longer emits the bare `<pre>`;
+    the five section buckets and four key classifiers exist by name; the raw
+    JSON is kept under disclosure with `formatContext(raw)`; the view builds
+    the DOM without `innerHTML`; the nav links point at real portal routes
+    and only link an `ons_code` with the portal's own `^[A-Z][0-9]{8}$`
+    shape. Full offline suite green — **2758 passed, 109 skipped, 35
+    deselected, 0 failed**. `ruff` clean. Browser-verified against a seeded
+    scratch warehouse (one `semantic_claim_candidate` item): the sections
+    render — SENTENCE / SOURCE (linked) / ENTITY / REASON / OTHER / Open
+    (three portal links) — with the raw JSON collapsed underneath, zero
+    console errors.
 
 - [DONE] BETA-051 | HSE enforcement-notice evidence
   - completed: 2026-08-29
@@ -2861,13 +2919,13 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | DONE (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | DONE (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | DONE (BETA-051) |
-| P1 | Structured review-item context | 5 | 2 | 5 | IN_PROGRESS (BETA-052) |
-| P2 | Review clusters and informational grouping | 4 | 3 | 4 | Approved successor backlog (BETA-053) |
-| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | Approved successor backlog (BETA-054) |
+| P1 | Structured review-item context | 5 | 2 | 5 | DONE (BETA-052) |
+| P2 | Review clusters and informational grouping | 4 | 3 | 4 | NEXT (BETA-053) |
+| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | NEXT (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | Approved successor backlog (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
-| P1 | Unified durable run ledger | 5 | 4 | 4 | NEXT (BETA-058) |
+| P1 | Unified durable run ledger | 5 | 4 | 4 | IN_PROGRESS (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | Approved successor backlog (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |

@@ -563,8 +563,6 @@ function renderItem(item) {
 
   const act = (decision) => decideItems([item.id], decision, note.value);
 
-  const context = formatContext(item.context_json);
-
   const body = el('div', {},
     el('div', { class: 'meta' },
       el('span', { class: 'badge module', text: item.module }),
@@ -572,7 +570,7 @@ function renderItem(item) {
       el('span', { class: `badge ${item.status}`, text: item.status }),
       el('span', { class: 'muted' }, `#${item.id} · seen `, timeNode(item.created_at))),
     el('div', { class: 'raw' }, maybeLink(item.raw_value)),
-    context ? el('pre', { class: 'context', text: context }) : null,
+    typedContext(item.context_json),
     item.last_decision ? el('div', { class: 'muted small' },
       `${item.last_decision} by ${item.last_decided_by} `,
       timeNode(item.last_decided_at),
@@ -707,6 +705,100 @@ function formatContext(raw) {
   if (!raw) return '';
   try { return JSON.stringify(JSON.parse(raw), null, 2); }
   catch (e) { return String(raw); }
+}
+
+/* BETA-052: the review item's context_json rendered as typed sections rather
+ * than a wall of pretty-printed JSON. Keys are classified by name into the
+ * five things a reviewer actually needs — source, entity, reason, evidence,
+ * navigation — and the complete raw object is kept under a <details> so
+ * nothing is lost for audit. A generic classifier, not a per-item_type map:
+ * the review types share these key shapes and a map would rot the first time
+ * a module added a context key. */
+const _CTX_URL_KEYS = /url$|_url$|^url$|link$|href$/i;
+const _CTX_EVIDENCE_KEYS = /^(sentence|evidence_span|snippet|excerpt|text|match_text|mention_text|contravention_text|description)$/i;
+const _CTX_ENTITY_KEYS = /(provider_key|provider_name|subject_entity_id|entity_id|ons_code|authority|buyer|supplier|charity_number|company_number|board|register_name|recipient_name|employer_name)/i;
+const _CTX_REASON_KEYS = /(reason|selection_reason|basis|match_basis|selection|rule|score|relation_score|confidence|assertion_status|status_reason)/i;
+
+function _ctxRows(entries, valueNode) {
+  return el('dl', { class: 'ctx-kv' }, entries.flatMap(([key, value]) => [
+    el('dt', { text: key }),
+    el('dd', {}, valueNode(key, value)),
+  ]));
+}
+
+function _ctxScalar(key, value) {
+  if (value === null || value === undefined) return el('span', { class: 'muted', text: '—' });
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (_CTX_URL_KEYS.test(key) && /^https?:\/\//i.test(text)) {
+    return el('a', { href: text, target: '_blank', rel: 'noopener noreferrer', text });
+  }
+  return document.createTextNode(text);
+}
+
+/* A provider_key / ons_code in the context is a jump to that entity's portal
+ * page — opened in a new tab, since the operator UI is a separate app. */
+function _ctxNav(context) {
+  const links = [];
+  if (context.provider_key) {
+    links.push(el('a', { href: `/#/providers/${encodeURIComponent(context.provider_key)}`,
+      target: '_blank', rel: 'noopener', text: `provider: ${context.provider_key}` }));
+  }
+  const ons = context.ons_code || context.authority_ons_code || context.buyer_ons_code;
+  if (ons && /^[A-Z][0-9]{8}$/.test(String(ons))) {
+    links.push(el('a', { href: `/#/authorities/${ons}`,
+      target: '_blank', rel: 'noopener', text: `authority: ${ons}` }));
+  }
+  if (context.document_id) {
+    links.push(el('a', { href: `/#/documents?q=`, target: '_blank', rel: 'noopener',
+      text: `document: ${context.document_id}` }));
+  }
+  return links.length ? el('div', { class: 'ctx-nav' }, ...links) : null;
+}
+
+function typedContext(raw) {
+  if (!raw) return null;
+  let context;
+  try { context = JSON.parse(raw); }
+  catch (e) { return el('pre', { class: 'context', text: String(raw) }); }
+  if (context === null || typeof context !== 'object' || Array.isArray(context)) {
+    return el('pre', { class: 'context', text: formatContext(raw) });
+  }
+
+  const buckets = { source: [], entity: [], reason: [], evidence: [], other: [] };
+  for (const [key, value] of Object.entries(context)) {
+    if (_CTX_EVIDENCE_KEYS.test(key)) buckets.evidence.push([key, value]);
+    else if (_CTX_URL_KEYS.test(key)) buckets.source.push([key, value]);
+    else if (_CTX_ENTITY_KEYS.test(key)) buckets.entity.push([key, value]);
+    else if (_CTX_REASON_KEYS.test(key)) buckets.reason.push([key, value]);
+    else buckets.other.push([key, value]);
+  }
+
+  const sections = [];
+  const add = (title, entries) => {
+    if (entries.length) {
+      sections.push(el('div', { class: 'ctx-section' },
+        el('h4', { text: title }), _ctxRows(entries, _ctxScalar)));
+    }
+  };
+  for (const [key, value] of buckets.evidence) {
+    sections.push(el('div', { class: 'ctx-section' },
+      el('h4', { text: key }),
+      el('blockquote', { class: 'ctx-evidence', text: String(value ?? '') })));
+  }
+  add('Source', buckets.source);
+  add('Entity', buckets.entity);
+  add('Reason', buckets.reason);
+  add('Other', buckets.other);
+
+  const nav = _ctxNav(context);
+  if (nav) sections.push(el('div', { class: 'ctx-section' },
+    el('h4', { text: 'Open' }), nav));
+
+  return el('div', { class: 'ctx-typed' },
+    ...sections,
+    el('details', { class: 'ctx-raw' },
+      el('summary', { text: 'Raw context (lossless)' }),
+      el('pre', { class: 'context', text: formatContext(raw) })));
 }
 
 function historyBlock(itemId, count) {
