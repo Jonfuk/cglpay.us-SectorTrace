@@ -414,6 +414,11 @@ main:focus { outline: none; }
 .badge.lifecycle.dissolved { color: var(--accent-red); border-color: rgba(248,113,113,0.35); }
 .provider-lifecycle-note { color: var(--text-secondary); font-size: 13px; margin: 2px 0 0; }
 .provider-lifecycle-note a { color: var(--text-primary); }
+/* BETA-066: the entity-lineage block. The chain reads left to right to the
+   surviving entity; the edges are a plain list with their basis. */
+.lineage-chain { font-size: 15px; margin: var(--space-2) 0; }
+.lineage-edges { margin: var(--space-2) 0; padding-left: var(--space-5); }
+.lineage-edges li { margin: 3px 0; }
 
 /* --- charts -------------------------------------------------------------- */
 

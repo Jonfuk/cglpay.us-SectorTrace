@@ -32,8 +32,9 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-065. Current
-  work: BETA-066. Next: BETA-067.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-066. Current
+  work: BETA-067 (the final Wave 4 item). Next: none — the successor
+  programme closes when BETA-067 lands.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,39 +273,39 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-066 | Provider predecessor and successor lineage
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-065 completed
+- [IN_PROGRESS] BETA-067 | Capability-documentation consistency checker
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-066 completed
   - started: 2026-08-29
   - priority: P2
   - impact: 4
   - effort: 3
-  - confidence: 4
-  - risk: 3
-  - area: provider-identity
-  - depends_on: BETA-056
-  - objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
-    detail timeline for explicit active, merged, dissolved, predecessor and
-    successor relationships.
-  - rationale: Older evidence remains attached to historical provider entities;
-    users need the verified lineage without inferred ownership or personal
-    officer data.
-  - suggested_first_action: Normalise existing `status` and `superseded_by`
-    configuration into explicit, testable lineage edges with verified identifier
-    roles only.
-  - next_action: Add a `GET /api/v1/providers/(provider_key)/lineage` route
-    (a parameterised addition to the frozen surface in
-    `tests/test_portal_isolation.py` + `openapi.py`) and a
-    `public_queries.provider_lineage(conn, provider_key)` that reads the
-    existing provider `status` / `superseded_by` / predecessor config into
-    explicit, typed lineage edges — `active`, `merged_into`, `dissolved`,
-    `predecessor_of`, `successor_of` — each edge carrying its basis and the
-    identifier role it was verified on (company number / charity number /
-    CQC provider id), never an inferred ownership link and never a personal
-    officer. A timeline block on the portal provider detail page rendering
-    those edges in date order. Fixtures for a clean chain, a fork (two
-    successors) and a cycle guard. Extend `CAVEATS.md` — lineage is the
-    verified administrative record, not a statement about continuity of
-    service or of the workforce.
+  - confidence: 5
+  - risk: 1
+  - area: documentation/tooling
+  - depends_on: BETA-038, BETA-048
+  - objective: Add machine-owned documentation blocks generated from module,
+    source, route, export, licence and caveat registries, with non-mutating
+    `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
+  - rationale: Capability prose has already drifted behind implemented committee
+    system support; machine-owned factual matrices can prevent recurrence while
+    narrative documentation remains manually reviewed.
+  - suggested_first_action: Reconcile the stale committee-system statements and
+    define the first generated source-capability matrix.
+  - next_action: Add `pipeline/docs_matrix.py` that renders factual matrices
+    from the existing in-code registries — the module registry
+    (`pipeline/registry.py`), the dataset catalogue
+    (`pipeline/web/datasets.py`), the frozen public route set + `openapi.py`,
+    the export schema, `pipeline/licences.py::MODULE_LICENCES` and the
+    `CAVEATS` keys — into delimited `<!-- BEGIN GENERATED: name -->` /
+    `<!-- END GENERATED: name -->` blocks in `docs/SOURCES.md` /
+    `README.md`. `pipeline docs-check` (CI, non-mutating: exit 1 with a diff
+    when a block is stale) and `pipeline docs-sync` (rewrites the blocks).
+    First matrix: one row per collecting module — id, source, cadence,
+    public tables, licence — which reconciles the stale committee-system
+    prose the rationale names. Offline tests: the generator is deterministic,
+    `docs-check` passes on a freshly synced tree and fails on a hand-edited
+    block, and every generated block is bounded by its markers. No schema
+    change; narrative docs outside the markers are untouched.
 
 ### BLOCKED
 
@@ -488,23 +489,7 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-067 | Capability-documentation consistency checker
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-064 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 1
-  - area: documentation/tooling
-  - depends_on: BETA-038, BETA-048
-  - objective: Add machine-owned documentation blocks generated from module,
-    source, route, export, licence and caveat registries, with non-mutating
-    `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
-  - rationale: Capability prose has already drifted behind implemented committee
-    system support; machine-owned factual matrices can prevent recurrence while
-    narrative documentation remains manually reviewed.
-  - suggested_first_action: Reconcile the stale committee-system statements and
-    define the first generated source-capability matrix.
+_(empty — BETA-067 is the last item of the approved successor programme.)_
 
 ### READY
 
@@ -553,6 +538,61 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-066 | Provider predecessor and successor lineage
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 3
+  - area: provider-identity
+  - depends_on: BETA-056
+  - objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
+    detail timeline for explicit active, merged, dissolved, predecessor and
+    successor relationships.
+  - result: New `public_queries.provider_lineage(conn, provider_key)` —
+    reads only `providers.status` / `superseded_by` (the lifecycle config
+    from `pipeline/providers.py::PROVIDER_STATUS`, cross-checked against the
+    registered company/charity record) and the `status='verified'` rows of
+    `provider_identifiers` (`_public(["providers", "provider_identifiers"])`,
+    a test greps for it). It returns typed, directional edges: forward
+    `renamed_to` / `merged_into` (with the successor's key + name) or a
+    terminal `dissolved` with no target; reverse `renamed_from` /
+    `merged_from` for every provider whose config points at this one. Plus
+    `chain` — this entity followed forward through `superseded_by` to the
+    surviving one, with a `seen`-set cycle guard and a 20-hop cap — and
+    `identifiers` (config-verified company / charity / CQC ids and their
+    role). Every edge carries a `basis` string; no ownership is inferred and
+    no individual is named.
+  - api/ui: `GET /api/v1/providers/(provider_key)/lineage` — a parameterised
+    addition to the frozen surface (`test_portal_isolation.py`
+    `PUBLIC_API_PATTERNS`, `openapi.py` `ROUTES`, an `api.html` article with
+    `data-route-pattern`). The portal provider page gains an "Entity lineage"
+    section (`#lineage`, a second lazy fetch so the timeline payload is
+    unchanged): the forward chain as a `A → B` breadcrumb, forward edges and
+    a "Predecessors" list (phrased from the other end — "X renamed to this
+    entity"), the config-verified identifiers, and the pinned caveat.
+    `.lineage-chain` / `.lineage-edges` styles.
+  - validation: New `tests/test_web_provider_lineage.py` (11 — the forward
+    edge + chain, the survivor's predecessor list, a fork (two successors),
+    a terminal `dissolved` with a null target, a multi-hop chain, a config
+    cycle that does not spin, only config-verified identifiers, an unknown
+    provider refused, the caveat wording, the `_public` table set, and the
+    public cacheable HTTP route incl. a 400 for a missing provider).
+    `test_portal_isolation.py` / `test_web_openapi.py` still green.
+    `docs/CAVEATS.md` provider-universe section extended. No migration. Full
+    offline suite — **2867 passed, 113 skipped, 35 deselected**, plus the one
+    pre-existing flaky timing test
+    (`test_db_concurrency.py::test_the_regression_reproduces_when_the_write_
+    slot_is_not_serialised`, recorded under BETA-035, also seen at BETA-056)
+    which fails intermittently under full-suite load and **passes on an
+    isolated re-run** (31 passed); nothing in BETA-066 touches the write slot
+    or concurrency. `ruff` clean. Browser-verified against a seeded scratch
+    warehouse: `addaction` shows "Addaction → With You" and "renamed to With
+    You"; `with_you` shows both predecessors ("Addaction renamed to this
+    entity", "Kent Council on Addictions merged into this entity") and the
+    verified company number; zero console errors.
 
 - [DONE] BETA-065 | CQC regulated-location explorer
   - completed: 2026-08-29
@@ -3575,8 +3615,8 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | DONE (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | DONE (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | DONE (BETA-065) |
-| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | IN_PROGRESS (BETA-066) |
-| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | NEXT (BETA-067) |
+| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | DONE (BETA-066) |
+| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | IN_PROGRESS (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-successor

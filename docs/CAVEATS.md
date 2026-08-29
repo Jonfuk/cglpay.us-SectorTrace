@@ -654,6 +654,17 @@ anyone using it.
   `provider_identifiers` (or a company row m04 seeded) — never through an
   unverified discovery or a name. This is the one rule the whole universe
   exists to enforce.
+- **Entity lineage (`/api/v1/providers/{provider_key}/lineage`, the provider
+  page's "Entity lineage" block, BETA-066) is the verified administrative
+  record only.** It reads `providers.status` / `superseded_by` — seeded from
+  `pipeline/providers.py::PROVIDER_STATUS`, cross-checked against the
+  registered company and charity record — into explicit `renamed_to` /
+  `merged_into` / `dissolved` / `renamed_from` / `merged_from` edges and a
+  forward chain to the surviving entity. It says nothing about whether the
+  services, staff or contracts of a merged or dissolved organisation moved,
+  stayed or ended. No ownership structure is inferred and no individual
+  officer is named. Evidence bearing an older identity stays under that
+  `provider_key` and is not rewritten.
 - **A funder is a buyer that matched no authority.** The funder rows include
   NHS bodies, police and other public bodies, suppliers that also
   commission, and names that are simply unidentifiable; they were captured

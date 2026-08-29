@@ -104,6 +104,7 @@ PUBLIC_API_ROUTES = {
 # Route patterns under /api/v1/ that take a parameter.
 PUBLIC_API_PATTERNS = {
     r"providers/([a-z0-9_]+)/timeline",
+    r"providers/([a-z0-9_]+)/lineage",
     r"authorities/([A-Z][0-9]{8})",
     r"documents/([A-Za-z0-9_-]{1,80})",
     r"catalogue/([a-z0-9-]{1,64})",

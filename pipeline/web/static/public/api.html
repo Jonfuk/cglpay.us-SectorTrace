@@ -192,6 +192,35 @@
     <p><code>/api/v1/providers/change_grow_live/timeline</code></p>
   </article>
 
+  <article class="apiroute" data-route="providers/{provider_key}/lineage"
+           data-route-pattern="providers/([a-z0-9_]+)/lineage">
+    <h3><code>/api/v1/providers/{provider_key}/lineage</code></h3>
+    <p>
+      The verified administrative record of an organisation's identity —
+      renamed, merged into another body, or dissolved — from the pipeline's
+      lifecycle config, cross-checked against the registered company and
+      charity record. <strong>Not a statement about continuity of service,
+      staff, contracts or quality</strong>: a merged charity's services and
+      workforce may have moved, stayed or ended, and this does not say which.
+      Evidence that names an older identity stays attached to that identity.
+      No ownership structure is inferred and no individual officer is named.
+    </p>
+    <p class="small">
+      Returns <code>provider</code> (<code>provider_key</code>,
+      <code>canonical_name</code>, <code>status</code>,
+      <code>is_target</code>), <code>edges</code> — each with
+      <code>relationship</code> (<code>renamed_to</code>,
+      <code>merged_into</code>, <code>dissolved</code>,
+      <code>renamed_from</code>, <code>merged_from</code>),
+      <code>direction</code>, the other <code>provider_key</code> /
+      <code>canonical_name</code> and its <code>basis</code> —
+      <code>chain</code> (this entity forward to the surviving one, with a
+      cycle guard), <code>identifiers</code> (config-verified company / charity
+      / CQC ids and their role) and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/providers/with_you/lineage</code></p>
+  </article>
+
   <article class="apiroute" data-route="authorities">
     <h3><code>/api/v1/authorities</code></h3>
     <p>

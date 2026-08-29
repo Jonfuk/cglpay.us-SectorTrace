@@ -53,6 +53,91 @@ function lifecycleNote(provider) {
     '.', tail);
 }
 
+// BETA-066: the verified administrative lineage — the forward chain to the
+// surviving entity, and the predecessors that point at this one. A separate
+// fetch (/lineage) so the timeline payload stays as it was.
+// Forward: "<this entity> <label> <other>".  Reverse: "<other> <label> this
+// entity" — a predecessor edge, so the same events read from the other end.
+const LINEAGE_LABEL = {
+  renamed_to: 'renamed to', merged_into: 'merged into', dissolved: 'dissolved',
+};
+const PREDECESSOR_LABEL = {
+  renamed_from: 'renamed to', merged_from: 'merged into',
+  superseded_from: 'superseded by',
+};
+
+async function renderLineage(container, key) {
+  if (!container) return;
+  let data;
+  try {
+    data = await fetchJSON(`providers/${encodeURIComponent(key)}/lineage`);
+  } catch (error) {
+    // A missing lineage route on an older cached server is not worth an error
+    // card in the middle of the page.
+    container.replaceChildren();
+    return;
+  }
+
+  const edges = data.edges || [];
+  const chain = data.chain || [];
+  const predecessors = edges.filter((e) => e.direction === 'predecessor');
+  const forward = edges.filter((e) => e.direction !== 'predecessor');
+
+  // Nothing to say when the entity is active, has no successor and nothing
+  // points at it.
+  if (!predecessors.length && !forward.length && chain.length <= 1) {
+    container.replaceChildren();
+    return;
+  }
+
+  const chainRow = chain.length > 1
+    ? el('p', { class: 'lineage-chain' }, ...chain.flatMap((node, i) => {
+        const name = node.provider_key === key
+          ? el('strong', { text: node.canonical_name || node.provider_key })
+          : el('a', {
+              href: `#/providers/${encodeURIComponent(node.provider_key)}`,
+              text: node.canonical_name || node.provider_key });
+        return i === 0 ? [name] : [el('span', { class: 'muted', text: ' → ' }), name];
+      }))
+    : null;
+
+  const forwardRows = forward.map((e) => el('li', {},
+    `${LINEAGE_LABEL[e.relationship] || e.relationship}`,
+    e.provider_key ? ' ' : null,
+    e.provider_key
+      ? el('a', { href: `#/providers/${encodeURIComponent(e.provider_key)}`,
+          text: e.canonical_name || e.provider_key })
+      : null,
+    el('span', { class: 'muted small', text: ` — ${e.basis}` })));
+
+  const predecessorRows = predecessors.map((e) => el('li', {},
+    el('a', { href: `#/providers/${encodeURIComponent(e.provider_key)}`,
+      text: e.canonical_name || e.provider_key }),
+    ` ${PREDECESSOR_LABEL[e.relationship] || e.relationship} this entity`,
+    el('span', { class: 'muted small', text: ` — ${e.basis}` })));
+
+  const identifiers = (data.identifiers || []).length
+    ? el('p', { class: 'muted small' },
+        'Verified identifiers: '
+        + data.identifiers.map((id) =>
+            `${id.scheme} ${id.identifier}${id.role ? ` (${id.role})` : ''}`).join('; '))
+    : null;
+
+  container.replaceChildren(section('Entity lineage',
+    'The verified administrative record of this organisation’s identity. It '
+    + 'does not describe what happened to the services, staff or contracts.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveat, 'Read before reading the lineage'),
+      chainRow,
+      forwardRows.length ? el('ul', { class: 'lineage-edges' }, ...forwardRows) : null,
+      predecessorRows.length
+        ? el('div', {},
+            el('h3', { class: 'small muted', text: 'Predecessors' }),
+            el('ul', { class: 'lineage-edges' }, ...predecessorRows))
+        : null,
+      identifiers)));
+}
+
 // --- the list ----------------------------------------------------------------
 
 async function renderList(main) {
@@ -224,6 +309,7 @@ async function renderOne(main, key) {
       });
     })(),
     el('div', { id: 'inventory' }),
+    el('div', { id: 'lineage' }),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
     el('div', { id: 'cqc' }),
@@ -236,6 +322,7 @@ async function renderOne(main, key) {
   replace(main, page);
 
   renderInventory(page.querySelector('#inventory'), data);
+  renderLineage(page.querySelector('#lineage'), key);
   renderTimeline(page.querySelector('#timeline'), data);
   renderGraph(page.querySelector('#graph'), data, charts, key);
   renderCqc(page.querySelector('#cqc'), data);

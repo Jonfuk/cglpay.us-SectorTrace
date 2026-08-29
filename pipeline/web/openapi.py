@@ -65,6 +65,14 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("provider_key", where="path", required=True,
                            desc="A provider_key from /api/v1/providers.")],
     },
+    "/api/v1/providers/{provider_key}/lineage": {
+        "surface": r"providers/([a-z0-9_]+)/lineage",
+        "summary": "Verified administrative lineage — renamed/merged/dissolved "
+                   "edges and the forward chain to the surviving entity; not a "
+                   "statement about continuity of service or workforce.",
+        "parameters": [_p("provider_key", where="path", required=True,
+                           desc="A provider_key from /api/v1/providers.")],
+    },
     "/api/v1/provider_compare": {
         "surface": "provider_compare",
         "summary": "Two to four providers across four separate pay-evidence layers; "

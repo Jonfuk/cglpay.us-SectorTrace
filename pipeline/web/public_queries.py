@@ -128,6 +128,17 @@ CAVEATS = {
         "and alcohol provision is not CQC-registered, so this is not a "
         "service map and absence does not mean absence of a service."
     ),
+    "provider_lineage": (
+        "The verified administrative record of an organisation's identity — "
+        "renamed, merged into another body, or dissolved — from the pipeline's "
+        "lifecycle config, cross-checked against the registered company and "
+        "charity record. It is not a statement about continuity of service, of "
+        "staff, of contracts or of quality: a merged charity's services and "
+        "workforce may have moved, stayed, or ended, and this does not say "
+        "which. Evidence that names an older identity stays attached to that "
+        "identity and is not rewritten. No ownership structure is inferred and "
+        "no individual officer is named."
+    ),
     "cqc_locations_explorer": (
         "CQC registration covers only certain regulated activities — "
         "residential detox, inpatient care, some prescribing. Most community "
@@ -2914,6 +2925,110 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
     for row in conn.execute(sql, tuple(ons_code for _ in counted)):
         cells[counted[row["i"]][0]] = row["n"]
     return cells
+
+
+# provider status -> the forward relationship it implies, when there is a
+# `superseded_by`. `dissolved` has no target and is terminal.
+_LINEAGE_FORWARD = {
+    "renamed": "renamed_to",
+    "merged": "merged_into",
+}
+_LINEAGE_REVERSE = {
+    "renamed": "renamed_from",
+    "merged": "merged_from",
+}
+_LINEAGE_CHAIN_CAP = 20
+
+
+def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
+    """The verified administrative lineage of one provider entity (BETA-066).
+
+    Reads only the lifecycle config already on `providers` (`status`,
+    `superseded_by`, seeded from `pipeline/providers.py::PROVIDER_STATUS`) and
+    the config-verified rows of `provider_identifiers`. It produces explicit
+    typed edges — `renamed_to` / `merged_into` / `dissolved` forward,
+    `renamed_from` / `merged_from` back — never an inferred ownership link and
+    never a person. Evidence that names an old identity stays attached to its
+    own `provider_key`; this describes the entity, not the evidence.
+    """
+    _public(["providers", "provider_identifiers"])
+
+    provider = _one(
+        conn,
+        "SELECT provider_key, canonical_name, status, superseded_by, is_target "
+        "FROM providers WHERE provider_key = ?", (provider_key,))
+    if not provider:
+        raise QueryError(f"No provider {provider_key!r}.")
+
+    def _name(key: str) -> str | None:
+        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = ?",
+                    (key,))
+        return row["canonical_name"] if row else None
+
+    edges: list[dict] = []
+    basis = ("provider lifecycle config (pipeline/providers.py PROVIDER_STATUS), "
+             "cross-checked against the registered company/charity record")
+
+    status = provider["status"]
+    superseded_by = provider["superseded_by"]
+    if status == "dissolved":
+        edges.append({
+            "relationship": "dissolved", "direction": "terminal",
+            "provider_key": None, "canonical_name": None, "basis": basis})
+    elif status in _LINEAGE_FORWARD and superseded_by:
+        edges.append({
+            "relationship": _LINEAGE_FORWARD[status], "direction": "successor",
+            "provider_key": superseded_by, "canonical_name": _name(superseded_by),
+            "basis": basis})
+
+    # Reverse edges: every provider whose config points at this one.
+    for row in _rows(
+        conn,
+        "SELECT provider_key, canonical_name, status FROM providers "
+        "WHERE superseded_by = ? ORDER BY canonical_name", (provider_key,)):
+        edges.append({
+            "relationship": _LINEAGE_REVERSE.get(row["status"], "superseded_from"),
+            "direction": "predecessor",
+            "provider_key": row["provider_key"],
+            "canonical_name": row["canonical_name"], "basis": basis})
+
+    # The forward chain to the surviving entity, with a cycle guard.
+    chain: list[dict] = [{
+        "provider_key": provider["provider_key"],
+        "canonical_name": provider["canonical_name"],
+        "status": provider["status"]}]
+    seen = {provider_key}
+    cursor = superseded_by
+    while cursor and cursor not in seen and len(chain) < _LINEAGE_CHAIN_CAP:
+        seen.add(cursor)
+        row = _one(conn,
+                    "SELECT provider_key, canonical_name, status, superseded_by "
+                    "FROM providers WHERE provider_key = ?", (cursor,))
+        if not row:
+            break
+        chain.append({"provider_key": row["provider_key"],
+                       "canonical_name": row["canonical_name"],
+                       "status": row["status"]})
+        cursor = row["superseded_by"]
+
+    identifiers = _rows(
+        conn,
+        "SELECT scheme, identifier, role FROM provider_identifiers "
+        "WHERE provider_key = ? AND status = 'verified' "
+        "ORDER BY scheme, identifier", (provider_key,))
+
+    return {
+        "provider": {
+            "provider_key": provider["provider_key"],
+            "canonical_name": provider["canonical_name"],
+            "status": provider["status"],
+            "is_target": bool(provider["is_target"]),
+        },
+        "edges": edges,
+        "chain": chain,
+        "identifiers": identifiers,
+        "caveat": CAVEATS["provider_lineage"],
+    }
 
 
 def authority(conn: sqlite3.Connection, ons_code: str) -> dict:

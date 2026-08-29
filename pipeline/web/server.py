@@ -1492,6 +1492,14 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return public_queries.provider_timeline(conn, match.group(1))
 
+        # BETA-066: the verified administrative lineage of a provider entity —
+        # renamed / merged / dissolved edges from the lifecycle config, both
+        # directions, plus the forward chain to the surviving entity. Not a
+        # statement about continuity of service or workforce.
+        match = re.fullmatch(r"providers/([a-z0-9_]+)/lineage", route)
+        if match:
+            return public_queries.provider_lineage(conn, match.group(1))
+
         # A document id is `document-<uuid5>` (pipeline/documents/repository.py).
         # The bounded window around one matched element (BETA-042); the source
         # allowlist and active-version rules are enforced in the query.
