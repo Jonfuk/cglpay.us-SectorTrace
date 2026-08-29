@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-037. Current work: BETA-038. Next:
-  BETA-039.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-038. Current work: BETA-039. Next:
+  BETA-040.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,26 +271,27 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-038 | Queue integrity validator
+- [IN_PROGRESS] BETA-039 | Release identity and beta smoke gate
   - started: 2026-08-29
   - priority: P1
   - impact: 5
   - effort: 2
   - confidence: 5
-  - risk: 1
-  - area: engineering/ci
-  - depends_on: none
-  - objective: Add a dependency-free validator for this queue that fails on
-    duplicate item IDs, invalid states, item/state-heading mismatches, more
-    than one `IN_PROGRESS` item, or a missing `next_action` on current work.
-  - rationale: This handoff file is operational infrastructure. Its stale
-    status header and queue markers survived several completed commits, so
-    prose review alone is not a sufficient integrity control.
-  - suggested_first_action: Specify the parser contract against this file's
-    existing Markdown shape, add focused fixtures for each failure mode, then
-    run it in CI without introducing a Markdown-parser dependency.
-  - next_action: Implement the validator and CI check; report optional missing
-    historical metadata as warnings so old DONE history remains valid.
+  - risk: 2
+  - area: web/release
+  - depends_on: BETA-038
+  - objective: Expose a safe `GET /api/v1/meta` release identity containing
+    revision, build time, environment, latest migration, latest data timestamp
+    and capability flags; show it in the portal footer/admin UI and verify it
+    with a read-only beta smoke gate.
+  - rationale: A beta is not auditable if reviewers cannot tell which build,
+    schema and optional capabilities they are exercising. `/health` remains
+    the deliberately plain `ok` liveness endpoint.
+  - suggested_first_action: Define the stable response schema and inject build
+    metadata at deployment, then add GET-only smoke assertions that cannot
+    mutate production or trigger collection.
+  - next_action: Implement `/api/v1/meta` in `public_queries`/`server.py`,
+    render it in the portal footer, and add a read-only smoke-gate test.
 
 ### BLOCKED
 
@@ -473,25 +474,6 @@ DONE
     exercise the extension paths against a disposable PostgreSQL instance.
 
 ### NEXT
-
-- [NEXT] BETA-039 | Release identity and beta smoke gate
-  - priority: P1
-  - impact: 5
-  - effort: 2
-  - confidence: 5
-  - risk: 2
-  - area: web/release
-  - depends_on: BETA-038
-  - objective: Expose a safe `GET /api/v1/meta` release identity containing
-    revision, build time, environment, latest migration, latest data timestamp
-    and capability flags; show it in the portal footer/admin UI and verify it
-    with a read-only beta smoke gate.
-  - rationale: A beta is not auditable if reviewers cannot tell which build,
-    schema and optional capabilities they are exercising. `/health` remains
-    the deliberately plain `ok` liveness endpoint.
-  - suggested_first_action: Define the stable response schema and inject build
-    metadata at deployment, then add GET-only smoke assertions that cannot
-    mutate production or trigger collection.
 
 - [NEXT] BETA-040 | Contract search and pagination
   - priority: P1
@@ -715,6 +697,36 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-038 | Queue integrity validator
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: engineering/ci
+  - depends_on: none
+  - objective: Add a dependency-free validator for this queue that fails on
+    duplicate item IDs, invalid states, item/state-heading mismatches, more
+    than one `IN_PROGRESS` item, or a missing `next_action` on current work.
+  - result: `scripts/validate_beta_queue.py` — stdlib only, no Markdown-parser
+    dependency. It reads the state vocabulary from the queue's own header
+    comment, then flags: unknown state (heading or `[STATE]` prefix), an item
+    whose prefix disagrees with its heading, a duplicate item ID, more than one
+    `IN_PROGRESS` item, an `IN_PROGRESS` item with no `next_action`, a
+    malformed top-level `- [...]` bullet, and a missing `AUTONOMOUS_QUEUE_VERSION`
+    marker. Softer gaps — an actionable (`IN_PROGRESS`/`NEXT`/`READY`) item
+    missing a recommended scoring field, an unrecognised queue version — are
+    warnings, so the pre-template `DONE` history stays valid. `--strict` also
+    fails on warnings; the file argument defaults to `beta.md`.
+  - ci: New "Validate the beta work queue" step in `.github/workflows/tests.yml`,
+    before the test run. It exits 0 with a notice when `beta.md` is absent, so
+    it is safe on `master` and on a beta→master PR build.
+  - validation: `tests/test_beta_queue.py` — 15 tests: a minimal well-formed
+    queue plus one fixture per failure mode, and two checks that the live
+    `beta.md` has zero errors and zero warnings. `ruff check pipeline tests
+    scripts` clean.
 
 - [DONE] BETA-037 | Optional public API LRU caching and route-specific TTLs
   - completed: 2026-08-29
