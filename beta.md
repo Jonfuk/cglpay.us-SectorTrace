@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-040. Current work: BETA-041. Next:
-  BETA-042.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-041. Current work: BETA-042. Next:
+  BETA-043.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,27 +271,28 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-041 | Ranked, faceted document search
+- [IN_PROGRESS] BETA-042 | Document evidence-context view
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 4
+  - effort: 3
   - confidence: 4
   - risk: 3
-  - area: api/documents/search/ui
-  - depends_on: BETA-039
-  - objective: Extend public document search with `source_system`,
-    `document_type`, `year_from`, `year_to` and `since_retrieved_at` facets,
-    ranked results and stable pagination across PostgreSQL and SQLite.
-  - rationale: The existing search proves demand but offers little corpus
-    control. Facets and honest relevance ranking make results useful without
-    implying that ranking is evidential confidence.
-  - suggested_first_action: Define an explicit public-source allowlist and
-    stable tie-breakers, then implement PostgreSQL `websearch_to_tsquery` plus
-    `ts_rank_cd` and the equivalent SQLite FTS5 path.
-  - next_action: Add the facet params + ranking to `public_queries.document_search`
-    (both backend branches), a `facets` block in the payload, and faceted
-    filters + stable pagination on the documents page.
+  - area: api/documents/ui
+  - depends_on: BETA-041
+  - objective: Add `GET /api/v1/documents/{id}?element_id&context=` and a
+    portal view that places a matched element in bounded surrounding context
+    from the active document version.
+  - rationale: Snippets locate a hit but often omit the qualifiers needed to
+    interpret it. Bounded context improves scrutiny while avoiding republication
+    of whole copyrighted documents.
+  - suggested_first_action: Specify active-version and public-allowlist rules,
+    clamp context to at most three elements either side, and test boundary,
+    superseded-version and unauthorised-source cases.
+  - next_action: Add a `documents/{id}` route to `_public_api` +
+    `public_queries.document_context`, reading the active version only and the
+    same source allowlist, clamped context window; a "show surrounding text"
+    expander on each document-search result.
 
 ### BLOCKED
 
@@ -475,24 +476,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-042 | Document evidence-context view
-  - priority: P1
-  - impact: 5
-  - effort: 3
-  - confidence: 4
-  - risk: 3
-  - area: api/documents/ui
-  - depends_on: BETA-041
-  - objective: Add `GET /api/v1/documents/{id}?element_id&context=` and a
-    portal view that places a matched element in bounded surrounding context
-    from the active document version.
-  - rationale: Snippets locate a hit but often omit the qualifiers needed to
-    interpret it. Bounded context improves scrutiny while avoiding republication
-    of whole copyrighted documents.
-  - suggested_first_action: Specify active-version and public-allowlist rules,
-    clamp context to at most three elements either side, and test boundary,
-    superseded-version and unauthorised-source cases.
-
 - [NEXT] BETA-043 | Public dataset catalogue
   - priority: P1
   - impact: 5
@@ -660,6 +643,48 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-041 | Ranked, faceted document search
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: api/documents/search/ui
+  - depends_on: BETA-039
+  - objective: Extend public document search with `source_system`,
+    `document_type`, `year_from`, `year_to` and `since_retrieved_at` facets,
+    ranked results and stable pagination across PostgreSQL and SQLite.
+  - result: `document_search()` gained the five filter params.
+    `source_system` is validated against `DOCUMENT_SEARCH_SOURCES` and 400s
+    on anything outside it (fail closed, like the allowlist itself);
+    `document_type` matches `document_records.document_type`; `year_from` /
+    `year_to` bound `substr(published_at,1,4)` (an undated page drops out of a
+    year-bounded search); `since_retrieved_at` bounds `evidence_records.
+    retrieved_at`. The SQLite branch keeps FTS5 `MATCH` and now orders
+    `rank, document_id, page_number, document_element_id` for stable paging;
+    the PostgreSQL branch moves `plainto_tsquery` → `websearch_to_tsquery`
+    (accepts a reader's quotes/OR/-term without raising) and adds
+    `ORDER BY ts_rank_cd(...) DESC` + the same tie-breakers — it had no
+    `ORDER BY` at all before, so paging was plan-order. Payload gains a
+    `facets` block (`source_system` and `document_type` counts over the query
+    and the date scope only, so the buckets stay visible while a selection
+    narrows the rows), a `filters` echo and `limit`.
+  - ui: The documents page carries the four filters in the hash beside `q`
+    (a shareable filtered search); a new facet bar under the results has two
+    count-labelled `<select>`s, published-year from/to inputs and a "Clear
+    filters" button. Changing any rewrites the hash and re-runs the search
+    from the first page. A new search term resets the filters. "Show more"
+    still pages by offset and now carries the filters.
+  - validation: 9 new tests in `tests/test_web_documents.py` — facet counts,
+    source/type filtering (results narrow, facets don't), the allowlist
+    rejection, year bounds incl. undated-page exclusion, `since_retrieved_at`,
+    and cross-call pagination stability. `ruff` clean; full offline suite
+    green; browser-verified against a seeded SQLite warehouse (facet selects
+    render with counts, selecting narrows + updates the URL, year inputs and
+    clear work, zero console errors; HTTP checks confirmed the 400 and the
+    stable order).
 
 - [DONE] BETA-040 | Contract search and pagination
   - completed: 2026-08-29

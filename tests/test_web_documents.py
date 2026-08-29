@@ -275,3 +275,137 @@ def test_document_search_quoted_phrase_anchors_the_snippet(conn, settings):
 
     assert "sleeping duty" in row["snippet"]
     assert "sleeping brief" not in row["snippet"]
+
+
+# --- BETA-041: facets, filters and ranked, stable pagination ---------------
+
+
+def _publish(conn, evidence_id: str, published_at: str) -> None:
+    conn.execute("UPDATE document_records SET published_at = ? WHERE evidence_id = ?",
+                 (published_at, evidence_id))
+    conn.commit()
+
+
+def _facet_scene(conn, settings) -> None:
+    """Four committee papers and two CDP documents, all matching "budget"."""
+    for i in range(4):
+        _seed_document(
+            conn, settings, evidence_id=f"ev-cp-{i}",
+            source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+            text=f"Budget pressures continue across service area {i}.")
+        _publish(conn, f"ev-cp-{i}", f"202{i}-05-01")
+    for i in range(2):
+        _seed_document(
+            conn, settings, evidence_id=f"ev-cdp-{i}",
+            source_system="cdp_document_promotion", document_type="PARTNERSHIP_MINUTES",
+            text=f"Budget allocation for the partnership, note {i}.")
+        _publish(conn, f"ev-cdp-{i}", "2025-05-01")
+
+
+def test_document_search_reports_facet_counts(conn, settings):
+    _facet_scene(conn, settings)
+
+    result = public_queries.document_search(conn, query="budget")
+
+    by_source = {row["value"]: row["count"] for row in result["facets"]["source_system"]}
+    assert by_source == {"committee_paper_promotion": 4, "cdp_document_promotion": 2}
+    by_type = {row["value"]: row["count"] for row in result["facets"]["document_type"]}
+    assert by_type == {"COMMITTEE_PAPER": 4, "PARTNERSHIP_MINUTES": 2}
+
+
+def test_document_search_source_system_facet_filters_results(conn, settings):
+    _facet_scene(conn, settings)
+
+    result = public_queries.document_search(
+        conn, query="budget", source_system="cdp_document_promotion")
+
+    assert result["total"] == 2
+    assert {r["source_system"] for r in result["results"]} == {"cdp_document_promotion"}
+    # The facet lists still show every bucket, so the reader can switch back.
+    by_source = {row["value"]: row["count"] for row in result["facets"]["source_system"]}
+    assert by_source == {"committee_paper_promotion": 4, "cdp_document_promotion": 2}
+    assert result["filters"]["source_system"] == "cdp_document_promotion"
+
+
+def test_document_search_document_type_filters_results_but_not_facets(conn, settings):
+    _facet_scene(conn, settings)
+
+    result = public_queries.document_search(
+        conn, query="budget", document_type="COMMITTEE_PAPER")
+
+    assert result["total"] == 4
+    assert {r["document_type"] for r in result["results"]} == {"COMMITTEE_PAPER"}
+    by_type = {row["value"]: row["count"] for row in result["facets"]["document_type"]}
+    assert by_type == {"COMMITTEE_PAPER": 4, "PARTNERSHIP_MINUTES": 2}
+
+
+def test_document_search_rejects_a_source_system_outside_the_allowlist(conn, settings):
+    _facet_scene(conn, settings)
+    with pytest.raises(QueryError):
+        public_queries.document_search(
+            conn, query="budget", source_system="pfd_report_promotion")
+
+
+def test_document_search_year_bounds_filter_on_published_at(conn, settings):
+    _facet_scene(conn, settings)
+
+    result = public_queries.document_search(
+        conn, query="budget", year_from="2021", year_to="2023")
+
+    # ev-cp-1 (2021), ev-cp-2 (2022), ev-cp-3 (2023); ev-cp-0 is 2020 and the
+    # CDP pair is 2025.
+    assert result["total"] == 3
+    assert result["filters"]["year_from"] == "2021"
+    assert result["filters"]["year_to"] == "2023"
+
+
+def test_document_search_year_bound_excludes_pages_with_no_published_date(conn, settings):
+    _seed_document(
+        conn, settings, evidence_id="ev-dated",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        text="Budget report for the year.")
+    _publish(conn, "ev-dated", "2024-01-01")
+    _seed_document(
+        conn, settings, evidence_id="ev-undated",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        text="Budget report with no publication date recorded.")
+
+    result = public_queries.document_search(conn, query="budget", year_from="2024")
+
+    assert result["total"] == 1
+    assert result["results"][0]["source_url"] == "https://example.test/ev-dated"
+
+
+def test_document_search_since_retrieved_at_filters_on_collection_time(conn, settings):
+    # _reference() stamps retrieved_at at 2026-08-19; move one earlier.
+    _seed_document(
+        conn, settings, evidence_id="ev-fresh",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        text="Budget matters, freshly collected.")
+    _seed_document(
+        conn, settings, evidence_id="ev-stale",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        text="Budget matters, collected long ago.")
+    conn.execute("UPDATE evidence_records SET retrieved_at = ? WHERE evidence_id = ?",
+                 ("2026-01-01T00:00:00+00:00", "ev-stale"))
+    conn.commit()
+
+    result = public_queries.document_search(
+        conn, query="budget", since_retrieved_at="2026-06-01T00:00:00+00:00")
+
+    assert result["total"] == 1
+    assert result["results"][0]["source_url"] == "https://example.test/ev-fresh"
+
+
+def test_document_search_pagination_is_stable_across_calls(conn, settings):
+    _facet_scene(conn, settings)
+
+    first = [public_queries.document_search(conn, query="budget", limit=2, offset=o)
+             for o in (0, 2, 4)]
+    again = [public_queries.document_search(conn, query="budget", limit=2, offset=o)
+             for o in (0, 2, 4)]
+
+    order_one = [r["document_id"] for page in first for r in page["results"]]
+    order_two = [r["document_id"] for page in again for r in page["results"]]
+    assert order_one == order_two
+    assert len(set(order_one)) == 6  # every match seen once, no overlap

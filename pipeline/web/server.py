@@ -1342,6 +1342,11 @@ class Handler(BaseHTTPRequestHandler):
         if route == "document_search":
             return public_queries.document_search(
                 conn, query=_str(params, "q") or "",
+                source_system=_str(params, "source_system") or None,
+                document_type=_str(params, "document_type") or None,
+                year_from=_str(params, "year_from") or None,
+                year_to=_str(params, "year_to") or None,
+                since_retrieved_at=_str(params, "since_retrieved_at") or None,
                 limit=_int(params, "limit", 25), offset=_int(params, "offset", 0))
 
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)

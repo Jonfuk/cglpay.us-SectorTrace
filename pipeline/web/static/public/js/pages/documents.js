@@ -24,13 +24,40 @@ import { section, pinnedCaveat, noData, errorCard, truncate,
  * reached through "show more", which asks for the next window by offset. */
 const PAGE_SIZE = 50;
 
+/* The facet and scope filters the page carries in the hash beside `q`
+ * (BETA-041), so a filtered search is a shareable link. `offset` stays out of
+ * the URL — how far a reader has paged is nobody else's business. */
+const FILTER_KEYS = ['source_system', 'document_type', 'year_from', 'year_to',
+                     'since_retrieved_at'];
+
+function readFilters(params) {
+  const source = params || new URLSearchParams(location.hash.split('?')[1] || '');
+  const out = {};
+  for (const key of FILTER_KEYS) {
+    const value = (source.get(key) || '').trim();
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+/* Merge a patch into the hash query, preserving `q` and any filter the patch
+ * does not mention. An empty value clears that key. */
+function setDocParams(patch) {
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  for (const [key, value] of Object.entries(patch)) {
+    if (value) params.set(key, value); else params.delete(key);
+  }
+  const query = params.toString();
+  location.hash = `#/documents${query ? `?${query}` : ''}`;
+}
+
 export async function render(main, { params = null } = {}) {
   const initialQuery = (params ? params.get('q') : '') || '';
-  /* Accumulates across "show more" clicks for this visit to the route. It is
-   * deliberately not URL state: the shareable address is `#/documents?q=…`,
-   * and how far a reader has paged through their results is nobody else's
-   * business — unlike compare.js's selection, which *is* the whole finding. */
-  const session = { query: initialQuery, results: [], total: NaN };
+  const filters = readFilters(params);
+  /* Accumulates across "show more" clicks for this visit to the route. Not URL
+   * state: the shareable address is `#/documents?q=…&document_type=…`, and how
+   * far a reader has paged is nobody else's business. */
+  const session = { query: initialQuery, filters, results: [], total: NaN };
 
   const input = el('input', {
     type: 'search', name: 'q', value: initialQuery,
@@ -44,6 +71,8 @@ export async function render(main, { params = null } = {}) {
     onsubmit: (event) => {
       event.preventDefault();
       const term = input.value.trim();
+      // A new search term resets the facet/scope filters: their available
+      // values belong to the previous query's result set.
       location.hash = `#/documents${term ? `?q=${encodeURIComponent(term)}` : ''}`;
     },
   }, input, el('button', { class: 'btn', type: 'submit', text: 'Search' }));
@@ -85,10 +114,13 @@ async function runSearch(holder, session) {
   replace(holder, el('div', { class: 'section' },
     el('div', { class: 'panel' }, el('div', { class: 'shimmer' }))));
 
+  const requestParams = () => ({
+    q: session.query, limit: PAGE_SIZE, ...session.filters,
+  });
+
   let data;
   try {
-    data = await fetchJSON('document_search',
-      { q: session.query, limit: PAGE_SIZE, offset: 0 });
+    data = await fetchJSON('document_search', { ...requestParams(), offset: 0 });
   } catch (error) {
     replace(holder, el('div', { class: 'section' },
       errorCard(error.message, () => runSearch(holder, session))));
@@ -133,7 +165,7 @@ async function runSearch(holder, session) {
     let page;
     try {
       page = await fetchJSON('document_search',
-        { q: session.query, limit: PAGE_SIZE, offset: session.results.length });
+        { ...requestParams(), offset: session.results.length });
     } catch (error) {
       // The pages already shown stay on screen; the failure and its retry
       // belong to the slot the button came from.
@@ -157,10 +189,62 @@ async function runSearch(holder, session) {
   replace(holder, section(
     `Results for "${session.query}"`,
     null,
+    facetBar(data, session.filters),
     pinnedCaveat(data.caveat, 'Read before citing a result'),
     session.results.length
       ? [countLine, list, moreSlot]
       : noData(`pages matching "${session.query}"`, null)));
+}
+
+/* The four filters, driven by the payload's own `facets` block. Changing any
+ * of them rewrites the hash (keeping `q` and the others), which re-renders the
+ * page from scratch — a filtered search is a link, and paging starts over
+ * because the result set changed. The facet <select>s always list every
+ * bucket the current query has, each with its size, so a reader can widen
+ * again after narrowing. */
+function facetBar(data, active) {
+  const facets = data.facets || {};
+  const label = (key) => ({
+    committee_paper_promotion: 'Committee papers',
+    cdp_document_promotion: 'Partnership documents',
+  }[key] || key);
+
+  const facetSelect = (key, allLabel, rows) => {
+    const options = [el('option', { value: '', text: allLabel })];
+    for (const row of rows || []) {
+      options.push(el('option', {
+        value: row.value, selected: active[key] === row.value || undefined,
+        text: `${label(row.value)} (${num(row.count)})`,
+      }));
+    }
+    return el('label', { class: 'small muted' }, `${allLabel.replace('All ', '')} `,
+      el('select', {
+        'aria-label': allLabel,
+        onchange: (event) => setDocParams({ [key]: event.target.value }),
+      }, options));
+  };
+
+  const yearInput = (key, placeholder) => el('input', {
+    type: 'number', inputmode: 'numeric', value: active[key] || '',
+    placeholder, min: '1990', max: '2100', style: 'width:6rem;',
+    'aria-label': placeholder,
+    onchange: (event) => setDocParams({ [key]: event.target.value.trim() }),
+  });
+
+  const hasFilter = FILTER_KEYS.some((key) => active[key]);
+
+  return el('div', { class: 'panel row wrap', style: 'gap:12px;align-items:center;' },
+    facetSelect('source_system', 'All sources', facets.source_system),
+    facetSelect('document_type', 'All document types', facets.document_type),
+    el('label', { class: 'small muted' }, 'Published ',
+      yearInput('year_from', 'from year'), ' ', yearInput('year_to', 'to year')),
+    hasFilter
+      ? el('button', {
+          class: 'btn ghost', type: 'button',
+          onclick: () => setDocParams(Object.fromEntries(
+            FILTER_KEYS.map((key) => [key, '']))),
+        }, 'Clear filters')
+      : null);
 }
 
 function escapeRegExp(text) {

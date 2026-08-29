@@ -3214,66 +3214,133 @@ def _match_snippet(text: str | None, terms: list[str]) -> str:
     return ("…" if start > 0 else "") + value[start:end].strip() + ("…" if end < len(value) else "")
 
 
-def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25,
-                    offset: int = 0) -> dict:
+# The two document facets a reader can narrow by (BETA-041). `document_type`
+# is `document_records`'s own classification label; `source_system` is
+# constrained to the allowlist above, so a facet value that is not in
+# DOCUMENT_SEARCH_SOURCES can never be selected and never appears in a count.
+_DOCUMENT_SEARCH_FACETS = ("source_system", "document_type")
+
+
+def _document_scope_filters(document_type, year_from, year_to, since_retrieved_at):
+    """Structured filters shared by both backends, as `" AND ..."` fragments.
+
+    Column expressions are the same on SQLite and PostgreSQL here —
+    `d`/`e` are the `document_records`/`evidence_records` aliases in both
+    branches — so this builds one list. `substr(published_at, 1, 4)` is a
+    string year on either engine; a row with no `published_at` drops out of a
+    year-bounded search, which is the honest answer for "documents from 2024".
+    Returned split in two: the date/source scope (which the facet counts also
+    apply) and the `document_type` narrowing (which they do not).
+    """
+    scope, scope_params = [], []
+    if year_from:
+        scope.append("substr(d.published_at, 1, 4) >= ?")
+        scope_params.append(str(year_from))
+    if year_to:
+        scope.append("substr(d.published_at, 1, 4) <= ?")
+        scope_params.append(str(year_to))
+    if since_retrieved_at:
+        scope.append("e.retrieved_at >= ?")
+        scope_params.append(since_retrieved_at)
+    type_sql, type_params = "", []
+    if document_type:
+        type_sql = " AND d.document_type = ?"
+        type_params = [document_type]
+    return "".join(f" AND {c}" for c in scope), scope_params, type_sql, type_params
+
+
+def document_search(conn: sqlite3.Connection, *, query: str,
+                    source_system: str | None = None,
+                    document_type: str | None = None,
+                    year_from: str | None = None, year_to: str | None = None,
+                    since_retrieved_at: str | None = None,
+                    limit: int = 25, offset: int = 0) -> dict:
     _public(["document_records", "document_elements", "document_versions",
              "evidence_records"])
     query = (query or "").strip()
     if not query:
         raise QueryError("document_search needs a `q` parameter.")
+    if source_system is not None and source_system not in DOCUMENT_SEARCH_SOURCES:
+        # Fail closed, like the allowlist itself: an unknown source is not an
+        # empty result, it is a request for something this route does not
+        # publish.
+        raise QueryError(f"unknown source_system {source_system!r}")
     limit = max(1, min(limit, 50))
     # A negative offset would make PostgreSQL raise and SQLite silently walk
     # backwards off the front of the ranked list; clamping keeps one behaviour.
     offset = max(0, int(offset))
-    placeholders = ", ".join("?" for _ in DOCUMENT_SEARCH_SOURCES)
 
-    if db.backend_of(conn) == "sqlite":
-        sql = (
-            "SELECT s.document_element_id, s.document_id, s.page_number, "
-            "s.element_type, s.text, d.document_type, d.title, d.filename, "
-            "d.published_at, e.source_url, e.retrieved_at "
+    sources = (source_system,) if source_system else DOCUMENT_SEARCH_SOURCES
+    src_ph = ", ".join("?" for _ in sources)
+    all_src_ph = ", ".join("?" for _ in DOCUMENT_SEARCH_SOURCES)
+    scope_sql, scope_params, type_sql, type_params = _document_scope_filters(
+        document_type, year_from, year_to, since_retrieved_at)
+
+    is_sqlite = db.backend_of(conn) == "sqlite"
+    _tail_cols = ("d.document_type, d.title, d.filename, d.published_at, "
+                  "e.source_url, e.retrieved_at, e.source_system")
+
+    if is_sqlite:
+        frm = (
             "FROM document_element_search s "
             "JOIN document_records d ON d.document_id = s.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders}) "
-            "ORDER BY rank LIMIT ? OFFSET ?"
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
         )
-        count_sql = (
-            "SELECT COUNT(*) "
-            "FROM document_element_search s "
-            "JOIN document_records d ON d.document_id = s.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            f"WHERE document_element_search MATCH ? AND e.source_system IN ({placeholders})"
-        )
+        cols = ("s.document_element_id, s.document_id, s.page_number, "
+                "s.element_type, s.text, " + _tail_cols)
+        # FTS5 `rank` is ascending (best first). A total order after it —
+        # document, page, element — makes `limit`/`offset` paging stable
+        # rather than dependent on the engine's row order for ties.
+        match = "document_element_search MATCH ?"
+        order = "ORDER BY rank, s.document_id, s.page_number, s.document_element_id"
     else:
-        sql = (
-            "SELECT de.document_element_id, d.document_id, de.page_number, "
-            "de.element_type, de.text, d.document_type, d.title, d.filename, "
-            "d.published_at, e.source_url, e.retrieved_at "
+        frm = (
             "FROM document_elements de "
             "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
             "JOIN document_records d ON d.document_id = dv.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            "WHERE dv.is_active = 1 "
-            "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
-            f"AND e.source_system IN ({placeholders}) LIMIT ? OFFSET ?"
+            "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
         )
-        count_sql = (
-            "SELECT COUNT(*) "
-            "FROM document_elements de "
-            "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-            "JOIN document_records d ON d.document_id = dv.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            "WHERE dv.is_active = 1 "
-            "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
-            f"AND e.source_system IN ({placeholders})"
-        )
-    params = (query, *DOCUMENT_SEARCH_SOURCES, limit, offset)
-    count_params = (query, *DOCUMENT_SEARCH_SOURCES)
+        cols = ("de.document_element_id, d.document_id, de.page_number, "
+                "de.element_type, de.text, " + _tail_cols)
+        # websearch_to_tsquery over plainto_tsquery: it accepts a reader's
+        # quotes, OR and -term without raising, and ts_rank_cd gives an honest
+        # relevance order where before there was none — the old query had no
+        # ORDER BY at all, so paging was whatever order the plan produced.
+        _tsv = "to_tsvector('simple', COALESCE(de.text, ''))"
+        _tsq = "websearch_to_tsquery('simple', ?)"
+        match = f"dv.is_active = 1 AND {_tsv} @@ {_tsq}"
+        order = (f"ORDER BY ts_rank_cd({_tsv}, {_tsq}) DESC, "
+                 "d.document_id, de.page_number, de.document_element_id")
+
+    where = f"WHERE {match} AND e.source_system IN ({src_ph}){scope_sql}{type_sql}"
+    # PostgreSQL's ORDER BY repeats the tsquery bind; SQLite's does not.
+    order_binds = () if is_sqlite else (query,)
+    filt_params = (*scope_params, *type_params)
+
+    sql = f"SELECT {cols} {frm} {where} {order} LIMIT ? OFFSET ?"
+    params = (query, *sources, *filt_params, *order_binds, limit, offset)
+    count_sql = f"SELECT COUNT(*) {frm} {where}"
+    count_params = (query, *sources, *filt_params)
+
+    # Facet counts: over the text query and the date/source scope only, not
+    # the `source_system` / `document_type` selection — so the buckets a
+    # reader can switch to stay visible with their sizes while a selection
+    # narrows the results below.
+    facet_where = f"WHERE {match} AND e.source_system IN ({all_src_ph}){scope_sql}"
+    facet_params = (query, *DOCUMENT_SEARCH_SOURCES, *scope_params)
 
     try:
         rows = _rows(conn, sql, params)
         total = conn.execute(count_sql, count_params).fetchone()[0]
+        facets = {
+            facet: _rows(
+                conn,
+                f"SELECT {'e.source_system' if facet == 'source_system' else 'd.document_type'} "
+                f"AS value, COUNT(*) AS count {frm} {facet_where} "
+                f"GROUP BY value ORDER BY count DESC, value",
+                facet_params)
+            for facet in _DOCUMENT_SEARCH_FACETS
+        }
     except sqlite3.OperationalError as error:
         # FTS5 MATCH raises on malformed query syntax (an unbalanced quote, a
         # bare trailing operator) rather than returning no rows — a reader's
@@ -3285,6 +3352,7 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25,
         "results": [{
             "document_id": r["document_id"],
             "document_type": r["document_type"],
+            "source_system": r["source_system"],
             "title": r["title"] or r["filename"],
             "page_number": r["page_number"],
             "element_type": r["element_type"],
@@ -3298,6 +3366,15 @@ def document_search(conn: sqlite3.Connection, *, query: str, limit: int = 25,
         } for r in rows],
         "total": total,
         "offset": offset,
+        "limit": limit,
         "query": query,
+        "facets": facets,
+        "filters": {
+            "source_system": source_system,
+            "document_type": document_type,
+            "year_from": year_from or None,
+            "year_to": year_to or None,
+            "since_retrieved_at": since_retrieved_at or None,
+        },
         "caveat": DOCUMENT_SEARCH_CAVEAT,
     }
