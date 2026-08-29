@@ -300,6 +300,36 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-relationship-detail"
+           data-route="relationships/{relationship_id}"
+           data-route-pattern="relationships/(relationship:[0-9a-f]{64})">
+    <h3><code>/api/v1/relationships/{relationship_id}</code></h3>
+    <p>
+      One <code>AWARDED_TO</code> edge (a <code>relationship_id</code> from an
+      <code>edges</code> entry above), resolved to the authority and provider
+      it connects, plus a dated <code>timeline</code> of every contract notice
+      behind every edge between that same pair. It is the source events behind
+      one relationship — not a history of the working relationship, a measure
+      of its value or reliance, or evidence of organisational continuity.
+      Missing notice dates are left blank, never inferred.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>relationship_id</code></td><td>Required, in the path. A <code>relationship_id</code> from an <code>/api/v1/relationships</code> <code>edges</code> entry; anything that is not an <code>AWARDED_TO</code> edge is a 400.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>authority</code> and <code>provider</code> (name and
+      identifier each), <code>timeline</code> — one entry per edge with
+      <code>valid_from</code> / <code>valid_to</code>, <code>confidence</code>,
+      the source <code>notice</code> (id, title, value, buyer/supplier names,
+      published date, source URL, and a constructed <code>notice_web_url</code>)
+      or <code>null</code> where the notice is no longer held —
+      <code>edge_count</code> and <code>caveat</code>.
+    </p>
+  </article>
+
   <article class="apiroute" id="route-document_search" data-route="document_search">
     <h3><code>/api/v1/document_search</code></h3>
     <p>

@@ -162,6 +162,16 @@ CAVEATS = {
         "recorded — it says nothing about the sector, and everything about "
         "how much verification has been done."
     ),
+    "commissioning_relationship_timeline": (
+        "Each row is one contract notice that named this authority as buyer "
+        "and this provider as supplier, dated as the notice published it. "
+        "Missing dates are left blank, not inferred. The list is the source "
+        "events behind one relationship — not a history of the working "
+        "relationship itself, a measure of its value or reliance, or "
+        "evidence of organisational continuity between differently-named "
+        "entities. Only notices with an exact supplier-name match appear, "
+        "the same floor as the contracts page."
+    ),
     "commissioning_relationship": (
         "A line means a contract notice named this authority as buyer and "
         "this provider as supplier — a commissioning relationship, not a "
@@ -2950,6 +2960,121 @@ def _relationships_fallback(conn: sqlite3.Connection,
                         "canonical_name": name},
             "neighbours": [], "edges": [],
             "caveat": CAVEATS["commissioning_relationship"]}
+
+
+def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
+    """One `AWARDED_TO` edge, its two entities, and the dated contract notices
+    behind every edge between the same authority and provider (BETA-044).
+
+    Deterministic only. The edge is resolved to the authority/provider pair it
+    connects, then every `AWARDED_TO` edge between that pair is listed as a
+    timeline, each resolved back to its source notice through
+    `evidence_records.payload_sha256` — the same key the graph backfill wrote
+    it from. Nothing here manufactures a `REGISTERED_AS`, claim or signal
+    edge, and a missing notice date is left blank rather than inferred.
+    """
+    _public(["entities", "entity_identifiers", "entity_relationships",
+              "evidence_records", "contracts"])
+
+    if catalog.object_type(conn, "entity_relationships") != "table":
+        raise QueryError("The evidence graph is not built in this warehouse.")
+
+    edge = _one(conn, """
+        SELECT relationship_id, subject_entity_id, object_entity_id, predicate
+        FROM entity_relationships
+        WHERE relationship_id = :id AND predicate = 'AWARDED_TO'
+          AND derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        """, {"id": relationship_id})
+    if not edge:
+        raise QueryError(f"No AWARDED_TO relationship {relationship_id!r}.")
+
+    ends = _rows(conn, """
+        SELECT e.entity_id, e.entity_type, e.canonical_name
+        FROM entities e
+        WHERE e.entity_id IN (:a, :b)
+        """, {"a": edge["subject_entity_id"], "b": edge["object_entity_id"]})
+    by_id = {row["entity_id"]: row for row in ends}
+    subject = by_id.get(edge["subject_entity_id"], {})
+    obj = by_id.get(edge["object_entity_id"], {})
+    authority = subject if subject.get("entity_type") == "LOCAL_AUTHORITY" else obj
+    provider = obj if authority is subject else subject
+    if not authority or not provider:
+        raise QueryError(
+            f"Relationship {relationship_id!r} does not connect an authority "
+            "and a provider.")
+
+    def _identifier(entity_id: str, scheme: str) -> str | None:
+        row = _one(conn, "SELECT identifier_value FROM entity_identifiers "
+                          "WHERE entity_id = :id AND identifier_scheme = :s",
+                   {"id": entity_id, "s": scheme})
+        return row.get("identifier_value")
+
+    # Every AWARDED_TO edge between this exact pair, with the notice each was
+    # written from. LEFT JOIN so an edge whose notice is no longer in
+    # `contracts` still appears (dates come from the edge in that case).
+    timeline = _rows(conn, """
+        SELECT r.relationship_id, r.valid_from, r.valid_to, r.confidence,
+               ev.source_url AS evidence_source_url,
+               ev.retrieved_at AS evidence_retrieved_at,
+               ev.source_system,
+               c.notice_id, c.title, c.value_core, c.currency,
+               c.buyer_name, c.supplier_name_raw,
+               c.date_published, c.source_url AS notice_source_url,
+               c.retrieved_at AS notice_retrieved_at
+        FROM entity_relationships r
+        JOIN evidence_records ev ON ev.evidence_id = r.evidence_id
+        LEFT JOIN contracts c
+          ON c.payload_sha256 = ev.payload_sha256
+         AND c.source_system = ev.source_system
+        WHERE r.subject_entity_id = :subj AND r.object_entity_id = :obj
+          AND r.predicate = 'AWARDED_TO'
+          AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        ORDER BY COALESCE(r.valid_from, c.date_published) DESC NULLS LAST,
+                 r.relationship_id
+        """, {"subj": edge["subject_entity_id"], "obj": edge["object_entity_id"]})
+
+    events = []
+    for row in timeline:
+        events.append({
+            "relationship_id": row["relationship_id"],
+            "valid_from": row["valid_from"],
+            "valid_to": row["valid_to"],
+            "confidence": row["confidence"],
+            "notice": {
+                "notice_id": row["notice_id"],
+                "title": row["title"],
+                "value_core": row["value_core"],
+                "currency": row["currency"],
+                "buyer_name": row["buyer_name"],
+                "supplier_name_raw": row["supplier_name_raw"],
+                "date_published": row["date_published"],
+                "source_url": row["notice_source_url"],
+                "retrieved_at": row["notice_retrieved_at"],
+                "notice_web_url": notice_page_url(
+                    row["source_system"], row["notice_id"]),
+            } if row["notice_id"] else None,
+            "source_url": row["evidence_source_url"],
+            "retrieved_at": row["evidence_retrieved_at"],
+        })
+
+    return {
+        "relationship_id": relationship_id,
+        "predicate": "AWARDED_TO",
+        "authority": {
+            "entity_id": authority["entity_id"],
+            "name": authority["canonical_name"],
+            "ons_code": _identifier(authority["entity_id"], "ons_code"),
+        },
+        "provider": {
+            "entity_id": provider["entity_id"],
+            "name": provider["canonical_name"],
+            "provider_key": _identifier(
+                provider["entity_id"], "sectortrace_provider_key"),
+        },
+        "timeline": events,
+        "edge_count": len(events),
+        "caveat": CAVEATS["commissioning_relationship_timeline"],
+    }
 
 
 # --- geography map layers (W-19) ----------------------------------------------

@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-043. Current work: BETA-044. Next:
-  BETA-045.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-044. Current work: BETA-045. Next:
+  BETA-046.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,29 +271,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-044 | Commissioning-relationship detail and timeline
-  - promoted_from: NEXT on 2026-08-29 after BETA-043 completed
+- [IN_PROGRESS] BETA-045 | Provider comparison enhancements
+  - promoted_from: NEXT on 2026-08-29 after BETA-044 completed
   - started: 2026-08-29
   - priority: P2
   - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: graph/api/ui
-  - depends_on: BETA-039
-  - objective: Add a relationship-detail endpoint, drawer and dated timeline
-    for deterministic provider-to-authority `AWARDED_TO` contract edges already
-    present in the evidence graph.
-  - rationale: The relationship explorer shows connections but not the source
-    events behind them. A narrow deterministic timeline adds explanatory value
-    without inventing organisational continuity.
-  - suggested_first_action: Define the endpoint from existing awarded-contract
-    provenance only; omit missing dates and never manufacture `REGISTERED_AS`,
-    claim or signal edges.
-  - next_action: Add `GET /api/v1/relationships/{relationship_id}` reading the
-    `AWARDED_TO` edge, its two entities and the dated contract notices behind
-    it (from `contracts` via `evidence_records`), a relationships.js drawer
-    that opens on an edge, tests, `api.html` + `test_portal_isolation.py`.
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: api/providers/ui
+  - depends_on: BETA-039, BETA-043
+  - objective: Let readers compare two to four providers across clearly
+    separated Living Wage, latest gender pay gap, provider-pay and recent NHS
+    advert layers, while keeping the API well-defined for larger selections.
+  - rationale: Side-by-side evidence can reveal where follow-up is warranted,
+    but unlike measures must not be collapsed into a score, rank or synthetic
+    difference.
+  - suggested_first_action: Specify a structured JSON response/export that
+    preserves layer-specific units, dates and caveats; refuse flat CSV and add
+    tests prohibiting rankings, conversions, ratios and composite scores.
+  - next_action: Add `GET /api/v1/providers/compare?provider_key=…` (2–4
+    keys) returning a per-layer block (living_wage, gender_pay_gap,
+    provider_pay, nhs_jobs) with each layer's own units/dates/caveats and no
+    cross-layer arithmetic; a `compare.js`/providers view rendering the
+    layers side by side; tests forbidding rank/ratio/score/flat-CSV; wire
+    `api.html`, the `<noscript>` list and `test_portal_isolation.py`.
 
 ### BLOCKED
 
@@ -477,28 +479,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-045 | Provider comparison enhancements
-  - promoted_from: READY on 2026-08-29 after BETA-043 completed
-  - priority: P2
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: api/providers/ui
-  - depends_on: BETA-039, BETA-043
-  - objective: Let readers compare two to four providers across clearly
-    separated Living Wage, latest gender pay gap, provider-pay and recent NHS
-    advert layers, while keeping the API well-defined for larger selections.
-  - rationale: Side-by-side evidence can reveal where follow-up is warranted,
-    but unlike measures must not be collapsed into a score, rank or synthetic
-    difference.
-  - suggested_first_action: Specify a structured JSON response/export that
-    preserves layer-specific units, dates and caveats; refuse flat CSV and add
-    tests prohibiting rankings, conversions, ratios and composite scores.
-
-### READY
-
-- [READY] BETA-046 | Admin semantic-search workbench
+- [NEXT] BETA-046 | Admin semantic-search workbench
+  - promoted_from: READY on 2026-08-29 after BETA-044 completed
   - priority: P2
   - impact: 4
   - effort: 3
@@ -515,6 +497,8 @@ DONE
   - suggested_first_action: Browser-verify the existing admin API contract,
     then build a keyboard-accessible view that labels relevance and fallback
     behaviour without presenting either as evidence confidence.
+
+### READY
 
 - [READY] BETA-047 | Semantic claim review and gate dashboard
   - priority: P2
@@ -610,6 +594,65 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-044 | Commissioning-relationship detail and timeline
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: graph/api/ui
+  - depends_on: BETA-039
+  - objective: Add a relationship-detail endpoint, drawer and dated timeline
+    for deterministic provider-to-authority `AWARDED_TO` contract edges already
+    present in the evidence graph.
+  - result: New public route `GET /api/v1/relationships/{relationship_id}`
+    (`public_queries.relationship_detail`), pattern
+    `relationships/(relationship:[0-9a-f]{64})` — a `relationship_id` from an
+    `/api/v1/relationships` `edges` entry. It resolves the one edge to the
+    authority/provider pair it connects (400 if the id is not an
+    `AWARDED_TO` `SOURCE_FACT`/`DERIVED_RELATIONSHIP` edge, or does not join
+    an authority and a provider), then returns **every** `AWARDED_TO` edge
+    between that same pair as a dated `timeline`. Each timeline entry carries
+    the edge's `valid_from`/`valid_to`/`confidence` and the source `notice`
+    it was written from — resolved by joining `evidence_records.payload_sha256`
+    + `source_system` back to `contracts` (the exact key
+    `pipeline/graph/backfill.py` wrote the edge from), a `LEFT JOIN` so an
+    edge whose notice is no longer held still appears with `notice: null`.
+    The notice block is id/title/value/currency/buyer/supplier/published
+    date/source URL + a **constructed** `notice_web_url` via
+    `notice_urls.notice_page_url` (labelled as constructed in the UI). Order
+    is `COALESCE(valid_from, date_published) DESC NULLS LAST`; a missing date
+    stays `null`, never inferred. New `CAVEATS["commissioning_relationship_timeline"]`
+    spells out that this is source events, not a relationship history, a
+    value/reliance measure or evidence of organisational continuity.
+  - ui: `relationships.js` — the flat per-edge table is now grouped to one
+    row per authority/provider pair (Authority · Provider · matched-notice
+    count · a "Show N contract events" `<details>`). Opening it lazily fetches
+    `relationships/{id}` for any one of that pair's edges and renders the
+    pinned caveat + an ordered list of events (title, published date, notice
+    period, published value — shown raw when the currency is not GBP so
+    `gbp()`'s pound sign is never misapplied — supplier-as-named, OCDS
+    release link, constructed notice-page link, retrieval date). The id is
+    sent unencoded: `encodeURIComponent` turns the `:` into `%3A` and the
+    server route pattern then misses — caught in the browser.
+  - api-doc: `api.html` gains the `relationships/{relationship_id}` article
+    (with `data-route` / `data-route-pattern`). `PUBLIC_API_PATTERNS` in
+    `test_portal_isolation.py` updated. No `<noscript>` change — the block
+    lists base route names only and `relationships` is already there.
+  - validation: 4 new tests in `tests/test_web_relationships.py` — the dated
+    two-notice timeline with resolved authority/provider identifiers, the
+    "never infer a missing date" pin (a notice with no `date_published`
+    stays `null`), the unknown-id 400, and a `REGISTERED_AS` edge id
+    refused. `test_route_is_documented_and_frozen` extended to assert the new
+    pattern. Full offline suite green — **2697 passed, 109 skipped, 34
+    deselected, 0 failed**. `ruff check pipeline tests` clean.
+    Browser-verified against a seeded scratch SQLite warehouse (`graph
+    backfill` run): the grouped table renders, "Show N contract events"
+    lazy-loads the timeline with the caveat and five dated events, the
+    detail route returns 200 for a real id and 400 for `relationship:` +
+    64 zeros, zero console errors after the encode fix.
 
 - [DONE] BETA-043 | Public dataset catalogue
   - completed: 2026-08-29
@@ -2479,9 +2522,9 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Ranked, faceted document search | 5 | 4 | 4 | NEXT (BETA-041) |
 | P1 | Document evidence-context view | 5 | 3 | 4 | NEXT (BETA-042) |
 | P1 | Public dataset catalogue | 5 | 4 | 4 | DONE (BETA-043) |
-| P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | IN_PROGRESS (BETA-044) |
-| P2 | Provider comparison enhancements | 4 | 4 | 4 | NEXT (BETA-045) |
-| P2 | Admin semantic-search workbench | 4 | 3 | 5 | READY (BETA-046) |
+| P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | DONE (BETA-044) |
+| P2 | Provider comparison enhancements | 4 | 4 | 4 | IN_PROGRESS (BETA-045) |
+| P2 | Admin semantic-search workbench | 4 | 3 | 5 | NEXT (BETA-046) |
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | READY (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |

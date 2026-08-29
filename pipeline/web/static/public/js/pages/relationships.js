@@ -17,9 +17,10 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, typeaheadKeyboard } from '/app.js';
+import { el, replace, fetchJSON, typeaheadKeyboard, isoDate, gbp, num,
+          sourceLink } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
-          provenance, shareButton } from '/js/components.js';
+          shareButton } from '/js/components.js';
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
@@ -222,24 +223,93 @@ function renderRelationships(container, data, charts) {
 
   // The citable record. A force diagram has no accessible text equivalent,
   // and "everything is citable" applies to a relationship exactly as it
-  // does to every other figure in this portal.
+  // does to every other figure in this portal. Edges are grouped to one row
+  // per authority/provider pair; each row expands to the dated contract
+  // notices behind it (BETA-044), loaded from /api/v1/relationships/{id}.
+  const pairs = new Map();
+  for (const e of edges) {
+    const subject = byId.get(e.subject_entity_id);
+    const object = byId.get(e.object_entity_id);
+    const authority = subject?.entity_type === 'PROVIDER' ? object : subject;
+    const provider = subject?.entity_type === 'PROVIDER' ? subject : object;
+    const key = `${authority?.entity_id}|${provider?.entity_id}`;
+    if (!pairs.has(key)) {
+      pairs.set(key, { authority, provider, edges: [] });
+    }
+    pairs.get(key).edges.push(e);
+  }
+
   replace(tableWrap, el('table', { class: 'small' },
     el('thead', {}, el('tr', {},
       el('th', { text: 'Authority' }), el('th', { text: 'Provider' }),
-      el('th', { text: 'Contract period' }), el('th', { text: 'Source' }))),
-    el('tbody', {}, edges.map((e) => {
-      const subject = byId.get(e.subject_entity_id);
-      const object = byId.get(e.object_entity_id);
-      const authority = subject?.entity_type === 'PROVIDER' ? object : subject;
-      const provider = subject?.entity_type === 'PROVIDER' ? subject : object;
-      return el('tr', {},
-        el('td', { text: authority?.canonical_name || '—' }),
-        el('td', { text: provider?.canonical_name || '—' }),
-        el('td', { class: 'small muted',
-          text: [e.valid_from, e.valid_to].filter(Boolean).join(' – ') || '—' }),
-        el('td', {}, provenance({
-          sources: [e.source_url], retrievedAt: e.retrieved_at,
-          module: 'm01_procurement', tables: ['contracts', 'entity_relationships'],
-        })));
-    }))));
+      el('th', { text: 'Matched notices' }), el('th', { text: 'Source events' }))),
+    el('tbody', {}, [...pairs.values()].map((pair) => el('tr', {},
+      el('td', { text: pair.authority?.canonical_name || '—' }),
+      el('td', { text: pair.provider?.canonical_name || '—' }),
+      el('td', { text: String(pair.edges.length) }),
+      el('td', {}, timelineExpander(pair)))))));
+}
+
+/* Lazily loads the dated notice timeline for one authority/provider pair.
+ * The endpoint takes any one of the pair's edge ids and returns every edge
+ * between the same two entities, each resolved back to its source notice. */
+function timelineExpander(pair) {
+  const anchor = pair.edges[0];
+  if (!anchor?.relationship_id) return el('span', { class: 'small muted', text: '—' });
+  const body = el('div', { class: 'rel-timeline' });
+  let loaded = false;
+  const details = el('details', {},
+    el('summary', { class: 'small',
+      text: `Show ${pair.edges.length} contract event${pair.edges.length === 1 ? '' : 's'}` }),
+    body);
+  details.addEventListener('toggle', async () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    body.replaceChildren(el('div', { class: 'shimmer' }));
+    let data;
+    try {
+      // The id is `relationship:<64 hex>` — every character is URL-safe in a
+      // path segment, and encoding the colon to %3A makes the server's route
+      // pattern miss.
+      data = await fetchJSON(`relationships/${anchor.relationship_id}`);
+    } catch (error) {
+      loaded = false;
+      body.replaceChildren(errorCard(error.message, () => { details.open = false; }));
+      return;
+    }
+    body.replaceChildren(
+      pinnedCaveat(data.caveat, 'Read before citing this timeline'),
+      el('ol', { class: 'rel-events' },
+        ...(data.timeline || []).map((event) => renderEvent(event))));
+  });
+  return details;
+}
+
+function renderEvent(event) {
+  const notice = event.notice || {};
+  const period = [event.valid_from, event.valid_to].filter(Boolean).join(' – ');
+  // gbp() assumes GBP; a notice in another currency is shown raw rather than
+  // relabelled with a pound sign it does not carry.
+  const value = notice.value_core == null ? null
+    : (!notice.currency || notice.currency === 'GBP')
+      ? gbp(notice.value_core)
+      : `${num(notice.value_core)} ${notice.currency}`;
+  return el('li', {},
+    el('div', { class: 'row wrap', style: 'justify-content:space-between;gap:8px;' },
+      el('strong', { text: notice.title || notice.notice_id || 'Contract notice' }),
+      el('span', { class: 'small muted',
+        text: notice.date_published ? isoDate(notice.date_published) : '' })),
+    el('p', { class: 'small muted',
+      text: [
+        period ? `notice period ${period}` : null,
+        value ? `published value ${value}` : null,
+        notice.supplier_name_raw ? `supplier as named: ${notice.supplier_name_raw}` : null,
+      ].filter(Boolean).join(' · ') }),
+    el('div', { class: 'row wrap', style: 'gap:8px;' },
+      notice.source_url ? sourceLink(notice.source_url, 'OCDS release') : null,
+      notice.notice_web_url
+        ? sourceLink(notice.notice_web_url, 'Notice page (constructed)') : null,
+      event.retrieved_at
+        ? el('span', { class: 'small muted', text: `retrieved ${isoDate(event.retrieved_at)}` })
+        : null));
 }

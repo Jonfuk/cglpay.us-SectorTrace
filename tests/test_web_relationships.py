@@ -214,5 +214,105 @@ def test_route_is_documented_and_frozen():
     """See tests/test_portal_isolation.py for the full frozen-surface pins;
     this is a quick sanity check that the route this file exercises is one
     of them, not a route this file invented ad hoc."""
-    from tests.test_portal_isolation import PUBLIC_API_ROUTES
+    from tests.test_portal_isolation import PUBLIC_API_PATTERNS, PUBLIC_API_ROUTES
     assert "relationships" in PUBLIC_API_ROUTES
+    assert r"relationships/(relationship:[0-9a-f]{64})" in PUBLIC_API_PATTERNS
+
+
+# --- BETA-044: relationship detail and dated timeline ----------------------
+
+
+@pytest.fixture
+def timeline_client(warehouse, settings):
+    """The base warehouse plus a second Birmingham -> Change Grow Live notice,
+    so the timeline behind the pair has two dated events, not one."""
+    warehouse.execute(
+        "INSERT INTO contracts (notice_id, supplier_id, ocid, buyer_ons_code, "
+        " supplier_name_raw, title, value_core, currency, date_start, date_end, "
+        " date_published, source_url, retrieved_at, http_status, source_system, "
+        " payload_sha256) "
+        "VALUES ('notice-2', 'supplier-1', 'ocid-2', ?, 'Change Grow Live Ltd', "
+        " 'Adult treatment and recovery service', 2500000, 'GBP', '2022-01-01', "
+        " '2023-12-31', '2021-11-15', 'https://find-a-tender.example/n2', "
+        " '2026-08-02T00:00:00Z', 200, 'fts', 'contract-hash-2')",
+        (BIRMINGHAM,))
+    warehouse.commit()
+    seed_existing_evidence(warehouse)
+    server = build_server(settings, host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}",
+                           timeout=10.0) as http:
+            yield http
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _an_awarded_edge_id(client) -> str:
+    edges = client.get(f"/api/v1/relationships?ons_code={BIRMINGHAM}").json()["edges"]
+    assert edges, "fixture produced no AWARDED_TO edge"
+    return edges[0]["relationship_id"]
+
+
+def test_relationship_detail_lists_every_dated_notice_behind_the_pair(timeline_client):
+    detail = timeline_client.get(
+        f"/api/v1/relationships/{_an_awarded_edge_id(timeline_client)}").json()
+
+    assert detail["predicate"] == "AWARDED_TO"
+    assert detail["authority"] == {
+        "entity_id": f"authority:{BIRMINGHAM}", "name": "Birmingham",
+        "ons_code": BIRMINGHAM}
+    assert detail["provider"]["name"] == "Change Grow Live"
+    assert detail["provider"]["provider_key"] == "change-grow-live"
+
+    # Both notices for the pair, newest first by notice/edge date.
+    assert detail["edge_count"] == 2
+    assert [e["valid_from"] for e in detail["timeline"]] == \
+        ["2024-01-01", "2022-01-01"]
+    older = detail["timeline"][1]["notice"]
+    assert older["title"] == "Adult treatment and recovery service"
+    assert older["value_core"] == 2500000
+    assert older["date_published"] == "2021-11-15"
+    assert detail["caveat"]
+
+
+def test_relationship_detail_never_infers_a_missing_date(timeline_client):
+    detail = timeline_client.get(
+        f"/api/v1/relationships/{_an_awarded_edge_id(timeline_client)}").json()
+    # notice-1 in the base fixture has no date_published; it is left null,
+    # not backfilled from the edge or a sibling notice.
+    newer = detail["timeline"][0]
+    assert newer["notice"]["notice_id"] == "notice-1"
+    assert newer["notice"]["date_published"] is None
+
+
+def test_relationship_detail_rejects_an_unknown_id(client):
+    response = client.get(f"/api/v1/relationships/relationship:{'0' * 64}")
+    assert response.status_code == 400
+
+
+def test_relationship_detail_rejects_a_non_awarded_edge(warehouse, settings):
+    edge_id = f"relationship:{'a' * 64}"
+    warehouse.execute(
+        "INSERT INTO entities (entity_id, entity_type, canonical_name, "
+        " canonical_name_normalized, created_at, updated_at) "
+        "VALUES ('company:00000009', 'LEGAL_ENTITY', 'Example Ltd', "
+        " 'example ltd', 'now', 'now')")
+    warehouse.execute(
+        "INSERT INTO entity_relationships (relationship_id, subject_entity_id, "
+        " predicate, object_entity_id, relationship_type, confidence, "
+        " derivation_type, created_at, updated_at) "
+        "VALUES (?, 'provider:change-grow-live', 'REGISTERED_AS', "
+        " 'company:00000009', 'REGISTERED_AS', 1.0, 'SOURCE_FACT', 'now', 'now')",
+        (edge_id,))
+    warehouse.commit()
+
+    ro = queries.readonly_connection(settings)
+    try:
+        with pytest.raises(queries.QueryError):
+            public_queries.relationship_detail(ro, edge_id)
+    finally:
+        ro.close()

@@ -103,6 +103,7 @@ PUBLIC_API_PATTERNS = {
     r"authorities/([A-Z][0-9]{8})",
     r"documents/([A-Za-z0-9_-]{1,80})",
     r"catalogue/([a-z0-9-]{1,64})",
+    r"relationships/(relationship:[0-9a-f]{64})",
 }
 
 # Published under /api/v1/ and dispatched before the table above, so it is not

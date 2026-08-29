@@ -1358,6 +1358,12 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return public_queries.catalogue_detail(conn, match.group(1))
 
+        # One AWARDED_TO edge and the dated contract notices behind every edge
+        # between the same authority and provider (BETA-044).
+        match = re.fullmatch(r"relationships/(relationship:[0-9a-f]{64})", route)
+        if match:
+            return public_queries.relationship_detail(conn, match.group(1))
+
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:
             return public_queries.provider_timeline(conn, match.group(1))
