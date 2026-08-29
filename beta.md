@@ -535,6 +535,51 @@ when the programme is started.)_
 
 ### DONE
 
+- [DONE] BETA-112 | Single-turn assistant API and CLI
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/assistant
+  - depends_on: BETA-108–111
+  - objective: `POST /api/admin/assistant` and `pipeline nlp assistant` for one
+    question plus optional source-system, publication-date and result-limit
+    filters; return answer, citations, tool, model identities, timings,
+    outcome and the finding-aid caveat.
+  - result: New `pipeline/assistant/service.py::ask(conn, settings, question,
+    …)` — one orchestration function both entry points call, so neither can
+    bypass the schema, confidence, citation or provenance checks. It
+    `require_enabled`s, routes once (BETA-110), executes at most one tool
+    (BETA-109), grounds one answer (BETA-111), records exactly one immutable
+    `assistant_runs` row (BETA-108) and returns a single domain payload
+    (`outcome`, `answer`, `citations`, `clarification`, `tool`,
+    `routing_confidence`, `models`, `filters`, `timings_ms`, `run_id`,
+    `caveat`). One `ROUTER_TIMEOUT_SECONDS` short leg and a 30-second overall
+    ceiling, both fail-closed; every failure resolves to
+    `unavailable`/`clarified`/`abstained`/`timeout`/`failed`, never a 500.
+    Filters are folded into the tool arguments only where the chosen tool's
+    schema has that field. New `_assistant_ask` POST handler in
+    `pipeline/web/server.py`: 404 when `assistant_enabled` is false (absent,
+    not merely erroring), reuses the existing admin-enabled + same-origin
+    write guards, `degrade.preflight(conn, "assistant_runs")`, one read-only
+    call. `GET /api/admin/assistant` still returns the BETA-107 status. New
+    `assistant_runs` requirement in `pipeline/web/degrade.py` (min_migration
+    79). New `pipeline nlp assistant` CLI, same payload.
+  - api/ui: additive `POST /api/admin/assistant` (admin-only, absent when the
+    layer is disabled, never under `/api/v1`). New CLI `pipeline nlp
+    assistant`. No new static assets.
+  - validation: New `tests/test_assistant_service.py` (9 — a disabled layer
+    returns `unavailable` and writes no ledger row; a clarification is
+    recorded and returned; a full turn records `selected_tool` + timings; a
+    dead router degrades to `unavailable` with a ledger row; only one tool
+    runs per turn even when the router reply names a second; the POST route is
+    404 when disabled, runs a turn and degrades to `unavailable` without the
+    runtimes while `GET` still reports status, and rejects an empty question).
+    `test_web_admin` / `test_portal_isolation` / `test_cli` green; `ruff`
+    clean.
+
 - [DONE] BETA-111 | LFM grounded answers and citation validation
   - completed: 2026-08-29
   - priority: P1
@@ -5792,7 +5837,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | DONE (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | DONE (BETA-110) |
 | P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | DONE (BETA-111) |
-| P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | APPROVED, not queued (BETA-112) |
+| P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | DONE (BETA-112) |
 | P1 | Assistant evaluation and release gate | 5 | 5 | 4 | APPROVED, not queued (BETA-113) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work

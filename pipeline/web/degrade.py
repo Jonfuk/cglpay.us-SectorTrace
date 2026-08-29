@@ -141,6 +141,11 @@ REQUIREMENTS: dict[str, Requirement] = {
         extensions=("vector",),
         label="Semantic search",
     ),
+    "assistant_runs": Requirement(
+        min_migration=79,
+        tables=("assistant_runs",),
+        label="Assistant run ledger",
+    ),
 }
 
 

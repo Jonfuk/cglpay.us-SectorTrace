@@ -631,6 +631,35 @@ def nlp_search(
         conn.close()
 
 
+@nlp_app.command("assistant")
+def nlp_assistant(
+    question: str = typer.Argument(..., help="One analyst question"),
+    source_system: str = typer.Option(None, help="Restrict retrieval to one evidence source_system"),
+    date_from: str = typer.Option(None, help="Earliest publication date (YYYY-MM-DD)"),
+    date_to: str = typer.Option(None, help="Latest publication date (YYYY-MM-DD)"),
+    limit: int = typer.Option(None, min=1, max=20, help="Max passages/rows the tool may return"),
+) -> None:
+    """Ask the optional local analyst assistant one question (BETA-112).
+
+    Off unless `assistant_enabled` and the `[assistant]` extra plus the local
+    runtimes are present; otherwise this prints an explicit `unavailable`
+    outcome. One read-only tool call only. Same orchestration as
+    `POST /api/admin/assistant` — the CLI cannot bypass any check.
+    """
+    from pipeline.assistant import service
+
+    conn, settings = _document_connection()
+    try:
+        result = service.ask(
+            conn, settings, question, source_system=source_system,
+            date_from=date_from, date_to=date_to, limit=limit)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if result["outcome"] not in ("ok", "clarified", "abstained"):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
 @nlp_app.command("eval-retrieval")
 def nlp_eval_retrieval(
     queries: Path = typer.Option(

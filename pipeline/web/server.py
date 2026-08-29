@@ -1880,6 +1880,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/aliases/decide": self._decide_alias,
             "/api/admin/qc-sample/draw": self._qc_draw,
             "/api/admin/qc-finding": self._qc_finding,
+            "/api/admin/assistant": self._assistant_ask,
         }
 
     def _qc_draw(self, body: dict) -> Any:
@@ -1923,6 +1924,41 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
         log.info("web.qc_finding_appended", finding_id=result["finding_id"])
+        return result
+
+    def _assistant_ask(self, body: dict) -> Any:
+        """One single-turn question for the optional local analyst assistant
+        (BETA-112). Absent unless `assistant_enabled`; one read-only tool call
+        only; short router timeout and a 30-second overall ceiling; degrades to
+        an explicit unavailable / clarify / abstain outcome rather than a 500.
+        Never appears under `/api/v1`.
+        """
+        from pipeline.assistant.runtime import is_enabled
+
+        if not is_enabled(self.settings):
+            # "Absent when assistant support is disabled" — a 404, the same
+            # shape the whole /api/admin surface uses when admin_ui is off.
+            raise ApiError("No route for POST /api/admin/assistant", status=404)
+
+        question = str(body.get("question", "")).strip()
+        if not question:
+            raise ApiError("A 'question' is required.", status=400)
+
+        conn = db.get_connection(self.settings)
+        try:
+            degrade.preflight(conn, "assistant_runs")
+            from pipeline.assistant import service
+            result = service.ask(
+                conn, self.settings, question,
+                source_system=body.get("source_system") or None,
+                date_from=body.get("date_from") or None,
+                date_to=body.get("date_to") or None,
+                limit=int(body["limit"]) if str(body.get("limit") or "").strip()
+                else None)
+        finally:
+            conn.close()
+        log.info("web.assistant_ask", outcome=result["outcome"],
+                  tool=result.get("tool"), run_id=result.get("run_id"))
         return result
 
     def _decide_alias(self, body: dict) -> Any:
