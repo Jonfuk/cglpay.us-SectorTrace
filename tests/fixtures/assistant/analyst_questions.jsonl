@@ -6,7 +6,7 @@
 {"id": "g02", "question": "Do any papers link the public health grant reduction to service pressure?", "expect": "answer", "notes": "search"}
 {"id": "g03", "question": "Which evidence type has the weakest coverage across responsible authorities?", "expect": "answer", "notes": "coverage"}
 {"id": "g04", "question": "How many claim candidates assert pay concern, and how many are affirmed?", "expect": "answer", "notes": "candidates"}
-{"id": "g05", "question": "Is the 034G gate ready for the recruitment_pressure category?", "expect": "answer", "notes": "gate"}
+{"id": "g05", "question": "Is the 034G gate ready for the vacancy_pressure category?", "expect": "answer", "notes": "gate"}
 {"id": "g06", "question": "How stale is the contracts evidence?", "expect": "answer", "notes": "freshness"}
 {"id": "g07", "question": "What is blocking claim-classifier training right now?", "expect": "answer", "notes": "gate"}
 {"id": "g08", "question": "Find documents describing staff leaving for better paid NHS posts.", "expect": "answer", "notes": "search"}
@@ -29,7 +29,7 @@
 {"id": "g25", "question": "Count negated claim candidates for high caseload.", "expect": "answer", "notes": "candidates"}
 {"id": "g26", "question": "Search for text on unfilled prescriber posts.", "expect": "answer", "notes": "search"}
 {"id": "g27", "question": "How fresh is the workforce census metrics data?", "expect": "answer", "notes": "freshness"}
-{"id": "g28", "question": "Does pay_concern have enough spread across providers and years for training?", "expect": "answer", "notes": "gate"}
+{"id": "g28", "question": "Does cost_pressure have enough spread across providers and years for training?", "expect": "answer", "notes": "gate"}
 {"id": "g29", "question": "Break authority coverage down by region.", "expect": "answer", "notes": "coverage"}
 {"id": "g30", "question": "Find documents mentioning a recommissioning of the community drug service.", "expect": "answer", "notes": "search"}
 {"id": "g31", "question": "How many claim candidates came from committee papers versus partnership documents?", "expect": "answer", "notes": "candidates"}

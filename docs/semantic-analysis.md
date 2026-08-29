@@ -334,8 +334,10 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
 
 034G (SetFit) is gated, and the gate is measurable. `pipeline nlp gate-034g`
 (`pipeline/nlp/gate.py`) reads `claim_candidate_decisions` and reports, per
-classifier category (`recruitment_pressure`, `pay_concern`, `high_caseload`,
-`funding_reduction`, `access_problem`): decided positive / negative counts,
+classifier category (`vacancy_pressure`, `agency_reliance`, `tupe_transfer`,
+`funding_reduction`, `cost_pressure`, `waiting_time` — redrawn after the first
+full cycle around the predicates the corpus actually produced in volume; see
+the comment on `GATE_CATEGORIES`): decided positive / negative counts,
 source-system / distinct-subject / year spread, inter-reviewer agreement on
 double-reviewed items, and a `blocking` list of exactly what is short. It
 exits non-zero until every condition holds. A *positive* is an `approved`

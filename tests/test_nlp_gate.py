@@ -31,22 +31,22 @@ def _doc(conn, settings, evidence_id, source_system, provider_name, published_ye
     conn.execute("UPDATE document_records SET published_at = ? WHERE document_id = ?",
                  (f"{published_year}-06-01", document_id))
     parsed = ParsedDocument("fixture", "1", [
-        ParsedElement("HEADING", 1, text="Workforce", page_number=1, heading_level=1),
-        ParsedElement("PARAGRAPH", 2, text=f"{provider_name} is struggling to recruit recovery "
-                      "workers across the drug and alcohol service.",
+        ParsedElement("HEADING", 1, text="Finance", page_number=1, heading_level=1),
+        ParsedElement("PARAGRAPH", 2, text=f"{provider_name} had a public health grant "
+                      "reduction of £900,000 this year.",
                       parent_sequence=1, page_number=1),
     ])
     repository.persist_parse(conn, document_id, parsed, "cfg", None, "GOOD", {}, [], settings)
 
 
-def _recruitment_candidate(conn, evidence_id):
+def _funding_candidate(conn, evidence_id):
     return conn.execute(
         "SELECT c.claim_candidate_id FROM document_claim_candidates c "
         "JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id "
         "JOIN document_versions v ON v.document_version_id = dc.document_version_id "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE c.predicate = 'workforce.has_recruitment_pressure' AND e.evidence_id = ?",
+        "WHERE c.predicate = 'finance.has_funding_reduction' AND e.evidence_id = ?",
         (evidence_id,)).fetchone()
 
 
@@ -54,7 +54,7 @@ def test_empty_warehouse_reports_not_ready_with_no_examples(conn, settings):
     report = gate.check(conn)
     assert report["ready"] is False
     assert report["n_decisions"] == 0
-    rec = report["categories"]["recruitment_pressure"]
+    rec = report["categories"]["funding_reduction"]
     assert rec["positive"] == 0 and rec["negative"] == 0
     assert any("positives 0" in s for s in rec["shortfalls"])
 
@@ -75,9 +75,9 @@ def test_counts_positives_negatives_and_diversity(conn, settings):
     resolve.run(conn)
     relations.run(conn)
 
-    ca = _recruitment_candidate(conn, "eva")
-    cb = _recruitment_candidate(conn, "evb")
-    cc = _recruitment_candidate(conn, "evc")
+    ca = _funding_candidate(conn, "eva")
+    cb = _funding_candidate(conn, "evb")
+    cc = _funding_candidate(conn, "evc")
     assert ca and cb and cc
     decisions.decide(conn, ca["claim_candidate_id"], "approved", "Reviewer A")
     decisions.decide(conn, cb["claim_candidate_id"], "approved", "Reviewer A")
@@ -87,15 +87,15 @@ def test_counts_positives_negatives_and_diversity(conn, settings):
     report = gate.check(conn, min_per_class=1, heldout_per_class=0,
                         min_source_systems=1, min_subjects=1, min_years=1,
                         min_double_reviewed=1)
-    rec = report["categories"]["recruitment_pressure"]
+    rec = report["categories"]["funding_reduction"]
     assert rec["positive"] == 2 and rec["negative"] == 1
     assert set(rec["source_systems"]) == {"committee_paper_promotion", "cdp_document_promotion"}
     assert rec["distinct_subjects"] == 2
     assert set(rec["years"]) == {"2021", "2022", "2023"}
-    # still not ready: other four categories have no examples, and no
+    # still not ready: the other five categories have no examples, and no
     # double-reviewed items.
     assert report["ready"] is False
-    assert any("pay_concern" in b for b in report["blocking"])
+    assert any("cost_pressure" in b for b in report["blocking"])
     assert report["inter_reviewer"]["double_reviewed"] == 0
 
 
@@ -107,17 +107,17 @@ def test_corrected_decision_moves_the_example_between_categories(conn, settings)
     nlp_context.run(conn)
     resolve.run(conn)
     relations.run(conn)
-    cand = _recruitment_candidate(conn, "evx")
+    cand = _funding_candidate(conn, "evx")
     decisions.decide(conn, cand["claim_candidate_id"], "corrected", "Reviewer A",
-                     corrected_predicate="workforce.has_retention_pressure")
+                     corrected_predicate="finance.has_savings_target")
 
     report = gate.check(conn, min_per_class=1, heldout_per_class=0)
-    # negative for recruitment_pressure (corrected away)…
-    assert report["categories"]["recruitment_pressure"]["negative"] == 1
-    assert report["categories"]["recruitment_pressure"]["positive"] == 0
-    # retention_pressure is not one of the five gate categories, so it does
-    # not appear — the correction still counts as a recruitment negative.
-    assert "retention_pressure" not in report["categories"]
+    # negative for funding_reduction (corrected away)…
+    assert report["categories"]["funding_reduction"]["negative"] == 1
+    assert report["categories"]["funding_reduction"]["positive"] == 0
+    # savings_target is not one of the gate categories, so it does not
+    # appear — the correction still counts as a funding_reduction negative.
+    assert "savings_target" not in report["categories"]
 
 
 def test_inter_reviewer_agreement_is_reported(conn, settings):
@@ -128,7 +128,7 @@ def test_inter_reviewer_agreement_is_reported(conn, settings):
     nlp_context.run(conn)
     resolve.run(conn)
     relations.run(conn)
-    cand = _recruitment_candidate(conn, "evy")["claim_candidate_id"]
+    cand = _funding_candidate(conn, "evy")["claim_candidate_id"]
     decisions.decide(conn, cand, "approved", "Reviewer A")
     decisions.decide(conn, cand, "rejected", "Reviewer B")
 

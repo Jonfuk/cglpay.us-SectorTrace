@@ -26,14 +26,34 @@ another -- that is the point of capturing corrections.
 """
 from __future__ import annotations
 
-# category -> the relations.yml predicate it classifies. The plan's five;
-# edit here, not in the SQL.
+# category -> the relations.yml predicate it classifies. Edit here, not in the
+# SQL.
+#
+# These six are not the plan's original five. The original set
+# (recruitment_pressure, pay_concern, high_caseload, funding_reduction,
+# access_problem) was chosen before any extraction had run. After one full NLP
+# cycle the counts are in, and three of those five cannot reach the gate's
+# per-class floor no matter how the review pass goes -- the corpus simply does
+# not contain 65 affirmed candidates for them (pay_concern 21, high_caseload 6,
+# recruitment_pressure 44). access_problem's predicate
+# (service.has_access_pressure) is never emitted at all; the signal lands as
+# service.reports_waiting_time.
+#
+# A gate that can never go green reports nothing useful. This set is redrawn
+# around the predicates the one completed cycle actually produced in volume,
+# keeping the original's "adverse condition, not a process event" character
+# (so commissioning.is_recommissioning, the single largest bucket at ~1k, is
+# deliberately left out -- it is churn, not a pressure claim a pay-campaign
+# classifier needs). funding_reduction survives from the original set on
+# 117 affirmed; it and cost_pressure have the thinnest easy-negative pools
+# (~44 and ~36 non-affirmed) and will lean on review rejections to reach 65.
 GATE_CATEGORIES: dict[str, str] = {
-    "recruitment_pressure": "workforce.has_recruitment_pressure",
-    "pay_concern": "workforce.has_pay_concern",
-    "high_caseload": "workforce.has_high_caseload",
+    "vacancy_pressure": "workforce.has_vacancy_pressure",
+    "agency_reliance": "workforce.relies_on_agency",
+    "tupe_transfer": "workforce.undergoes_tupe",
     "funding_reduction": "finance.has_funding_reduction",
-    "access_problem": "service.has_access_pressure",
+    "cost_pressure": "finance.has_cost_pressure",
+    "waiting_time": "service.reports_waiting_time",
 }
 
 MIN_PER_CLASS = 50

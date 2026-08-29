@@ -115,8 +115,8 @@ def test_gate_report_is_the_readonly_034g_check(client):
     gate = client.get("/api/admin/claim-gate").json()
     assert gate["ready"] is False           # a single fixture cannot pass it
     assert set(gate["categories"]) == {
-        "recruitment_pressure", "pay_concern", "high_caseload",
-        "funding_reduction", "access_problem"}
+        "vacancy_pressure", "agency_reliance", "tupe_transfer",
+        "funding_reduction", "cost_pressure", "waiting_time"}
     assert gate["blocking"]
 
 

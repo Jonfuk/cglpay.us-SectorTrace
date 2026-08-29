@@ -93,10 +93,10 @@ def test_retrieved_text_is_delimited_as_untrusted_data(settings):
 
 def test_aggregate_tool_identifiers_resolve_as_aggregates(settings):
     env = {"tool": "inspect_claim_gate",
-           "result_ids": ["pay_concern", "high_caseload"],
-           "data": {"categories": {"pay_concern": {}, "high_caseload": {}}}}
-    fake = FakeLFM("The pay_concern category is not ready [[pay_concern]].")
-    out = grounding.answer("is pay_concern ready?", env, settings=settings,
+           "result_ids": ["vacancy_pressure", "cost_pressure"],
+           "data": {"categories": {"vacancy_pressure": {}, "cost_pressure": {}}}}
+    fake = FakeLFM("The vacancy_pressure category is not ready [[vacancy_pressure]].")
+    out = grounding.answer("is vacancy_pressure ready?", env, settings=settings,
                            conn=None, adapter=fake)
     assert out.outcome == "answered"
     assert out.citations[0]["kind"] == "aggregate"

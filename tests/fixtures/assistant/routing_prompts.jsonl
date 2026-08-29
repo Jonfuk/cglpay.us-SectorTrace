@@ -41,12 +41,12 @@
 {"id": "r037", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Are we ready to train the 034G claim classifiers yet?"}
 {"id": "r038", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "What is blocking the SetFit readiness gate right now?"}
 {"id": "r039", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "How many decided positive and negative examples do we have per category?"}
-{"id": "r040", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Does the pay-concern category have enough spread across providers and years?"}
+{"id": "r040", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Does the cost-pressure category have enough spread across providers and years?"}
 {"id": "r041", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is inter-reviewer agreement high enough to proceed with training?"}
 {"id": "r042", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Show the 034G gate status and its shortfalls by category."}
 {"id": "r043", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Which categories are gate-ready and which are not?"}
 {"id": "r044", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "How many double-reviewed claim candidates do we have?"}
-{"id": "r045", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is there room to carve a held-out eval set for the recruitment_pressure category?"}
+{"id": "r045", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is there room to carve a held-out eval set for the vacancy_pressure category?"}
 {"id": "r046", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Report on training readiness for the funding_reduction classifier."}
 {"id": "r047", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "How many responsible authorities have at least one contract on file?"}
 {"id": "r048", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "What is our evidence coverage across the upper-tier authorities?"}
