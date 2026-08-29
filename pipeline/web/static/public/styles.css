@@ -515,6 +515,11 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-079: safety & legal chronology. */
+.sl-chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-2) 0 var(--space-4); }
+.sl-relationship-key { margin: var(--space-3) 0; padding: var(--space-3); border-left: 3px solid var(--accent-amber); background: var(--caveat-bg, var(--bg-elevated)); }
+.sl-relationship-key p { margin: 0 0 var(--space-1); }
+
 /* BETA-078: unified evidence atlas — one layer at a time. */
 .atlas-layer-select { min-width: 240px; }
 .atlas-legend { margin: var(--space-2) 0; }

@@ -96,6 +96,7 @@ PUBLIC_API_ROUTES = {
     "layers",
     "atlas_layers",
     "pfd",
+    "safety_legal",
     "freshness",
     "claims",
     "relationships",

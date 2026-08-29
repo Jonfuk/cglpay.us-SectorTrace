@@ -1492,6 +1492,17 @@ class Handler(BaseHTTPRequestHandler):
             # HSE enforcement notices attributed to a tracked provider by
             # exact name match (BETA-051). Individuals excluded at collection.
             return public_queries.safety(conn)
+        if route == "safety_legal":
+            # One filterable chronology over PFD, SAR, HSE, tribunal and CQC
+            # evidence, each event carrying exactly one relationship label
+            # (BETA-079). Counts by source and by relationship, never summed.
+            return public_queries.safety_legal(
+                conn,
+                source=_str(params, "source") or None,
+                relationship=_str(params, "relationship") or None,
+                provider_key=_str(params, "provider_key") or None,
+                year_from=_str(params, "year_from") or None,
+                year_to=_str(params, "year_to") or None)
         if route == "cqc_locations":
             # BETA-065: tracked providers' CQC-registered locations, filtered
             # and paginated. Not a service map; a location count is not

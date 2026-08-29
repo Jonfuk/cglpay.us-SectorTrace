@@ -297,23 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-079 | Safety and legal evidence hub
+- [IN_PROGRESS] BETA-080 | Shared responsive design system
   - priority: P1
-  - impact: 5
+  - impact: 4
   - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: public/safety-legal
-  - depends_on: BETA-043, BETA-051, BETA-065
-  - objective: Bring PFD reports, safeguarding reviews, HSE notices, CQC
-    inspections and tribunal evidence into a filterable chronology with
-    source-specific caveats and sensitive-content treatment.
-  - next_action: Define distinct visual and data labels for "addressed to",
-    "named in", "matched to" and "regulated by"; never merge those counts or
-    imply culpability from a mention.
+  - confidence: 5
+  - risk: 2
+  - area: public/admin UI foundations
+  - depends_on: BETA-049
+  - objective: Consolidate spacing, typography, forms, buttons, cards,
+    disclosures, statuses, skeletons, focus states and breakpoints into
+    reusable primitives while preserving the two front ends' distinct
+    identities.
+  - next_action: Inventory existing CSS tokens/components and create a
+    migration map; change primitives incrementally with visual/browser
+    checks, not through a wholesale stylesheet rewrite.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–078 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–079 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -549,6 +550,57 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-079 | Safety and legal evidence hub
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: public/safety-legal
+  - depends_on: BETA-043, BETA-051, BETA-065
+  - objective: Bring PFD reports, safeguarding reviews, HSE notices, CQC
+    inspections and tribunal evidence into a filterable chronology with
+    source-specific caveats and sensitive-content treatment.
+  - result: New additive route `/api/v1/safety_legal`
+    (`public_queries.safety_legal`). One chronology composed from five
+    streams — `pfd_provider_mentions` (recipient → **addressed_to**,
+    body_text → **named_in**), `sar_provider_mentions` (**named_in**, undated),
+    `hse_enforcement_notices` with a provider match (**matched_to**),
+    `tribunal_cases` with a provider (**named_in**), `cqc_locations` with an
+    inspection date (**regulated_by**). Each event carries exactly one of the
+    four relationship labels; `SAFETY_LEGAL_LABELS` explains each and states
+    that "a mention is not a finding, an allegation or a fault". `counts`
+    holds only `by_source` and `by_relationship` — **no total key anywhere**
+    — and the two are never added. Each stream's table is guarded so a
+    missing one is skipped. Filters: `source`, `relationship`,
+    `provider_key`, `year_from`/`year_to` (year bounds only touch dated
+    events). An HSE `result` is the register's own text (an appeal decision
+    or a withdrawal), never an inferred compliance outcome. Personal data
+    stays in the `restricted_` tables this does not read. The chronology is
+    capped at 2000 events with a `truncated` flag. `pfd.js` renders it as a
+    "Safety & legal chronology" section above the detailed per-source panels:
+    source and relationship filter chips with their counts, the four-label
+    key, per-source caveats (only the filtered source's caveat when one is
+    selected), and a dated table with the relationship column. Filter state
+    is in the hash (`#/pfd?source=hse`).
+  - api/ui: additive route `/api/v1/safety_legal` (source, relationship,
+    provider_key, year_from, year_to). Added to the OpenAPI doc,
+    `<noscript>` list, `api.html` and `test_portal_isolation`
+    `PUBLIC_API_ROUTES`. New CSS `.sl-chiprow`, `.sl-relationship-key`.
+  - validation: New `tests/test_web_safety_legal.py` (7 — events carry one
+    relationship label and the counts are never summed (no total key);
+    the four labels are explained and a mention is not a finding; each source
+    keeps its own caveat; source and relationship filters narrow the same
+    rows; the HSE result is the register's own text; year bounds only touch
+    dated events; the route is in the OpenAPI doc). `test_web_safety` /
+    `test_web_openapi` / `test_portal_isolation` / chart / offline-reading
+    suites green. `ruff` clean. Browser-verified: the chronology renders with
+    source chips (All · 1, HSE notices · 1, others · 0) and relationship
+    chips (Matched to · 1, others · 0) as **separate** counts; the four-label
+    key renders; clicking "HSE notices" filters the hash and narrows the
+    caveats to just HSE's.
 
 - [DONE] BETA-078 | Unified evidence atlas
   - completed: 2026-08-29
@@ -4220,8 +4272,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | DONE (BETA-076) |
 | P2 | Navigation continuity | 4 | 3 | 5 | DONE (BETA-077) |
 | P1 | Unified evidence atlas | 5 | 5 | 4 | DONE (BETA-078) |
-| P1 | Safety and legal evidence hub | 5 | 4 | 4 | IN_PROGRESS (BETA-079) |
-| P1 | Shared responsive design system | 4 | 4 | 5 | APPROVED, not queued (BETA-080) |
+| P1 | Safety and legal evidence hub | 5 | 4 | 4 | DONE (BETA-079) |
+| P1 | Shared responsive design system | 4 | 4 | 5 | IN_PROGRESS (BETA-080) |
 | P1 | Document reading room | 5 | 5 | 4 | APPROVED, not queued (BETA-081) |
 | P1 | Pipeline mission control | 5 | 5 | 4 | APPROVED, not queued (BETA-082) |
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-083) |

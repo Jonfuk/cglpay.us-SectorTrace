@@ -841,6 +841,37 @@
     <p><a href="/api/v1/safety"><code>/api/v1/safety</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-safety_legal" data-route="safety_legal">
+    <h3><code>/api/v1/safety_legal</code></h3>
+    <p>
+      One filterable chronology over five distinct accountability sources —
+      Prevention of Future Deaths reports, Safeguarding Adult Reviews, HSE
+      enforcement notices, employment-tribunal cases and CQC inspections. Each
+      event carries exactly one relationship label: <code>addressed_to</code>
+      (the document was sent to the organisation), <code>named_in</code> (the
+      organisation is mentioned — not a finding), <code>matched_to</code> (an
+      exact name match in a register) or <code>regulated_by</code> (a
+      registration/inspection record). The four are never summed and a mention
+      is never a finding of fault.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>source</code></td><td>pfd, sar, hse, tribunal or cqc.</td></tr>
+        <tr><td><code>relationship</code></td><td>addressed_to, named_in, matched_to or regulated_by.</td></tr>
+        <tr><td><code>provider_key</code></td><td>One tracked provider.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Bound the dated events.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code>, <code>counts</code> (by_source,
+      by_relationship — never a total), <code>labels</code>, <code>sources</code>,
+      <code>caveats</code> (one per source), <code>note</code>,
+      <code>truncated</code>.
+    </p>
+    <p><a href="/api/v1/safety_legal"><code>/api/v1/safety_legal</code></a></p>
+  </article>
+
   <article class="apiroute" id="route-cqc_locations" data-route="cqc_locations">
     <h3><code>/api/v1/cqc_locations</code></h3>
     <p>

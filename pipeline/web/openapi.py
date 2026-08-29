@@ -216,6 +216,18 @@ ROUTES: dict[str, dict] = {
                    "(exact name match; individuals excluded; result verbatim).",
         "parameters": [],
     },
+    "/api/v1/safety_legal": {
+        "surface": "safety_legal",
+        "summary": "One filterable chronology over PFD, SAR, HSE, tribunal and "
+                   "CQC evidence. Each event carries exactly one relationship "
+                   "label; counts by source and relationship, never summed.",
+        "parameters": [
+            _p("source", desc="pfd, sar, hse, tribunal or cqc."),
+            _p("relationship", desc="addressed_to, named_in, matched_to or "
+                                     "regulated_by."),
+            _p("provider_key"), _p("year_from"), _p("year_to"),
+        ],
+    },
     "/api/v1/cqc_locations": {
         "surface": "cqc_locations",
         "summary": "Tracked providers' CQC-registered locations, filtered and "

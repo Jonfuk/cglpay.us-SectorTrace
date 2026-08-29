@@ -2710,6 +2710,225 @@ def safety(conn: sqlite3.Connection) -> dict:
     }
 
 
+# --- safety and legal evidence hub (BETA-079) ---------------------------------
+#
+# Five distinct accountability sources on one filterable chronology. They
+# encode materially different relationships and standards, so each event is
+# tagged with exactly one of these — and the four are NEVER summed, NEVER
+# treated as interchangeable, and a mention is NEVER a finding of fault:
+#
+#   addressed_to  — the document was formally sent to this organisation
+#   named_in      — the organisation is mentioned in the source text
+#   matched_to    — attributed by an exact name match in a public register
+#   regulated_by  — the organisation holds a registration/inspection record
+#
+SAFETY_LEGAL_LABELS = {
+    "addressed_to": "Addressed to — the source document was formally sent to "
+                    "this organisation.",
+    "named_in": "Named in — this organisation is mentioned in the source text. "
+                "A mention is not a finding, an allegation or a fault.",
+    "matched_to": "Matched to — attributed by an exact match of the "
+                  "organisation's name in a public register.",
+    "regulated_by": "Regulated by — this organisation holds a registration or "
+                    "inspection record with the regulator.",
+}
+
+SAFETY_LEGAL_SOURCES = ("pfd", "sar", "hse", "tribunal", "cqc")
+
+_SAFETY_LEGAL_MAX = 2000
+
+
+def safety_legal(conn: sqlite3.Connection, *, source=None, relationship=None,
+                  provider_key=None, year_from=None, year_to=None) -> dict:
+    """One filterable chronology over PFD reports, Safeguarding Adult Reviews,
+    HSE notices, employment-tribunal cases and CQC inspections (BETA-079).
+
+    Each event carries exactly one relationship label; the per-source and
+    per-relationship counts are returned separately and are never added
+    together. Personal data stays in the `restricted_` tables this does not
+    read.
+    """
+    _public(["pfd_reports", "pfd_provider_mentions", "sar_documents",
+              "sar_provider_mentions", "hse_enforcement_notices",
+              "tribunal_cases", "cqc_locations", "providers"])
+
+    present = {obj["name"] for obj in catalog.list_objects(conn)}
+    events: list[dict] = []
+
+    def keep(row: dict) -> None:
+        events.append(row)
+
+    if {"pfd_reports", "pfd_provider_mentions"} <= present:
+        for r in _rows(conn, """
+            SELECT m.mention_type, m.matched_name, m.provider_key,
+                   p.canonical_name, r.report_date, r.report_ref, r.report_url,
+                   r.coroner_area, r.source_url
+            FROM pfd_provider_mentions m
+            JOIN pfd_reports r ON r.report_ref = m.report_ref
+            LEFT JOIN providers p ON p.provider_key = m.provider_key
+            ORDER BY r.report_date DESC NULLS LAST"""):
+            keep({
+                "source": "pfd",
+                "relationship": "addressed_to"
+                    if r["mention_type"] == "recipient" else "named_in",
+                "date": r["report_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["matched_name"],
+                "entity_type": "provider",
+                "title": f"Prevention of Future Deaths report {r['report_ref']}",
+                "detail": f"Coroner area: {r['coroner_area'] or 'not recorded'}",
+                "result": None,
+                "source_url": r["report_url"] or r["source_url"],
+            })
+
+    if {"sar_documents", "sar_provider_mentions"} <= present:
+        for r in _rows(conn, """
+            SELECT m.matched_name, m.provider_key, p.canonical_name,
+                   d.document_url, d.sab_name, d.library_year
+            FROM sar_provider_mentions m
+            JOIN sar_documents d ON d.document_url = m.document_url
+            LEFT JOIN providers p ON p.provider_key = m.provider_key"""):
+            keep({
+                "source": "sar",
+                "relationship": "named_in",
+                "date": None,
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["matched_name"],
+                "entity_type": "provider",
+                "title": "Safeguarding Adult Review"
+                         + (f" — {r['sab_name']}" if r["sab_name"] else ""),
+                "detail": "National SAR Library"
+                          + (f", library year {r['library_year']}"
+                             if r["library_year"] else "")
+                          + "; no structured report date is published.",
+                "result": None,
+                "source_url": r["document_url"],
+            })
+
+    if "hse_enforcement_notices" in present:
+        for r in _rows(conn, """
+            SELECT h.notice_number, h.provider_key, p.canonical_name,
+                   h.recipient_name, h.notice_type, h.issue_date, h.result,
+                   h.source_url
+            FROM hse_enforcement_notices h
+            LEFT JOIN providers p ON p.provider_key = h.provider_key
+            WHERE h.provider_key IS NOT NULL
+            ORDER BY h.issue_date DESC NULLS LAST"""):
+            keep({
+                "source": "hse",
+                "relationship": "matched_to",
+                "date": r["issue_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["recipient_name"],
+                "entity_type": "provider",
+                "title": f"HSE {r['notice_type'] or 'enforcement'} notice {r['notice_number']}",
+                "detail": "Register text as published.",
+                # The published result may be an appeal decision or a
+                # withdrawal — it travels with the notice, never inferred.
+                "result": r["result"],
+                "source_url": r["source_url"],
+            })
+
+    if "tribunal_cases" in present:
+        for r in _rows(conn, """
+            SELECT t.case_number, t.provider_key, p.canonical_name,
+                   t.respondent_normalised, t.decision_date, t.outcome,
+                   t.outcome_confidence, t.source_url
+            FROM tribunal_cases t
+            LEFT JOIN providers p ON p.provider_key = t.provider_key
+            WHERE t.provider_key IS NOT NULL
+            ORDER BY t.decision_date DESC NULLS LAST"""):
+            keep({
+                "source": "tribunal",
+                "relationship": "named_in",
+                "date": r["decision_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["respondent_normalised"],
+                "entity_type": "provider",
+                "title": f"Employment tribunal case {r['case_number']}",
+                "detail": "A case with this organisation as a party. The "
+                          "outcome and its confidence are the source's.",
+                "result": (f"{r['outcome']} ({r['outcome_confidence']} confidence)"
+                           if r["outcome"] else None),
+                "source_url": r["source_url"],
+            })
+
+    if "cqc_locations" in present:
+        for r in _rows(conn, """
+            SELECT c.location_id, c.provider_key, p.canonical_name,
+                   c.location_name, c.last_inspection_date, c.overall_rating,
+                   c.overall_rating_date, c.source_url
+            FROM cqc_locations c
+            LEFT JOIN providers p ON p.provider_key = c.provider_key
+            WHERE c.provider_key IS NOT NULL
+              AND (c.last_inspection_date IS NOT NULL
+                   OR c.overall_rating_date IS NOT NULL)
+            ORDER BY COALESCE(c.last_inspection_date, c.overall_rating_date) DESC"""):
+            keep({
+                "source": "cqc",
+                "relationship": "regulated_by",
+                "date": r["last_inspection_date"] or r["overall_rating_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"],
+                "entity_type": "provider",
+                "title": f"CQC inspection — {r['location_name']}",
+                "detail": "A regulated location's most recent inspection. "
+                          "CQC registration covers only some service types.",
+                "result": r["overall_rating"],
+                "source_url": r["source_url"],
+            })
+
+    def year_of(value: str | None) -> str:
+        return (value or "")[:4]
+
+    if source:
+        events = [e for e in events if e["source"] == source]
+    if relationship:
+        events = [e for e in events if e["relationship"] == relationship]
+    if provider_key:
+        events = [e for e in events if e["entity_key"] == provider_key]
+    if year_from:
+        events = [e for e in events
+                  if e["date"] and year_of(e["date"]) >= str(year_from)]
+    if year_to:
+        events = [e for e in events
+                  if e["date"] and year_of(e["date"]) <= str(year_to)]
+
+    # Dated first (newest first), then the undated (SAR) at the end.
+    events.sort(key=lambda e: (e["date"] or "", ), reverse=True)
+    truncated = len(events) > _SAFETY_LEGAL_MAX
+    events = events[:_SAFETY_LEGAL_MAX]
+
+    by_source: dict[str, int] = {}
+    by_relationship: dict[str, int] = {}
+    for e in events:
+        by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+        by_relationship[e["relationship"]] = \
+            by_relationship.get(e["relationship"], 0) + 1
+
+    return {
+        "events": events,
+        "truncated": truncated,
+        "counts": {"by_source": by_source, "by_relationship": by_relationship},
+        "labels": SAFETY_LEGAL_LABELS,
+        "sources": list(SAFETY_LEGAL_SOURCES),
+        "caveats": {
+            "pfd": CAVEATS["pfd_mentions"],
+            "sar": "SAR reports carry no structured date or excerpt; this "
+                   "stream is a finding aid to the National SAR Library.",
+            "hse": CAVEATS["hse_notices"],
+            "tribunal": "A tribunal case names an organisation as a party. It "
+                        "is not a finding against a named provider unless the "
+                        "decision itself says so.",
+            "cqc": "CQC registration covers only some service types; most "
+                   "community drug and alcohol provision is not CQC-registered.",
+        },
+        "note": "Five distinct evidence streams. Their counts are shown by "
+                "source and by relationship and are never added together. A "
+                "mention is never a finding of fault.",
+    }
+
+
 # The exact columns the CQC-location explorer publishes. An allowlist, not a
 # `SELECT *`: `cqc_locations` carries no personal data (registered managers
 # are in `restricted_cqc_location_contacts`, a separate table), but naming
