@@ -515,6 +515,123 @@ async function loadRunComparison() {
             text: 'The two runs touched no modules in common.' })))));
 }
 
+/* BETA-102: the pipeline & data-lineage graph — one typed graph over the
+ * module registry, the dataset catalogue, the live foreign keys and the
+ * export tab registry. Every edge is derived. Read-only, fetched once and
+ * explored in the DOM (no vendored graph library, no canvas). */
+const LIN_STATE = { graph: null, kinds: new Set(['source', 'module', 'table', 'export']), q: '', focus: null };
+const LIN_REL_IN = {
+  collected_by: 'collected by', depends_on: 'depended on by',
+  writes: 'written by', references: 'referenced by', exported_by: 'reads',
+};
+const LIN_REL_OUT = {
+  collected_by: 'feeds', depends_on: 'depends on', writes: 'writes',
+  references: 'references', exported_by: 'exported by',
+};
+
+function linKindBadge(kind) {
+  return el('span', { class: `badge ${kind === 'module' ? 'approved'
+    : kind === 'source' ? 'type' : kind === 'export' ? 'pending' : 'muted'}`, text: kind });
+}
+
+function linRenderList() {
+  const holder = $('lineage-list');
+  if (!holder || !LIN_STATE.graph) return;
+  const q = LIN_STATE.q.toLowerCase();
+  const nodes = LIN_STATE.graph.nodes.filter((n) =>
+    LIN_STATE.kinds.has(n.kind) && (!q || n.label.toLowerCase().includes(q)));
+  holder.replaceChildren(el('ul', { class: 'lin-nodes' },
+    ...nodes.slice(0, 400).map((n) => el('li', {
+      class: n.id === LIN_STATE.focus ? 'is-focus' : '',
+      onclick: () => { LIN_STATE.focus = n.id; linRenderList(); linRenderDetail(); },
+    }, linKindBadge(n.kind), el('span', { class: 'mono small', text: ` ${n.label}` }),
+      n.consumer_count
+        ? el('span', { class: 'muted small', text: ` ·${n.consumer_count} consumer${n.consumer_count === 1 ? '' : 's'}` })
+        : null)),
+    nodes.length > 400 ? el('li', { class: 'muted small', text: `+${nodes.length - 400} more — narrow the search` }) : null));
+}
+
+function linRenderDetail() {
+  const holder = $('lineage-detail');
+  const g = LIN_STATE.graph;
+  if (!holder || !g) return;
+  const node = g.nodes.find((n) => n.id === LIN_STATE.focus);
+  if (!node) { holder.replaceChildren(el('span', { class: 'muted small', text: 'Pick a node.' })); return; }
+
+  const label = (id) => (g.nodes.find((n) => n.id === id) || {}).label || id.split(':').pop();
+  const link = (id) => el('a', { href: '#', class: 'linklike',
+    onclick: (e) => { e.preventDefault(); LIN_STATE.focus = id; linRenderList(); linRenderDetail(); } },
+    label(id));
+
+  const outs = g.edges.filter((e) => e.source === node.id);
+  const ins = g.edges.filter((e) => e.target === node.id);
+  const group = (edges, dir) => {
+    const byRel = {};
+    for (const e of edges) (byRel[e.rel] ??= []).push(dir === 'out' ? e.target : e.source);
+    return Object.entries(byRel).map(([rel, ids]) => el('div', { class: 'lin-rel' },
+      el('span', { class: 'lin-rel-label', text: (dir === 'out' ? LIN_REL_OUT : LIN_REL_IN)[rel] || rel }),
+      el('span', {}, ...ids.map((id, i) => el('span', {}, i ? ', ' : '', link(id))))));
+  };
+
+  const facts = [];
+  if (node.kind === 'module') {
+    facts.push(`wave ${node.wave ?? '—'}`);
+    if (node.last_run) facts.push(`last run ${node.last_run.status}${node.last_run.rows != null ? ` · ${node.last_run.rows} rows` : ''}`);
+    else facts.push('never run in the ledger window');
+    if (node.pending_review) facts.push(`${node.pending_review} pending review`);
+    if (node.parse_failures) facts.push(`${node.parse_failures} parse failures`);
+    if (node.missing_dependencies?.length) facts.push(`missing deps: ${node.missing_dependencies.join(', ')}`);
+  } else if (node.kind === 'table') {
+    facts.push(node.present ? `${node.rows ?? '?'} rows` : 'not in this schema');
+    if (node.restricted) facts.push('restricted_ — never on the portal');
+  } else if (node.kind === 'source') {
+    facts.push(node.publisher);
+    facts.push(`cadence: ${node.cadence}`);
+    if (node.licence) facts.push(`licence: ${node.licence}`);
+  } else if (node.kind === 'export') {
+    facts.push(node.description);
+    facts.push(`${node.columns} columns`);
+  }
+
+  holder.replaceChildren(...[
+    el('div', { class: 'lin-detail-head' }, linKindBadge(node.kind),
+      el('strong', { class: 'mono', text: ` ${node.label}` })),
+    el('p', { class: 'muted small', text: facts.filter(Boolean).join(' · ') }),
+    node.kind === 'source' && node.official_url
+      ? el('p', { class: 'small' }, el('a', { href: node.official_url, target: '_blank', rel: 'noopener', text: node.official_url }))
+      : null,
+    ins.length ? el('div', { class: 'lin-dir' }, el('h4', { class: 'small', text: 'Upstream / consumers' }), ...group(ins, 'in')) : null,
+    outs.length ? el('div', { class: 'lin-dir' }, el('h4', { class: 'small', text: 'Downstream' }), ...group(outs, 'out')) : null,
+    el('p', { class: 'muted small', text: g.note }),
+  ].filter(Boolean));
+}
+
+async function loadLineage() {
+  const holder = $('lineage-list');
+  if (!holder || LIN_STATE.graph) return;
+  let data;
+  try { data = await api('/api/admin/lineage'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'muted small', text: 'Lineage unavailable.' })); return; }
+  LIN_STATE.graph = data;
+
+  const kindWrap = $('lin-kinds');
+  if (kindWrap && !kindWrap.dataset.filled) {
+    kindWrap.replaceChildren(...data.node_kinds.map((k) => {
+      const box = el('input', { type: 'checkbox', checked: true,
+        onchange: (e) => { e.target.checked ? LIN_STATE.kinds.add(k) : LIN_STATE.kinds.delete(k); linRenderList(); } });
+      return el('label', { class: 'small' }, box, ` ${k} (${data.counts.by_kind[k] || 0})`);
+    }));
+    kindWrap.dataset.filled = '1';
+  }
+  const search = $('lin-search');
+  if (search && !search.dataset.wired) {
+    search.addEventListener('input', () => { LIN_STATE.q = search.value; linRenderList(); });
+    search.dataset.wired = '1';
+  }
+  linRenderList();
+  linRenderDetail();
+}
+
 /* BETA-058: the durable run ledger — every module-run, whatever started it. */
 async function loadRunLedger() {
   const holder = $('run-ledger');
@@ -567,6 +684,10 @@ export function initPipeline() {
   for (const id of ['rc-a', 'rc-b']) {
     $(id)?.addEventListener('change', loadRunComparison);
   }
+  // BETA-102: fetch the lineage graph the first time its panel is opened.
+  $('lineage-panel')?.addEventListener('toggle', (event) => {
+    if (event.target.open) loadLineage();
+  });
 
   document.addEventListener('tabshown', (event) => {
     if (event.detail.tab !== 'pipeline') return;
@@ -574,6 +695,7 @@ export function initPipeline() {
     loadHistory();
     loadMissionControl();
     loadRunComparison();
+    if ($('lineage-panel')?.open) loadLineage();
   });
 
   // app.js is a classic script and has already routed the opening hash by the

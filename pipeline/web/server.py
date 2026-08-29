@@ -1371,6 +1371,14 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import mission_control
             return mission_control.overview(conn, self.settings, self.jobs)
 
+        if path == "/api/admin/lineage":
+            # BETA-102: one typed graph over the module registry, the dataset
+            # catalogue, the live foreign keys and the export tab registry —
+            # source -> module -> table -> table -> export. Every edge is
+            # derived; none is hand-maintained. Read-only.
+            from pipeline.web import lineage
+            return lineage.graph(conn, self.settings)
+
         if path == "/api/admin/run-comparison":
             # BETA-101: a per-module diff between two runs — status, rows,
             # review items, failures, duration and freshness effect — derived

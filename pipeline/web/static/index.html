@@ -260,6 +260,22 @@
       <div id="run-comparison"></div>
     </div>
 
+    <!-- BETA-102: one typed graph over the module registry, the dataset
+         catalogue, the live foreign keys and the export tab registry —
+         source -> module -> table -> table -> export. Every edge is derived;
+         none is hand-maintained. Read-only. -->
+    <details class="panel" id="lineage-panel">
+      <summary><h2>Data lineage</h2></summary>
+      <div class="lin-controls">
+        <input id="lin-search" type="search" placeholder="search nodes…">
+        <span id="lin-kinds" class="lin-kinds"></span>
+      </div>
+      <div class="lin-split">
+        <div id="lineage-list"></div>
+        <div id="lineage-detail" class="muted small">Pick a node to see what feeds it and what it feeds.</div>
+      </div>
+    </details>
+
     <div class="split">
       <div class="panel">
         <h2>Modules</h2>

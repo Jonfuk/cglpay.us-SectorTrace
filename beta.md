@@ -297,25 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-102 | Interactive pipeline and data-lineage map
-  - priority: P1
-  - impact: 5
-  - effort: 5
+- [IN_PROGRESS] BETA-104 | Validation-rule explorer
+  - priority: P2
+  - impact: 4
+  - effort: 4
   - confidence: 4
-  - risk: 3
-  - area: admin/system understanding
-  - depends_on: BETA-043, BETA-058, BETA-067, BETA-082, BETA-083, BETA-085
-  - objective: Map modules, sources, archives, tables, entity links, APIs,
-    exports and public pages as searchable dependencies with health and
-    consumer details.
-  - next_action: Generate a read-only typed graph from the machine-owned
-    registries and migrations; forbid hand-maintained edges where a registry
-    can supply them.
+  - risk: 2
+  - area: admin/data quality
+  - depends_on: BETA-059, BETA-060, BETA-067, BETA-082, BETA-085
+  - objective: Catalogue validation rules with purpose, affected modules and
+    fields, recent pass/failure counts and protected representative failures.
+  - next_action: Add stable rule IDs and a read-only registry; redact
+    restricted values before any failure example reaches the browser.
 
 _(The first refinement programme BETA-068–087 is complete. The second
 programme BETA-088–106 is now in progress in its own approved wave order:
 wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090,
-BETA-091 and BETA-101 are complete, see DONE.)_
+BETA-091, BETA-101 and BETA-102 are complete, see DONE.)_
 
 ### BLOCKED
 
@@ -550,6 +548,64 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-102 | Interactive pipeline and data-lineage map
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: admin/system understanding
+  - depends_on: BETA-043, BETA-058, BETA-067, BETA-082, BETA-083, BETA-085
+  - objective: Map modules, sources, archives, tables, entity links, APIs,
+    exports and public pages as searchable dependencies with health and
+    consumer details.
+  - result: New `pipeline/web/lineage.py::graph(conn, settings)` — one typed
+    graph composed on the request from the machine-owned registries and the
+    live schema. **Every edge is derived; none is hand-maintained.** Node
+    kinds: `source` (dataset catalogue), `module` (`admin.modules` over the
+    registry — wave, pending review, parse failures, missing deps, plus last
+    recorded run status from the ledger), `table` (only tables actually named,
+    with live row counts and a `restricted` flag), `export`
+    (`exports/schema.py::TABS`). Edge kinds: `collected_by` (source→module),
+    `depends_on` (module→module, from `MODULE_META`), `writes` (module→table,
+    from `datasets.py` `public_tables`), `references` (table→table, from
+    `catalog.foreign_key_columns` — the live foreign keys), `exported_by`
+    (table→export, from a word-boundary `FROM`/`JOIN` scan of each
+    `TabSpec.sql`). Each node carries a `consumer_count` (incoming edges).
+    API routes and portal pages are **deliberately omitted** — the Python
+    side has no registry mapping one to the tables it reads without parsing
+    `public_queries` — and the payload's `omitted` list says so rather than
+    the graph guessing. New additive admin route `/api/admin/lineage`
+    (network-trust-gated, read-only, writes nothing).
+  - api/ui: additive `/api/admin/lineage`. New collapsed "Data lineage" panel
+    on the pipeline tab (`<details id="lineage-panel">`) — a search box, node-
+    kind checkboxes with counts, a scrollable node list (kind badge +
+    consumer count), and a detail pane that shows a node's facts (module run
+    health / table rows / source publisher+licence / export description) and
+    its upstream and downstream edges grouped by relationship, each target a
+    link that re-focuses the pane. `loadLineage()` in `pipeline.js`, fetched
+    once when the panel is first opened — the graph is registry-derived and
+    does not change between runs, so it is not polled. `styles.css` gained a
+    `.lin-*` block; no vendored graph library, no canvas — a DOM list and a
+    detail pane, the offline-safe "table equivalent" the earlier items kept.
+  - validation: New `tests/test_web_lineage.py` (6 — the graph is typed and
+    every edge lands on a declared node of a declared kind; the
+    source→module→table chain is present for `public-health-grant` and the
+    module node carries its registry facts; every `catalog.foreign_key_columns`
+    row appears as a `references` edge between two `table:` nodes; every
+    `exported_by` edge targets a `TABS` entry and `authorities` feeds
+    `01_Authorities`; two calls create no tables; the HTTP route serves the
+    graph). `ruff` clean; `test_web_admin` / `test_admin_navigation` /
+    `test_web_schema_graph` / `test_web_mission_control` green. Browser-
+    verified on the admin pipeline tab: the panel lists 189 nodes
+    (34 source / 34 module / 110 table / 11 export) with kind filters;
+    searching "m11_public_health" and selecting the module shows "wave 2 ·
+    never run in the ledger window", upstream "collected by Public health
+    grant allocations", downstream "depends on m00_geography" and "writes
+    public_health_grants"; selecting `authorities` shows "referenced by" its
+    eight FK children and "exported by 01_Authorities, 02_Public_Health_Grant".
 
 - [DONE] BETA-101 | Run-to-run output comparison
   - completed: 2026-08-29
@@ -4806,9 +4862,9 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
-| P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | IN_PROGRESS (BETA-102) |
+| P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
-| P2 | Validation-rule explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-104) |
+| P2 | Validation-rule explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |

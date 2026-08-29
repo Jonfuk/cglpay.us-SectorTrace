@@ -692,3 +692,23 @@ a.jump:hover { border-bottom-style: solid; }
 .rc-change-removed, .rc-change-regressed { color: var(--bad, #d9534f); }
 .rc-delta-pos::before { content: "+"; }
 td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* BETA-102: data-lineage explorer. A DOM list and a detail pane — no canvas,
+ * no vendored graph library. The graph is fetched once and filtered here. */
+#lineage-panel > summary { cursor: pointer; }
+#lineage-panel > summary h2 { display: inline; }
+.lin-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; }
+.lin-controls #lin-search { min-width: 220px; }
+.lin-kinds { display: flex; flex-wrap: wrap; gap: 10px; }
+.lin-kinds label { display: inline-flex; align-items: center; gap: 3px; }
+.lin-split { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .lin-split { grid-template-columns: minmax(240px, 320px) 1fr; align-items: start; } }
+.lin-nodes { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.lin-nodes li { padding: 3px 8px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.lin-nodes li:hover { background: var(--bg-elevated, rgba(127,127,127,0.08)); }
+.lin-nodes li.is-focus { background: var(--bg-elevated, rgba(127,127,127,0.14)); font-weight: 600; }
+.lin-detail-head { margin-bottom: 4px; }
+.lin-dir { margin-top: 10px; }
+.lin-dir h4 { margin: 0 0 4px; }
+.lin-rel { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; font-size: 13px; }
+.lin-rel-label { color: var(--muted); min-width: 120px; }
