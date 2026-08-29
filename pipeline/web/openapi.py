@@ -164,7 +164,15 @@ ROUTES: dict[str, dict] = {
     "/api/v1/pay": {
         "surface": "pay",
         "summary": "The campaign's central pay evidence, every figure caveated.",
-        "parameters": [_p("provider_key"), _p("year_from"), _p("year_to")],
+        "parameters": [
+            _p("provider_key"), _p("year_from"), _p("year_to"),
+            _p("role", desc="Case-insensitive substring on each source's role "
+                            "text. Narrows rows; combines nothing."),
+            _p("source", desc="One source group: indicative_wage, "
+                              "advertised_roles, published_statutory, "
+                              "workforce_census, external_comparators."),
+            _p("pay_unit", desc="hourly, annual or other."),
+        ],
     },
     "/api/v1/council_spend": {
         "surface": "council_spend",

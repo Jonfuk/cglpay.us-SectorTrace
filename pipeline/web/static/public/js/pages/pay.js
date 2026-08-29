@@ -13,6 +13,89 @@ import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
           truncate, shareButton, findingBlock, evidenceMeta, revealOnScroll } from '/js/components.js';
 
+/* BETA-070 workforce pay explorer.
+ *
+ * The page already grouped pay evidence into source-specific panels; this adds
+ * a control strip that narrows those panels by source group, role text and pay
+ * unit, with the state carried in the hash query so a filtered view is a link.
+ * It combines nothing: `source` picks exactly one group to show, `role` is a
+ * substring match per source, `pay_unit` keeps rows explicitly carrying that
+ * unit. Counts on the chips are the server's post-filter `source_groups`
+ * index, not a figure to quote. */
+
+const EXPLORER_KEYS = ['source', 'role', 'pay_unit'];
+
+function readExplorer(params) {
+  const q = params || new URLSearchParams(location.hash.split('?')[1] || '');
+  return {
+    source: q.get('source') || '',
+    role: q.get('role') || '',
+    pay_unit: q.get('pay_unit') || '',
+  };
+}
+
+function setExplorer(patch) {
+  const q = new URLSearchParams(location.hash.split('?')[1] || '');
+  for (const [k, v] of Object.entries(patch)) {
+    if (v) q.set(k, v); else q.delete(k);
+  }
+  const query = q.toString();
+  location.hash = `#/pay${query ? `?${query}` : ''}`;
+}
+
+function explorerStrip(data, current) {
+  const groups = data.source_groups || [];
+  const avail = data.filters_available || { roles: [], pay_units: [] };
+  const total = groups.reduce((n, g) => n + (g.count || 0), 0);
+
+  const chip = (key, label, count, active) => el('button', {
+    type: 'button',
+    class: `filter-chip${active ? ' is-active' : ''}`,
+    'aria-pressed': String(active),
+    onclick: () => setExplorer({ source: key }),
+  }, `${label} · ${num(count)}`);
+
+  const roleList = el('datalist', { id: 'pay-role-options' },
+    ...(avail.roles || []).map((r) => el('option', { value: r })));
+
+  const roleInput = el('input', {
+    type: 'search', list: 'pay-role-options', value: current.role,
+    placeholder: 'Any role', 'aria-label': 'Filter by role text',
+    onchange: (e) => setExplorer({ role: e.target.value.trim() }),
+  });
+
+  const unitSelect = el('select', {
+    'aria-label': 'Pay unit',
+    onchange: (e) => setExplorer({ pay_unit: e.target.value }),
+  },
+    el('option', { value: '', text: 'Any pay unit' }),
+    ...(avail.pay_units || []).map((u) =>
+      el('option', { value: u, text: u[0].toUpperCase() + u.slice(1), selected: current.pay_unit === u })));
+
+  const activeBits = [];
+  if (current.source) {
+    const g = groups.find((x) => x.key === current.source);
+    activeBits.push(`Source: ${g ? g.label : current.source}`);
+  }
+  if (current.role) activeBits.push(`Role: ${current.role}`);
+  if (current.pay_unit) activeBits.push(`Unit: ${current.pay_unit}`);
+
+  return el('div', { class: 'pay-explorer', role: 'region', 'aria-label': 'Pay evidence explorer' },
+    el('div', { class: 'pay-explorer-groups' },
+      chip('', 'All sources', total, !current.source),
+      ...groups.map((g) => chip(g.key, g.label, g.count, current.source === g.key))),
+    el('div', { class: 'pay-explorer-fields' },
+      el('label', {}, 'Role ', roleInput), roleList,
+      el('label', {}, 'Unit ', unitSelect),
+      activeBits.length
+        ? el('button', { type: 'button', class: 'filter-clear',
+            onclick: () => setExplorer({ source: '', role: '', pay_unit: '' }) }, 'Clear explorer')
+        : null),
+    activeBits.length
+      ? el('p', { class: 'small muted', text: `Showing ${activeBits.join(' · ')}. Sources are never combined.` })
+      : null);
+}
+
 function takeaway(status, statusClass, text) {
   return el('div', { class: 'takeaway' },
     el('span', { class: 'badge ' + statusClass, text: status }),
@@ -24,15 +107,20 @@ function scrollToLayer(id) {
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-export async function render(main) {
+export async function render(main, { params = null } = {}) {
   const charts = [];
+  const explorer = readExplorer(params);
   let data;
   try {
-    data = await fetchJSON('pay', filterParams());
+    data = await fetchJSON('pay', { ...filterParams(), ...explorer });
   } catch (error) {
-    replace(main, errorCard(error, () => render(main)));
+    replace(main, errorCard(error, () => render(main, { params })));
     return () => {};
   }
+  // When a single source group is selected the page shows only that group's
+  // section — "focused", the word in the objective. `null` shows all four.
+  const only = explorer.source || null;
+  const show = (id) => !only || only === id;
 
   const page = el('div', {},
     el('div', { class: 'hero hero-animated' },
@@ -50,6 +138,7 @@ export async function render(main) {
         el('button', { type: 'button', onclick: () => scrollToLayer('adverts') }, 'Advertised roles'),
         el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
         el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
+    explorerStrip(data, explorer),
     (() => {
       const meta = evidenceMeta(data);
       return findingBlock({
@@ -65,19 +154,49 @@ export async function render(main) {
       el('summary', { text: 'How to read pay evidence' }),
       el('p', { text: 'Charity accounts provide an indicative wage measure; NHS Jobs records advertised vacancies; provider pages record what an organisation published; statutory rates are legal hourly floors.' }),
       el('p', { text: 'None is payroll data. Labour-market benchmarks provide context only, and the portal does not calculate gaps, ratios, or a combined trend from unlike sources.' })),
-    el('div', { id: 'wage' }),
-    el('div', { id: 'adverts' }),
-    el('div', { id: 'published-pay' }),
-    el('div', { id: 'benchmarks' }));
+    show('indicative_wage') ? el('div', { id: 'wage' }) : null,
+    show('advertised_roles') ? el('div', { id: 'adverts' }) : null,
+    show('published_statutory') ? el('div', { id: 'published-pay' }) : null,
+    show('external_comparators') ? el('div', { id: 'benchmarks' }) : null,
+    only === 'workforce_census' ? el('div', { id: 'census' }) : null,
+    only && !['indicative_wage', 'advertised_roles', 'published_statutory',
+             'external_comparators', 'workforce_census'].includes(only)
+      ? el('p', { class: 'small muted', text: 'Unknown source group.' }) : null);
   replace(main, page);
 
-  renderWage(page.querySelector('#wage'), data, charts);
-  renderAdverts(page.querySelector('#adverts'), data, charts);
-  renderPublishedPay(page.querySelector('#published-pay'), data, charts);
-  renderBenchmarks(page.querySelector('#benchmarks'), data);
+  if (show('indicative_wage')) renderWage(page.querySelector('#wage'), data, charts);
+  if (show('advertised_roles')) renderAdverts(page.querySelector('#adverts'), data, charts);
+  if (show('published_statutory')) renderPublishedPay(page.querySelector('#published-pay'), data, charts);
+  if (show('external_comparators')) renderBenchmarks(page.querySelector('#benchmarks'), data);
+  if (only === 'workforce_census') renderCensus(page.querySelector('#census'), data);
 
   revealOnScroll(page);
   return () => disposeCharts(charts);
+}
+
+// --- workforce census (BETA-070: was fetched but unrendered on this page) ---
+
+function renderCensus(container, data) {
+  const rows = data.workforce_census || [];
+  const note = data.census_all_unverified
+    ? data.caveats?.census_unverified_note
+    : (data.census_verified_count < data.census_total
+        ? data.caveats?.census_partly_verified_note
+        : data.caveats?.census_comparability_note);
+  replace(container, section(
+    'Workforce census measures',
+    'Published workforce metrics (vacancy, turnover and similar) as recorded '
+    + 'by the source. Segments and years are not differenced or combined.',
+    pinnedCaveat(note, 'How to read the census'),
+    rows.length ? tableCard('Workforce census', [
+      { title: 'Year', field: 'census_year' },
+      { title: 'Metric', field: 'metric' },
+      { title: 'Segment', field: 'workforce_segment' },
+      { title: 'Value', field: 'value' },
+      { title: 'Unit', field: 'unit' },
+      { title: 'Verified', field: 'verified', formatter: (c) => c.getValue() ? 'yes' : 'not checked' },
+    ], rows, { height: 320 }) : noData('workforce census metrics', './start.sh run m06_workforce_census'),
+    provenanceFromRows(rows, { tables: ['workforce_census_metrics'], module: 'm06_workforce_census' })));
 }
 
 // --- 2c. provider-published and statutory pay evidence ---------------------

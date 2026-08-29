@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-070 | Workforce pay explorer
+- [IN_PROGRESS] BETA-071 | Responsive public data tables
   - priority: P1
   - impact: 5
   - effort: 4
   - confidence: 4
-  - risk: 3
-  - area: public/workforce
-  - depends_on: BETA-043, BETA-049
-  - objective: Create one focused interface for salary bands, statutory
-    benchmarks, workforce census measures, provider pay pages, job adverts,
-    gender-pay-gap filings and Living Wage evidence, filtered by role,
-    provider, source, year and pay unit.
-  - next_action: Inventory the exact fields, units, coverage and caveats of
-    each pay source and define explicit source-group panels before composing
-    any cross-source screen.
+  - risk: 2
+  - area: public/tables
+  - depends_on: BETA-049, BETA-080
+  - objective: Give every public table a mobile card mode, priority columns,
+    column chooser, density control, sticky identifiers and explicit
+    full-table mode while retaining complete accessible tabular data and
+    exports.
+  - next_action: Extend the shared table component with declarative priority
+    metadata, then migrate one narrow and one very wide table as the contract
+    tests.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–069 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–070 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -550,6 +550,55 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-070 | Workforce pay explorer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/workforce
+  - depends_on: BETA-043, BETA-049
+  - objective: Create one focused interface for salary bands, statutory
+    benchmarks, workforce census measures, provider pay pages, job adverts,
+    gender-pay-gap filings and Living Wage evidence, filtered by role,
+    provider, source, year and pay unit.
+  - result: `/api/v1/pay` gains three additive, backward-compatible filter
+    params — `role` (case-insensitive substring against each source's own
+    role-text field), `source` (one closed `PAY_SOURCE_GROUPS` key), and
+    `pay_unit` (`hourly` / `annual` / `other`). They narrow the existing
+    per-source arrays in place; a `source` the reader excludes is emptied, not
+    removed, so the payload shape never changes. Nothing is joined, summed or
+    scored — `PAY_SOURCE_GROUPS` names each group's arrays, its role fields
+    and its legitimate units, and a `primary` subset so a derived chart
+    aggregate (`nhs_job_by_band`) does not inflate the group count. The
+    response now also carries `source_groups` (per-group label + post-filter
+    count + units, the explorer's index) and `filters_available` (the role
+    labels and units present at the current provider/year scope, computed
+    *before* the role filter so choosing a role does not empty its own
+    picker). `pay.js` renders a control strip above the existing layers:
+    source-group chips (All + five groups, each with its count), a role
+    `search`+`datalist` input, and a pay-unit select; state lives in the hash
+    query (`#/pay?source=…&role=…&pay_unit=…`) so a filtered view is a link,
+    and selecting one group shows only that section ("focused"). The
+    workforce-census layer — fetched by this endpoint but never rendered on
+    the page — now has a `renderCensus` panel, shown when its group is
+    selected.
+  - api/ui: additive params on `/api/v1/pay`; `source_groups` /
+    `filters_available` / `filters_applied` added to the response. OpenAPI
+    updated. New CSS: `.pay-explorer*`, `.filter-chip.is-active`.
+  - validation: New `tests/test_web_pay_explorer.py` (7 — baseline groups and
+    pickers; `source` shows one group and empties the rest without changing
+    the shape; `role` is a case-insensitive substring; `pay_unit` keeps only
+    rows carrying that unit; filters compose without introducing a
+    rate/ratio/score key; bad `source`/`pay_unit` raise `QueryError`; the role
+    picker is not shrunk by an active role filter). `test_web_public` /
+    `test_web_openapi` / `test_web_exports` green. `ruff` clean.
+    Browser-verified: the strip renders, chips/inputs update the hash and
+    re-render, a single-source view shows only its section, deep links
+    restore the exact filtered view, no console errors, no horizontal
+    overflow.
 
 - [DONE] BETA-069 | Rebuild the mobile public header
   - completed: 2026-08-29
@@ -3784,8 +3833,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | DONE (BETA-067) |
 | P1 | Release compatibility and graceful degradation | 5 | 3 | 5 | DONE (BETA-068) |
 | P1 | Mobile public-header rebuild | 5 | 3 | 5 | DONE (BETA-069) |
-| P1 | Workforce pay explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-070) |
-| P1 | Responsive public data tables | 5 | 4 | 4 | APPROVED, not queued (BETA-071) |
+| P1 | Workforce pay explorer | 5 | 4 | 4 | DONE (BETA-070) |
+| P1 | Responsive public data tables | 5 | 4 | 4 | IN_PROGRESS (BETA-071) |
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | APPROVED, not queued (BETA-072) |
 | P1 | My area context | 5 | 4 | 4 | APPROVED, not queued (BETA-073) |
 | P2 | Inspectable visualisations | 4 | 3 | 5 | APPROVED, not queued (BETA-074) |

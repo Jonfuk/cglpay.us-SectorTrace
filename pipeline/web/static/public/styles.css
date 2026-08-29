@@ -719,6 +719,15 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .filter-summary-label { color: var(--text-muted); font-size: 12px; }
 .filter-chip, .filter-clear { border: 1px solid var(--border-accent); border-radius: 999px; background: var(--bg-elevated); color: var(--text-primary); padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .filter-clear { background: transparent; color: var(--accent-teal); border-color: transparent; }
+.filter-chip.is-active { background: var(--accent-teal); color: #04121d; border-color: var(--accent-teal); }
+
+/* BETA-070 workforce pay explorer control strip. */
+.pay-explorer { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0 var(--space-6); padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
+.pay-explorer-groups { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pay-explorer-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.pay-explorer-fields label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-secondary); }
+.pay-explorer-fields input, .pay-explorer-fields select { min-width: 180px; }
+.pay-explorer > p { margin: 0; }
 
 @media (max-width: 1100px) {
   .topbar { gap: var(--space-3); }

@@ -1451,7 +1451,12 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 provider_key=_str(params, "provider_key") or None,
                 year_from=_str(params, "year_from") or None,
-                year_to=_str(params, "year_to") or None)
+                year_to=_str(params, "year_to") or None,
+                # BETA-070 workforce pay explorer: additive, backward-compatible
+                # narrowing. Omitted => the full multi-source payload as before.
+                role=_str(params, "role") or None,
+                source=_str(params, "source") or None,
+                pay_unit=_str(params, "pay_unit") or None)
         if route == "council_spend":
             return public_queries.council_spend(
                 conn,

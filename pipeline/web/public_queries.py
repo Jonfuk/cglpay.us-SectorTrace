@@ -1482,9 +1482,180 @@ def _median_value(conn, clause: str, params: dict) -> float | None:
 # --- pay ----------------------------------------------------------------------
 
 
+# The workforce pay explorer (BETA-070). A closed registry: each source group
+# names the response arrays it owns, the role-text field to match a `role`
+# filter against in each, and the pay units it can legitimately carry. The
+# groups are never summed or ranked against one another — this is an index
+# over unlike evidence, not a composite. `role`/`pay_unit`/`source` narrow
+# what is returned; they add nothing and combine nothing.
+PAY_SOURCE_GROUPS = {
+    "indicative_wage": {
+        "label": "Indicative wage",
+        # `arrays` is everything the group owns and every `source`/`role`/
+        # `pay_unit` filter narrows; `primary` is the discrete-evidence
+        # array(s) whose length the explorer's group count reports, so a
+        # derived chart aggregate does not inflate the number.
+        "arrays": ("charity_wage_series",),
+        "primary": ("charity_wage_series",),
+        "role_fields": {},                      # no role dimension
+        "units": ("per employee, per year",),
+    },
+    "advertised_roles": {
+        "label": "Advertised roles",
+        "arrays": ("nhs_job_adverts", "nhs_job_by_band", "repeat_advertised_roles"),
+        "primary": ("nhs_job_adverts",),
+        "role_fields": {
+            "nhs_job_adverts": ("job_title",),
+            "repeat_advertised_roles": ("job_title_normalised",),
+        },
+        "units": ("annual", "hourly"),
+    },
+    "published_statutory": {
+        "label": "Published & statutory pay",
+        "arrays": ("provider_published_pay", "statutory_pay_rates",
+                   "living_wage_accreditations", "gender_pay_gap_reports"),
+        "primary": ("provider_published_pay", "statutory_pay_rates",
+                    "living_wage_accreditations", "gender_pay_gap_reports"),
+        "role_fields": {
+            "provider_published_pay": ("section", "mention_text"),
+            "statutory_pay_rates": ("band_role", "band_label"),
+        },
+        "units": ("hourly", "percent"),
+    },
+    "workforce_census": {
+        "label": "Workforce census",
+        "arrays": ("workforce_census",),
+        "primary": ("workforce_census",),
+        "role_fields": {"workforce_census": ("workforce_segment", "metric")},
+        "units": ("varies by metric",),
+    },
+    "external_comparators": {
+        "label": "External comparators",
+        "arrays": ("ons_ashe_observations", "skills_for_care_estimates"),
+        "primary": ("ons_ashe_observations", "skills_for_care_estimates"),
+        "role_fields": {
+            "ons_ashe_observations": ("dimension_label",),
+            "skills_for_care_estimates": ("job_role", "job_role_group"),
+        },
+        "units": ("hourly", "annual"),
+    },
+}
+
+PAY_UNITS = ("hourly", "annual", "other")
+
+# Which pay unit a row of a given array carries, as a callable. `None` means
+# the array has no single unit to filter on and a `pay_unit` filter drops it.
+_PAY_UNIT_OF = {
+    "nhs_job_adverts": lambda r: {"year": "annual", "annum": "annual",
+                                   "hour": "hourly"}.get(
+        (r.get("salary_period") or "").lower(), "other"),
+    "provider_published_pay": lambda r: {"year": "annual", "annum": "annual",
+                                          "hour": "hourly"}.get(
+        (r.get("salary_period") or "").lower(), "other"),
+    "statutory_pay_rates": lambda r: "hourly",
+    "ons_ashe_observations": lambda r: "hourly"
+        if "hour" in (r.get("unit_of_measure") or "").lower() else "annual",
+    "skills_for_care_estimates": lambda r: "hourly"
+        if r.get("hourly_pay") is not None else "annual",
+    "charity_wage_series": lambda r: "annual",
+}
+
+
+def _pay_role_match(row: dict, fields: tuple[str, ...], term: str) -> bool:
+    term = term.lower()
+    return any(term in str(row.get(f) or "").lower() for f in fields)
+
+
+def _apply_pay_filters(payload: dict, *, role: str | None, source: str | None,
+                        pay_unit: str | None) -> None:
+    """Narrow the already-built pay arrays in place (BETA-070).
+
+    Order does not matter: each filter is a row predicate on one array, never
+    a join or a rollup across arrays. A group the `source` filter excludes is
+    emptied, not removed, so the payload shape is unchanged.
+    """
+    active_arrays: set[str] = set()
+    for key, group in PAY_SOURCE_GROUPS.items():
+        if source and key != source:
+            for name in group["arrays"]:
+                if name in payload:
+                    payload[name] = []
+            continue
+        active_arrays.update(group["arrays"])
+
+    for key, group in PAY_SOURCE_GROUPS.items():
+        if source and key != source:
+            continue
+        for name in group["arrays"]:
+            rows = payload.get(name)
+            if not isinstance(rows, list) or not rows:
+                continue
+            if role:
+                fields = group["role_fields"].get(name)
+                rows = [r for r in rows if fields and _pay_role_match(r, fields, role)] \
+                    if fields else []
+            if pay_unit:
+                unit_of = _PAY_UNIT_OF.get(name)
+                rows = [r for r in rows if unit_of and unit_of(r) == pay_unit] \
+                    if unit_of else []
+            payload[name] = rows
+
+
+def _pay_source_groups(payload: dict) -> list[dict]:
+    """One entry per source group: label, row count, units, caveat keys.
+
+    The count is the sum of the group's array lengths *after* filtering — an
+    index the explorer can show, not a figure to quote. Groups stay separate.
+    """
+    out = []
+    for key, group in PAY_SOURCE_GROUPS.items():
+        count = sum(len(payload.get(name) or [])
+                    for name in group["primary"] if isinstance(payload.get(name), list))
+        out.append({
+            "key": key,
+            "label": group["label"],
+            "count": count,
+            "units": list(group["units"]),
+            "arrays": list(group["arrays"]),
+        })
+    return out
+
+
+def _pay_filters_available(payload: dict) -> dict:
+    """Distinct role labels and units present in the current payload, so the
+    explorer's selects are populated from data rather than a hard-coded list
+    that drifts."""
+    roles: set[str] = set()
+    for group in PAY_SOURCE_GROUPS.values():
+        for name, fields in group["role_fields"].items():
+            for row in payload.get(name) or []:
+                for f in fields:
+                    value = str(row.get(f) or "").strip()
+                    if value:
+                        roles.add(value)
+    return {
+        "roles": sorted(roles)[:200],
+        "pay_units": list(PAY_UNITS),
+        "sources": [{"key": k, "label": v["label"]}
+                    for k, v in PAY_SOURCE_GROUPS.items()],
+    }
+
+
 def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
-         year_to=None) -> dict:
-    """The campaign's central evidence, and the most caveat-heavy payload here."""
+         year_to=None, role=None, source=None, pay_unit=None) -> dict:
+    """The campaign's central evidence, and the most caveat-heavy payload here.
+
+    BETA-070: `role` (case-insensitive substring on each source's role text),
+    `source` (one closed `PAY_SOURCE_GROUPS` key) and `pay_unit` (`hourly` /
+    `annual` / `other`) narrow the returned rows. They never combine sources
+    or produce a rate, ratio or score — the groups remain separate arrays.
+    """
+    if source is not None and source not in PAY_SOURCE_GROUPS:
+        raise QueryError(f"unknown pay source {source!r}")
+    if pay_unit is not None and pay_unit not in PAY_UNITS:
+        raise QueryError(f"pay_unit must be one of {', '.join(PAY_UNITS)}")
+    role = (role or "").strip() or None
+
     _public(["v_wage_per_employee", "charity_financials", "provider_identifiers",
               "providers", "nhs_job_adverts", "v_nhs_repeat_advertised_roles",
               "workforce_census_metrics", "statutory_pay_rates",
@@ -1626,7 +1797,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
         ORDER BY year DESC, sector, service, job_role_group, job_role
         LIMIT 500""")
 
-    return {
+    payload = {
         "charity_wage_series": charity_wage_series,
         "nhs_job_adverts": adverts,
         "nhs_job_by_band": by_band,
@@ -1659,6 +1830,23 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
             "skills_for_care_note": CAVEATS["skills_for_care"],
         },
     }
+
+    # BETA-070: the role picker is populated from every role present at the
+    # current provider/year scope, before the role/unit filters narrow the
+    # rows — otherwise choosing a role would empty its own picker.
+    payload["filters_available"] = _pay_filters_available(payload)
+    # Then narrow the arrays to the requested role / source group / pay unit
+    # and attach the per-group index. `source_groups` counts are computed from
+    # the final arrays, so a filtered view's counts match what it shows.
+    # `census_*` counts above describe the unfiltered census and stay the
+    # page's caveat basis.
+    _apply_pay_filters(payload, role=role, source=source, pay_unit=pay_unit)
+    payload["source_groups"] = _pay_source_groups(payload)
+    payload["filters_applied"] = {
+        "role": role, "source": source, "pay_unit": pay_unit,
+        "provider_key": provider_key, "year_from": year_from, "year_to": year_to,
+    }
+    return payload
 
 
 def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
