@@ -2207,6 +2207,39 @@ def archive_process(
     )
 
 
+@app.command("archive-audit")
+def archive_audit(
+    show: bool = typer.Option(
+        False, "--show", help="Print the last few audit rows instead of "
+                               "recording a new one."),
+) -> None:
+    """Record one append-only raw-archive audit snapshot (BETA-060).
+
+    Counts, by-source distribution, unarchived evidence references, duplicated
+    hashes and a deterministic sample, from the `archive_objects` index. It
+    writes exactly one `archive_audits` row and touches nothing else: it never
+    deletes an object, compacts the archive, or changes retention.
+    """
+    import json as _json
+
+    from pipeline import archive_audit as audit_mod
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        if show:
+            typer.echo(_json.dumps(audit_mod.history(conn, limit=10), indent=2))
+            return
+        row = audit_mod.record(conn, settings)
+    finally:
+        conn.close()
+    typer.echo(_json.dumps({k: v for k, v in row.items() if k != "sample"},
+                            indent=2))
+    typer.echo(f"recorded audit {row['audit_id']}: {row['object_count']} objects, "
+                f"{row['total_bytes']} bytes, {row['missing_refs']} unarchived refs, "
+                f"{row['duplicate_hashes']} duplicated hashes")
+
+
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""

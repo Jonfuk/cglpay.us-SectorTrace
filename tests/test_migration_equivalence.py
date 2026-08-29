@@ -147,7 +147,11 @@ class TestTheTreesMatch:
         # 73 adds run_ledger — one durable row per module-run, written by
         # runner.run_waves whatever entry point started it, beside (not
         # replacing) job_runs. TEXT/INTEGER -> text/bigint only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 73
+        # 74 adds archive_audits — one append-only row per `archive-audit`
+        # run: counts, by-source distribution, unarchived evidence refs,
+        # duplicated hashes, a deterministic sample. TEXT/INTEGER ->
+        # text/bigint only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 74
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

@@ -1240,6 +1240,13 @@ class Handler(BaseHTTPRequestHandler):
                      "staleness": artefacts.staleness(
                          self.settings, conn, listed["files"])}
 
+        if path == "/api/admin/archive-audits":
+            # The append-only archive audit history (BETA-060). Read-only —
+            # recording a new one is the `pipeline archive-audit` CLI.
+            from pipeline import archive_audit
+            return {"audits": archive_audit.history(
+                conn, _int(params, "limit", 30))}
+
         if path == "/api/admin/completeness":
             # The coverage completion action board (BETA-059): one reason
             # code + one non-destructive next step per catalogued dataset.

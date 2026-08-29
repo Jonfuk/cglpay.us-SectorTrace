@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-059. Current
-  work: BETA-060. Next: BETA-056, BETA-057.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-060. Current
+  work: BETA-056. Next: BETA-057, BETA-061.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,31 +272,33 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-060 | Raw-archive inventory and integrity trends
-  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-059 completed
+- [IN_PROGRESS] BETA-056 | Human alias-resolution workflow
+  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-060 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: archive/operations
-  - depends_on: BETA-058
-  - objective: Track archive count, size, source distribution, missing
-    references, duplicate hashes, deterministic hash samples and growth through
-    `pipeline archive audit` and an admin audit-history endpoint.
-  - rationale: A point-in-time size scan cannot reveal integrity drift or future
-    storage pressure.
-  - suggested_first_action: Define immutable summaries and deterministic sampling
-    rules; this item measures only and never deletes, compacts or chooses
-    retention policy.
-  - next_action: Add a migration for an append-only `archive_audits` table
-    (audit_id, run_at, object_count, total_bytes, by_source JSON,
-    missing_refs, duplicate_hashes, sample_json, git_revision); a
-    `pipeline archive audit` CLI command that walks `archive_objects` /
-    `data/raw`, computes those and inserts one row (never deletes or
-    compacts); `GET /api/admin/archive-audits` history + a Health-tab
-    panel; tests that the command is measurement-only.
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 3
+  - risk: 4
+  - area: entity-quality
+  - depends_on: BETA-054
+  - objective: Resolve unmatched buyer and provider names through append-only
+    proposed, accepted, rejected and superseded decisions, then produce a
+    deterministic verified-alias registry.
+  - rationale: Repeated unresolved names reduce coverage, but fuzzy matches must
+    never silently become canonical identity.
+  - suggested_first_action: Design the decision schema and SQLite/PostgreSQL
+    invariants around named reviewer, timestamp, evidence and canonical entity
+    ID; automatic fuzzy application remains forbidden.
+  - next_action: Add a migration for an append-only `alias_decisions` table
+    (decision_id, unmatched_name, target_scheme buyer/provider,
+    canonical_id, status proposed/accepted/rejected/superseded, decided_by,
+    evidence_review_item_id, decided_at, supersedes_id); web helpers to
+    propose / decide one alias at a time (named reviewer required, no fuzzy
+    auto-apply); a `verified_aliases` read view = the latest accepted,
+    non-superseded row per name; an admin panel building on BETA-054's
+    sidecar candidates; tests that a fuzzy match never becomes canonical
+    without an accepted decision.
 
 ### BLOCKED
 
@@ -480,24 +482,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-056 | Human alias-resolution workflow
-  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-055 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 3
-  - risk: 4
-  - area: entity-quality
-  - depends_on: BETA-054
-  - objective: Resolve unmatched buyer and provider names through append-only
-    proposed, accepted, rejected and superseded decisions, then produce a
-    deterministic verified-alias registry.
-  - rationale: Repeated unresolved names reduce coverage, but fuzzy matches must
-    never silently become canonical identity.
-  - suggested_first_action: Design the decision schema and SQLite/PostgreSQL
-    invariants around named reviewer, timestamp, evidence and canonical entity
-    ID; automatic fuzzy application remains forbidden.
-
 - [NEXT] BETA-057 | Candidate URL overlap signals
   - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-059 completed
   - priority: P2
@@ -514,11 +498,30 @@ DONE
   - suggested_first_action: Define fixtures for fragments, tracking parameters,
     redirects and genuinely distinct documents before writing the normaliser.
 
+- [NEXT] BETA-061 | Candidate-promotion campaign workspace
+  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-060 completed
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: evidence-promotion
+  - depends_on: BETA-052, BETA-054
+  - objective: Provide a campaign workspace for CDP documents, committee papers
+    and FOI/SAR candidates with filters, previews, session progress and explicit
+    promote/reject/reset actions.
+  - rationale: Candidate promotion is a separate audited human act from general
+    review-queue decisions and needs a focused workflow rather than unattended
+    batching.
+  - suggested_first_action: Reuse the existing promotion API through the shared
+    typed presenters; retain one-candidate-at-a-time confirmation and prohibit
+    `promote all`.
+
 ### READY
 
-_(empty — Wave 3 of the successor round, BETA-056/057/061/062/063, is promoted
-here as Wave 2 lands, per the delivery sequence in the Approved successor
-round subsection.)_
+_(empty — Wave 4 of the successor round, BETA-062/063/064/065/066/067, is
+promoted here as Wave 3 lands, per the delivery sequence in the Approved
+successor round subsection.)_
 
 ### DEFERRED
 
@@ -561,6 +564,48 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-060 | Raw-archive inventory and integrity trends
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: archive/operations
+  - depends_on: BETA-058
+  - objective: Track archive count, size, source distribution, missing
+    references, duplicate hashes, deterministic hash samples and growth through
+    `pipeline archive audit` and an admin audit-history endpoint.
+  - result: New migration `0074_archive_audits.sql` (+ postgres pair, count
+    bump 73→74) — `archive_audits`, one append-only row per audit run:
+    `object_count`, `total_bytes`, `by_source_json`, `missing_refs`
+    (distinct `evidence_records.payload_sha256` with no `archive_objects`
+    row), `duplicate_hashes` (a hash stored under more than one object id),
+    `sample_json` (a **deterministic** sample — the objects with the
+    lexicographically smallest hashes, so a value that changes between
+    audits is a real change), and `git_revision`. New
+    `pipeline/archive_audit.py`: `compute()` (read-only — a test greps it
+    for `INSERT`/`UPDATE`/`DELETE`), `record()` (one `INSERT INTO
+    archive_audits`, nothing else) and `history()`.
+  - cli: `pipeline archive-audit` records one snapshot and prints it;
+    `--show` prints the last ten without writing. It never deletes an
+    object, compacts the archive, or changes retention — stated in the
+    command's docstring.
+  - surface: `GET /api/admin/archive-audits` (read-only history, admin
+    only); the Health tab's Storage panel gains an "Archive audits" table
+    (when / objects / size / unarchived refs / dup hashes / revision).
+  - validation: New `tests/test_archive_audit.py` (6) — `compute` measures
+    the index (counts, by-source bytes, the one duplicated hash, the one
+    unarchived ref, the deterministic sample order), `compute` is read-only
+    by source scan, `record` appends an immutable row that `history` parses,
+    `record` has exactly one `INSERT INTO` and no `UPDATE`/`DELETE`, the
+    history route is admin-only, and the CLI records one while `--show`
+    writes nothing. Full offline suite green — **2795 passed, 109 skipped,
+    35 deselected, 0 failed**. `ruff` clean. Browser-verified against a
+    seeded scratch warehouse (40 objects): `pipeline archive-audit` records
+    `40 objects, 820000 bytes, 5 unarchived refs, 0 duplicated hashes` and
+    the Health-tab table shows the row, zero console errors.
 
 - [DONE] BETA-059 | Coverage completion action board
   - completed: 2026-08-29
@@ -3146,12 +3191,12 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | DONE (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | DONE (BETA-055) |
-| P1 | Human alias-resolution workflow | 5 | 4 | 3 | NEXT (BETA-056) |
+| P1 | Human alias-resolution workflow | 5 | 4 | 3 | IN_PROGRESS (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | NEXT (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
-| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | IN_PROGRESS (BETA-060) |
-| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
+| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
+| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | NEXT (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | Approved successor backlog (BETA-064) |

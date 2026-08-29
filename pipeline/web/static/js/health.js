@@ -394,6 +394,47 @@ function loadAll() {
   loadStorage();
   loadFreshness();
   loadCompleteness();
+  loadArchiveAudits();
+}
+
+/* BETA-060: the append-only archive-audit history. Read-only — recording one
+ * is `pipeline archive-audit`. */
+function _bytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0; let v = Number(n);
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+async function loadArchiveAudits() {
+  const holder = $('archive-audits');
+  if (!holder) return;
+  let data;
+  try { data = await api('/api/admin/archive-audits'); }
+  catch (e) { return; }
+
+  const audits = data.audits || [];
+  if (!audits.length) {
+    return holder.replaceChildren(el('p', { class: 'muted small',
+      text: 'No audits recorded yet — run `pipeline archive-audit`.' }));
+  }
+
+  const rows = audits.map((a) => el('tr', {},
+    el('td', { class: 'muted small', text: (a.run_at || '').replace('T', ' ').slice(0, 16) }),
+    el('td', { class: 'num', text: Number(a.object_count).toLocaleString('en-GB') }),
+    el('td', { class: 'num', text: _bytes(a.total_bytes) }),
+    el('td', { class: `num${a.missing_refs ? ' bad' : ''}`, text: String(a.missing_refs) }),
+    el('td', { class: 'num', text: String(a.duplicate_hashes) }),
+    el('td', { class: 'muted small mono', title: a.git_revision || '',
+      text: (a.git_revision || '').slice(0, 10) })));
+
+  holder.replaceChildren(el('table', {},
+    el('thead', {}, el('tr', {},
+      el('th', { text: 'When' }), el('th', { text: 'Objects' }),
+      el('th', { text: 'Size' }), el('th', { text: 'Unarchived refs' }),
+      el('th', { text: 'Dup hashes' }), el('th', { text: 'Revision' }))),
+    el('tbody', {}, rows)));
 }
 
 /* BETA-059: the coverage completion action board. One reason code + one
