@@ -515,6 +515,38 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-076: sticky section index on the provider / authority workbenches. */
+.workbench-index {
+  position: sticky; top: 60px; z-index: 20; display: flex; gap: 6px;
+  overflow-x: auto; padding: var(--space-2) 0; margin-bottom: var(--space-4);
+  background: color-mix(in srgb, var(--bg-base) 92%, transparent);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border-subtle);
+  scrollbar-width: thin;
+}
+.workbench-index-link {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; text-decoration: none;
+  border: 1px solid var(--border-accent); color: var(--text-secondary);
+  font-size: 12.5px; white-space: nowrap;
+}
+.workbench-index-link:hover { color: var(--text-primary); background: var(--bg-elevated); }
+.workbench-index-link[aria-current="true"] {
+  background: var(--accent-teal); color: #04121d; border-color: var(--accent-teal);
+}
+.workbench-index-link.is-empty { opacity: 0.5; }
+.workbench-index-count { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.workbench-index-count:empty { display: none; }
+.workbench-totop {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-accent); background: var(--bg-surface);
+  color: var(--text-primary); box-shadow: 0 8px 24px rgba(0,0,0,.3);
+}
+.section-count { color: var(--text-muted); font-weight: 400; }
+.section-disclosure > summary { cursor: pointer; color: var(--accent-teal); margin-bottom: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .workbench-index { scroll-behavior: auto; } }
+
 /* BETA-075: treatment metric catalogue. */
 .metric-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); max-height: 520px; overflow-y: auto; }
 .metric-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); }

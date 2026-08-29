@@ -15,7 +15,7 @@ import { el, replace, fetchJSON, setFilterResultCount, num, gbp, pct, isoDate, s
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
-          findingBlock, evidenceMeta } from '/js/components.js';
+          findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
 import { chartLabelColor } from '/js/theme.js';
 
 export async function render(main, { path }) {
@@ -335,7 +335,30 @@ async function renderOne(main, key) {
   renderPfd(page.querySelector('#pfd'), data);
   renderTribunals(page.querySelector('#tribunals'), data);
 
-  return () => disposeCharts(charts);
+  // BETA-076: sticky section index with counts, scroll-spy, back-to-top and
+  // ?section= deep links. Counts are of the records the warehouse holds;
+  // `available: false` keeps an empty section listed rather than hidden.
+  const n = (v) => (Array.isArray(v) ? v.length : 0);
+  const withCount = (id, label, list) => ({
+    id, label, count: n(list), available: n(list) > 0,
+  });
+  const sections = [
+    { id: 'inventory', label: 'Identifiers' },
+    { id: 'lineage', label: 'Lineage' },
+    withCount('timeline', 'Timeline', data.events),
+    { id: 'graph', label: 'Relationships', count: n(data.entity_edges) },
+    withCount('cqc', 'CQC locations', data.cqc_locations),
+    withCount('cqc-reports', 'CQC reports', data.cqc_inspections),
+    withCount('finance', 'Charity finance', data.charity_finance),
+    { id: 'disclosure', label: 'Disclosure log' },
+    withCount('filings', 'Company filings', data.filings),
+    withCount('pfd', 'PFD mentions', data.pfd_mentions),
+    withCount('tribunals', 'Tribunal cases', data.tribunal_cases),
+  ];
+  const wb = workbenchNav(page, sections, { routePath: `/providers/${key}` });
+  page.insertBefore(wb.nav, page.querySelector('#inventory'));
+
+  return () => { wb.cleanup(); disposeCharts(charts); };
 }
 
 function providerStatus(provider) {

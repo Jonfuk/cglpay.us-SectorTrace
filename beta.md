@@ -297,22 +297,22 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-076 | Navigable provider and authority workbenches
-  - priority: P1
-  - impact: 5
-  - effort: 4
+- [IN_PROGRESS] BETA-077 | Navigation continuity
+  - priority: P2
+  - impact: 4
+  - effort: 3
   - confidence: 5
-  - risk: 2
-  - area: public/entity detail
-  - depends_on: BETA-017, BETA-045, BETA-065, BETA-066
-  - objective: Add sticky section indexes, counts, deep-link anchors,
-    progressive disclosure, section search and back-to-top controls; paginate
-    or collapse large collections while preserving complete exports.
-  - next_action: Define stable section IDs and availability/count metadata,
-    then refactor provider CQC and filing sections before authorities.
+  - risk: 1
+  - area: public/navigation
+  - depends_on: BETA-024, BETA-072, BETA-076
+  - objective: Add route-aware breadcrumbs, locally stored recent entities,
+    scroll restoration, meaningful back links and preservation of the
+    originating search/filter context around detail pages.
+  - next_action: Specify history and scroll semantics for list → detail →
+    back, then apply them through the central router.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–075 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–076 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -548,6 +548,54 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-076 | Navigable provider and authority workbenches
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 5
+  - risk: 2
+  - area: public/entity detail
+  - depends_on: BETA-017, BETA-045, BETA-065, BETA-066
+  - objective: Add sticky section indexes, counts, deep-link anchors,
+    progressive disclosure, section search and back-to-top controls; paginate
+    or collapse large collections while preserving complete exports.
+  - result: Two shared helpers in `components.js`. `workbenchNav(pageRoot,
+    sections, {routePath})` builds a sticky section index from
+    `[{id, label, count, available}]`: a horizontally-scrollable chip bar
+    (its own `overflow-x` — never the page's), a count badge per section, an
+    `IntersectionObserver` scroll-spy that sets `aria-current` on the section
+    in view, a fixed "↑ Top" button that appears past 600px of scroll, and a
+    `?section=<id>` deep link that scrolls to a section (polling briefly for
+    an async-filled one) and is written to the URL with `replaceState` — no
+    re-render. `available: false` greys a section row rather than hiding it,
+    so "no records" stays visible. Returns `{nav, cleanup}`; the page
+    `dispose` calls `cleanup` (disconnects the observer, drops the scroll
+    listener, removes the button). `collapsibleSection(id, title, count, body,
+    {collapsedAbove, extra})` collapses a large collection behind a
+    "Show all N" `<details>` while the `extra` slot (a Download button) stays
+    in the header, outside the collapse — so a complete export never depends
+    on the section being expanded. Wired into the provider workbench (11
+    sections, counts from the timeline payload: identifiers, timeline,
+    relationships, CQC locations, CQC reports, charity finance, disclosure,
+    company filings, PFD mentions, tribunal cases) and the authority
+    workbench (coverage, grant & budget, budget detail, treatment, contracts,
+    homelessness comparators).
+  - api/ui: no API change. New CSS `.workbench-index*`, `.workbench-totop`,
+    `.section-count`, `.section-disclosure`.
+  - validation: New `tests/test_portal_workbench_nav.py` (6 — the exports
+    exist; the index has a scroll-spy, count badges and a back-to-top and
+    greys rather than hides an empty section; deep links are a `?section=`
+    key written with `replaceState`, not a re-render; progressive disclosure
+    keeps the export outside the collapse; both workbenches mount the index
+    and clean it up; the provider counts come from payload fields).
+    `test_portal_isolation` / `test_web_authority` / `test_web_provider_compare`
+    / navigation / chart suites green. `ruff` clean. Browser-verified: the
+    provider index renders 11 links with counts and `is-empty` on the zero
+    sections; a `?section=tribunals` deep link scrolls to that section and the
+    scroll-spy marks its link `aria-current`; at 375px the index is a sticky
+    horizontally-scrolling bar with no page overflow.
 
 - [DONE] BETA-075 | Treatment metric explorer
   - completed: 2026-08-29
@@ -4069,8 +4117,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | My area context | 5 | 4 | 4 | DONE (BETA-073) |
 | P2 | Inspectable visualisations | 4 | 3 | 5 | DONE (BETA-074) |
 | P1 | Treatment metric explorer | 5 | 4 | 4 | DONE (BETA-075) |
-| P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | IN_PROGRESS (BETA-076) |
-| P2 | Navigation continuity | 4 | 3 | 5 | APPROVED, not queued (BETA-077) |
+| P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | DONE (BETA-076) |
+| P2 | Navigation continuity | 4 | 3 | 5 | IN_PROGRESS (BETA-077) |
 | P1 | Unified evidence atlas | 5 | 5 | 4 | APPROVED, not queued (BETA-078) |
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | APPROVED, not queued (BETA-079) |
 | P1 | Shared responsive design system | 4 | 4 | 5 | APPROVED, not queued (BETA-080) |

@@ -1030,6 +1030,125 @@ export function truncate(text, length) {
   return value.length > length ? `${value.slice(0, length - 1)}…` : value;
 }
 
+/* BETA-076: a sticky index for a long entity workbench.
+ *
+ * `sections` is [{id, label, count}] — `id` matches a section wrapper already
+ * in the page. Builds a sticky nav with a count badge per section, a
+ * scroll-spy that marks the section in view, a "Back to top" control, and
+ * honours a `?section=<id>` deep link (added to the URL as you navigate,
+ * without a re-render). `available: false` greys a row instead of hiding it,
+ * so "no records" is a visible state, not an absence.
+ *
+ * Returns { nav, cleanup } — the caller prepends `nav` and calls `cleanup`
+ * from the page's dispose function.
+ */
+export function workbenchNav(pageRoot, sections, { routePath = null } = {}) {
+  const links = new Map();
+  const nav = el('nav', { class: 'workbench-index', 'aria-label': 'Sections on this page' });
+
+  const scrollTo = (id) => {
+    const target = pageRoot.querySelector(`#${CSS.escape(id)}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+    if (routePath) {
+      const q = new URLSearchParams(location.hash.split('?')[1] || '');
+      q.set('section', id);
+      history.replaceState(null, '', `#${routePath}?${q.toString()}`);
+    }
+  };
+
+  for (const s of sections) {
+    const link = el('a', {
+      href: `#${routePath || ''}`,
+      class: `workbench-index-link${s.available === false ? ' is-empty' : ''}`,
+      onclick: (e) => { e.preventDefault(); scrollTo(s.id); },
+    },
+      el('span', { class: 'workbench-index-label', text: s.label }),
+      el('span', { class: 'workbench-index-count', text: String(s.count ?? '') }));
+    links.set(s.id, link);
+    nav.append(link);
+  }
+
+  const toTop = el('button', {
+    class: 'workbench-totop', type: 'button', hidden: true,
+    onclick: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
+  }, '↑ Top');
+  document.body.append(toTop);
+
+  let spy = null;
+  if ('IntersectionObserver' in window) {
+    spy = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        for (const link of links.values()) link.removeAttribute('aria-current');
+        links.get(entry.target.id)?.setAttribute('aria-current', 'true');
+      }
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    for (const s of sections) {
+      const el2 = pageRoot.querySelector(`#${CSS.escape(s.id)}`);
+      if (el2) spy.observe(el2);
+    }
+  }
+
+  const onScroll = () => { toTop.hidden = window.scrollY < 600; };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // Deep link: ?section=<id> scrolls there once the section has painted. A
+  // few sections fill asynchronously (a table via queueMicrotask, a lazy
+  // fetch), so poll briefly for the element rather than assuming it is there
+  // on the next frame.
+  const wanted = new URLSearchParams(location.hash.split('?')[1] || '').get('section');
+  if (wanted && links.has(wanted)) {
+    let tries = 0;
+    const tryScroll = () => {
+      if (pageRoot.querySelector(`#${CSS.escape(wanted)}`)?.offsetParent || tries > 20) {
+        scrollTo(wanted);
+      } else {
+        tries += 1;
+        setTimeout(tryScroll, 60);
+      }
+    };
+    requestAnimationFrame(tryScroll);
+  }
+
+  return {
+    nav,
+    cleanup: () => {
+      spy?.disconnect();
+      window.removeEventListener('scroll', onScroll);
+      toTop.remove();
+    },
+  };
+}
+
+/* BETA-076: a section whose body is collapsed when it holds a lot, with the
+ * full content one click away and the count always visible. The export button
+ * a caller passes stays outside the collapse, so "download everything" never
+ * depends on the section being expanded. */
+export function collapsibleSection(id, title, count, body, {
+  collapsedAbove = 25, extra = null, description = null,
+} = {}) {
+  const collapsed = typeof count === 'number' && count > collapsedAbove;
+  const heading = el('h2', {},
+    el('span', { text: title }),
+    el('span', { class: 'section-count', text: ` (${count ?? 0})` }));
+  const wrap = el('section', { class: 'section', id },
+    el('header', {}, heading,
+      description ? el('p', { class: 'small muted', text: description }) : null),
+    extra || null);
+  if (collapsed) {
+    const det = el('details', { class: 'section-disclosure' },
+      el('summary', { text: `Show all ${count}` }), body);
+    wrap.append(det);
+  } else {
+    wrap.append(body);
+  }
+  return wrap;
+}
+
 /* ECharts tooltip formatters take an HTML string, which is the one place in
  * this portal where warehouse text does not arrive as a text node. Everything
  * interpolated into one goes through here. */

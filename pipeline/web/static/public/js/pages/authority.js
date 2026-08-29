@@ -21,7 +21,7 @@ import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
 import { myAreaToggle } from '/js/myarea.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, tableCard, escapeHtml, shareButton,
-          findingBlock, evidenceMeta } from '/js/components.js';
+          findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
 
 const TYPE_LABELS = {
   county: 'County council',
@@ -114,7 +114,27 @@ async function renderOne(main, code) {
   renderContracts(page.querySelector('#contracts'), data, code);
   renderComparators(page.querySelector('#comparators'), data);
 
-  return () => disposeCharts(charts);
+  // BETA-076: sticky section index with counts, scroll-spy, back-to-top and
+  // ?section= deep links.
+  const comparatorCount = ['rough_sleeping', 'statutory_homelessness',
+    'temporary_accommodation'].filter(
+    (k) => (data.comparators?.[k]?.rows || []).length).length;
+  const sections = [
+    { id: 'coverage', label: 'Coverage' },
+    { id: 'grant-budget', label: 'Grant & budget',
+      count: (data.grant?.rows?.length || 0) + (data.budget?.rows?.length || 0) },
+    { id: 'drilldown', label: 'Budget detail', count: data.budget_detail?.rows?.length || 0,
+      available: (data.budget_detail?.rows?.length || 0) > 0 },
+    { id: 'treatment', label: 'Treatment' },
+    { id: 'contracts', label: 'Contracts', count: data.contracts?.total || 0,
+      available: (data.contracts?.total || 0) > 0 },
+    { id: 'comparators', label: 'Homelessness comparators', count: comparatorCount,
+      available: comparatorCount > 0 },
+  ];
+  const wb = workbenchNav(page, sections, { routePath: `/authorities/${code}` });
+  page.insertBefore(wb.nav, page.querySelector('#coverage'));
+
+  return () => { wb.cleanup(); disposeCharts(charts); };
 }
 
 // --- coverage (W-12) ---------------------------------------------------------
