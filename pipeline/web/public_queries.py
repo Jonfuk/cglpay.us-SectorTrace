@@ -3351,6 +3351,9 @@ def document_search(conn: sqlite3.Connection, *, query: str,
     return {
         "results": [{
             "document_id": r["document_id"],
+            # The exact element that matched — the anchor GET
+            # /api/v1/documents/{id}?element_id=… needs for the context view.
+            "document_element_id": r["document_element_id"],
             "document_type": r["document_type"],
             "source_system": r["source_system"],
             "title": r["title"] or r["filename"],
@@ -3376,5 +3379,98 @@ def document_search(conn: sqlite3.Connection, *, query: str,
             "year_to": year_to or None,
             "since_retrieved_at": since_retrieved_at or None,
         },
+        "caveat": DOCUMENT_SEARCH_CAVEAT,
+    }
+
+
+# At most this many elements either side of a matched element (BETA-042). A
+# ceiling, not a default a caller can raise: bounded context aids scrutiny of
+# one hit; an unbounded one is a way to reassemble a whole copyrighted
+# document a page at a time, which docs/CAVEATS.md does not allow.
+_DOCUMENT_CONTEXT_MAX = 3
+
+
+def document_context(conn: sqlite3.Connection, document_id: str, *,
+                     element_id: str | None = None, context: int = 3) -> dict:
+    """The passage around one matched element, from the active parse only.
+
+    `GET /api/v1/documents/{id}?element_id=…&context=…`. The same
+    `DOCUMENT_SEARCH_SOURCES` allowlist as `document_search` is the safety
+    boundary — a document from an unlisted source is not published here at
+    all — and only the `is_active` version's elements are ever returned, so a
+    link made before a reparse refuses rather than anchoring on stale text.
+    """
+    _public(["document_records", "document_elements", "document_versions",
+             "evidence_records"])
+    context = max(0, min(int(context), _DOCUMENT_CONTEXT_MAX))
+
+    meta = _one(
+        conn,
+        "SELECT d.document_id, d.document_type, d.title, d.filename, "
+        "d.published_at, e.source_url, e.retrieved_at, e.source_system "
+        "FROM document_records d "
+        "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+        "WHERE d.document_id = ?", (document_id,))
+    if not meta or meta["source_system"] not in DOCUMENT_SEARCH_SOURCES:
+        raise QueryError(f"No document {document_id!r}.")
+
+    version = _one(
+        conn,
+        "SELECT document_version_id, parser_name, parser_version "
+        "FROM document_versions WHERE document_id = ? AND is_active = 1",
+        (document_id,))
+    if not version:
+        raise QueryError(f"Document {document_id!r} has no active parsed version.")
+
+    elements = _rows(
+        conn,
+        "SELECT document_element_id, sequence, page_number, element_type, "
+        "heading_level, text FROM document_elements "
+        "WHERE document_version_id = ? ORDER BY sequence",
+        (version["document_version_id"],))
+
+    anchor_index = None
+    if element_id is not None:
+        anchor_index = next(
+            (i for i, e in enumerate(elements)
+             if e["document_element_id"] == element_id), None)
+        if anchor_index is None:
+            raise QueryError(
+                f"Element {element_id!r} is not in the active version of "
+                f"document {document_id!r}.")
+        lo = max(0, anchor_index - context)
+        hi = min(len(elements), anchor_index + context + 1)
+    else:
+        # No anchor: the head of the document, same window size.
+        lo, hi = 0, min(len(elements), 2 * context + 1)
+
+    window = [{
+        "document_element_id": e["document_element_id"],
+        "sequence": e["sequence"],
+        "page_number": e["page_number"],
+        "element_type": e["element_type"],
+        "heading_level": e["heading_level"],
+        "text": e["text"],
+        "is_anchor": element_id is not None
+        and e["document_element_id"] == element_id,
+    } for e in elements[lo:hi]]
+
+    return {
+        "document_id": meta["document_id"],
+        "document_type": meta["document_type"],
+        "title": meta["title"] or meta["filename"],
+        "source_url": meta["source_url"],
+        "retrieved_at": meta["retrieved_at"],
+        "published_at": meta["published_at"],
+        "source_system": meta["source_system"],
+        "parser": {"name": version["parser_name"],
+                   "version": version["parser_version"]},
+        "anchor_element_id": element_id,
+        "context": context,
+        "element_count": len(elements),
+        "range": {"from": lo, "to": hi},
+        "has_more_before": lo > 0,
+        "has_more_after": hi < len(elements),
+        "elements": window,
         "caveat": DOCUMENT_SEARCH_CAVEAT,
     }

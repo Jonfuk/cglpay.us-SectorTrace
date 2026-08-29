@@ -99,6 +99,7 @@ PUBLIC_API_ROUTES = {
 PUBLIC_API_PATTERNS = {
     r"providers/([a-z0-9_]+)/timeline",
     r"authorities/([A-Z][0-9]{8})",
+    r"documents/([A-Za-z0-9_-]{1,80})",
 }
 
 # Published under /api/v1/ and dispatched before the table above, so it is not

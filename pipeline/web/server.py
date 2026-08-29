@@ -1353,6 +1353,16 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return public_queries.provider_timeline(conn, match.group(1))
 
+        # A document id is `document-<uuid5>` (pipeline/documents/repository.py).
+        # The bounded window around one matched element (BETA-042); the source
+        # allowlist and active-version rules are enforced in the query.
+        match = re.fullmatch(r"documents/([A-Za-z0-9_-]{1,80})", route)
+        if match:
+            return public_queries.document_context(
+                conn, match.group(1),
+                element_id=_str(params, "element_id") or None,
+                context=_int(params, "context", 3))
+
         # ONS codes are a letter followed by eight digits (E08000025). The
         # pattern is intentionally tighter than "anything": an authority page
         # is keyed by a code the /api/v1/authorities list actually returns.

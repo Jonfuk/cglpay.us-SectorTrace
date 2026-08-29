@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-041. Current work: BETA-042. Next:
-  BETA-043.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-042. Current work: BETA-043. Next:
+  BETA-044.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,28 +271,27 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-042 | Document evidence-context view
+- [IN_PROGRESS] BETA-043 | Public dataset catalogue
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 3
+  - effort: 4
   - confidence: 4
-  - risk: 3
-  - area: api/documents/ui
-  - depends_on: BETA-041
-  - objective: Add `GET /api/v1/documents/{id}?element_id&context=` and a
-    portal view that places a matched element in bounded surrounding context
-    from the active document version.
-  - rationale: Snippets locate a hit but often omit the qualifiers needed to
-    interpret it. Bounded context improves scrutiny while avoiding republication
-    of whole copyrighted documents.
-  - suggested_first_action: Specify active-version and public-allowlist rules,
-    clamp context to at most three elements either side, and test boundary,
-    superseded-version and unauthorised-source cases.
-  - next_action: Add a `documents/{id}` route to `_public_api` +
-    `public_queries.document_context`, reading the active version only and the
-    same source allowlist, clamped context window; a "show surrounding text"
-    expander on each document-search result.
+  - risk: 2
+  - area: metadata/api/ui
+  - depends_on: BETA-039
+  - objective: Publish a validated registry and list/detail views describing
+    each dataset's title, publisher, official URL, evidence layer, geography,
+    cadence, public tables, licence and caveat, with exact counts and freshness.
+  - rationale: Readers should be able to discover what the system contains and
+    its limitations without reverse-engineering module names or README prose.
+  - suggested_first_action: Design the registry schema and a validation test
+    requiring every registered module to map to catalogue metadata before
+    building the API and portal views.
+  - next_action: Design the registry (a checked-in data file or a small
+    module-declared block), a coverage test binding every registered `mNN_`
+    module to catalogue metadata, then the `/api/v1/catalogue` list/detail
+    routes and portal views with exact counts and freshness.
 
 ### BLOCKED
 
@@ -476,26 +475,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-043 | Public dataset catalogue
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 2
-  - area: metadata/api/ui
-  - depends_on: BETA-039
-  - objective: Publish a validated registry and list/detail views describing
-    each dataset's title, publisher, official URL, evidence layer, geography,
-    cadence, public tables, licence and caveat, with exact counts and freshness.
-  - rationale: Readers should be able to discover what the system contains and
-    its limitations without reverse-engineering module names or README prose.
-  - suggested_first_action: Design the registry schema and a validation test
-    requiring every registered module to map to catalogue metadata before
-    building the API and portal views.
-
-### READY
-
-- [READY] BETA-044 | Commissioning-relationship detail and timeline
+- [NEXT] BETA-044 | Commissioning-relationship detail and timeline
+  - promoted_from: READY on 2026-08-29 after BETA-042 completed
   - priority: P2
   - impact: 4
   - effort: 3
@@ -512,6 +493,8 @@ DONE
   - suggested_first_action: Define the endpoint from existing awarded-contract
     provenance only; omit missing dates and never manufacture `REGISTERED_AS`,
     claim or signal edges.
+
+### READY
 
 - [READY] BETA-045 | Provider comparison enhancements
   - priority: P2
@@ -643,6 +626,49 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-042 | Document evidence-context view
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 4
+  - risk: 3
+  - area: api/documents/ui
+  - depends_on: BETA-041
+  - objective: Add `GET /api/v1/documents/{id}?element_id&context=` and a
+    portal view that places a matched element in bounded surrounding context
+    from the active document version.
+  - result: New parameterised public route
+    `GET /api/v1/documents/{document_id}` → `public_queries.document_context`.
+    Same `DOCUMENT_SEARCH_SOURCES` allowlist as the search (a document whose
+    source is not searchable is not readable here — 400, not an empty body),
+    and only the `is_active` `document_versions` row's elements are ever
+    returned: an `element_id` from a superseded parse is refused rather than
+    silently re-anchored. `context` is clamped to at most 3 elements either
+    side — bounded scrutiny of one hit, not a way to reassemble a copyrighted
+    document a window at a time (`docs/CAVEATS.md`). Payload: the document's
+    identity + provenance + parser identity, an ordered `elements` window
+    (each `text`/`element_type`/`page_number`/`heading_level` + an
+    `is_anchor` flag), `has_more_before`/`has_more_after`, `element_count`,
+    `range`, `caveat`. `document_search` results now also carry
+    `document_element_id` — the anchor this route needs.
+  - ui: Each document-search result gains a lazy "Show surrounding text"
+    `<details>`; opening it fetches `documents/{id}?element_id=…&context=3`
+    and renders the window, the matched element highlighted the same way its
+    snippet is, with "…earlier/later text on this page" markers when the
+    window is not the whole page.
+  - api-doc: `api.html` gains the `documents/{document_id}` article (with its
+    `data-route-pattern`) and the `document_search` article is refreshed for
+    BETA-041's facet/offset/since parameters and richer response.
+  - validation: 8 new tests in `tests/test_web_documents.py` — anchored
+    window, edge clamping, the `context` cap, no-anchor head, the allowlist
+    refusal, unknown-document refusal, the superseded-version refusal, and a
+    search-result → context round trip. `test_portal_isolation.py`'s
+    `PUBLIC_API_PATTERNS` updated. `ruff` clean; full offline suite green;
+    browser-verified against a seeded SQLite warehouse (the expander loads
+    the bounded window with the anchor highlighted, unknown id → 400, context
+    capped, zero console errors).
 
 - [DONE] BETA-041 | Ranked, faceted document search
   - completed: 2026-08-29

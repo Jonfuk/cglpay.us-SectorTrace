@@ -409,3 +409,153 @@ def test_document_search_pagination_is_stable_across_calls(conn, settings):
     order_two = [r["document_id"] for page in again for r in page["results"]]
     assert order_one == order_two
     assert len(set(order_one)) == 6  # every match seen once, no overlap
+
+
+# --- BETA-042: bounded evidence-context view ------------------------------
+
+
+def _seed_multi_element(conn, settings, *, evidence_id, source_system, document_type,
+                        texts, title=None):
+    """A document whose active parse has one element per string in `texts`."""
+    reference = _reference(evidence_id, source_system)
+    repository.upsert_evidence(conn, reference)
+    document_id = repository.upsert_document(
+        conn, reference, document_type, "fixture", 1.0, "report.pdf",
+        "application/pdf", 1, title)
+    parsed = ParsedDocument("fixture", "1", [
+        ParsedElement("PARAGRAPH", i + 1, text=t, page_number=1 + i // 3)
+        for i, t in enumerate(texts)
+    ])
+    repository.persist_parse(
+        conn, document_id, parsed, "config", None, "GOOD", {}, [], settings)
+    conn.commit()
+    return document_id
+
+
+def _elements(conn, document_id):
+    return [dict(r) for r in conn.execute(
+        "SELECT de.document_element_id, de.sequence, de.text "
+        "FROM document_elements de "
+        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+        "WHERE dv.document_id = ? AND dv.is_active = 1 ORDER BY de.sequence",
+        (document_id,))]
+
+
+def test_document_context_windows_around_the_anchor(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx", source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER",
+        texts=[f"Paragraph number {i}." for i in range(10)], title="Ten paragraphs")
+    elements = _elements(conn, document_id)
+    anchor = elements[5]
+
+    result = public_queries.document_context(
+        conn, document_id, element_id=anchor["document_element_id"], context=2)
+
+    seqs = [e["sequence"] for e in result["elements"]]
+    assert seqs == [4, 5, 6, 7, 8]  # sequence is 1-based; anchor is index 5
+    assert [e["is_anchor"] for e in result["elements"]] == [False, False, True, False, False]
+    assert result["has_more_before"] is True
+    assert result["has_more_after"] is True
+    assert result["anchor_element_id"] == anchor["document_element_id"]
+    assert result["title"] == "Ten paragraphs"
+    assert result["source_url"] == "https://example.test/ev-ctx"
+
+
+def test_document_context_clamps_the_window_at_the_edges(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-edge",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        texts=[f"Line {i}." for i in range(4)])
+    elements = _elements(conn, document_id)
+
+    result = public_queries.document_context(
+        conn, document_id, element_id=elements[0]["document_element_id"], context=3)
+
+    assert [e["sequence"] for e in result["elements"]] == [1, 2, 3, 4]
+    assert result["has_more_before"] is False
+    assert result["has_more_after"] is False
+
+
+def test_document_context_caps_the_context_parameter_at_three(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-cap",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        texts=[f"Row {i}." for i in range(30)])
+    elements = _elements(conn, document_id)
+
+    result = public_queries.document_context(
+        conn, document_id, element_id=elements[15]["document_element_id"], context=99)
+
+    assert result["context"] == 3
+    assert len(result["elements"]) == 7  # 3 + anchor + 3
+
+
+def test_document_context_without_an_anchor_returns_the_head(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-head",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        texts=[f"Head {i}." for i in range(20)])
+
+    result = public_queries.document_context(conn, document_id, context=3)
+
+    assert [e["sequence"] for e in result["elements"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert all(e["is_anchor"] is False for e in result["elements"])
+
+
+def test_document_context_refuses_a_document_outside_the_allowlist(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-restricted",
+        source_system="pfd_report_promotion", document_type="PFD_REPORT",
+        texts=["Confidential paragraph one.", "Confidential paragraph two."])
+
+    with pytest.raises(QueryError):
+        public_queries.document_context(conn, document_id)
+
+
+def test_document_context_refuses_an_unknown_document(conn):
+    with pytest.raises(QueryError):
+        public_queries.document_context(conn, "document-does-not-exist")
+
+
+def test_document_context_refuses_an_element_from_a_superseded_version(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-reparse",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        texts=["Original paragraph A.", "Original paragraph B."])
+    stale_element = _elements(conn, document_id)[0]["document_element_id"]
+
+    # A second parse becomes the active version; the first is superseded.
+    reparsed = ParsedDocument("fixture", "2", [
+        ParsedElement("PARAGRAPH", 1, text="Reparsed paragraph A.", page_number=1),
+        ParsedElement("PARAGRAPH", 2, text="Reparsed paragraph B.", page_number=1),
+    ])
+    repository.persist_parse(
+        conn, document_id, reparsed, "config-2", None, "GOOD", {}, [], settings)
+    conn.commit()
+
+    # The active window still works…
+    fresh = public_queries.document_context(conn, document_id)
+    assert "Reparsed paragraph A." in fresh["elements"][0]["text"]
+
+    # …but the element id from the old version is refused, not silently mapped.
+    with pytest.raises(QueryError):
+        public_queries.document_context(
+            conn, document_id, element_id=stale_element)
+
+
+def test_document_context_id_matches_the_search_result(conn, settings):
+    document_id = _seed_multi_element(
+        conn, settings, evidence_id="ev-ctx-search",
+        source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
+        texts=["Nothing here.", "The naloxone budget was raised in Q2.", "Nor here."])
+
+    hit = public_queries.document_search(conn, query="naloxone")["results"][0]
+    assert hit["document_id"] == document_id
+    assert hit["document_element_id"]
+
+    ctx = public_queries.document_context(
+        conn, hit["document_id"], element_id=hit["document_element_id"], context=1)
+    anchor = [e for e in ctx["elements"] if e["is_anchor"]]
+    assert len(anchor) == 1
+    assert "naloxone" in anchor[0]["text"].lower()

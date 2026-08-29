@@ -299,10 +299,53 @@ function renderResult(result, query) {
         text: [result.document_type, result.page_number ? `page ${result.page_number}` : null]
           .filter(Boolean).join(' · ') })),
     highlightedSnippet(passage, query),
+    contextExpander(result, query),
     el('div', { class: 'row wrap', style: 'gap:8px;', },
       result.source_url ? sourceLink(result.source_url, 'Read the source page') : null,
       el('span', { class: 'small muted',
         text: [result.published_at ? `published ${isoDate(result.published_at)}` : null,
                result.retrieved_at ? `retrieved ${isoDate(result.retrieved_at)}` : null]
           .filter(Boolean).join(' · ') })));
+}
+
+/* BETA-042: a lazily-loaded window of the surrounding elements, from
+ * /api/v1/documents/{id}. Bounded server-side to three elements either side —
+ * enough to read a hit in context, not enough to reassemble the document. */
+function contextExpander(result, query) {
+  if (!result.document_id || !result.document_element_id) return null;
+  const body = el('div', { class: 'doc-context' });
+  let loaded = false;
+  const details = el('details', { class: 'doc-context-toggle' },
+    el('summary', { class: 'small', text: 'Show surrounding text' }),
+    body);
+  details.addEventListener('toggle', async () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    body.replaceChildren(el('div', { class: 'shimmer' }));
+    let data;
+    try {
+      data = await fetchJSON(`documents/${encodeURIComponent(result.document_id)}`,
+        { element_id: result.document_element_id, context: 3 });
+    } catch (error) {
+      loaded = false;
+      body.replaceChildren(errorCard(error.message, () => {
+        details.open = false;
+      }));
+      return;
+    }
+    const parts = [];
+    if (data.has_more_before) {
+      parts.push(el('p', { class: 'small muted', text: '…earlier text on this page' }));
+    }
+    for (const element of data.elements || []) {
+      parts.push(element.is_anchor
+        ? highlightedSnippet(element.text || '', query)
+        : el('p', { class: 'small muted', text: element.text || '' }));
+    }
+    if (data.has_more_after) {
+      parts.push(el('p', { class: 'small muted', text: 'later text on this page…' }));
+    }
+    body.replaceChildren(...parts);
+  });
+  return details;
 }

@@ -316,21 +316,64 @@
     <table class="params">
       <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
       <tbody>
-        <tr><td><code>q</code></td><td>Required. The search term(s).</td></tr>
+        <tr><td><code>q</code></td><td>Required. The search term(s). Quotes, <code>OR</code> and <code>-term</code> are honoured.</td></tr>
+        <tr><td><code>source_system</code></td><td>Optional. One of the values in the <code>facets.source_system</code> block; anything else is rejected.</td></tr>
+        <tr><td><code>document_type</code></td><td>Optional. One of the values in the <code>facets.document_type</code> block.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Optional. Bound the document's published year; an undated page is excluded when either is set.</td></tr>
+        <tr><td><code>since_retrieved_at</code></td><td>Optional ISO timestamp. Only pages collected on or after it.</td></tr>
         <tr><td><code>limit</code></td><td>Optional, default 25, maximum 50.</td></tr>
+        <tr><td><code>offset</code></td><td>Optional. Pages the ranked list; the order is stable across requests.</td></tr>
       </tbody>
     </table>
     <p class="small">
       Returns <code>results</code> — one row per matching page/element, each
-      with <code>document_type</code>, <code>title</code>,
-      <code>page_number</code>, the matched <code>text</code>,
-      <code>source_url</code>, <code>retrieved_at</code> and
-      <code>published_at</code> — plus <code>query</code> and
-      <code>caveat</code>. A result is a page that contains the term, not a
-      finding: read the source page before citing anything found here.
+      with <code>document_id</code>, <code>document_element_id</code>,
+      <code>document_type</code>, <code>source_system</code>,
+      <code>title</code>, <code>page_number</code>, the matched
+      <code>text</code>, <code>source_url</code>, <code>retrieved_at</code>
+      and <code>published_at</code> — plus <code>total</code>,
+      <code>facets</code> (a <code>value</code>/<code>count</code> list per
+      facet, sized to the query and any date scope), <code>filters</code>,
+      <code>query</code> and <code>caveat</code>. Relevance order is a reading
+      aid, not a measure of evidential weight. A result is a page that
+      contains the term, not a finding.
     </p>
     <p>
-      <code>/api/v1/document_search?q=recruitment</code>
+      <code>/api/v1/document_search?q=recruitment&amp;source_system=committee_paper_promotion</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-documents" data-route="documents/{document_id}"
+           data-route-pattern="documents/([A-Za-z0-9_-]{1,80})">
+    <h3><code>/api/v1/documents/{document_id}</code></h3>
+    <p>
+      The bounded passage around one element of a document from
+      <code>/api/v1/document_search</code> — enough surrounding text to
+      interpret a hit without republishing the document. Reads the active
+      parsed version only, and the same allowlist as the search: a
+      <code>document_id</code> whose source is not searchable is not
+      readable here either.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>document_id</code></td><td>Required, in the path. The <code>document_id</code> from a search result.</td></tr>
+        <tr><td><code>element_id</code></td><td>Optional. A <code>document_element_id</code> from a search result to centre the window on; omitted, the window is the head of the document.</td></tr>
+        <tr><td><code>context</code></td><td>Optional, default 3, maximum 3. Elements to include either side of the anchor.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns the document's <code>title</code>, <code>source_url</code>,
+      <code>source_system</code>, <code>published_at</code>,
+      <code>retrieved_at</code>, the <code>parser</code> identity, and an
+      ordered <code>elements</code> window — each with <code>text</code>,
+      <code>element_type</code>, <code>page_number</code> and an
+      <code>is_anchor</code> flag — plus <code>has_more_before</code> /
+      <code>has_more_after</code>, <code>element_count</code> and
+      <code>caveat</code>.
+    </p>
+    <p>
+      <code>/api/v1/documents/document-…?element_id=…&amp;context=3</code>
     </p>
   </article>
 
