@@ -161,6 +161,17 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("dataset_id", where="path", required=True,
                            desc="A dataset_id from /api/v1/catalogue.")],
     },
+    "/api/v1/changes": {
+        "surface": "changes",
+        "summary": "Derived chronology of what the warehouse recorded changing "
+                   "— release, refreshed, reparsed, superseded, verified. "
+                   "Collection / parser / human-review changes are distinct "
+                   "kinds and never summed.",
+        "parameters": [
+            _p("kind", desc="release, refreshed, reparsed, superseded or verified."),
+            _p("source"), _p("evidence_type"), _SINCE, _LIMIT,
+        ],
+    },
     "/api/v1/pay": {
         "surface": "pay",
         "summary": "The campaign's central pay evidence, every figure caveated.",

@@ -519,6 +519,38 @@
     <p><code>/api/v1/catalogue/procurement-notices</code></p>
   </article>
 
+  <article class="apiroute" id="route-changes" data-route="changes">
+    <h3><code>/api/v1/changes</code></h3>
+    <p>
+      A <em>derived</em> chronology of what the warehouse recorded changing —
+      there is no persisted change-event table and this endpoint adds no
+      collection-time write path. Each event is one kind: <code>release</code>
+      (a run of the module runner), <code>refreshed</code> (a source table's
+      latest retrieval moved), <code>reparsed</code> (a document got a new
+      active parsed version), <code>superseded</code> (a provider now trades as
+      a successor) or <code>verified</code> (a human review decision). A
+      collection change, a parser change and a human-review change are distinct
+      kinds and their counts are never added. This shows what <em>this
+      warehouse</em> recorded changing, not what a source published.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>release, refreshed, reparsed, superseded or verified.</td></tr>
+        <tr><td><code>source</code></td><td>One source label from the feed.</td></tr>
+        <tr><td><code>evidence_type</code></td><td>One evidence type / dataset id.</td></tr>
+        <tr><td><code>since</code></td><td>ISO date; keeps dated events on or after it.</td></tr>
+        <tr><td><code>limit</code></td><td>Default 200, capped at 500.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code>, <code>counts</code> (by_kind — never a
+      total), <code>kinds</code>, <code>note</code>, <code>caveat</code>,
+      <code>truncated</code>.
+    </p>
+    <p><a href="/api/v1/changes"><code>/api/v1/changes</code></a></p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>

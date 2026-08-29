@@ -123,7 +123,7 @@ for _module in ("theme", "components", "palette", "filterstate", "myarea", "rece
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
-              "documents", "catalogue", "cqc"):
+              "documents", "catalogue", "cqc", "changes"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1580,6 +1580,18 @@ class Handler(BaseHTTPRequestHandler):
         match = re.fullmatch(r"catalogue/([a-z0-9-]{1,64})", route)
         if match:
             return public_queries.catalogue_detail(conn, match.group(1))
+
+        if route == "changes":
+            # BETA-090: a derived, filterable chronology of what the warehouse
+            # recorded changing — added/refreshed, reparsed, superseded,
+            # verified. Read-only; adds no collection-time write path.
+            return public_queries.change_feed(
+                conn,
+                kind=_str(params, "kind") or None,
+                source=_str(params, "source") or None,
+                evidence_type=_str(params, "evidence_type") or None,
+                since=_str(params, "since") or None,
+                limit=_int(params, "limit", 200))
 
         # The notices that share one OCID, grouped into published OCDS
         # lifecycle stages (BETA-050). No inferred stage, no computed

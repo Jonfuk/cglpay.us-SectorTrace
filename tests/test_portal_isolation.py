@@ -59,6 +59,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/documents.js",
     "/js/pages/catalogue.js",
     "/js/pages/cqc.js",
+    "/js/pages/changes.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -103,6 +104,7 @@ PUBLIC_API_ROUTES = {
     "document_search",
     "catalogue",
     "provider_compare",
+    "changes",
     "safety",
     "cqc_locations",
 }

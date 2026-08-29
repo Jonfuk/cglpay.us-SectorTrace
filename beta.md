@@ -297,23 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-090 | "What changed?" evidence feed
-  - priority: P1
-  - impact: 5
-  - effort: 5
+- [IN_PROGRESS] BETA-091 | Source publication calendar
+  - priority: P2
+  - impact: 4
+  - effort: 3
   - confidence: 4
-  - risk: 4
-  - area: public/change awareness
-  - depends_on: BETA-058, BETA-068, BETA-084
-  - objective: Publish a filterable chronology of evidence added, changed,
-    withdrawn, superseded or newly verified by source, provider, authority,
-    evidence type and release.
-  - next_action: Define an append-only change-event model that distinguishes
-    source changes, parser changes and human-review changes.
+  - risk: 2
+  - area: public/source coverage
+  - depends_on: BETA-043, BETA-059, BETA-084
+  - objective: Show each source's stated or observed release cadence, last
+    publication, next expected window and overdue/unknown status.
+  - next_action: Add nullable cadence and expectation metadata to the dataset
+    catalogue, labelling observed estimates separately from stated dates.
 
 _(The first refinement programme BETA-068–087 is complete. The second
 programme BETA-088–106 is now in progress in its own approved wave order:
-wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104.)_
+wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104. BETA-090 is
+complete, see DONE.)_
 
 ### BLOCKED
 
@@ -548,6 +548,54 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-090 | "What changed?" evidence feed
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: public/change awareness
+  - depends_on: BETA-058, BETA-068, BETA-084
+  - objective: Publish a filterable chronology of evidence added, changed,
+    withdrawn, superseded or newly verified by source, provider, authority,
+    evidence type and release.
+  - result: New additive read-only route `/api/v1/changes`
+    (`public_queries.change_feed`). **No persisted change-event table and no
+    new collection-time write path** — the feed is *derived* on each request
+    from signals the warehouse already records, each classed as one of five
+    kinds: `release` (a `run_ledger` row), `refreshed` (a dataset's measured
+    `last_retrieved_at`, i.e. a collection changed it), `reparsed` (a
+    document got a new active `document_versions` row while an inactive one
+    exists — a parser change), `superseded` (a provider with
+    `superseded_by` set — verified lineage), `verified` (a confirmed
+    `alias_decisions` row — a human review). The three axes the objective
+    names stay apart: a collection change, a parser change and a human-review
+    change are distinct kinds and `counts.by_kind` never adds them (there is
+    no `total`). Filters: `kind`, `source`, `evidence_type`, `since`,
+    `limit` (cap 500). Each stream is guarded so a missing table is skipped.
+    A `caveat` states the feed shows what *this warehouse* recorded changing,
+    not what a source published. New `/js/pages/changes.js` + `/changes`
+    route ("What changed?"): a chronology table with kind and source filter
+    chips (each showing its own count), linked from the footer nav and the
+    lens menu's Accountability group.
+  - api/ui: additive route `/api/v1/changes` (kind, source, evidence_type,
+    since, limit). Added to the OpenAPI doc, `<noscript>` list, `api.html`
+    and `test_portal_isolation` `PUBLIC_API_ROUTES` + the page-module list.
+    New portal page `changes.js` + route `/changes`.
+  - validation: New `tests/test_web_change_feed.py` (5 — events are typed and
+    `counts` has only `by_kind` with no `total`; a run is a `release` event
+    carrying its `run_id`; a superseded parse version is a `reparsed` event
+    of its own kind, counted separately; a bad `kind` raises and `since`
+    keeps only dated events on/after it; the route is in the OpenAPI doc).
+    `test_web_openapi` / `test_portal_isolation` / `test_web_public` /
+    `test_web_catalogue` / offline-reading / navigation suites green. `ruff`
+    clean. Browser-verified: the "What changed?" page shows kind chips
+    "All kinds · 5 / Release · 0 / Refreshed · 5 / Reparsed · 0 /
+    Superseded · 0 / Verified · 0" (each counted separately) and a 5-row
+    table; clicking "Refreshed" sets `#/changes?kind=refreshed` and keeps the
+    table; no console errors.
 
 - [DONE] BETA-087 | Split-pane review workspace
   - completed: 2026-08-29
@@ -4632,8 +4680,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Split-pane review workspace | 5 | 5 | 4 | DONE (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
-| P1 | “What changed?” evidence feed | 5 | 5 | 4 | IN_PROGRESS (BETA-090) |
-| P2 | Source publication calendar | 4 | 3 | 4 | APPROVED, not queued (BETA-091) |
+| P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
+| P2 | Source publication calendar | 4 | 3 | 4 | IN_PROGRESS (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |

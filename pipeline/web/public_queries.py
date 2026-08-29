@@ -844,6 +844,141 @@ def catalogue_detail(conn: sqlite3.Connection, dataset_id: str) -> dict:
     return figures
 
 
+# --- "what changed?" evidence feed (BETA-090) ---------------------------------
+#
+# There is no persisted change-event table and this adds none — no new
+# collection-time write path. The feed is *derived* on each request from
+# signals the warehouse already records, each classed as one kind:
+#
+#   release     — a run of the shared module runner (`run_ledger`)
+#   refreshed   — a source table's most recent retrieval moved (catalogue
+#                 freshness), i.e. a collection changed it
+#   reparsed    — a document got a new active parsed version (parser change)
+#   superseded  — a provider now trades as a successor (verified lineage)
+#   verified    — a human review decision resolved a candidate (alias review)
+#
+# The three axes the objective names are kept apart: a collection change
+# (`refreshed`/`release`), a parser change (`reparsed`) and a human-review
+# change (`verified`/`superseded`) are different kinds and are never merged
+# into one count.
+CHANGE_KINDS = ("release", "refreshed", "reparsed", "superseded", "verified")
+_CHANGE_MAX = 500
+
+
+def change_feed(conn: sqlite3.Connection, *, kind=None, source=None,
+                 evidence_type=None, since=None, limit: int = 200) -> dict:
+    _public(["run_ledger", "document_versions", "document_records", "providers",
+              "alias_decisions"])
+    if kind is not None and kind not in CHANGE_KINDS:
+        raise QueryError(f"unknown change kind {kind!r}")
+    limit = max(1, min(int(limit), _CHANGE_MAX))
+    present = {obj["name"] for obj in catalog.list_objects(conn)}
+    events: list[dict] = []
+
+    def keep(**event) -> None:
+        events.append({
+            "kind": event["kind"], "at": event.get("at"),
+            "source": event.get("source"),
+            "evidence_type": event.get("evidence_type"),
+            "entity": event.get("entity"),
+            "detail": event.get("detail"),
+            "release": event.get("release"),
+        })
+
+    if "run_ledger" in present:
+        for r in _rows(conn, """
+            SELECT run_id, origin, status, finished_at, started_at,
+                   modules_ok, modules_failed
+            FROM run_ledger ORDER BY started_at DESC LIMIT 30"""):
+            keep(kind="release", at=r["finished_at"] or r["started_at"],
+                 source="pipeline", evidence_type=None, entity=r["origin"],
+                 detail=(f"run {r['origin']} {r['status']} — "
+                         f"{r['modules_ok'] or 0} ok"
+                         + (f", {r['modules_failed']} failed"
+                            if r["modules_failed"] else "")),
+                 release=r["run_id"])
+
+    # `refreshed`: the catalogue's measured last-retrieval per dataset.
+    for figures in (_dataset_figures(conn, ds) for ds in datasets.DATASETS):
+        last = figures.get("last_retrieved_at")
+        if last:
+            keep(kind="refreshed", at=last, source=figures.get("publisher"),
+                 evidence_type=figures.get("dataset_id"),
+                 entity=None,
+                 detail=f"{figures.get('title')}: latest retrieval {last[:10]}")
+
+    if {"document_versions", "document_records"} <= present:
+        for r in _rows(conn, """
+            SELECT v.document_id, v.parser_name, v.parser_version, v.created_at,
+                   d.title
+            FROM document_versions v
+            JOIN document_records d ON d.document_id = v.document_id
+            WHERE v.is_active = 1
+              AND EXISTS (SELECT 1 FROM document_versions v2
+                          WHERE v2.document_id = v.document_id
+                            AND v2.is_active = 0)
+            ORDER BY v.created_at DESC LIMIT 60"""):
+            keep(kind="reparsed", at=r["created_at"], source="document parser",
+                 evidence_type="document", entity=r["document_id"],
+                 detail=(f"{r['title'] or r['document_id']}: reparsed with "
+                         f"{r['parser_name']} {r['parser_version']}"))
+
+    if "providers" in present:
+        for r in _rows(conn, """
+            SELECT p.provider_key, p.canonical_name, s.canonical_name AS successor
+            FROM providers p
+            LEFT JOIN providers s ON s.provider_key = p.superseded_by
+            WHERE p.superseded_by IS NOT NULL"""):
+            keep(kind="superseded", at=None, source="provider lineage",
+                 evidence_type="provider", entity=r["provider_key"],
+                 detail=(f"{r['canonical_name']} now trades as "
+                         f"{r['successor'] or r['provider_key']}"))
+
+    if "alias_decisions" in present:
+        for r in _rows(conn, """
+            SELECT decision_id, unmatched_name, canonical_name, target_scheme,
+                   status, decided_by, decided_at
+            FROM alias_decisions
+            WHERE status = 'confirmed'
+            ORDER BY decided_at DESC LIMIT 60"""):
+            keep(kind="verified", at=r["decided_at"], source="alias review",
+                 evidence_type=r["target_scheme"], entity=r["canonical_name"],
+                 detail=(f"“{r['unmatched_name']}” confirmed as "
+                         f"{r['canonical_name']} by {r['decided_by']}"))
+
+    if kind:
+        events = [e for e in events if e["kind"] == kind]
+    if source:
+        events = [e for e in events if e["source"] == source]
+    if evidence_type:
+        events = [e for e in events if e["evidence_type"] == evidence_type]
+    if since:
+        events = [e for e in events if e["at"] and e["at"][:10] >= str(since)[:10]]
+
+    events.sort(key=lambda e: (e["at"] or ""), reverse=True)
+    truncated = len(events) > limit
+    events = events[:limit]
+
+    by_kind: dict[str, int] = {}
+    for e in events:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+
+    return {
+        "events": events,
+        "truncated": truncated,
+        "counts": {"by_kind": by_kind},
+        "kinds": list(CHANGE_KINDS),
+        "note": "Derived from the run ledger, catalogue freshness, document "
+                "reparses and verified provider/alias changes. A collection "
+                "change, a parser change and a human-review change are "
+                "distinct kinds and their counts are never added.",
+        "caveat": "This feed reveals what the warehouse recorded changing. It "
+                  "is not a record of what a source published — a source can "
+                  "change with no collection here, and this feed will not show "
+                  "it until the next run.",
+    }
+
+
 def _value_is_concentrated(conn: sqlite3.Connection, threshold: float = 0.5) -> bool:
     """True when billion-pound notices carry most of the total value.
 
