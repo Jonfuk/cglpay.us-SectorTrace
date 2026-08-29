@@ -63,6 +63,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/cqc.js",
     "/js/pages/changes.js",
     "/js/pages/calendar.js",
+    "/js/pages/revisions.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -109,6 +110,7 @@ PUBLIC_API_ROUTES = {
     "provider_compare",
     "changes",
     "publication_calendar",
+    "record_diff",
     "safety",
     "cqc_locations",
 }

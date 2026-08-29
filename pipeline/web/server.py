@@ -124,7 +124,8 @@ for _module in ("theme", "components", "palette", "filterstate", "myarea",
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
-              "documents", "catalogue", "cqc", "changes", "calendar"):
+              "documents", "catalogue", "cqc", "changes", "calendar",
+              "revisions"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1656,6 +1657,21 @@ class Handler(BaseHTTPRequestHandler):
             # asserted figure and never merged with the observed estimate.
             return public_queries.publication_calendar(
                 conn, today=_str(params, "today") or None)
+
+        if route == "record_diff":
+            # BETA-092: field-aware diff of two procurement notices sharing an
+            # OCID, or text-aware diff of two parsed versions of one document.
+            # Labels a publisher amendment ('source' field) apart from a
+            # normalisation this pipeline recomputed ('derived' field / parser
+            # change). Read-only; documents gated by DOCUMENT_SEARCH_SOURCES.
+            from pipeline.web import record_diff as _record_diff
+            return _record_diff.record_diff(
+                conn,
+                kind=_str(params, "kind") or "ocds",
+                a=_str(params, "a") or None,
+                b=_str(params, "b") or None,
+                ocid=_str(params, "ocid") or None,
+                document_id=_str(params, "document_id") or None)
 
         if route == "changes":
             # BETA-090: a derived, filterable chronology of what the warehouse

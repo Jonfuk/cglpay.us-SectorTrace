@@ -584,6 +584,37 @@
     <p><a href="/api/v1/publication_calendar"><code>/api/v1/publication_calendar</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-record_diff" data-route="record_diff">
+    <h3><code>/api/v1/record_diff</code></h3>
+    <p>
+      Compare two revisions of one record rather than treating the latest row
+      as timeless. <code>kind=ocds</code> diffs two procurement notices
+      field by field and labels each changed field: a <strong>source</strong>
+      field is verbatim from the OCDS release, so a change there is an
+      amendment the publisher made; a <strong>derived</strong> field is a
+      match or normalisation this pipeline recomputed between collections, so a
+      change there need not mean the underlying notice moved. The two change
+      counts are reported apart and never added. <code>kind=document</code>
+      diffs two parsed versions of one document — a metadata diff (parser,
+      schema, config hash) plus an element-aligned, text-aware diff of the
+      body; unchanged elements are omitted.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>ocds (default) or document.</td></tr>
+        <tr><td><code>a</code>, <code>b</code></td><td>The two revision ids (notice_id or document_version_id).</td></tr>
+        <tr><td><code>ocid</code></td><td>kind=ocds: diff this OCID's two most recent notices instead of passing a/b.</td></tr>
+        <tr><td><code>document_id</code></td><td>kind=document: diff this document's two most recent versions.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Documents are gated by the same source allowlist as
+      <a href="#route-document_search">document search</a> — a source not
+      searchable there is not diffable here.
+    </p>
+  </article>
+
   <article class="apiroute" id="route-feed" data-route="feed">
     <h3><code>/api/v1/feed/changes.atom</code></h3>
     <p>

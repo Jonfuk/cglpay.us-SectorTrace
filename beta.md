@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-092 | Record revision comparison
+- [IN_PROGRESS] BETA-093 | Relationship pathfinder
   - priority: P1
   - impact: 5
-  - effort: 5
+  - effort: 4
   - confidence: 4
-  - risk: 3
-  - area: public/version inspection
-  - depends_on: BETA-050, BETA-060, BETA-081, BETA-090
-  - objective: Compare successive procurement notices, documents, provider
-    records and regulatory entries with field-aware and text-aware diffs.
-  - next_action: Prove stable version identity and before/after fixtures for
-    one OCDS notice and one parsed document, then a field-aware diff that
-    labels source amendments apart from parser/normalisation changes.
+  - risk: 4
+  - area: public/relationships
+  - depends_on: BETA-010, BETA-044, BETA-076, BETA-080
+  - objective: Find and explain the shortest verified path between two
+    selected entities through source-backed graph edges.
+  - next_action: Define the permitted edge types (verified only, no extracted
+    or analytical edges), deterministic tie-breaking and a path length cap;
+    BFS over the existing graph edges with a table equivalent.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
 complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
-BETA-097; BETA-088 and BETA-089 are complete.)_
+BETA-097; BETA-088, BETA-089 and BETA-092 are complete.)_
 
 ### BLOCKED
 
@@ -549,6 +549,56 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-092 | Record revision comparison
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: public/version inspection
+  - depends_on: BETA-050, BETA-060, BETA-081, BETA-090
+  - objective: Compare successive procurement notices, documents, provider
+    records and regulatory entries with field-aware and text-aware diffs.
+  - result: New `pipeline/web/record_diff.py`. `ocds_diff()` — a field-aware
+    diff of two procurement notices (explicit `a`/`b` notice ids, or an
+    `ocid` to take its two most recently published). Each contract field is
+    classed once, in `_CONTRACT_FIELDS`: **source** (verbatim from the OCDS
+    release — `title`, `value_core`, `date_published`, `notice_type`, …) or
+    **derived** (a match/normalisation this pipeline computes —
+    `buyer_ons_code`, `psr_basis`). The payload returns every field with its
+    class, `a`, `b` and `changed`, plus `counts.changed_source` /
+    `counts.changed_derived` **reported apart and never added** and a
+    `same_ocid` flag. `document_version_diff()` — a metadata diff (parser,
+    schema, `config_hash`, `text_sha256`, status, is_active) plus a
+    text-aware, **element-aligned** diff: `document_elements` from each
+    version keyed by `sequence`, unchanged elements (equal `text_sha256`)
+    omitted, the rest classed `added` / `removed` / `changed`, capped at 600
+    elements. Documents are gated by the same `DOCUMENT_SEARCH_SOURCES`
+    allowlist as `document_search` — a source not searchable there raises
+    here too — and versions belonging to different documents are refused.
+    New additive public route `/api/v1/record_diff` (`kind` ocds|document,
+    `a`/`b`/`ocid`/`document_id`), on the frozen surface
+    (`PUBLIC_API_ROUTES`), OpenAPI, `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/record_diff`. New `/revisions` route + page
+    ("Compare revisions"): a kind selector + id field, then for OCDS a
+    two-column field table (source/derived class pills, changed rows tinted)
+    under a finding block "N source fields amended · M derived fields
+    recomputed"; for a document the metadata diff plus an ordered list of
+    changed/added/removed elements with their A and B text. Linked from the
+    footer nav. `styles.css` gained a `.rev-*` block.
+  - validation: New `tests/test_web_record_diff.py` (6 — the OCDS diff labels
+    source vs derived changes and keeps the counts apart; `ocid=` takes the
+    two most recent notices; a missing notice raises; the document diff is
+    element-aligned with correct added/changed counts and a metadata diff; a
+    non-allowlisted `source_system` is refused; the route is in the OpenAPI
+    doc). Also fixed `test_portal_offline_reading` to treat `feed` as an
+    EXTRA route like `export` (BETA-089 follow-up). `test_portal_isolation` /
+    `test_portal_navigation` / `test_web_openapi` green; `ruff` clean.
+    Browser-verified: `#/revisions?kind=ocds&ocid=…` against a seeded pair of
+    notices shows "3 source fields amended · 0 derived recomputed", a "same
+    OCID" badge and three tinted rows (title, value_core, date_published).
 
 - [DONE] BETA-089 | Saved searches and change alerts
   - completed: 2026-08-29
@@ -5025,8 +5075,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | DONE (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
-| P1 | Record revision comparison | 5 | 5 | 4 | IN_PROGRESS (BETA-092) |
-| P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |
+| P1 | Record revision comparison | 5 | 5 | 4 | DONE (BETA-092) |
+| P1 | Relationship pathfinder | 5 | 4 | 4 | IN_PROGRESS (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |

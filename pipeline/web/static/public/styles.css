@@ -1305,6 +1305,26 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .ss-name:hover, .ss-name:focus { border-color: var(--border-subtle); }
 .ss-new { color: var(--accent-amber); font-weight: 600; }
 
+/* BETA-092: record revision comparison. Field-aware and text-aware diffs;
+ * a source amendment and a pipeline normalisation are labelled apart. */
+.rev-form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.rev-form input { min-width: 240px; padding: var(--space-1) var(--space-2); }
+.rev-head { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: baseline; margin-bottom: var(--space-3); }
+.rev-table { width: 100%; border-collapse: collapse; }
+.rev-table th, .rev-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.rev-table tr.rev-changed { background: var(--caveat-bg); }
+.rev-class { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); }
+.rev-class-source { color: var(--accent-amber); }
+.rev-class-derived { color: var(--text-secondary); }
+.rev-elements { display: flex; flex-direction: column; gap: var(--space-2); padding-left: 0; }
+.rev-el { list-style: none; border-left: 3px solid var(--border-subtle); padding: var(--space-1) var(--space-3); }
+.rev-el-changed { border-left-color: var(--accent-amber); }
+.rev-el-added { border-left-color: #3fb27f; }
+.rev-el-removed { border-left-color: #d9534f; }
+.rev-was, .rev-now { font-size: 14px; margin-top: 2px; }
+.rev-was { opacity: .75; }
+.rev-tag { font: 700 11px/1 var(--display, inherit); color: var(--text-muted); margin-right: var(--space-1); }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

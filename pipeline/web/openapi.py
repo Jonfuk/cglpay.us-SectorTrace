@@ -173,6 +173,23 @@ ROUTES: dict[str, dict] = {
                              "server's current date. For reproducible views."),
         ],
     },
+    "/api/v1/record_diff": {
+        "surface": "record_diff",
+        "summary": "Compare two revisions of one record. kind=ocds diffs two "
+                   "procurement notices field-aware, labelling a publisher "
+                   "amendment ('source') apart from a normalisation this "
+                   "pipeline recomputed ('derived'). kind=document diffs two "
+                   "parsed versions of one document, element-aligned and "
+                   "text-aware. The source and derived change counts are never "
+                   "added.",
+        "parameters": [
+            _p("kind", desc="ocds (default) or document."),
+            _p("a", desc="First revision id (notice_id or document_version_id)."),
+            _p("b", desc="Second revision id."),
+            _p("ocid", desc="For kind=ocds: diff this OCID's two most recent notices."),
+            _p("document_id", desc="For kind=document: diff this document's two most recent versions."),
+        ],
+    },
     "/api/v1/changes": {
         "surface": "changes",
         "summary": "Derived chronology of what the warehouse recorded changing "
