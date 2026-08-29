@@ -1263,6 +1263,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "summary":
             return public_queries.summary(conn)
+        if route == "meta":
+            # Release identity for the beta — build, schema, capabilities.
+            # `/health` stays the plain `ok` liveness probe; this is the
+            # auditable identity beside it. Needs settings, unlike the rest.
+            return public_queries.meta(conn, self.settings)
         if route == "providers":
             return {"providers": public_queries.providers(conn)}
         if route == "authorities":

@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-038. Current work: BETA-039. Next:
-  BETA-040.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-039. Current work: BETA-040. Next:
+  BETA-041.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,27 +271,28 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-039 | Release identity and beta smoke gate
+- [IN_PROGRESS] BETA-040 | Contract search and pagination
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 2
+  - effort: 3
   - confidence: 5
   - risk: 2
-  - area: web/release
-  - depends_on: BETA-038
-  - objective: Expose a safe `GET /api/v1/meta` release identity containing
-    revision, build time, environment, latest migration, latest data timestamp
-    and capability flags; show it in the portal footer/admin UI and verify it
-    with a read-only beta smoke gate.
-  - rationale: A beta is not auditable if reviewers cannot tell which build,
-    schema and optional capabilities they are exercising. `/health` remains
-    the deliberately plain `ok` liveness endpoint.
-  - suggested_first_action: Define the stable response schema and inject build
-    metadata at deployment, then add GET-only smoke assertions that cannot
-    mutate production or trigger collection.
-  - next_action: Implement `/api/v1/meta` in `public_queries`/`server.py`,
-    render it in the portal footer, and add a read-only smoke-gate test.
+  - area: api/contracts/ui
+  - depends_on: BETA-039
+  - objective: Add `q`, `limit`, `offset` and `since_retrieved_at` to
+    `/api/v1/contracts`, matching buyer and supplier names case-insensitively,
+    with URL-backed portal search, show-more pagination and export/filter
+    parity apart from pagination parameters.
+  - rationale: Contract evidence is already valuable but hard to interrogate;
+    server-side filtering avoids oversized transfers and makes a shared result
+    set linkable and reproducible.
+  - suggested_first_action: Lock the request/response and export-parity tests,
+    then use existing PostgreSQL trigram indexes with a SQLite scan fallback
+    and stable ordering.
+  - next_action: Add the params to `public_queries.contracts` + the server
+    route, wire URL-backed search and show-more into the contracts page, and
+    pin export/filter parity.
 
 ### BLOCKED
 
@@ -474,25 +475,6 @@ DONE
     exercise the extension paths against a disposable PostgreSQL instance.
 
 ### NEXT
-
-- [NEXT] BETA-040 | Contract search and pagination
-  - priority: P1
-  - impact: 5
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: api/contracts/ui
-  - depends_on: BETA-039
-  - objective: Add `q`, `limit`, `offset` and `since_retrieved_at` to
-    `/api/v1/contracts`, matching buyer and supplier names case-insensitively,
-    with URL-backed portal search, show-more pagination and export/filter
-    parity apart from pagination parameters.
-  - rationale: Contract evidence is already valuable but hard to interrogate;
-    server-side filtering avoids oversized transfers and makes a shared result
-    set linkable and reproducible.
-  - suggested_first_action: Lock the request/response and export-parity tests,
-    then use existing PostgreSQL trigram indexes with a SQLite scan fallback
-    and stable ordering.
 
 - [NEXT] BETA-041 | Ranked, faceted document search
   - priority: P1
@@ -697,6 +679,51 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-039 | Release identity and beta smoke gate
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 2
+  - area: web/release
+  - depends_on: BETA-038
+  - objective: Expose a safe `GET /api/v1/meta` release identity containing
+    revision, build time, environment, latest migration, latest data timestamp
+    and capability flags; show it in the portal footer/admin UI and verify it
+    with a read-only beta smoke gate.
+  - result: New public route `GET /api/v1/meta` (`public_queries.meta`), added
+    to the frozen surface in `test_portal_isolation.py`, the `/api` page and
+    the `<noscript>` list. Payload: `service`, `environment`, `revision` +
+    `revision_source` (`deployment` when the deploy injected `GIT_REVISION`,
+    else `checkout` — read from `.git/HEAD`/`packed-refs`, no subprocess),
+    `build_time`, `backend`, a `schema` block (`latest_migration`,
+    `applied_count`, `migrated_at`) and a `capabilities` block (`admin_ui`,
+    `api_response_cache`, `api_rate_limit`, `document_analysis`,
+    `semantic_search`, `postgres_extensions` — `{}` on SQLite, name→installed
+    on PostgreSQL via `health.extensions`). Deliberately cheap: reads only
+    `schema_migrations` and `http_cache`; per-source retrieval times stay on
+    `/api/v1/freshness`, which the `data` block points at. `/health` is
+    untouched — still the plain `ok` liveness probe.
+  - config: `environment` / `git_revision` / `build_time` added to `Settings`
+    (all with local-dev defaults) and documented in `.env.example`.
+    `deploy/railway-start.sh` now exports `ENVIRONMENT=production`,
+    `GIT_REVISION` (from Railway's `RAILWAY_GIT_COMMIT_SHA`) and a
+    process-start `BUILD_TIME` before serving.
+  - ui: Portal footer carries a hidden `#build-identity` line that `app.js`
+    (`initBuildIdentity`) fills from `/api/v1/meta` — `environment · build
+    <sha10> · schema <NNNN> · deployed <ts>` — via text nodes, staying silent
+    on any fetch failure.
+  - validation: New `tests/test_web_meta.py` (14 tests) — payload shape,
+    settings reflection, the `.git` revision fallback, idempotence, and the
+    read-only smoke gate (GET/HEAD only; POST/PUT/PATCH/DELETE all refused;
+    `/health` still plain text; HTTP payload equals the function output).
+    `test_portal_isolation.py` updated for the new route. Full web/portal/
+    cache/docs subset green (582 passed); `ruff check pipeline tests scripts`
+    clean. Browser-verified against a SQLite warehouse: `/api/v1/meta` serves
+    the identity, the `/api` page shows the route, the footer line renders
+    with no console errors.
 
 - [DONE] BETA-038 | Queue integrity validator
   - completed: 2026-08-29

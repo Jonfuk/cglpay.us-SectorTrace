@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import date
+from pathlib import Path
 from typing import Any, Iterator
 
 from pipeline import catalog, db
@@ -570,6 +571,98 @@ def freshness(conn: sqlite3.Connection) -> dict:
     return {
         "tables": _rows(conn, union),
         "caveat": CAVEATS["collection_freshness"],
+    }
+
+
+# --- release identity -------------------------------------------------------
+
+
+def _git_revision_from_checkout() -> str | None:
+    """The current commit, read straight from `.git` — no subprocess.
+
+    Only the local-checkout fallback: a hosted deployment injects
+    `GIT_REVISION` because the Docker image carries no `.git` directory. Any
+    read problem (detached checkout, packed refs, no `.git` at all) returns
+    None rather than raising — an unknown revision is a fine answer here and a
+    500 on the footer is not.
+    """
+    git_dir = Path(__file__).resolve().parents[2] / ".git"
+    try:
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(":", 1)[1].strip()
+            ref_file = git_dir / ref
+            if ref_file.is_file():
+                return ref_file.read_text(encoding="utf-8").strip() or None
+            packed = git_dir / "packed-refs"
+            if packed.is_file():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    if line.startswith(("#", "^")) or " " not in line:
+                        continue
+                    sha, name = line.split(" ", 1)
+                    if name.strip() == ref:
+                        return sha or None
+            return None
+        return head or None
+    except OSError:
+        return None
+
+
+def meta(conn: sqlite3.Connection, settings) -> dict:
+    """Release identity for the beta: which build, schema and capabilities.
+
+    Deliberately cheap — the portal footer and the beta smoke gate both read
+    it, so it touches only two tiny tables (`schema_migrations`, `http_cache`)
+    and the server's own extension catalogue. Per-source collection times are
+    `/api/v1/freshness`, which this points at rather than recomputing.
+
+    `/health` stays the plain-text `ok` liveness probe; this is the auditable
+    identity beside it.
+    """
+    _public(["schema_migrations", "http_cache"])
+
+    applied = db.applied_migrations(conn)
+    schema_row = _one(
+        conn, "SELECT MAX(applied_at) AS migrated_at FROM schema_migrations")
+
+    last_fetch_at = None
+    if any(obj["name"] == "http_cache" for obj in catalog.list_objects(conn)):
+        last_fetch_at = _one(
+            conn, "SELECT MAX(updated_at) AS t FROM http_cache").get("t")
+
+    backend = db.backend_of(conn)
+    extension_state = {
+        ext["name"]: bool(ext["installed"]) for ext in health.extensions(conn)
+    }
+
+    return {
+        "service": "sectortrace",
+        "environment": settings.environment,
+        "revision": settings.git_revision or _git_revision_from_checkout(),
+        "revision_source": "deployment" if settings.git_revision else "checkout",
+        "build_time": settings.build_time,
+        "backend": backend,
+        "schema": {
+            "latest_migration": max(applied) if applied else None,
+            "applied_count": len(applied),
+            "migrated_at": schema_row.get("migrated_at"),
+        },
+        "data": {
+            # The freshest signal of collection activity, cheaply: when this
+            # warehouse last spoke to any source. The authoritative per-table
+            # retrieval times are their own route.
+            "last_fetch_at": last_fetch_at,
+            "per_source": "/api/v1/freshness",
+        },
+        "capabilities": {
+            "admin_ui": bool(settings.admin_ui_enabled),
+            "api_response_cache": bool(settings.cache_enabled),
+            "api_rate_limit": bool(settings.api_rate_limit_enabled),
+            "document_analysis": bool(settings.document_analysis_enabled),
+            "semantic_search": bool(settings.nlp_enabled),
+            # {} on SQLite; on PostgreSQL, name -> installed-in-this-database.
+            "postgres_extensions": extension_state,
+        },
     }
 
 

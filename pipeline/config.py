@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
 
+    # Release identity, surfaced read-only at GET /api/v1/meta and in the
+    # portal footer (BETA-039). A beta is not auditable if a reviewer cannot
+    # tell which build, schema and optional capabilities they are exercising.
+    # All three are injected by the deployment: `deploy/railway-start.sh` sets
+    # GIT_REVISION (from Railway's RAILWAY_GIT_COMMIT_SHA), BUILD_TIME and
+    # ENVIRONMENT before the web process starts. Left unset on a local
+    # checkout, `meta` falls back to reading .git/HEAD and reports the
+    # environment as "development".
+    environment: str = "development"
+    git_revision: str | None = None
+    build_time: str | None = None
+
     # A per-IP token bucket on the public /api/v1/* routes, answering
     # sustained abuse with 429 + Retry-After. Generous by design: it exists
     # to deter a scraper hammering the API, not to meter ordinary interactive

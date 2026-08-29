@@ -76,6 +76,7 @@ PUBLIC_STATIC_PATHS = {
 # The portal's read-only API, as route names under /api/v1/.
 PUBLIC_API_ROUTES = {
     "summary",
+    "meta",
     "providers",
     "authorities",
     "contracts",

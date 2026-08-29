@@ -175,6 +175,7 @@
     -->
     <ul>
       <li><code>/api/v1/summary</code> — headline counts and their caveats</li>
+      <li><code>/api/v1/meta</code> — release identity: build, schema and capabilities of this deployment</li>
       <li><code>/api/v1/pay</code> — pay evidence</li>
       <li><code>/api/v1/council_spend</code> — published council payment lines</li>
       <li><code>/api/v1/contracts</code> — contract notices</li>
@@ -249,6 +250,13 @@
     <em>Where this came from</em> drawer beside it, and every export writes it
     into the file.
   </p>
+  <!--
+    Release identity, filled by app.js from /api/v1/meta. Hidden until it
+    resolves so a reader with JavaScript off (who has the <noscript> API list
+    above) sees nothing half-formed. It is a build/schema fingerprint, not a
+    figure, so it needs no caveat.
+  -->
+  <p class="muted small buildid" id="build-identity" hidden></p>
 </footer>
 
 <script type="module" src="/app.js"></script>

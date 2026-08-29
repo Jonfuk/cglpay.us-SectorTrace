@@ -140,6 +140,23 @@
     <p><a href="/api/v1/summary"><code>/api/v1/summary</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="meta">
+    <h3><code>/api/v1/meta</code></h3>
+    <p>
+      Release identity for this deployment: the <code>environment</code>, the
+      running <code>revision</code> and <code>build_time</code>, the database
+      <code>backend</code>, the <code>schema</code> block (latest applied
+      migration and count) and a <code>capabilities</code> block (admin UI,
+      response cache, rate limit, document analysis, semantic search, and any
+      PostgreSQL extensions installed). It lets a reviewer confirm which build
+      and schema they are looking at. Per-source collection times are
+      <a href="/api/v1/freshness"><code>/api/v1/freshness</code></a>;
+      <code>/health</code> stays the plain liveness check.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p><a href="/api/v1/meta"><code>/api/v1/meta</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="providers">
     <h3><code>/api/v1/providers</code></h3>
     <p>

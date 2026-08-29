@@ -604,6 +604,30 @@ function initMobileNavigation() {
   });
 }
 
+// Release identity in the footer, from /api/v1/meta (BETA-039). A build and
+// schema fingerprint so a reviewer can tell which deployment they are on;
+// staying quiet on any failure, because a footer line is not worth an error.
+async function initBuildIdentity() {
+  const target = $('#build-identity');
+  if (!target) return;
+  let meta;
+  try {
+    meta = await fetchJSON('meta');
+  } catch (e) {
+    return;
+  }
+  const parts = [];
+  if (meta.environment) parts.push(meta.environment);
+  if (meta.revision) parts.push(`build ${String(meta.revision).slice(0, 10)}`);
+  if (meta.schema && meta.schema.latest_migration) {
+    parts.push(`schema ${meta.schema.latest_migration.replace(/\.sql$/, '')}`);
+  }
+  if (meta.build_time) parts.push(`deployed ${meta.build_time}`);
+  if (!parts.length) return;
+  target.textContent = parts.join(' · ');
+  target.hidden = false;
+}
+
 // --- boot --------------------------------------------------------------------
 
 function boot() {
@@ -614,6 +638,7 @@ function boot() {
   initFindCouncil();
   initMobileNavigation();
   initPalette();
+  initBuildIdentity();
   subscribe(() => render());
   window.addEventListener('hashchange', render);
   window.addEventListener('portalthemechange', render);
