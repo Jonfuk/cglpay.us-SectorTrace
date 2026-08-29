@@ -297,26 +297,26 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-086 | Operator action cockpit
+- [IN_PROGRESS] BETA-087 | Split-pane review workspace
   - priority: P1
   - impact: 5
-  - effort: 4
+  - effort: 5
   - confidence: 4
-  - risk: 3
-  - area: admin/overview
-  - depends_on: BETA-058, BETA-059, BETA-060, BETA-063, BETA-068, BETA-085
-  - objective: Replace long overview tables with prioritised cards for review
-    pressure, failed/stale runs, blocked sources, coverage actions, archive
-    health, schema drift and resumable work; every card opens a pre-filtered
-    existing workflow.
-  - next_action: Add a read-only `/api/admin/cockpit` aggregate with
-    deterministic priority reasons; the UI may rank operational states, never
-    evidence quality or review outcomes.
+  - risk: 4
+  - area: admin/review
+  - depends_on: BETA-052, BETA-054, BETA-055, BETA-080, BETA-085
+  - objective: Display the queue on the left and typed context, source
+    preview, alternatives, history and decision controls on the right;
+    preserve keyboard operation and scroll position, with a stacked
+    narrow-screen layout.
+  - next_action: Refactor presentation around the existing single-item APIs
+    and keep named reviewer, explicit decision and one-candidate-at-a-time
+    safeguards unchanged.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–085 are complete, see DONE. Wave 4 (BETA-082–087) is
-in progress. The remaining items are being delivered in the approved wave
-order.)_
+on 2026-08-29. BETA-068–086 are complete, see DONE. BETA-087 is the last item
+in wave 4 and the first programme. The remaining items are being delivered in
+the approved wave order.)_
 
 ### BLOCKED
 
@@ -551,6 +551,48 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-086 | Operator action cockpit
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/overview
+  - depends_on: BETA-058, BETA-059, BETA-060, BETA-063, BETA-068, BETA-085
+  - objective: Replace long overview tables with prioritised cards for review
+    pressure, failed/stale runs, blocked sources, coverage actions, archive
+    health, schema drift and resumable work; every card opens a pre-filtered
+    existing workflow.
+  - result: New `pipeline/web/cockpit.py` — `overview(conn, settings)`, the
+    one aggregate the BETA-068–087 interface contract plans. Seven cards,
+    each `{key, title, priority (0 clear … 3 act now), metric, reason,
+    link}`, ranked by a **deterministic reason** — review pressure (pending
+    count + oldest age), run health (last run failed/partial → 3, ≥30 days
+    stale → 2), coverage actions and blocked sources (from
+    `completeness_board.board`'s `by_reason`), schema state (unapplied
+    migrations → 3, applied-without-file → 2, from `health.warehouse`),
+    raw-archive audit (missing refs / duplicate hashes → 3), and parse
+    failures. Every `link` is an admin hash to a pre-filtered workflow
+    (`#review`, `#pipeline`, `#health`). It ranks **operational states only**
+    — never evidence quality, never a review outcome — and decides nothing;
+    the `note` says so. New route `GET /api/admin/cockpit`. The admin
+    Overview tab gains a "What needs attention" cockpit above the warehouse
+    counts (`loadCockpit` in `app.js`): the cards as clickable buttons
+    (priority-coloured left border), sorted worst-first, each navigating to
+    its link.
+  - api/ui: new read-only route `GET /api/admin/cockpit` (admin boundary; no
+    params). New admin HTML `#cockpit`; new CSS `.cockpit*`.
+  - validation: New `tests/test_web_cockpit.py` (4 — the cards are the seven
+    operational keys, each with a priority / reason / hash link, sorted
+    priority-desc then key, with no "reviewer" or "quality" in the reasons
+    and the note stating the boundary; review pressure reflects the pending
+    queue and an old oldest → act now with `#review`; a failed last run →
+    act now; the route serves the expected shape). `test_web_admin` green.
+    `ruff` clean. Browser-verified: the Overview tab shows 7 cockpit cards
+    (Coverage actions p2 "29 datasets need a first run" first, then the p1s,
+    then p0s); clicking "Review queue" navigates to `#review`.
 
 - [DONE] BETA-085 | Responsive admin navigation
   - completed: 2026-08-29
@@ -4543,8 +4585,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | DONE (BETA-083) |
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | DONE (BETA-084) |
 | P1 | Responsive admin navigation | 5 | 4 | 5 | DONE (BETA-085) |
-| P1 | Operator action cockpit | 5 | 4 | 4 | IN_PROGRESS (BETA-086) |
-| P1 | Split-pane review workspace | 5 | 5 | 4 | APPROVED, not queued (BETA-087) |
+| P1 | Operator action cockpit | 5 | 4 | 4 | DONE (BETA-086) |
+| P1 | Split-pane review workspace | 5 | 5 | 4 | IN_PROGRESS (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | APPROVED, not queued (BETA-090) |

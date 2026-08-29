@@ -1348,6 +1348,13 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import completeness_board
             return completeness_board.board(conn)
 
+        if path == "/api/admin/cockpit":
+            # BETA-086: the operator action cockpit — prioritised cards over
+            # operational state, each with a deterministic reason and a link
+            # to a pre-filtered workflow. Read-only.
+            from pipeline.web import cockpit
+            return cockpit.overview(conn, self.settings)
+
         if path == "/api/admin/run-ledger":
             # The durable run ledger (BETA-058) — every module-run, whatever
             # entry point started it, not only the browser-started jobs.

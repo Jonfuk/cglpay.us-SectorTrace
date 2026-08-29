@@ -313,7 +313,34 @@ function requireReviewer() {
 
 // --- overview ---------------------------------------------------------------
 
+// BETA-086: the operator action cockpit. Prioritised cards over operational
+// state; each card links to a pre-filtered existing workflow.
+async function loadCockpit() {
+  const holder = $('#cockpit');
+  if (!holder) return;
+  let data;
+  try { data = await api('/api/admin/cockpit'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'muted small', text: 'Cockpit unavailable.' })); return; }
+
+  const labels = data.priority_labels || {};
+  const cards = (data.cards || []).map((c) => el('button', {
+    class: `cockpit-card p${c.priority}`,
+    type: 'button',
+    onclick: () => { location.hash = c.link; },
+    title: `Go to ${c.link}`,
+  },
+    el('span', { class: 'cockpit-badge', text: labels[c.priority] || String(c.priority) }),
+    el('span', { class: 'cockpit-title', text: c.title }),
+    el('span', { class: 'cockpit-metric', text: num(c.metric) }),
+    el('span', { class: 'cockpit-reason small', text: c.reason })));
+
+  holder.replaceChildren(
+    el('p', { class: 'muted small', text: data.note }),
+    el('div', { class: 'cockpit-grid' }, ...cards));
+}
+
 async function loadOverview() {
+  loadCockpit();
   let data;
   try { data = await api('/api/overview'); }
   catch (e) { return toast(e.message, true); }

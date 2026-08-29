@@ -646,3 +646,20 @@ a.jump:hover { border-bottom-style: solid; }
 .schema-panel p { margin: 4px 0; }
 .schema-cols { margin-top: 6px; }
 .schema-cols th { font-size: 11.5px; }
+
+/* BETA-086: operator action cockpit. */
+.cockpit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.cockpit-card {
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "badge title metric" "reason reason reason";
+  gap: 4px 8px; align-items: center; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+}
+.cockpit-card:hover { border-color: var(--accent); }
+.cockpit-card.p3 { border-left-color: var(--reject); }
+.cockpit-card.p2 { border-left-color: var(--pending); }
+.cockpit-card.p1 { border-left-color: var(--accent); }
+.cockpit-badge { grid-area: badge; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cockpit-title { grid-area: title; font-weight: 600; }
+.cockpit-metric { grid-area: metric; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cockpit-reason { grid-area: reason; color: var(--muted); }
