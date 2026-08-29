@@ -322,3 +322,44 @@ backup_s3_endpoint: ""
 backup_s3_region: ""
 backup_s3_access_key: ""
 backup_s3_secret: ""
+
+# --- Local analyst assistant (BETA-107) ---------------------------------------
+# The optional natural-language operator finding aid, off by default and
+# never on Railway (docs/assistant.md). Two switches, because provisioning
+# the model runtime and authorising the feature are different decisions:
+#
+#   assistant_runtime_enabled  stands up a single Ollama (its own compose
+#                              file), builds the `openai` extra into the app
+#                              image, and points ASSISTANT_OLLAMA_URL /
+#                              ASSISTANT_NEEDLE_URL at it.
+#   assistant_app_enabled      writes ASSISTANT_ENABLED=true. Do NOT set this
+#                              until `pipeline nlp assistant-eval` reports
+#                              gate.may_enable: true — a provisioned runtime
+#                              is not an enabled feature.
+assistant_runtime_enabled: false
+assistant_app_enabled: false
+
+# One Ollama serves both roles the assistant calls. It pulls this reference
+# (ollama.com/library/lfm2) once, then `ollama cp`s it to the two model
+# strings pipeline/assistant/adapters.py sends — LFM_MODEL for synthesis and
+# NEEDLE_MODEL for the router — so a request for either resolves to the same
+# weights. Provenance note: the library model is LFM2; the code and
+# docs/assistant.md pin "LFM2.5" and quant Q4_K_M. The alias bridges the
+# name; assistant_runs.lfm_model still records the pinned constant. Serve a
+# real LFM2.5 GGUF here instead if that gap matters.
+assistant_lfm_ollama_ref: "lfm2:1.2b"
+assistant_lfm_model_tag: "LiquidAI/LFM2.5-1.2B-Instruct"
+assistant_needle_model_tag: "needle-2"
+
+# Pinned like every other image here (neo4j:5-community, caddy:2-alpine).
+# Bump deliberately; lfm2 needs a build recent enough to know the
+# architecture. A wrong tag fails cleanly at `docker compose pull` and
+# breaks nothing already running.
+assistant_ollama_image: "ollama/ollama:0.6.0"
+
+# A ceiling, not a reservation — the same blast-radius reasoning as
+# documents_mem_limit_mb. Inference of a 1.2B Q4 model sits well inside this.
+# NOT part of the preflight role's RAM budget: that role predates this
+# service and does not know to reserve for it, so leave headroom yourself on
+# a box that also runs a document worker.
+assistant_ollama_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.2) | int, 1536] | max, 4096] | min }}"

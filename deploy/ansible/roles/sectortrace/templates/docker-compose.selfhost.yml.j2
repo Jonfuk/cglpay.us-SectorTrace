@@ -140,6 +140,11 @@ services:
     build:
       context: "{{ repo_root }}"
       dockerfile: Dockerfile
+      args:
+        # `openai` (the [assistant] extra) only when this box provisions the
+        # assistant runtime. Railway builds the same Dockerfile with no
+        # args, so its image never gets it — see Dockerfile.
+        INSTALL_ASSISTANT: "{{ assistant_runtime_enabled | lower }}"
     restart: unless-stopped
     env_file:
       - "{{ state_dir }}/.env"

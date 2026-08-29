@@ -528,6 +528,32 @@ Set the list back to empty and re-run to tear all of it down again.
   here, for the same reason (the `nlp` extra is in this image, not the
   always-on app).
 
+## The local analyst assistant (optional, off)
+
+`assistant_runtime_enabled: false` by default, the same switch and the same
+`docker-compose.assistant.yml` as the self-host build — an Ollama serving
+`lfm2:1.2b`, aliased to `LiquidAI/LFM2.5-1.2B-Instruct` and `needle-2`, with
+`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it and the `app`
+image built with the `openai` extra. It reads only warehouse content, so a
+mirror is a legitimate host for it.
+
+Two mirror-specific things:
+
+- **Retrieval needs embeddings the sync keeps wiping.** The assistant's
+  document-search tool reads `document_embeddings`, replaced wholesale on
+  every sync. On a `beta` box set `mirror_nlp_rebuild: true` (and a real
+  `mirror_nlp_embed_model`), or run `sectortrace-mirror nlp embed` after
+  each deliberate reseed, or that tool has nothing to work with.
+- **Enabling stays gated and manual.** `assistant_runtime_enabled` only
+  provisions Ollama. Leave `ASSISTANT_ENABLED` unset until `pipeline nlp
+  assistant-eval` reports `gate.may_enable: true`
+  ([`docs/assistant.md`](../../docs/assistant.md)); then put
+  `ASSISTANT_ENABLED=true` in `.env.merge` so it survives the beta checkout
+  reset.
+
+The Ollama weights volume sits outside the warehouse, so it is untouched by
+a sync and by a `beta` reseed — provisioning is a one-off.
+
 ## Everything else
 
 Sizing, Cloudflare and certificates, the admin UI and its allowlist, ufw and

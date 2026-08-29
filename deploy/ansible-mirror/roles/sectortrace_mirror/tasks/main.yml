@@ -221,6 +221,15 @@
     dest: "{{ state_dir }}/docker-compose.documents.yml"
     mode: "0644"
 
+# Rendered whether or not the assistant is provisioned, so the file is there
+# the day someone sets assistant_runtime_enabled. Nothing starts from it
+# unless that is true — see the bring-up block after the health gate.
+- name: Render the assistant model-runtime compose file
+  ansible.builtin.template:
+    src: docker-compose.assistant.yml.j2
+    dest: "{{ state_dir }}/docker-compose.assistant.yml"
+    mode: "0644"
+
 - name: Render the Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
@@ -331,6 +340,69 @@
     chdir: "{{ state_dir }}"
   register: sectortrace_mirror_backfill
   changed_when: false
+
+# --- Local analyst assistant model runtime (BETA-107) ----------------------
+# Only when this box provisions it. Ollama serves the LFM synthesis model
+# and the same weights aliased to the router's tag; the app reaches both at
+# http://ollama:11434 on the mirror network. Enabling the feature itself
+# (ASSISTANT_ENABLED) is still a separate, gated step — see docs/assistant.md.
+# On a beta box the weights volume outlives a reseed, so this is a one-off
+# after the first provisioning run.
+- name: Bring up the assistant model runtime
+  when: assistant_runtime_enabled
+  block:
+    - name: Start Ollama
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml up -d
+        chdir: "{{ state_dir }}"
+      changed_when: true
+
+    - name: Wait for Ollama to answer
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama list
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_ready
+      retries: 20
+      delay: 3
+      until: sectortrace_mirror_ollama_ready.rc == 0
+      changed_when: false
+
+    - name: Pull the LFM model (a no-op once current)
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama pull {{ assistant_lfm_ollama_ref }}
+        chdir: "{{ state_dir }}"
+      changed_when: true
+
+    # pipeline/assistant/adapters.py sends fixed model strings (LFM_MODEL and
+    # NEEDLE_MODEL in runtime.py). Alias the pulled weights to both so a
+    # request for either resolves to them. `ollama cp` overwrites an existing
+    # tag, so re-running the playbook is a no-op. If Ollama rejects one of
+    # these names (case, dots, slash) or fails to match it at request time,
+    # the fix is to lowercase assistant_lfm_model_tag /
+    # assistant_needle_model_tag AND change the matching constant — the
+    # Option B code change docs/assistant.md's deploy note describes.
+    - name: Alias the pulled weights to the tags the assistant sends
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama cp {{ assistant_lfm_ollama_ref }} {{ item }}
+        chdir: "{{ state_dir }}"
+      loop:
+        - "{{ assistant_lfm_model_tag }}"
+        - "{{ assistant_needle_model_tag }}"
+      changed_when: true
+  rescue:
+    - name: Collect Ollama logs
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml logs --tail=60 --no-color
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report what Ollama said
+      ansible.builtin.fail:
+        msg: >-
+          {{ ['The assistant model runtime failed to start or provision. Logs follow.', '']
+             + (sectortrace_mirror_ollama_failure_logs.stdout_lines | default(['(no logs available)'])) }}
 
 # --- Direct PostgreSQL access for listed addresses --------------------------
 # postgres_external_allowed_ips is empty in the self-host build and by

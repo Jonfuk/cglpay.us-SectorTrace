@@ -81,12 +81,25 @@ def test_an_unknown_adapter_name_is_rejected(settings, monkeypatch) -> None:
         get_adapter("gpt-4", settings)
 
 
-def test_the_extra_is_declared_and_kept_out_of_the_docker_image() -> None:
+def test_the_extra_is_declared_and_kept_out_of_the_default_docker_image() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "\nassistant = [" in pyproject
     assert '"openai' in pyproject.split("\nassistant = [", 1)[1].split("]", 1)[0]
+
+    # The image can be built with the extra (a self-hosted box that
+    # provisions the assistant runtime does), but only on an explicit
+    # opt-in: ARG INSTALL_ASSISTANT defaults to false, and every
+    # `--extra assistant` in the file is guarded by a test on it. Railway
+    # builds this file with no build args (railway.toml below), so its
+    # image never gets `openai`.
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "--extra assistant" not in dockerfile
+    assert "ARG INSTALL_ASSISTANT=false" in dockerfile
+    for line in dockerfile.splitlines():
+        if "--extra assistant" in line:
+            assert '"$INSTALL_ASSISTANT" = "true"' in line, line
+
+    railway = (ROOT / "railway.toml").read_text(encoding="utf-8")
+    assert "INSTALL_ASSISTANT" not in railway
 
 
 def test_the_admin_route_reports_the_status(settings) -> None:

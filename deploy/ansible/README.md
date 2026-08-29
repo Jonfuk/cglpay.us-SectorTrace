@@ -465,6 +465,34 @@ docker compose exec app python -m pipeline graph backfill   # once, after your f
 docker compose exec app python -m pipeline graph rebuild --clear
 ```
 
+## The local analyst assistant (optional, off)
+
+`assistant_runtime_enabled: false` by default. Set it true and the deploy
+adds one more container from `docker-compose.assistant.yml` — an Ollama
+serving `lfm2:1.2b`, aliased (`ollama cp`) to the two model strings the
+assistant sends: `LiquidAI/LFM2.5-1.2B-Instruct` for synthesis and
+`needle-2` for the router. Both `ASSISTANT_OLLAMA_URL` and
+`ASSISTANT_NEEDLE_URL` in `.env` then point at `http://ollama:11434`, and
+the `app` image is built with the `assistant` extra (`openai`). Weights
+live in the `sectortrace-assistant_ollama-models` volume, not in
+`state_dir/data`.
+
+That provisions the runtime; it does **not** turn the feature on.
+`ASSISTANT_ENABLED` stays false until you run
+
+```bash
+docker compose exec app python -m pipeline nlp assistant-eval
+```
+
+and it reports `gate.may_enable: true` (see [`docs/assistant.md`](../../docs/assistant.md)).
+Then set `assistant_app_enabled: true` and re-run the playbook.
+
+The Ollama container's `mem_limit` is **not** in the preflight RAM budget —
+leave headroom yourself on a box that also runs a document worker. If a
+model call 400s with an unknown-model error, Ollama has normalised the tag
+away from the string the code sends; the fix is in the `ollama cp` note in
+`roles/sectortrace/tasks/main.yml`.
+
 ## What ufw doesn't cover
 
 Docker manipulates `iptables` directly for published ports, bypassing ufw's
