@@ -264,6 +264,27 @@
          catalogue, the live foreign keys and the export tab registry —
          source -> module -> table -> table -> export. Every edge is derived;
          none is hand-maintained. Read-only. -->
+    <!-- BETA-103: replay a stdlib parser against one archived object in
+         memory and diff its proposed output against the stored active
+         version. Read-only -- nothing is written. -->
+    <details class="panel" id="replay-panel">
+      <summary><h2 style="display:inline">Parser replay sandbox</h2></summary>
+      <p class="muted small">A test run against the archived bytes — the parse
+        happens in memory and nothing is written. Covers the stdlib parsers
+        (html, docx, pptx) only.</p>
+      <div class="rp-controls">
+        <input id="rp-doc" type="text" placeholder="document_id">
+        <select id="rp-parser">
+          <option value="">auto (by mime type)</option>
+          <option value="html">html</option>
+          <option value="docx">docx</option>
+          <option value="pptx">pptx</option>
+        </select>
+        <button class="btn" id="rp-run" type="button">Replay</button>
+      </div>
+      <div id="parser-replay"></div>
+    </details>
+
     <details class="panel" id="lineage-panel">
       <summary><h2>Data lineage</h2></summary>
       <div class="lin-controls">

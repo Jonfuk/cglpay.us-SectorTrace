@@ -297,20 +297,19 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-103 | Parser replay sandbox
+- [IN_PROGRESS] BETA-105 | Review-outcome analytics
   - priority: P2
   - impact: 4
-  - effort: 5
-  - confidence: 3
-  - risk: 4
-  - area: admin/document diagnostics
-  - depends_on: BETA-060, BETA-082, BETA-085, BETA-087
-  - objective: Replay one parser against one archived object and compare its
-    non-persisted proposed output with the stored normalised output and
-    warnings.
-  - next_action: An isolated read-only replay — parse the archived bytes in
-    memory, never write to the warehouse, and diff the proposed elements /
-    tables / warnings against the stored active version.
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/review operations
+  - depends_on: BETA-052, BETA-053, BETA-055, BETA-087
+  - objective: Show review decisions over time by source, item type, reason
+    code and evidence age without scoring or ranking reviewers.
+  - next_action: Aggregate review_queue / alias_decisions outcomes by
+    source, item type and month with a minimum group size; omit the reviewer
+    identity entirely.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -550,6 +549,55 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-103 | Parser replay sandbox
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: admin/document diagnostics
+  - depends_on: BETA-060, BETA-082, BETA-085, BETA-087
+  - objective: Replay one parser against one archived object and compare its
+    non-persisted proposed output with the stored normalised output and
+    warnings.
+  - result: New `pipeline/web/parser_replay.py::replay(conn, settings,
+    document_id, parser=None)` — a **read-only** contract. It reads the
+    archived bytes from `data/raw/` (checking the SHA-256 against
+    `evidence_records.payload_sha256`), runs a **stdlib parser in memory**
+    (`html` / `docx` / `pptx` via `pipeline.documents.parsers.get_parser`),
+    and diffs the proposed elements against the stored active version's:
+    per-`sequence` alignment gives added / removed / changed text, and the
+    table counts are compared. **Nothing is written** — the note says so and
+    a test asserts the row counts are unchanged after two replays. A PDF, or
+    a request for `docling` / `pymupdf`, returns `available: false` with a
+    reason rather than importing a heavy optional dependency into a web
+    request; a missing archived file or one over 32 MB does the same. A
+    parser that raises is reported as a diagnostic result, not a 500. New
+    additive admin route `/api/admin/parser-replay` (network-trust-gated).
+  - api/ui: additive `/api/admin/parser-replay?document_id=&parser=`. New
+    collapsed "Parser replay sandbox" panel on the pipeline tab
+    (`<details id="replay-panel">`) — a document_id input, a parser select
+    (auto / html / docx / pptx), and a results block showing the "nothing
+    was written" note, the stored vs proposed element/table/warning counts,
+    the archive-sha256 badge, the element delta, and a stored-vs-proposed
+    text-change table. `loadParserReplay()` in `pipeline.js`, run only on the
+    button press. `styles.css` gained a `.rp-*` block.
+  - validation: New `tests/test_web_parser_replay.py` (7 — an archived HTML
+    file is re-parsed and diffed against the stored version (1 element →
+    `h1` + `p`, one changed + one added, seq-1 stored/proposed text shown);
+    two replays write nothing; a PDF returns `available: false` without
+    importing a heavy parser; a missing archive returns `available: false`;
+    a tampered archive still replays but `archive.verified` is `false`; an
+    unknown document raises; the admin HTTP route serves the replay).
+    `test_admin_navigation` / `test_web_admin` green; `ruff` clean. The full
+    suite's 3084 passing was confirmed (the transient isolation failures in
+    the last sweep were files being edited mid-run and pass clean).
+    Browser-verified on the pipeline tab: replaying the seeded PDF document
+    shows "…nothing was written to the warehouse", "Stored: docling 1 — 2
+    elements, 1 tables" and "Replay not available: replay covers the stdlib
+    parsers only (docx, html, pptx)".
 
 - [DONE] BETA-099 | Document table extraction viewer
   - completed: 2026-08-29
@@ -5454,9 +5502,9 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Source-link resilience checker | 5 | 4 | 4 | DONE (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
-| P2 | Parser replay sandbox | 4 | 5 | 3 | IN_PROGRESS (BETA-103) |
+| P2 | Parser replay sandbox | 4 | 5 | 3 | DONE (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
-| P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
+| P2 | Review-outcome analytics | 4 | 4 | 4 | IN_PROGRESS (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |

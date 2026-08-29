@@ -632,6 +632,58 @@ async function loadLineage() {
   linRenderDetail();
 }
 
+/* BETA-103: parser replay sandbox. Replay a stdlib parser against one
+ * archived object in memory and diff the proposed output against the stored
+ * active version. Read-only — nothing is written. Runs on demand only. */
+async function loadParserReplay() {
+  const holder = $('parser-replay');
+  const doc = $('rp-doc')?.value.trim();
+  if (!holder || !doc) return;
+  holder.replaceChildren(el('p', { class: 'muted small', text: 'Replaying…' }));
+  let data;
+  try {
+    const q = new URLSearchParams({ document_id: doc });
+    if ($('rp-parser').value) q.set('parser', $('rp-parser').value);
+    data = await api(`/api/admin/parser-replay?${q}`);
+  } catch (e) {
+    holder.replaceChildren(el('p', { class: 'bad small', text: e.message || 'Replay failed.' }));
+    return;
+  }
+
+  const nodes = [
+    el('p', { class: 'muted small', text: data.note }),
+    el('p', { class: 'small' },
+      el('strong', { text: 'Stored: ' }),
+      el('span', { text: `${data.stored.parser} — ${data.stored.element_count} elements, ${data.stored.table_count} tables, ${data.stored.warnings.length} warnings` })),
+  ];
+  if (!data.available) {
+    nodes.push(el('p', { class: 'small', text: `Replay not available: ${data.reason}` }));
+  } else if (data.proposed.error) {
+    nodes.push(el('p', { class: 'bad small', text: `Proposed parse errored: ${data.proposed.error}` }));
+  } else {
+    nodes.push(
+      el('p', { class: 'small' },
+        el('strong', { text: 'Proposed: ' }),
+        el('span', { text: `${data.parser} — ${data.proposed.element_count} elements, ${data.proposed.table_count} tables, ${data.proposed.warnings.length} warnings ` }),
+        el('span', { class: `badge ${data.archive.verified ? 'approved' : 'pending'}`,
+          text: data.archive.verified ? 'archive sha256 verified' : 'archive sha256 unchecked' })),
+      el('p', { class: 'small',
+        text: `Δ elements: +${data.diff.elements.added} / −${data.diff.elements.removed} / ~${data.diff.elements.changed}`
+          + ` · tables ${data.diff.tables.stored} → ${data.diff.tables.proposed}` }),
+      data.diff.text_changes.length
+        ? el('table', {}, el('thead', {}, el('tr', {},
+            el('th', { text: 'seq' }), el('th', { text: 'kind' }),
+            el('th', { text: 'stored' }), el('th', { text: 'proposed' }))),
+            el('tbody', {}, ...data.diff.text_changes.slice(0, 60).map((t) => el('tr', {},
+              el('td', { class: 'mono small', text: String(t.sequence) }),
+              el('td', { class: 'small', text: t.kind }),
+              el('td', { class: 'small', text: (t.stored || '').slice(0, 120) }),
+              el('td', { class: 'small', text: (t.proposed || '').slice(0, 120) })))))
+        : el('p', { class: 'muted small', text: 'No element text differs.' }));
+  }
+  holder.replaceChildren(...nodes);
+}
+
 /* BETA-058: the durable run ledger — every module-run, whatever started it. */
 async function loadRunLedger() {
   const holder = $('run-ledger');
@@ -688,6 +740,8 @@ export function initPipeline() {
   $('lineage-panel')?.addEventListener('toggle', (event) => {
     if (event.target.open) loadLineage();
   });
+  // BETA-103: parser replay runs only when the button is pressed.
+  $('rp-run')?.addEventListener('click', loadParserReplay);
 
   document.addEventListener('tabshown', (event) => {
     if (event.detail.tab !== 'pipeline') return;

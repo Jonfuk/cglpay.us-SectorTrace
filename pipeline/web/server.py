@@ -1421,6 +1421,17 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import validation
             return validation.rules(conn, today=_str(params, "today") or None)
 
+        if path == "/api/admin/parser-replay":
+            # BETA-103: replay a stdlib parser against one archived object in
+            # memory and diff the proposed output against the stored active
+            # version. Read-only -- nothing is written; a PDF or a request for
+            # docling/pymupdf returns available:false.
+            from pipeline.web import parser_replay
+            return parser_replay.replay(
+                conn, self.settings,
+                _str(params, "document_id"),
+                _str(params, "parser") or None)
+
         if path == "/api/admin/lineage":
             # BETA-102: one typed graph over the module registry, the dataset
             # catalogue, the live foreign keys and the export tab registry —

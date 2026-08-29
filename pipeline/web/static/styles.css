@@ -713,6 +713,11 @@ td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
 .lin-rel { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; font-size: 13px; }
 .lin-rel-label { color: var(--muted); min-width: 120px; }
 
+/* BETA-103: parser replay sandbox. */
+#replay-panel > summary { cursor: pointer; }
+.rp-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.rp-controls #rp-doc { min-width: 260px; }
+
 /* BETA-104: validation-rule explorer. A flat card list — schema rules and
  * observed rules together, filtered by kind and text. Failure examples show
  * shape only. */
