@@ -469,9 +469,10 @@ docker compose exec app python -m pipeline graph rebuild --clear
 
 `assistant_runtime_enabled: false` by default. Set it true and the deploy
 adds one more container from `docker-compose.assistant.yml` — an Ollama
-serving `lfm2:1.2b`, aliased (`ollama cp`) to the two model strings the
-assistant sends: `LiquidAI/LFM2.5-1.2B-Instruct` for synthesis and
-`needle-2` for the router. Both `ASSISTANT_OLLAMA_URL` and
+serving `LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` (731 MB), aliased
+(`ollama cp`) to the two model strings the assistant sends:
+`LiquidAI/LFM2.5-1.2B-Instruct` for synthesis and `needle-2` for the
+router. Both `ASSISTANT_OLLAMA_URL` and
 `ASSISTANT_NEEDLE_URL` in `.env` then point at `http://ollama:11434`, and
 both the `app` and the documents-worker images are rebuilt with the
 `assistant` extra (`openai`). Weights live in the

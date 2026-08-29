@@ -202,20 +202,27 @@
       until: sectortrace_ollama_ready.rc == 0
       changed_when: false
 
+    # `ollama pull` of a missing manifest can exit 0 with the error only in
+    # the streamed body (a wrong assistant_lfm_ollama_ref does exactly this),
+    # so check the output too, not just rc. The reference must exist on
+    # ollama.com — `ollama.com/library/lfm2` is a 24B model, not this one.
     - name: Pull the LFM model (a no-op once current)
       ansible.builtin.command:
         cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama pull {{ assistant_lfm_ollama_ref }}
         chdir: "{{ state_dir }}"
-      changed_when: true
+      register: sectortrace_ollama_pull
+      changed_when: "'success' in sectortrace_ollama_pull.stdout or 'pulling' in sectortrace_ollama_pull.stdout"
+      failed_when: >-
+        sectortrace_ollama_pull.rc != 0
+        or 'Error:' in (sectortrace_ollama_pull.stdout + sectortrace_ollama_pull.stderr)
+        or 'file does not exist' in (sectortrace_ollama_pull.stdout + sectortrace_ollama_pull.stderr)
 
     # pipeline/assistant/adapters.py sends fixed model strings (LFM_MODEL and
-    # NEEDLE_MODEL in runtime.py). Alias the pulled weights to both so a
-    # request for either resolves to them. `ollama cp` overwrites an existing
-    # tag, so re-running the playbook is a no-op. If Ollama rejects one of
-    # these names (case, dots, slash) or fails to match it at request time,
-    # the fix is to lowercase assistant_lfm_model_tag /
-    # assistant_needle_model_tag AND change the matching constant — that is
-    # the Option B code change docs/assistant.md's deploy note describes.
+    # NEEDLE_MODEL in runtime.py). Alias the pulled weights to both, at the
+    # :latest tag those strings resolve to. Ollama matches names
+    # case-insensitively (types/model: EqualFold), so the mixed-case
+    # constants find the lowercase copy. `ollama cp` overwrites, so a re-run
+    # is a no-op.
     - name: Alias the pulled weights to the tags the assistant sends
       ansible.builtin.command:
         cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama cp {{ assistant_lfm_ollama_ref }} {{ item }}
@@ -236,7 +243,11 @@
     - name: Report what Ollama said
       ansible.builtin.fail:
         msg: >-
-          {{ ['The assistant model runtime failed to start or provision. Logs follow.', '']
+          {{ ['The assistant model runtime failed to start or provision.', '',
+              'Pull (' ~ assistant_lfm_ollama_ref ~ '):']
+             + (sectortrace_ollama_pull.stdout_lines | default(['(pull task did not run)']))
+             + (sectortrace_ollama_pull.stderr_lines | default([]))
+             + ['', 'Ollama container logs:']
              + (sectortrace_ollama_failure_logs.stdout_lines | default(['(no logs available)'])) }}
 
 - name: Install the offsite backup script

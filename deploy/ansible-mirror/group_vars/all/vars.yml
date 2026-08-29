@@ -550,13 +550,18 @@ assistant_runtime_enabled: false
 assistant_app_enabled: false
 
 # One Ollama serves both roles the assistant calls. It pulls this reference
-# (ollama.com/library/lfm2) once, then `ollama cp`s it to the two model
-# strings pipeline/assistant/adapters.py sends — LFM_MODEL for synthesis and
+# once, then `ollama cp`s it to the two model strings
+# pipeline/assistant/adapters.py sends — LFM_MODEL for synthesis and
 # NEEDLE_MODEL for the router — so a request for either resolves to the same
-# weights. Provenance note: the library model is LFM2; the code and
-# docs/assistant.md pin "LFM2.5" and quant Q4_K_M. The alias bridges the
-# name; assistant_runs.lfm_model still records the pinned constant.
-assistant_lfm_ollama_ref: "lfm2:1.2b"
+# weights. Ollama compares model names case-insensitively (types/model:
+# EqualFold), so the pulled lowercase name and the mixed-case constant the
+# code sends match; the `ollama cp` gives each an alias at the :latest tag
+# the code assumes.
+#
+# This is `ollama.com/LiquidAI/lfm2.5-1.2b-instruct` at Q4_K_M — the exact
+# model and quant docs/assistant.md pins (731 MB, 1.17B params, ~125K ctx).
+# NOT `ollama.com/library/lfm2`, which is a 24B model at 14 GB.
+assistant_lfm_ollama_ref: "LiquidAI/lfm2.5-1.2b-instruct:q4_k_m"
 assistant_lfm_model_tag: "LiquidAI/LFM2.5-1.2B-Instruct"
 assistant_needle_model_tag: "needle-2"
 

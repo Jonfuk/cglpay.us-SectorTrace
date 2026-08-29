@@ -532,7 +532,8 @@ Set the list back to empty and re-run to tear all of it down again.
 
 `assistant_runtime_enabled: false` by default, the same switch and the same
 `docker-compose.assistant.yml` as the self-host build — an Ollama serving
-`lfm2:1.2b`, aliased to `LiquidAI/LFM2.5-1.2B-Instruct` and `needle-2`, with
+`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`, aliased to
+`LiquidAI/LFM2.5-1.2B-Instruct` and `needle-2`, with
 `ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it and both the
 `app` and documents-worker images rebuilt with `openai`. `sectortrace-mirror
 nlp assistant` and `nlp assistant-eval` run in the documents worker (where

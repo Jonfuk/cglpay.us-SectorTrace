@@ -42,6 +42,11 @@ services:
       # Listen on the compose network. No `ports:` block, so nothing off-box
       # can reach it; the app container resolves `ollama` by service name.
       OLLAMA_HOST: "0.0.0.0:11434"
+      # Ollama's default is 2048, which truncates the grounding step's
+      # retrieved passages long before the model's own limit. The assistant
+      # is designed around 32K-context synthesis (pipeline/assistant/
+      # adapters.py); LFM2.5-1.2B handles ~125K.
+      OLLAMA_CONTEXT_LENGTH: "32768"
       # Unload the model this long after the last call. The assistant is
       # interactive and bursty; keeping 1.2B of weights resident between
       # questions is cheap and saves the reload latency.

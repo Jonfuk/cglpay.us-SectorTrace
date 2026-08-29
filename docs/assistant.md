@@ -64,11 +64,13 @@ Postgres:
   (one Ollama service on the stack's Docker network), builds **both** the
   `app` and the documents-worker images with `--build-arg
   INSTALL_ASSISTANT=true` so `openai` is present, brings Ollama up,
-  `ollama pull`s `assistant_lfm_ollama_ref` (`lfm2:1.2b`), and `ollama
-  cp`s it to **both** strings the adapters send — `LFM_MODEL` and
-  `NEEDLE_MODEL`. One Ollama, one endpoint, two model names:
-  `ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` both become
-  `http://ollama:11434/v1`.
+  `ollama pull`s `assistant_lfm_ollama_ref`
+  (`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`), and `ollama cp`s it to **both**
+  strings the adapters send — `LFM_MODEL` and `NEEDLE_MODEL`. One Ollama,
+  one endpoint, two model names: `ASSISTANT_OLLAMA_URL` and
+  `ASSISTANT_NEEDLE_URL` both become `http://ollama:11434/v1`. Ollama's
+  context window is raised to 32K (`OLLAMA_CONTEXT_LENGTH`); the 2048
+  default would truncate the grounding step's passages.
 * `assistant_app_enabled: true` writes `ASSISTANT_ENABLED=true`. Keep it
   false until step 3's gate passes. On a `beta` mirror, set
   `ASSISTANT_ENABLED=true` in `.env.merge` instead so it survives the
@@ -91,17 +93,16 @@ under a second Ollama tag rather than a distinct router model — a
 deployment choice, made because one Ollama is simpler to run. The run
 ledger still records `needle_model = "needle-2"` as its own identity, so
 swapping in a real router later is a deployment change, not a code one.
-If Ollama normalises `LiquidAI/LFM2.5-1.2B-Instruct` (case, dots, the
-slash) so a request for that exact string no longer matches the stored
-model, lowercase `assistant_lfm_model_tag` / `assistant_needle_model_tag`
-in `group_vars` **and** change the matching constant in
-`pipeline/assistant/runtime.py` to agree.
+Ollama compares model names case-insensitively (`types/model`:
+`EqualFold`), so the mixed-case `LiquidAI/LFM2.5-1.2B-Instruct` the code
+sends resolves to the lowercase copy the `ollama cp` creates.
 
-**Provenance gap.** `ollama.com/library/lfm2` is LFM2; this doc and the
-code pin `LFM2.5` at `Q4_K_M`. The alias bridges the name and
-`assistant_runs.lfm_model` keeps recording the pinned constant — so a run
-ledger says `LFM2.5` while the bytes are `lfm2:1.2b`. Point
-`assistant_lfm_ollama_ref` at a real LFM2.5 GGUF if that gap matters.
+**The reference.** `assistant_lfm_ollama_ref` must name a model that
+exists on `ollama.com` — `ollama.com/library/lfm2` is a **24B** model
+(14 GB), not this one. The default,
+`ollama.com/LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`, is the exact model and
+quant pinned above (731 MB, 1.17B params). A missing reference fails the
+provisioning task with `ollama pull`'s own error in the message.
 
 ## Using it
 
