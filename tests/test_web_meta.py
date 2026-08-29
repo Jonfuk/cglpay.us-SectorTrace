@@ -71,7 +71,7 @@ def test_meta_shape_is_stable(conn: sqlite3.Connection, settings: Settings):
     assert set(meta["schema"]) == {"latest_migration", "applied_count", "migrated_at"}
     assert meta["schema"]["applied_count"] > 0
     assert meta["schema"]["latest_migration"].endswith(".sql")
-    assert set(meta["data"]) == {"last_fetch_at", "per_source"}
+    assert set(meta["data"]) == {"last_fetch_at", "per_source", "last_run"}
     assert meta["data"]["per_source"] == "/api/v1/freshness"
     assert set(meta["capabilities"]) == EXPECTED_CAPABILITIES
     # SQLite reports no PostgreSQL extensions.

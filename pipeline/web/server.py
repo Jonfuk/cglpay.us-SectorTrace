@@ -1234,6 +1234,12 @@ class Handler(BaseHTTPRequestHandler):
                      "staleness": artefacts.staleness(
                          self.settings, conn, listed["files"])}
 
+        if path == "/api/admin/run-ledger":
+            # The durable run ledger (BETA-058) — every module-run, whatever
+            # entry point started it, not only the browser-started jobs.
+            from pipeline import run_ledger
+            return {"runs": run_ledger.recent(conn, _int(params, "limit", 20))}
+
         if path == "/api/admin/jobs":
             running = self.jobs.running()
             return {"jobs": [job.head() for job in self.jobs.all()],

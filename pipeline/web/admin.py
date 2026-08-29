@@ -179,7 +179,7 @@ def start_run(registry_of_jobs, settings, body: dict):
             conn.close()
 
         summary = runner.run_waves(waves, jobs, settings, since, dry_run, limit,
-                                    _LoggingObserver())
+                                    _LoggingObserver(), origin="admin")
         # Exceptions are already inside the rows; surface them as text so the
         # summary survives JSON.
         return [{**row, "error": (f"{type(row['error']).__name__}: {row['error']}"

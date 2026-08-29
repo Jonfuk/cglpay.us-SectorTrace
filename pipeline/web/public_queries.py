@@ -668,16 +668,27 @@ def meta(conn: sqlite3.Connection, settings) -> dict:
     `/health` stays the plain-text `ok` liveness probe; this is the auditable
     identity beside it.
     """
-    _public(["schema_migrations", "http_cache"])
+    _public(["schema_migrations", "http_cache", "run_ledger"])
 
     applied = db.applied_migrations(conn)
     schema_row = _one(
         conn, "SELECT MAX(applied_at) AS migrated_at FROM schema_migrations")
 
+    objects = {obj["name"] for obj in catalog.list_objects(conn)}
     last_fetch_at = None
-    if any(obj["name"] == "http_cache" for obj in catalog.list_objects(conn)):
+    if "http_cache" in objects:
         last_fetch_at = _one(
             conn, "SELECT MAX(updated_at) AS t FROM http_cache").get("t")
+
+    # The last durable run-ledger row (BETA-058), if the table exists — a
+    # cheap "when did collection last run, and how" signal beside the
+    # per-source retrieval times.
+    last_run = None
+    if "run_ledger" in objects:
+        row = _one(conn, "SELECT origin, status, started_at, finished_at, "
+                          "modules_ok, modules_failed FROM run_ledger "
+                          "ORDER BY started_at DESC LIMIT 1")
+        last_run = row or None
 
     backend = db.backend_of(conn)
     extension_state = {
@@ -702,6 +713,9 @@ def meta(conn: sqlite3.Connection, settings) -> dict:
             # retrieval times are their own route.
             "last_fetch_at": last_fetch_at,
             "per_source": "/api/v1/freshness",
+            # The last module-run recorded in the durable ledger (BETA-058):
+            # origin, status and timestamps. None if none has run.
+            "last_run": last_run,
         },
         "capabilities": {
             "admin_ui": bool(settings.admin_ui_enabled),

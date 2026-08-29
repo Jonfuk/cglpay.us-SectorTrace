@@ -158,7 +158,8 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
 
 
 def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
-               observer: RunObserver | None = None, source: str = "all") -> list[dict]:
+               observer: RunObserver | None = None, source: str = "all",
+               origin: str = "cli", parent_run_id: str | None = None) -> list[dict]:
     """Each wave concurrently, waves in order.
 
     Every module in a wave has its dependencies satisfied by an earlier wave,
@@ -173,6 +174,16 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
     observer = observer or RunObserver()
     total_modules = sum(len(wave) for wave in waves)
     observer.run_starting(total_modules)
+
+    # One durable ledger row per run, whatever entry point called this
+    # (BETA-058). Best-effort — a ledger write that fails must not fail the
+    # collection — see pipeline/run_ledger.py.
+    from pipeline import run_ledger
+    selector = ", ".join(name for wave in waves for name in wave) or "none"
+    ledger_run_id = run_ledger.start(
+        settings, origin=origin,
+        module_selector="all" if total_modules >= len(MODULE_REGISTRY) else selector,
+        dry_run=dry_run, modules_total=total_modules, parent_run_id=parent_run_id)
 
     summary: list[dict] = []
     for wave in waves:
@@ -197,4 +208,6 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
                 row = future.result()
                 summary.append(row)
                 observer.module_finished(row)
+
+    run_ledger.finish(settings, ledger_run_id, summary)
     return summary

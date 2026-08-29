@@ -144,7 +144,10 @@ class TestTheTreesMatch:
         # 72 adds hse_enforcement_notices — Module 33's HSE improvement /
         # prohibition notices, one row per notice number, plus an index on
         # provider_key. TEXT/INTEGER -> text/bigint is the only dialect change.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 72
+        # 73 adds run_ledger — one durable row per module-run, written by
+        # runner.run_waves whatever entry point started it, beside (not
+        # replacing) job_runs. TEXT/INTEGER -> text/bigint only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 73
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

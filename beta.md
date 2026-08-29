@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-052. Current
-  work: BETA-058. Next: BETA-053, BETA-054.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-058. Current
+  work: BETA-053. Next: BETA-054, BETA-055.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,30 +272,28 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-058 | Unified durable run ledger
-  - promoted_from: NEXT on 2026-08-29 after BETA-052 completed
+- [IN_PROGRESS] BETA-053 | Review clusters and informational grouping
+  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-058 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
+  - priority: P2
+  - impact: 4
+  - effort: 3
   - confidence: 4
-  - risk: 3
-  - area: operations
-  - depends_on: BETA-039
-  - objective: Record CLI, admin and scheduled executions through one durable
-    model with origin, revision, environment, parent run, timestamps and
-    per-module results; keep full logs in their current storage.
-  - rationale: Browser-started job history alone cannot explain every collection
-    path or support reliable operational handoff.
-  - suggested_first_action: Add a backward-compatible migration and instrument
-    the shared module runner used by every entry point.
-  - next_action: Add a migration for a `run_ledger` table (run_id, origin
-    cli/admin/scheduled, revision, environment, parent_run_id, started_at,
-    finished_at, status, per-module JSON results) that does not disturb the
-    existing `job_runs`; instrument the shared runner
-    (`pipeline/runner.py` / `parallel.py`) so every entry point writes one
-    ledger row; a read view in the admin Pipeline tab and/or `/api/v1/meta`;
-    tests that a CLI run and an admin run both leave a row with origin set.
+  - risk: 2
+  - area: admin/review
+  - depends_on: BETA-052
+  - objective: Group related items by issue type, source, organisation and shared
+    evidence, with facets and an informational/not-actionable state.
+  - rationale: Coherent batches reduce reviewer navigation without allowing
+    grouping itself to become a judgement.
+  - suggested_first_action: Define deterministic cluster keys and require a
+    transactional recount before every grouped action.
+  - next_action: Add a `/api/review/clusters` endpoint that buckets pending
+    items by a deterministic key (item_type + module + a normalised
+    organisation/source token pulled from `context_json`), with counts; a
+    collapsible cluster view in the admin Review tab that expands to the
+    existing item list; grouping is display only — every existing bulk
+    action still recounts its exact id set transactionally before deciding.
 
 ### BLOCKED
 
@@ -479,22 +477,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-053 | Review clusters and informational grouping
-  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-052 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: admin/review
-  - depends_on: BETA-052
-  - objective: Group related items by issue type, source, organisation and shared
-    evidence, with facets and an informational/not-actionable state.
-  - rationale: Coherent batches reduce reviewer navigation without allowing
-    grouping itself to become a judgement.
-  - suggested_first_action: Define deterministic cluster keys and require a
-    transactional recount before every grouped action.
-
 - [NEXT] BETA-054 | Evidence sidecars and candidate suggestions
   - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-052 completed
   - priority: P1
@@ -511,6 +493,22 @@ DONE
   - suggested_first_action: Define sidecars and candidate-generation rules for
     each supported review type; label rankings as similarity, never preselect a
     candidate and suppress known false-match patterns.
+
+- [NEXT] BETA-055 | Review-session workflow polish
+  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-058 completed
+  - priority: P2
+  - impact: 4
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/ux
+  - depends_on: BETA-052
+  - objective: Add next-page prefetch, session progress, saved note/filter
+    presets, a keyboard map and a primary-source shortcut.
+  - rationale: These reduce mechanical work without altering the review audit
+    trail or confirmation boundaries.
+  - suggested_first_action: Pin focus, history and navigation behaviour in
+    browser tests before introducing shortcuts.
 
 ### READY
 
@@ -559,6 +557,53 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-058 | Unified durable run ledger
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: operations
+  - depends_on: BETA-039
+  - objective: Record CLI, admin and scheduled executions through one durable
+    model with origin, revision, environment, parent run, timestamps and
+    per-module results; keep full logs in their current storage.
+  - result: New migration `0073_run_ledger.sql` (+ postgres pair, count bump
+    72→73) — `run_ledger`, one row per module-run: `run_id` (uuid4),
+    `origin` (`cli` / `admin` / `scheduled`), `revision`, `environment`,
+    `parent_run_id`, `module_selector`, `dry_run`, `started_at` /
+    `finished_at`, `status` (`running` / `ok` / `partial` / `failed`),
+    module counts and a `results_json` array of the per-module summary rows.
+    It sits **beside** `job_runs`, not replacing it — the web UI keeps
+    `job_runs` for live log streaming. New `pipeline/run_ledger.py`:
+    `start()` / `finish()` (best-effort — a ledger write that fails is
+    logged and swallowed, so losing an audit row never loses the
+    collection), `git_revision()` (settings or `.git/HEAD`, no subprocess,
+    no `pipeline.web` import), and `recent()`.
+  - instrumentation: `runner.run_waves` — the one choke point every entry
+    point already funnels through — gains `origin` / `parent_run_id`
+    parameters and writes exactly one ledger row per run (start before the
+    first wave, finish after the last). `cli.py`'s `run` command grows a
+    hidden `--origin` (a cron wrapper passes `scheduled`); `web/admin.py`
+    passes `origin="admin"`.
+  - surface: `/api/v1/meta` `data.last_run` (origin / status / timestamps /
+    counts of the newest row, or `null`); `test_web_meta.py`'s `data`-block
+    key pin updated. New admin route `GET /api/admin/run-ledger`; the
+    Pipeline tab gains a "Run ledger" section under "Recent jobs" that shows
+    every run — including CLI and scheduled — with origin, status, selector,
+    module counts, revision and time.
+  - validation: New `tests/test_run_ledger.py` (6) — `start`/`finish` write
+    one row with parsed results; `run_waves` records the origin and selector;
+    a run with one failed module is `partial`; **dropping the ledger table
+    does not break the run** (the summary still comes back); `/api/v1/meta`
+    and `/api/admin/run-ledger` both expose the last run. Full offline suite
+    green — **2763 passed, 109 skipped, 35 deselected, 0 failed**. `ruff`
+    clean. Browser-verified against a seeded scratch warehouse: the Pipeline
+    tab's Run ledger shows a `scheduled / partial / 33 ok / 1 failed` row
+    and a `cli / running` row with revision and timestamp, zero console
+    errors.
 
 - [DONE] BETA-052 | Structured review-item context
   - completed: 2026-08-29
@@ -2920,12 +2965,12 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | DONE (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | DONE (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | DONE (BETA-052) |
-| P2 | Review clusters and informational grouping | 4 | 3 | 4 | NEXT (BETA-053) |
+| P2 | Review clusters and informational grouping | 4 | 3 | 4 | IN_PROGRESS (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | NEXT (BETA-054) |
-| P2 | Review-session workflow polish | 4 | 2 | 5 | Approved successor backlog (BETA-055) |
+| P2 | Review-session workflow polish | 4 | 2 | 5 | NEXT (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
-| P1 | Unified durable run ledger | 5 | 4 | 4 | IN_PROGRESS (BETA-058) |
+| P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | Approved successor backlog (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |

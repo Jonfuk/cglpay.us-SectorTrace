@@ -339,6 +339,39 @@ async function loadHistory() {
   $('job-history').replaceChildren(el('table', {}, el('tbody', {},
     rows.length ? rows
       : el('tr', {}, el('td', { colspan: '4', class: 'empty', text: 'Nothing run yet.' })))));
+
+  loadRunLedger();
+}
+
+/* BETA-058: the durable run ledger — every module-run, whatever started it. */
+async function loadRunLedger() {
+  const holder = $('run-ledger');
+  if (!holder) return;
+  let data;
+  try { data = await api('/api/admin/run-ledger'); }
+  catch (e) { return; }
+
+  const when = (iso) => (iso || '').replace('T', ' ').replace(/\.\d+/, '').replace('+00:00', 'Z');
+  const rows = (data.runs || []).map((r) => {
+    const modules = r.status === 'running' ? `${r.modules_total ?? '?'} queued`
+      : `${r.modules_ok ?? 0} ok${r.modules_failed ? ` / ${r.modules_failed} failed` : ''}`;
+    return el('tr', {},
+      el('td', {}, el('span', { class: 'badge type', text: r.origin })),
+      el('td', {}, el('span', {
+        class: `badge ${r.status === 'failed' ? 'rejected'
+          : (r.status === 'running' ? 'pending' : 'approved')}`,
+        text: r.status + (r.dry_run ? ' · dry' : '') })),
+      el('td', { class: 'muted small', text: r.module_selector || '' }),
+      el('td', { class: 'small', text: modules }),
+      el('td', { class: 'muted small mono',
+        title: r.revision || '', text: (r.revision || '').slice(0, 10) }),
+      el('td', { class: 'muted small', text: when(r.finished_at || r.started_at) }));
+  });
+
+  holder.replaceChildren(el('table', {}, el('tbody', {},
+    rows.length ? rows
+      : el('tr', {}, el('td', { colspan: '6', class: 'empty',
+          text: 'No runs recorded yet — the ledger starts at the next run.' })))));
 }
 
 // --- wiring --------------------------------------------------------------------------

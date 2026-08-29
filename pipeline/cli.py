@@ -1691,10 +1691,10 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar, source=
 
 
 def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
-                bar, source="all") -> list[dict]:
+                bar, source="all", origin="cli") -> list[dict]:
     """Every wave, painted onto `bar`. The ordering rules are in runner.py."""
     return runner.run_waves(waves, jobs, settings, since, dry_run, limit,
-                             _BarObserver(bar), source=source)
+                             _BarObserver(bar), source=source, origin=origin)
 
 
 @app.command()
@@ -1724,6 +1724,10 @@ def run(
     all_sources: bool = typer.Option(
         False, "--all", help="m01 only: run every channel that writes contracts "
                               "(live APIs + CSV archive) -- not --kag, see --kag's help"),
+    origin: str = typer.Option(
+        "cli", "--origin", hidden=True,
+        help="How this run was started, for the run ledger (BETA-058). A cron "
+              "wrapper passes 'scheduled'; anything else is recorded as 'cli'."),
 ) -> None:
     if limit is not None and limit < 1:
         # Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
@@ -1834,7 +1838,9 @@ def run(
     waves = resolve_run_waves([name for name, _ in targets])
 
     with ui.progress() as bar:
-        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar, source=source)
+        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar,
+                              source=source,
+                              origin=origin if origin in ("cli", "scheduled") else "cli")
 
     failed = [row for row in summary if row["status"] == "failed"]
     for row in failed:

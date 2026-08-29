@@ -190,6 +190,11 @@
         <pre id="job-log" class="joblog" aria-live="polite" aria-label="Job log"></pre>
         <h2>Recent jobs</h2>
         <div id="job-history"></div>
+        <h2 title="Every module-run, whatever started it — CLI, this UI, or a cron wrapper">Run ledger</h2>
+        <p class="muted small">One durable row per run of the shared module
+          runner. Unlike "Recent jobs" above, this includes runs started from
+          the command line or a scheduled task, not just this UI.</p>
+        <div id="run-ledger"></div>
       </div>
     </div>
   </section>
