@@ -1060,6 +1060,12 @@ class Handler(BaseHTTPRequestHandler):
             return {**queries.review_facets(conn),
                      "resolvable": resolve.resolvable_types()}
 
+        if path == "/api/review/clusters":
+            # Pending items grouped by (module, item_type, org token) —
+            # display only (BETA-053). Bulk actions still recount.
+            return queries.review_clusters(
+                conn, status=_str(params, "status", "pending") or "pending")
+
         if path == "/api/overrides":
             return {"overrides": resolve.overrides(conn)}
 

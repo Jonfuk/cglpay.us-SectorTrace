@@ -441,6 +441,14 @@ async function loadFacets() {
 async function loadReview(keepFocus) {
   if (!reviewState.facets) await loadFacets();
 
+  if ($('#f-clusters') && $('#f-clusters').checked) {
+    return loadReviewClusters();
+  }
+  const clustersHolder = $('#review-clusters');
+  if (clustersHolder) clustersHolder.hidden = true;
+  $('#review-list').hidden = false;
+  $('#review-pager').hidden = false;
+
   const previousFocus = keepFocus ? reviewState.focus : 0;
   // Skeletons sized to the page being requested, so the list does not
   // collapse to nothing and jump back when the rows arrive.
@@ -471,6 +479,65 @@ async function loadReview(keepFocus) {
   $('#select-page').checked = false;
   updateBulkBar();
   renderFocus();
+}
+
+/* BETA-053: the cluster view. Pending items grouped by (module, item_type,
+ * a shared organisation/source token) so a reviewer sees "40 unknown
+ * committee URLs for Kent" as one row. Grouping is display only — the
+ * per-cluster Approve/Reject drives the existing decide-matching endpoint,
+ * which recounts its exact id set inside the transaction and refuses on a
+ * mismatch (confirm_count). */
+async function loadReviewClusters() {
+  const holder = $('#review-clusters');
+  $('#review-list').hidden = true;
+  $('#review-pager').hidden = true;
+  holder.hidden = false;
+  replace(holder, el('div', { class: 'muted small', text: 'Grouping…' }));
+
+  let data;
+  try { data = await api(`/api/review/clusters?status=${$('#f-status').value || 'pending'}`); }
+  catch (e) { return replace(holder, el('div', { class: 'empty', text: e.message })); }
+
+  const decideCluster = async (cluster, decision) => {
+    const by = requireReviewer();
+    if (!by) return;
+    try {
+      const result = await post('/api/review/decide-matching', {
+        decision, decided_by: by,
+        confirm_count: cluster.count,
+        status: $('#f-status').value || 'pending',
+        module: cluster.module, item_type: cluster.item_type,
+        search: cluster.token === '(none)' ? null : cluster.token,
+      });
+      toast(`${decision}: ${result.updated.length} item(s) in this cluster.`);
+      loadReviewClusters();
+      loadFacets();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+
+  const rows = (data.clusters || []).map((cluster) => el('details', { class: 'cluster' },
+    el('summary', {},
+      el('span', { class: 'badge module', text: cluster.module }), ' ',
+      el('span', { class: 'badge type', text: cluster.item_type }), ' ',
+      el('strong', { text: cluster.token }), ' ',
+      el('span', { class: 'muted', text: `· ${cluster.count} item${cluster.count === 1 ? '' : 's'}` })),
+    el('div', { class: 'cluster-body' },
+      el('p', { class: 'muted small', text: cluster.sample_raw || '' }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn approve',
+          onclick: () => decideCluster(cluster, 'approved') }, `Approve ${cluster.count}`),
+        el('button', { class: 'btn reject',
+          onclick: () => decideCluster(cluster, 'rejected') }, `Reject ${cluster.count}`)))));
+
+  replace(holder,
+    el('p', { class: 'muted small', text: data.caveat }),
+    el('p', { class: 'muted small',
+      text: `${data.cluster_count} cluster(s) over ${data.scanned} pending item(s)`
+        + (data.truncated ? ' (scan capped at 5000)' : '') }),
+    rows.length ? el('div', {}, ...rows)
+      : el('div', { class: 'empty', text: 'No pending items to group.' }));
 }
 
 function renderList() {
@@ -1394,8 +1461,10 @@ function init() {
   document.querySelectorAll('.tab').forEach((button) =>
     button.addEventListener('click', () => showTab(button.dataset.tab)));
 
-  for (const id of ['#f-status', '#f-module', '#f-type', '#f-limit', '#f-oldest']) {
-    $(id).addEventListener('change', () => {
+  for (const id of ['#f-status', '#f-module', '#f-type', '#f-limit', '#f-oldest', '#f-clusters']) {
+    const node = $(id);
+    if (!node) continue;
+    node.addEventListener('change', () => {
       if (id === '#f-module') populateItemTypes($('#f-module').value);
       reviewState.offset = 0;
       selected.clear();

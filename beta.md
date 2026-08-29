@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-058. Current
-  work: BETA-053. Next: BETA-054, BETA-055.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-053. Current
+  work: BETA-054. Next: BETA-055, BETA-059.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,28 +272,30 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-053 | Review clusters and informational grouping
-  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-058 completed
+- [IN_PROGRESS] BETA-054 | Evidence sidecars and candidate suggestions
+  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-053 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 3
+  - priority: P1
+  - impact: 5
+  - effort: 4
   - confidence: 4
-  - risk: 2
+  - risk: 3
   - area: admin/review
-  - depends_on: BETA-052
-  - objective: Group related items by issue type, source, organisation and shared
-    evidence, with facets and an informational/not-actionable state.
-  - rationale: Coherent batches reduce reviewer navigation without allowing
-    grouping itself to become a judgement.
-  - suggested_first_action: Define deterministic cluster keys and require a
-    transactional recount before every grouped action.
-  - next_action: Add a `/api/review/clusters` endpoint that buckets pending
-    items by a deterministic key (item_type + module + a normalised
-    organisation/source token pulled from `context_json`), with counts; a
-    collapsible cluster view in the admin Review tab that expands to the
-    existing item list; grouping is display only — every existing bulk
-    action still recounts its exact id set transactionally before deciding.
+  - depends_on: BETA-036, BETA-052
+  - objective: Show source excerpts, archive references and ranked candidate
+    entities beside the decision form.
+  - rationale: Side-by-side evidence and alternatives improve decision quality,
+    provided ranking remains a finding aid rather than an automatic verdict.
+  - suggested_first_action: Define sidecars and candidate-generation rules for
+    each supported review type; label rankings as similarity, never preselect a
+    candidate and suppress known false-match patterns.
+  - next_action: Add `/api/review/{id}/sidecar` returning, for the review
+    types that support it, the archived source excerpt / URL and — for
+    name-match types — ranked candidate entities from the existing
+    `name_matches.suggestions` (labelled "similarity N%", never preselected,
+    known false-match patterns suppressed); render it as a panel beside the
+    decision form in the admin Review tab; tests that no candidate is
+    auto-selected and the ranking is labelled as similarity only.
 
 ### BLOCKED
 
@@ -477,23 +479,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-054 | Evidence sidecars and candidate suggestions
-  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-052 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: admin/review
-  - depends_on: BETA-036, BETA-052
-  - objective: Show source excerpts, archive references and ranked candidate
-    entities beside the decision form.
-  - rationale: Side-by-side evidence and alternatives improve decision quality,
-    provided ranking remains a finding aid rather than an automatic verdict.
-  - suggested_first_action: Define sidecars and candidate-generation rules for
-    each supported review type; label rankings as similarity, never preselect a
-    candidate and suppress known false-match patterns.
-
 - [NEXT] BETA-055 | Review-session workflow polish
   - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-058 completed
   - priority: P2
@@ -509,6 +494,23 @@ DONE
     trail or confirmation boundaries.
   - suggested_first_action: Pin focus, history and navigation behaviour in
     browser tests before introducing shortcuts.
+
+- [NEXT] BETA-059 | Coverage completion action board
+  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-053 completed
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: admin/coverage
+  - depends_on: BETA-043, BETA-058
+  - objective: Distinguish run needed, review needed, source blocked, not
+    published and complete; add `GET /api/admin/completeness` with links to the
+    relevant run, candidate, review or dataset view.
+  - rationale: Coverage measurements become operationally useful only when each
+    gap has an honest reason and a permitted, non-destructive next action.
+  - suggested_first_action: Map every current completeness state to one reason
+    code and one action destination.
 
 ### READY
 
@@ -557,6 +559,50 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-053 | Review clusters and informational grouping
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: admin/review
+  - depends_on: BETA-052
+  - objective: Group related items by issue type, source, organisation and shared
+    evidence, with facets and an informational/not-actionable state.
+  - result: New `queries.review_clusters(conn, status="pending")` — buckets
+    the queue (scanned to a 5000-row cap, reported) by
+    `(module, item_type, token)` where `token` is a **deterministic**
+    organisation/source key: the first present of a context-JSON id key
+    (`provider_key`, `ons_code`, `sab_name`, `register_name`, …), else a
+    URL key's host, else the item's own short `raw_value`, else `(none)`.
+    Returns clusters sorted by count with `item_ids` (capped 200),
+    `sample_raw`, `scanned` / `truncated` / `cluster_count` and a caveat:
+    "Grouping is a reading aid, not a judgement … every action still
+    confirms its own id set." New route `GET /api/review/clusters` (admin
+    only — 404 under `/api/v1/`).
+  - ui: The Review tab gains a "Cluster view" checkbox that swaps the item
+    list for `#review-clusters` — a collapsible `<details>` per cluster
+    (module · type · token · N items) whose body has Approve N / Reject N
+    buttons. Those drive the **existing** `/api/review/decide-matching`
+    with `search=token` and `confirm_count=cluster.count`, so the bulk
+    path's in-transaction recount is what decides — a token that
+    substring-matches extra items makes the count disagree and the action
+    is refused. Grouping changes what a reviewer looks at, not what a
+    decision touches.
+  - validation: New `tests/test_web_review_clusters.py` (6) — items sharing
+    (module, type, token) form one cluster; only the requested status is
+    grouped; the token prefers a context id then the URL host then the raw
+    value; the caveat wording; the route serves under `/api/review` only;
+    and a source-pin that the admin cluster button passes
+    `confirm_count: cluster.count` into `decide-matching`. Full offline
+    suite green — **2769 passed, 109 skipped, 35 deselected, 0 failed**.
+    `ruff` clean. Browser-verified against a seeded scratch warehouse (10
+    pending items): the cluster view shows three clusters
+    (`e10000016 · 6`, `surreycc.gov.uk · 3`, an HSE near-miss · 1); an
+    early `reviewerName` typo was fixed to `requireReviewer` (app.js's own
+    helper) — the served file is correct and the three clusters render.
 
 - [DONE] BETA-058 | Unified durable run ledger
   - completed: 2026-08-29
@@ -2965,13 +3011,13 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | DONE (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | DONE (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | DONE (BETA-052) |
-| P2 | Review clusters and informational grouping | 4 | 3 | 4 | IN_PROGRESS (BETA-053) |
-| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | NEXT (BETA-054) |
+| P2 | Review clusters and informational grouping | 4 | 3 | 4 | DONE (BETA-053) |
+| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | IN_PROGRESS (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | NEXT (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
-| P1 | Coverage completion action board | 5 | 4 | 4 | Approved successor backlog (BETA-059) |
+| P1 | Coverage completion action board | 5 | 4 | 4 | NEXT (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |

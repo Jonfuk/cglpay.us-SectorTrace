@@ -22,6 +22,8 @@ evidence base through a mis-click, and that is what it is for.
 """
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -616,6 +618,93 @@ def review_items(
         "module": module or "",
         "item_type": item_type or "",
         "search": search or "",
+    }
+
+
+# Context keys that identify the organisation / place a review item is about,
+# tried in order. The first that is present becomes the cluster's org token.
+_CLUSTER_ID_KEYS = (
+    "provider_key", "ons_code", "authority_ons_code", "buyer_ons_code",
+    "sab_name", "board", "authority", "register_name", "employer_name",
+    "recipient_name", "notice_number",
+)
+_CLUSTER_URL_KEYS = ("source_url", "url", "page_url", "source_page", "notice_web_url")
+_DOMAIN_RE = re.compile(r"https?://([^/]+)", re.IGNORECASE)
+
+
+def _cluster_token(raw_value: str | None, context_json: str | None) -> str:
+    """A deterministic organisation/source token for grouping.
+
+    The same (module, item_type, token) always lands in the same cluster, and
+    the token is derived only from stored fields — a context id key, else a
+    URL's host, else the item's own short raw value. Grouping is a reading
+    aid, never a judgement, so an unhelpful token ('(none)') is fine.
+    """
+    context: dict = {}
+    if context_json:
+        try:
+            parsed = json.loads(context_json)
+            if isinstance(parsed, dict):
+                context = parsed
+        except (TypeError, ValueError):
+            context = {}
+    for key in _CLUSTER_ID_KEYS:
+        value = context.get(key)
+        if value:
+            return str(value).strip().lower()[:80]
+    for key in _CLUSTER_URL_KEYS:
+        value = context.get(key)
+        if value:
+            match = _DOMAIN_RE.search(str(value))
+            if match:
+                return match.group(1).lower()
+    raw = (raw_value or "").strip().lower()
+    return raw[:80] if raw else "(none)"
+
+
+_CLUSTER_SCAN_CAP = 5000
+
+
+def review_clusters(conn: db.Connection, *, status: str = "pending") -> dict:
+    """Pending review items grouped by (module, item_type, org token).
+
+    Display only: the cluster is a way to see 40 "unknown committee URL for
+    Kent" items as one row instead of forty. Every bulk action still recounts
+    its exact id set transactionally before it decides anything — grouping
+    changes what a reviewer looks at, not what a decision touches.
+    """
+    rows = _run(
+        conn,
+        "SELECT id, module, item_type, raw_value, context_json FROM review_queue "
+        "WHERE status = :status ORDER BY created_at, id LIMIT :cap",
+        {"status": status, "cap": _CLUSTER_SCAN_CAP})
+
+    buckets: dict[tuple[str, str, str], dict] = {}
+    for row in rows:
+        token = _cluster_token(row["raw_value"], row["context_json"])
+        key = (row["module"], row["item_type"], token)
+        bucket = buckets.setdefault(key, {
+            "module": row["module"], "item_type": row["item_type"],
+            "token": token, "count": 0, "item_ids": [], "sample_raw": row["raw_value"],
+        })
+        bucket["count"] += 1
+        if len(bucket["item_ids"]) < 200:
+            bucket["item_ids"].append(row["id"])
+
+    clusters = sorted(
+        buckets.values(),
+        key=lambda b: (-b["count"], b["module"], b["item_type"], b["token"]))
+    return {
+        "status": status,
+        "scanned": len(rows),
+        "truncated": len(rows) >= _CLUSTER_SCAN_CAP,
+        "cluster_count": len(clusters),
+        "clusters": clusters,
+        "caveat": (
+            "Grouping is a reading aid, not a judgement: items land in one "
+            "cluster because they share a module, type and a token derived "
+            "from stored fields, not because a decision on one applies to the "
+            "rest. Every action still confirms its own id set."),
     }
 
 
