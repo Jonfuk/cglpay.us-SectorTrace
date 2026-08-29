@@ -297,24 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-080 | Shared responsive design system
+- [IN_PROGRESS] BETA-081 | Document reading room
   - priority: P1
-  - impact: 4
-  - effort: 4
-  - confidence: 5
-  - risk: 2
-  - area: public/admin UI foundations
-  - depends_on: BETA-049
-  - objective: Consolidate spacing, typography, forms, buttons, cards,
-    disclosures, statuses, skeletons, focus states and breakpoints into
-    reusable primitives while preserving the two front ends' distinct
-    identities.
-  - next_action: Inventory existing CSS tokens/components and create a
-    migration map; change primitives incrementally with visual/browser
-    checks, not through a wholesale stylesheet rewrite.
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: public/documents
+  - depends_on: BETA-041, BETA-042, BETA-062, BETA-072
+  - objective: Open a search result in a split reading view containing the
+    matched passage, surrounding text, document metadata, element/page
+    navigation, linked evidence, provenance and stable passage links;
+    returning restores search and scroll state.
+  - next_action: Pin stable document/element identifiers and passage anchors
+    across SQLite and PostgreSQL before building the split layout.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–079 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–080 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -550,6 +549,50 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-080 | Shared responsive design system
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 4
+  - effort: 4
+  - confidence: 5
+  - risk: 2
+  - area: public/admin UI foundations
+  - depends_on: BETA-049
+  - objective: Consolidate spacing, typography, forms, buttons, cards,
+    disclosures, statuses, skeletons, focus states and breakpoints into
+    reusable primitives while preserving the two front ends' distinct
+    identities.
+  - result: Deliberately **not** a rewrite — the two stylesheets stay
+    distinct (the operator sheet has no spacing scale by design). New
+    `docs/design-system.md` is the inventory + migration map: every portal
+    `:root` token by group, which component classes are shared vs.
+    front-end-specific, the four canonical breakpoints (340 / 720 / 900 /
+    1100), and a done/left table. Two concrete consolidations landed:
+    * **Spacing scale gap fixed.** `--space-5` (20px) and `--space-10` (40px)
+      were referenced by five live rules (`.section-links`, `.explore-card`,
+      `.chart-data`, `.lineage-edges`, the safety card) but never defined —
+      an undefined custom property invalidates the whole declaration, so
+      those paddings and gaps silently collapsed to nothing. Both are defined
+      now and those rules render their intended 20px. The stale
+      "there is no --space-5" comment is corrected.
+    * **Focus ring as one primitive.** New `--focus-ring` /
+      `--focus-ring-offset` on both `:root`s, each carrying its own accent
+      (`--accent-teal` / `--accent`). The unscoped `:focus-visible` rule on
+      each front end now derives from the token instead of a hard-coded
+      `2px solid …`. The map-control variant keeps its heavier 3px ring.
+  - api/ui: no API change. CSS-token additions only; one visible change — the
+    five rules that referenced the missing `--space-5` now have their 20px
+    spacing (a fix, not a restyle).
+  - validation: New `tests/test_portal_design_system.py` (5 — every
+    `--space-*` a rule references is defined and `--space-5`/`--space-10`
+    exist; the scale stays a 4px step; the focus ring is one primitive per
+    front end deriving from an accent token; no rule references an undefined
+    custom property; the inventory/migration doc exists and keeps the two
+    front ends distinct). Offline-reading / tables / charts / admin / docs
+    suites green. `ruff` clean. Browser-verified: `--space-5` resolves to
+    20px, `--focus-ring` to `2px solid #21d4d0`, and `.section-links`
+    `margin-top` is now 20px (was 0).
 
 - [DONE] BETA-079 | Safety and legal evidence hub
   - completed: 2026-08-29
@@ -4273,8 +4316,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Navigation continuity | 4 | 3 | 5 | DONE (BETA-077) |
 | P1 | Unified evidence atlas | 5 | 5 | 4 | DONE (BETA-078) |
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | DONE (BETA-079) |
-| P1 | Shared responsive design system | 4 | 4 | 5 | IN_PROGRESS (BETA-080) |
-| P1 | Document reading room | 5 | 5 | 4 | APPROVED, not queued (BETA-081) |
+| P1 | Shared responsive design system | 4 | 4 | 5 | DONE (BETA-080) |
+| P1 | Document reading room | 5 | 5 | 4 | IN_PROGRESS (BETA-081) |
 | P1 | Pipeline mission control | 5 | 5 | 4 | APPROVED, not queued (BETA-082) |
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-083) |
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | APPROVED, not queued (BETA-084) |

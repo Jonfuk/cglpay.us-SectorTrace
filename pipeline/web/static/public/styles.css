@@ -37,12 +37,35 @@
                       rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.06) 4px,
                       transparent 4px, transparent 12px);
 
-  /* Spacing */
+  /* Spacing — a 4px scale, --space-N == N*4px. `--space-5` (20px) and
+     `--space-10` (40px) were missing and several rules already referenced
+     them; an undefined custom property invalidates the whole declaration, so
+     those paddings and gaps silently collapsed to nothing. Defined here now
+     (BETA-080). */
   --space-1: 4px;  --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
-  --space-6: 24px; --space-8: 32px;  --space-12: 48px; --space-16: 64px;
+  --space-5: 20px; --space-6: 24px;  --space-8: 32px;  --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
 
   /* Radii */
   --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+
+  /* Shared primitive: the keyboard focus ring. One declaration so every
+     `:focus-visible` outline in this stylesheet is the same shape; the
+     colour is the portal's own accent (BETA-080). The admin stylesheet has
+     its own `--focus-ring` with its own accent — the two front ends keep
+     their identities. */
+  --focus-ring: 2px solid var(--accent-teal);
+  --focus-ring-offset: 2px;
+
+  /* Breakpoints, as documented constants. CSS cannot use a custom property
+     inside a media query, so these are not consumed directly — they are the
+     canonical values every `@media` in this file is written against, so a
+     new rule lands on an existing breakpoint rather than inventing one.
+       --bp-narrow  340px   very small phones
+       --bp-mobile  720px   phone / drawer layout
+       --bp-tablet  900px   the offcanvas nav still applies
+       --bp-wide    1100px  two-column layouts collapse
+     (BETA-080) */
 
   /* Glass */
   --glass-bg:     rgba(22, 27, 34, 0.72);
@@ -84,7 +107,7 @@ a:hover { text-decoration-color: currentColor; }
 }
 .skip:focus { left: var(--space-4); top: var(--space-2); }
 
-:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; }
+:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 /* --- top bar ------------------------------------------------------------- */
 
@@ -989,9 +1012,9 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   color: var(--text-secondary); font-size: 14.5px; line-height: 1.6;
 }
 .noscript h1 { color: var(--text-primary); font-size: 20px; margin: 0 0 var(--space-4); }
-/* --space-6, not --space-5: there is no --space-5 token, and an undefined
- * custom property makes the whole declaration invalid, so this list had no
- * indent at all. Found while adding the API page's list beside it. */
+/* `--space-5` (20px) is a real token now (BETA-080); this list's indent no
+ * longer has to round up to --space-6 to stay valid. Kept at --space-6 so
+ * the rendered indent does not change. */
 .noscript ul { padding-left: var(--space-6); }
 .noscript li { margin-bottom: var(--space-2); }
 .noscript code { font-family: var(--mono); color: var(--accent-teal); }

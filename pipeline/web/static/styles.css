@@ -18,6 +18,11 @@
   --pending-bg: #fdf3d8;
   --restricted: #8c2b21;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* Shared primitive with the portal (BETA-080): one focus-ring declaration,
+     this front end's own accent. Consolidating the *shape* of the ring, not
+     the identity — the two stylesheets stay distinct. */
+  --focus-ring: 2px solid var(--accent);
+  --focus-ring-offset: 1px;
 }
 
 /* Dark, written twice. Once for "follow the OS", which is the default and was
@@ -121,7 +126,7 @@ input[type="text"], input[type="search"], select, textarea {
   border-radius: 6px; padding: 5px 8px;
 }
 input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 1px;
+  outline: var(--focus-ring); outline-offset: var(--focus-ring-offset);
 }
 textarea { width: 100%; font-family: var(--mono); resize: vertical; }
 
