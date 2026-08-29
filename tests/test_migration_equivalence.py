@@ -164,7 +164,12 @@ class TestTheTreesMatch:
         # 78 adds qc_samples + qc_sample_findings (BETA-106) — reproducible
         # quality-control sample manifests and their append-only second-look
         # findings, plus one index. TEXT/INTEGER -> text/integer only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 78
+        # 79 adds assistant_runs (BETA-108) — one immutable row per single-turn
+        # local-assistant run: question, filters, model identities, prompt
+        # hashes, routing confidence, validated args, retrieved chunk ids,
+        # answer, citation ids, timings, outcome, error class. Plus one index.
+        # TEXT/REAL -> text/double precision only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 79
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

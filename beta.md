@@ -535,6 +535,46 @@ when the programme is started.)_
 
 ### DONE
 
+- [DONE] BETA-108 | Assistant provenance and run ledger
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: nlp/assistant/provenance
+  - depends_on: BETA-058, BETA-107
+  - objective: Equivalent SQLite/PostgreSQL storage for one immutable
+    assistant run: request and filters, Needle/LFM identities, prompt-template
+    hashes, routing confidence and validated arguments, retrieved chunk IDs,
+    answer and citation IDs, timings, outcome and error class.
+  - result: New migration `0079_assistant_runs.sql` (+ postgres twin) — one
+    `assistant_runs` table, append-only by the same discipline as
+    `alias_decisions` (0075) and `qc_sample_findings` (0078), plus a
+    `created_at` index. Columns: `run_id`, `created_at`, `code_commit`,
+    `question`, `filters_json`, `needle_model` / `needle_endpoint`,
+    `lfm_model` / `lfm_quant` / `lfm_endpoint`, `router_prompt_sha256` /
+    `answer_prompt_sha256`, `selected_tool`, `routing_confidence`,
+    `tool_args_json`, `retrieved_chunk_ids`, `answer`, `citation_ids_json`,
+    `timings_json`, `outcome`
+    (`ok|abstained|clarified|timeout|failed|unavailable`), `error_class`. No
+    secrets, API keys or model file paths — only identities and hashes. New
+    `pipeline/assistant/ledger.py`: `record()` INSERTs one row (there is no
+    UPDATE/DELETE path; a `**rejected` kwarg catch raises on a credential /
+    model-path key and logs anything else), returns the `run_id` or `None` on
+    a write failure (a lost audit row must not lose a good answer, as with
+    `run_ledger`); `one()` / `recent()` read back with the JSON columns
+    parsed.
+  - api/ui: none directly — written by BETA-112's service, read by
+    `one()` / `recent()`.
+  - validation: New `tests/test_assistant_ledger.py` (6 — a row round-trips
+    with JSON columns parsed; every one of the six outcomes is recordable and
+    an unknown one coerces to `failed`; `recent` is newest-first; a
+    credential or model-path kwarg raises `ValueError`; the module contains no
+    `UPDATE`/`DELETE` of the table; a dropped table makes `record` return
+    `None` not raise). `tests/test_migration_equivalence.py` updated for the
+    79th migration.
+
 - [DONE] BETA-107 | Optional Needle 2 and LFM assistant runtimes
   - completed: 2026-08-29
   - priority: P1
@@ -5641,7 +5681,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Review-outcome analytics | 4 | 4 | 4 | DONE (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | DONE (BETA-106) |
 | P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | DONE (BETA-107) |
-| P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |
+| P1 | Assistant provenance and run ledger | 5 | 3 | 5 | DONE (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |
 | P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | APPROVED, not queued (BETA-111) |
