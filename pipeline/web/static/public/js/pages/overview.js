@@ -23,6 +23,7 @@ import { el, svgEl, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard,
           lensBadge, timingBadge, findingBlock, revealOnScroll } from '/js/components.js';
+import { renderMyAreaCard } from '/js/myarea.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -62,6 +63,7 @@ export async function render(main) {
           el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
           el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
       heroMap),
+    el('div', { id: 'my-area' }),
     el('div', { id: 'snapshot' }),
     el('div', { id: 'briefing-strip' }),
     el('div', { id: 'explore' }),
@@ -74,6 +76,14 @@ export async function render(main) {
   // element below with a matching id was a separate, permanently-empty
   // node. The whole "Current snapshot" band (coverage, evidence quality,
   // sector context cards) has not rendered on the live site until now.
+  // BETA-073: the reader's saved council, if any — a local starting point
+  // built entirely from the existing authority payload. Lazily filled; not on
+  // the headline critical path, and absent when no area is saved.
+  const myAreaSlot = page.querySelector('#my-area');
+  renderMyAreaCard(myAreaSlot);
+  const onMyAreaChange = () => renderMyAreaCard(myAreaSlot);
+  window.addEventListener('myareachange', onMyAreaChange);
+
   renderCards(page.querySelector('#snapshot'), summary);
   renderBriefingStrip(page.querySelector('#briefing-strip'), summary);
   renderExplore(page.querySelector('#explore'));
@@ -86,7 +96,10 @@ export async function render(main) {
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
   revealOnScroll(page);
-  return () => disposeCharts(charts);
+  return () => {
+    window.removeEventListener('myareachange', onMyAreaChange);
+    disposeCharts(charts);
+  };
 }
 
 // --- hero: England region silhouette -----------------------------------------

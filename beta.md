@@ -297,24 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-073 | My area context
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
+- [IN_PROGRESS] BETA-074 | Inspectable visualisations
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
   - risk: 2
-  - area: public/local evidence
-  - depends_on: BETA-017, BETA-043, BETA-044
-  - objective: Let a reader choose and locally retain one council without an
-    account, then present its funding, treatment, contracts, providers,
-    relationships, homelessness comparators, coverage and freshness through
-    links to the underlying evidence.
-  - next_action: Define the minimum local summary exclusively from existing
-    authority/public routes, with localStorage containing only the ONS code
-    and no personal data.
+  - area: public/charts
+  - depends_on: BETA-020, BETA-049, BETA-080
+  - objective: Standardise keyboard-accessible legends, series toggles, value
+    tooltips, appropriate zoom/reset, caveat and missing-period annotations,
+    image saving and direct movement between each chart and its accessible
+    table.
+  - next_action: Extend the shared chart wrapper and prove the contract on
+    time-series, bar and map-backed views.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–072 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–073 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -550,6 +549,51 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-073 | My area context
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: public/local evidence
+  - depends_on: BETA-017, BETA-043, BETA-044
+  - objective: Let a reader choose and locally retain one council without an
+    account, then present its funding, treatment, contracts, providers,
+    relationships, homelessness comparators, coverage and freshness through
+    links to the underlying evidence.
+  - result: New `js/myarea.js`. `localStorage` key `sectortrace.my_area` holds
+    only the nine-character ONS code, gated on `/^[A-Z][0-9]{8}$/` on both
+    read and write — no name, no postcode, no personal data — and every
+    access is wrapped so private mode degrades to "feature absent" rather than
+    throwing. `myAreaToggle(code, name)` is a star button on the authority
+    workbench hero (set / clear, `aria-pressed`, listens for `myareachange`).
+    `renderMyAreaCard(container)` fetches only the existing
+    `/api/v1/authorities/:code` payload and renders a compact card on the
+    overview: the authority name (linked), its type/region, the latest
+    `retrieved_at` across the payload as a freshness line, and five stat tiles
+    — grant years, budget years, treatment indicators, contract notices,
+    homelessness comparators — each linking to the matching section anchor on
+    the workbench (`#grant-budget`, `#treatment`, `#contracts`,
+    `#comparators`), plus workbench / compare / commissions links. No saved
+    area shows a prompt to choose one on the map. The overview registers a
+    `myareachange` listener and removes it on dispose.
+  - api/ui: no API change; no new route. New served module `/js/myarea.js`
+    (server static map + `test_portal_isolation` whitelist). New CSS
+    `.myarea-*`, `.linklike`.
+  - validation: New `tests/test_portal_my_area.py` (6 — the module is served
+    and exports the surface; localStorage holds only the validated ONS code
+    (one guarded `setItem`, ONS regex on read and write); access is guarded
+    for private mode; the card reads only the existing authority route; every
+    stat links into the workbench; the overview and authority pages wire it in
+    and the overview removes its listener on dispose). Portal isolation /
+    offline-reading, `test_web_authority`, security-header suites green.
+    `ruff` clean. Browser-verified: empty prompt with no saved area; "Set as
+    my area" on E08000025 stores `E08000025` and flips the star; the overview
+    card then shows Birmingham with "25 contract notices" linking to
+    `#/authorities/E08000025#contracts`; "Change" clears it; no console
+    errors; no overflow at 1440.
 
 - [DONE] BETA-072 | Consistent filters and URL-restored query state
   - completed: 2026-08-29
@@ -3935,8 +3979,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Workforce pay explorer | 5 | 4 | 4 | DONE (BETA-070) |
 | P1 | Responsive public data tables | 5 | 4 | 4 | DONE (BETA-071) |
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | DONE (BETA-072) |
-| P1 | My area context | 5 | 4 | 4 | IN_PROGRESS (BETA-073) |
-| P2 | Inspectable visualisations | 4 | 3 | 5 | APPROVED, not queued (BETA-074) |
+| P1 | My area context | 5 | 4 | 4 | DONE (BETA-073) |
+| P2 | Inspectable visualisations | 4 | 3 | 5 | IN_PROGRESS (BETA-074) |
 | P1 | Treatment metric explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-075) |
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | APPROVED, not queued (BETA-076) |
 | P2 | Navigation continuity | 4 | 3 | 5 | APPROVED, not queued (BETA-077) |
