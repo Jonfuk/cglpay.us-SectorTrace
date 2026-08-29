@@ -663,3 +663,20 @@ a.jump:hover { border-bottom-style: solid; }
 .cockpit-title { grid-area: title; font-weight: 600; }
 .cockpit-metric { grid-area: metric; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .cockpit-reason { grid-area: reason; color: var(--muted); }
+
+/* BETA-087: split-pane review. Compact queue left, focused item right. */
+.review-split { display: block; }
+.review-detail { display: none; }
+@media (min-width: 1000px) {
+  .review-split {
+    display: grid; grid-template-columns: minmax(300px, 380px) 1fr;
+    gap: 12px; align-items: start;
+  }
+  #review-list-wrap { max-height: 78vh; overflow-y: auto; }
+  .review-detail {
+    display: block; position: sticky; top: 60px; max-height: 82vh; overflow-y: auto;
+  }
+  .review-detail .item { margin-bottom: 0; }
+  /* the left list is the dense table on a wide screen; keep its rows tight */
+  .review-split .dense td.raw { max-width: 220px; }
+}

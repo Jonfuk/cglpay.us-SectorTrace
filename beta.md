@@ -297,26 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-087 | Split-pane review workspace
+- [IN_PROGRESS] BETA-090 | "What changed?" evidence feed
   - priority: P1
   - impact: 5
   - effort: 5
   - confidence: 4
   - risk: 4
-  - area: admin/review
-  - depends_on: BETA-052, BETA-054, BETA-055, BETA-080, BETA-085
-  - objective: Display the queue on the left and typed context, source
-    preview, alternatives, history and decision controls on the right;
-    preserve keyboard operation and scroll position, with a stacked
-    narrow-screen layout.
-  - next_action: Refactor presentation around the existing single-item APIs
-    and keep named reviewer, explicit decision and one-candidate-at-a-time
-    safeguards unchanged.
+  - area: public/change awareness
+  - depends_on: BETA-058, BETA-068, BETA-084
+  - objective: Publish a filterable chronology of evidence added, changed,
+    withdrawn, superseded or newly verified by source, provider, authority,
+    evidence type and release.
+  - next_action: Define an append-only change-event model that distinguishes
+    source changes, parser changes and human-review changes.
 
-_(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–086 are complete, see DONE. BETA-087 is the last item
-in wave 4 and the first programme. The remaining items are being delivered in
-the approved wave order.)_
+_(The first refinement programme BETA-068–087 is complete. The second
+programme BETA-088–106 is now in progress in its own approved wave order:
+wave 1 is BETA-090, BETA-091, BETA-101, BETA-102, BETA-104.)_
 
 ### BLOCKED
 
@@ -551,6 +548,52 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-087 | Split-pane review workspace
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: admin/review
+  - depends_on: BETA-052, BETA-054, BETA-055, BETA-080, BETA-085
+  - objective: Display the queue on the left and typed context, source
+    preview, alternatives, history and decision controls on the right;
+    preserve keyboard operation and scroll position, with a stacked
+    narrow-screen layout.
+  - result: Presentation only — `renderItem` (the full item card, with its
+    typed context, sidecar, resolve form, history and Approve/Reject/Reset
+    controls), the `decideItems([id], …)` path, the named-reviewer
+    requirement, the explicit decision and one-candidate-at-a-time are all
+    unchanged. New `splitActive()` = `matchMedia('(min-width: 1000px)')`;
+    `dense()` now returns `#f-dense.checked || splitActive()`, so on a wide
+    screen the left `#review-list` is always the existing compact dense
+    table (which already has `data-id` rows, click-to-focus, checkboxes and
+    quick A/R). New `renderReviewDetail()` renders `renderItem(focusedItem())`
+    into a right-hand `#review-detail` pane; `renderFocus()` calls it, so
+    `j`/`k`, a row click and the pager all keep the pane in sync. The pane's
+    checkbox/buttons act by item id exactly like the row's — no new route.
+    A `matchMedia` `change` listener re-renders on crossing the breakpoint.
+    CSS: `.review-split` is `display: block` (the familiar stacked card list)
+    until 1000px, where it becomes a `minmax(300px,380px) 1fr` grid with a
+    scrollable left list and a sticky, scrollable detail pane;
+    `#review-detail` is `display: none` below the breakpoint.
+  - api/ui: no API change, no change to the decision path. HTML: `#review-list`
+    + `#review-pager` wrapped in `.review-split` with a new `#review-detail`
+    aside. New CSS `.review-split`, `.review-detail`. JS: `splitActive`,
+    `renderReviewDetail`, the `renderFocus` call, the breakpoint listener.
+  - validation: New `tests/test_admin_review_split.py` (4 — the pane markup
+    exists; wide screens use the compact list + a detail pane reusing
+    `renderItem` kept in sync by `renderFocus`; `renderReviewDetail` does not
+    touch the decision path or the reviewer requirement; the split stacks
+    below 1000px). `test_web_admin` / review-session / -context / -sidecar /
+    -clusters / console suites green. Browser-verified at 1400px (a
+    `380px 768px` grid, dense 4-row list left, item 1 in the detail pane;
+    `j` moves focus 1→2→3 and the detail pane follows; the pane carries the
+    decision controls) and at 785px (no grid, detail pane hidden, the
+    4-item stacked card list, no page overflow).
+  - closes: the approved front-end refinement programme BETA-068–087.
 
 - [DONE] BETA-086 | Operator action cockpit
   - completed: 2026-08-29
@@ -4586,10 +4629,10 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | DONE (BETA-084) |
 | P1 | Responsive admin navigation | 5 | 4 | 5 | DONE (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | DONE (BETA-086) |
-| P1 | Split-pane review workspace | 5 | 5 | 4 | IN_PROGRESS (BETA-087) |
+| P1 | Split-pane review workspace | 5 | 5 | 4 | DONE (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
-| P1 | “What changed?” evidence feed | 5 | 5 | 4 | APPROVED, not queued (BETA-090) |
+| P1 | “What changed?” evidence feed | 5 | 5 | 4 | IN_PROGRESS (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | APPROVED, not queued (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |
 | P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |

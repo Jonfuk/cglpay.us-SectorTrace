@@ -183,8 +183,19 @@
       </span>
     </div>
 
-    <div id="review-list"></div>
-    <div class="pager" id="review-pager"></div>
+    <!-- BETA-087: split-pane review. On wide screens the queue is a compact
+         list on the left and the focused item's full context, source
+         preview, alternatives, history and decision controls are on the
+         right. The single-item APIs, the named reviewer, the explicit
+         decision and one-candidate-at-a-time are unchanged; this is layout.
+         Below 1000px it stacks: the familiar card list, no separate pane. -->
+    <div class="review-split">
+      <div id="review-list-wrap">
+        <div id="review-list"></div>
+        <div class="pager" id="review-pager"></div>
+      </div>
+      <aside id="review-detail" class="review-detail" aria-label="Focused review item"></aside>
+    </div>
     <p class="muted small keys">
       Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>r</kbd> reject ·
       <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>o</kbd> open primary source ·

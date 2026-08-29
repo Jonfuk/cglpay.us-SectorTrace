@@ -576,8 +576,26 @@ function renderList() {
   replace($('#review-list'), dense() ? renderDense(items) : items.map(renderItem));
 }
 
+// BETA-087: on wide screens the queue is always the compact list — the full
+// item lives in the right-hand detail pane instead of in every row.
+function splitActive() {
+  return window.matchMedia('(min-width: 1000px)').matches;
+}
+
 function dense() {
-  return $('#f-dense').checked;
+  return $('#f-dense').checked || splitActive();
+}
+
+/* BETA-087: render the focused item's full context + decision controls into
+ * the right pane. `renderItem` is unchanged; it just renders here now on a
+ * wide screen. The pane's checkbox/buttons act by item id like the row's. */
+function renderReviewDetail() {
+  const pane = $('#review-detail');
+  if (!pane) return;
+  const item = focusedItem();
+  if (!splitActive() || !item) { pane.replaceChildren(); pane.hidden = true; return; }
+  pane.hidden = false;
+  replace(pane, renderItem(item));
 }
 
 function renderCounts() {
@@ -1198,6 +1216,7 @@ function renderFocus() {
   rowNodes().forEach((node, index) => {
     node.classList.toggle('focused', index === reviewState.focus);
   });
+  renderReviewDetail();
 }
 
 function focusedItem() {
@@ -1892,6 +1911,14 @@ function init() {
   renderSavedSql();
 
   setInterval(retickTimes, 60_000);
+
+  // BETA-087: crossing the 1000px breakpoint flips the review layout between
+  // split-pane and the stacked card list. Re-render so the switch is clean.
+  window.matchMedia('(min-width: 1000px)').addEventListener('change', () => {
+    if (currentTab === 'review' && reviewState.items.length) {
+      renderList(); renderFocus();
+    }
+  });
 
   // Back/forward, pasted worklist links and the command palette all arrive
   // here: everything that navigates does it by setting the hash.
