@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-057. Current
-  work: BETA-061. Next: BETA-062, BETA-063.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-061. Current
+  work: BETA-062. Next: BETA-063, BETA-064.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,32 +272,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-061 | Candidate-promotion campaign workspace
-  - promoted_from: NEXT (Wave 3) on 2026-08-29 after BETA-057 completed
+- [IN_PROGRESS] BETA-062 | Human-readable document titles
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-061 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
+  - priority: P2
+  - impact: 4
+  - effort: 3
   - confidence: 4
-  - risk: 3
-  - area: evidence-promotion
-  - depends_on: BETA-052, BETA-054
-  - objective: Provide a campaign workspace for CDP documents, committee papers
-    and FOI/SAR candidates with filters, previews, session progress and explicit
-    promote/reject/reset actions.
-  - rationale: Candidate promotion is a separate audited human act from general
-    review-queue decisions and needs a focused workflow rather than unattended
-    batching.
-  - suggested_first_action: Reuse the existing promotion API through the shared
-    typed presenters; retain one-candidate-at-a-time confirmation and prohibit
-    `promote all`.
-  - next_action: Reuse the existing `/api/admin/candidates` list and
-    `/api/admin/candidates/promote|reject|reset` endpoints (one candidate at
-    a time already — pipeline/promote.py) behind a dedicated Candidates-tab
-    "campaign" view with a kind filter (cdp_document / committee_paper /
-    foi_request), a per-candidate preview reusing BETA-052's typed context,
-    a session-progress line, and no `promote all` control; source-pin tests
-    that batching stays forbidden.
+  - risk: 2
+  - area: documents/public-ux
+  - depends_on: BETA-041, BETA-042
+  - objective: Replace hash-like labels with deterministic display titles while
+    preserving raw source titles and recording `title_basis` as source label,
+    PDF metadata, first heading or filename.
+  - rationale: Search results need readable identity, but a derived title must
+    remain explainable rather than being presented as source text.
+  - suggested_first_action: Add fixtures for blank, misleading, duplicated and
+    personal-name-heavy metadata, then specify deterministic precedence.
+  - next_action: Add a `documents.display_title` + `title_basis` column pair
+    (SQLite migration + postgres pair), a pure `pipeline/documents/titles.py`
+    with a deterministic precedence (source-provided label → PDF `/Title`
+    metadata → first heading of the extracted text → cleaned filename), a
+    backfill step, and portal + admin surfacing that shows the derived title
+    with the raw source title still available and `title_basis` labelled.
+    Fixtures for blank / misleading / duplicated / personal-name-heavy
+    metadata; no title is ever presented as verbatim source text.
 
 ### BLOCKED
 
@@ -481,23 +480,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-062 | Human-readable document titles
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-056 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: documents/public-ux
-  - depends_on: BETA-041, BETA-042
-  - objective: Replace hash-like labels with deterministic display titles while
-    preserving raw source titles and recording `title_basis` as source label,
-    PDF metadata, first heading or filename.
-  - rationale: Search results need readable identity, but a derived title must
-    remain explainable rather than being presented as source text.
-  - suggested_first_action: Add fixtures for blank, misleading, duplicated and
-    personal-name-heavy metadata, then specify deterministic precedence.
-
 - [NEXT] BETA-063 | PostgreSQL extension readiness gate
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-057 completed
   - priority: P1
@@ -515,7 +497,26 @@ DONE
   - suggested_first_action: Codify the trigram, PostGIS and pgvector capability
     matrix and its fallback expectations.
 
-### READY### READY
+- [NEXT] BETA-064 | Temporary-accommodation B&B breakdown
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-061 completed
+  - priority: P2
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: dataset/comparators
+  - depends_on: BETA-043
+  - objective: Extend m31 with the source-published bed-and-breakfast household
+    breakdown from H-CLIC Table TA1, stored in
+    `temporary_accommodation_breakdowns` with authority, quarter, value, unit
+    and full provenance.
+  - rationale: The data was deliberately omitted from the smallest coherent v1
+    and is now a bounded extension of the same official comparator source.
+  - suggested_first_action: Verify archived workbook header variants and define
+    the exact permitted measure codes; surface contextually without rankings or
+    provider-performance comparison.
+
+### READY
 
 _(empty — Wave 4 of the successor round, BETA-062/063/064/065/066/067, is
 promoted here as Wave 3 lands, per the delivery sequence in the Approved
@@ -562,6 +563,69 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-061 | Candidate-promotion campaign workspace
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: evidence-promotion
+  - depends_on: BETA-052, BETA-054
+  - objective: Provide a campaign workspace for CDP documents, committee papers
+    and FOI/SAR candidates with filters, previews, session progress and explicit
+    promote/reject/reset actions.
+  - result: A view over the **existing** Candidates tab and the existing
+    `/api/admin/candidates` + `/api/admin/candidates/promote|reject|reset`
+    endpoints — no migration, no new route, and the promote route still takes
+    one URL and still refuses a list (`pipeline/promote.py`, pinned again
+    here). Three additions:
+    (1) **Session progress.** `#candidate-session` (aria-live) carries
+    `This session: N promoted, N rejected, N reset.` — incremented in
+    `bumpSession()` from the single-row promote, the opened-batch promote
+    (per successful document), bulk reject (by the server's count) and reset.
+    Not persisted and not a gate: the same reasoning as `state.opened` and the
+    review queue's own session line — a count of what the person at the
+    keyboard has done now, nothing a localStorage key should let a reload
+    inherit.
+    (2) **Typed triage preview.** A per-row "Preview" toggle lazily fetches
+    `/api/admin/candidates/detail` once and renders the whole candidate row
+    through the shared typed-context presenter (BETA-052) — Source / Entity /
+    Reason / Evidence / Other sections, linkified URL keys, portal nav links,
+    and the lossless raw object under `<details>`. `typedContext` was lifted
+    out of the classic `app.js` into a new ES module
+    `pipeline/web/static/js/context.js` (imported by `candidates.js`; app.js
+    keeps its own copy — it is a classic script with no exports, the same
+    trade `dom.js` records) and taught to accept either a `context_json`
+    string or an already-parsed object. Opening the preview is explicitly
+    **not** `markOpened`: viewing the warehouse row we already hold is not
+    looking at the document on its own server, so it does not make a
+    candidate batch-promotable.
+    (3) The kind filter (cdp_document / committee_paper / foi_request) was
+    already the chip strip; left as is.
+  - api/ui: No API change. `pipeline/web/static/js/context.js` added to the
+    served admin module list. Candidates tab: `#candidate-session` line,
+    per-row "Preview" toggle, `.candidate-preview` style. `#candidate-session`
+    added to `index.html`.
+  - validation: New `tests/test_web_candidate_workspace.py` (9 — the two
+    `typedContext` copies agree on the four key-bucket regexes byte-for-byte;
+    `context.js` imports only `./dom.js`; the preview never calls
+    `markOpened` and reads the detail route; BETA-061 adds no
+    `promote-all`/`promote-matching`/`campaign` route to `server.py`; the
+    session line counts all of promote/reject/reset and is not persisted;
+    `index.html` has no "promote all" control; the detail route returns the
+    full row that backs the preview and is not on the portal). Existing
+    `tests/test_web_candidates.py` still green — the batch still promotes
+    through the single-URL route exactly twice, still cannot send an unopened
+    candidate, still runs one at a time. `tests/test_portal_isolation.py`
+    updated (the new module is served). Also corrected a stray
+    `### READY### READY` heading in this file. Full offline suite green —
+    **2824 passed, 109 skipped, 35 deselected, 0 failed**. `ruff` clean.
+    Browser-verified against a seeded scratch warehouse: the Preview toggle
+    on a CDP candidate renders the typed sections plus the raw `<details>`,
+    a bulk reject moves the line to `This session: 1 rejected.` and drops the
+    tab pill from 4 to 3, zero console errors.
 
 - [DONE] BETA-057 | Candidate URL overlap signals
   - completed: 2026-08-29
@@ -3291,10 +3355,10 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
-| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | IN_PROGRESS (BETA-061) |
-| P2 | Human-readable document titles | 4 | 3 | 4 | NEXT (BETA-062) |
+| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | DONE (BETA-061) |
+| P2 | Human-readable document titles | 4 | 3 | 4 | IN_PROGRESS (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | NEXT (BETA-063) |
-| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | Approved successor backlog (BETA-064) |
+| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | NEXT (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | Approved successor backlog (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | Approved successor backlog (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | Approved successor backlog (BETA-067) |

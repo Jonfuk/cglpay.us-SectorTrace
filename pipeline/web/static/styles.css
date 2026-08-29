@@ -544,6 +544,13 @@ a.jump:hover { border-bottom-style: solid; }
    the batch is not going to move on until it answers. */
 .candidate.working { border-color: var(--accent); opacity: 0.75; }
 
+/* The triage preview: the warehouse row we already hold, rendered typed. Set
+   in from the row so it reads as detail, not another candidate. */
+.candidate-preview {
+  margin: 6px 0 2px; padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+
 /* "Opened" is not a decision, so it is not coloured like one -- it is the
    statement that this row is eligible to be promoted in a batch at all. */
 .pill.opened { background: transparent; color: var(--muted); border: 1px solid var(--line); }

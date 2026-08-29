@@ -111,8 +111,8 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # reloading working review tooling differently buys nothing -- so everything
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
-for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "candidates", "census", "claims", "search",
+for _module in ("shell", "dom", "context", "theme", "palette", "pipeline",
+                 "health", "exports", "candidates", "census", "claims", "search",
                  "claimreview"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
