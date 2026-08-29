@@ -12,6 +12,7 @@
  */
 import { initCandidates } from './candidates.js';
 import { initCensus } from './census.js';
+import { initClaimReview } from './claimreview.js';
 import { initClaims } from './claims.js';
 import { initExports } from './exports.js';
 import { initHealth } from './health.js';
@@ -29,3 +30,4 @@ initCandidates();
 initCensus();
 initClaims();
 initSearch();
+initClaimReview();

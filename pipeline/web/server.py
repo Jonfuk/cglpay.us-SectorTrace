@@ -49,6 +49,7 @@ from pipeline.web import (
     artefacts,
     candidates,
     census,
+    claim_review,
     claims,
     health,
     name_matches,
@@ -110,7 +111,8 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
 for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "candidates", "census", "claims", "search"):
+                 "exports", "candidates", "census", "claims", "search",
+                 "claimreview"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
@@ -1098,6 +1100,29 @@ class Handler(BaseHTTPRequestHandler):
                 date_from=_str(params, "date_from") or None,
                 date_to=_str(params, "date_to") or None)
 
+        # The semantic claim-candidate review workbench (BETA-047). List and
+        # detail read `document_claim_candidates`; the gate report is
+        # `pipeline/nlp/gate.check` verbatim. Deciding is a POST, one at a time.
+        if path == "/api/admin/claim-candidates":
+            return claim_review.listing(
+                conn,
+                status=_str(params, "status") or None,
+                predicate=_str(params, "predicate") or None,
+                source_system=_str(params, "source_system") or None,
+                q=_str(params, "q") or None,
+                offset=_int(params, "offset", 0),
+                limit=_int(params, "limit", claim_review.PAGE))
+
+        match = re.fullmatch(r"/api/admin/claim-candidates/([A-Za-z0-9_:-]{1,120})", path)
+        if match:
+            return claim_review.detail(conn, match.group(1))
+
+        if path == "/api/admin/claim-gate":
+            return claim_review.gate(conn)
+
+        if path == "/api/admin/claim-ontology":
+            return claim_review.ontology_options(conn)
+
         if path == "/api/admin/candidates":
             kind = _str(params, "kind") or "cdp_document"
             try:
@@ -1419,7 +1444,40 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/claims/uncite": self._uncite_claim,
             "/api/admin/claims/decide": self._decide_claim,
             "/api/admin/claims/reset": self._reset_claim,
+            "/api/admin/claim-candidates/decide": self._decide_claim_candidate,
         }
+
+    def _decide_claim_candidate(self, body: dict) -> Any:
+        """Record one reviewer's judgement on one semantic claim candidate.
+
+        One candidate per request, the same rule `_verify_census` and
+        `_decide_claim` follow: the act being recorded is that a person read a
+        sentence and judged a machine-extracted triple. `corrected` needs (and
+        the nlp layer validates) at least one ontology-valid `corrected_*`
+        field. Nothing here writes `graph_claims` or trains anything.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            result = claim_review.decide(
+                conn,
+                claim_candidate_id=str(body.get("claim_candidate_id", "")),
+                decision=str(body.get("decision", "")),
+                decided_by=str(body.get("decided_by", "")),
+                reason_code=body.get("reason_code") or None,
+                corrected_predicate=body.get("corrected_predicate") or None,
+                corrected_object_concept_id=body.get("corrected_object_concept_id") or None,
+                corrected_object_literal=body.get("corrected_object_literal") or None,
+                corrected_subject_mention_id=body.get("corrected_subject_mention_id") or None,
+                review_queue_id=body.get("review_queue_id"),
+                note=body.get("note") or None)
+        except queries.QueryError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.claim_candidate_decided",
+                  claim_candidate_id=result["claim_candidate_id"],
+                  decision=result["decision"])
+        return result
 
     def _verify_census(self, body: dict) -> Any:
         """Record that one census figure was checked against its page.

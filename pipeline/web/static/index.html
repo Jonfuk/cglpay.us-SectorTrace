@@ -46,6 +46,7 @@
     <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
     <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
     <button class="tab" data-tab="search" role="tab">Search</button>
+    <button class="tab" data-tab="claimreview" role="tab">Claim review</button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
@@ -510,6 +511,49 @@
     <div id="search-meta" class="batchnote" hidden></div>
     <div id="search-status" class="muted small" aria-live="polite"></div>
     <div id="search-results"></div>
+  </section>
+
+  <!-- Semantic claim-candidate review -------------------------------------------->
+  <!-- Rendered by /admin/js/claimreview.js. The human-review labour BETA-034
+       is blocked on: a person reads one machine-extracted (subject, predicate,
+       object) triple at a time and records approve / reject / corrected, with
+       their name. Nothing here writes graph_claims, trains a model, or
+       approves in bulk. The gate strip shows how far the corpus is from
+       letting the 034G classifiers be trained. -->
+  <section id="tab-claimreview" class="tabpanel">
+    <p class="muted small">
+      One machine-extracted <code>(subject, predicate, object)</code> triple at
+      a time, from a single sentence of a parsed committee paper or partnership
+      document. A candidate is a lead for a reviewer, <strong>not</strong> a
+      claim. Deciding one records a named judgement in
+      <code>claim_candidate_decisions</code>; it does not write a graph claim,
+      train a classifier, or produce any public output. Use the
+      <em>Reviewer</em> box above — a decision without a name is refused.
+    </p>
+
+    <div id="claimreview-gate" class="batchnote" hidden></div>
+
+    <form id="claimreview-filters" class="runbar" role="search">
+      <input id="cr-q" type="search" placeholder="Search the sentence text" aria-label="Search sentence text" autocomplete="off">
+      <select id="cr-status" aria-label="Candidate status">
+        <option value="queued">Queued for review</option>
+        <option value="new">New (not queued)</option>
+        <option value="accepted">Accepted</option>
+        <option value="dismissed">Dismissed</option>
+        <option value="">Any status</option>
+      </select>
+      <select id="cr-predicate" aria-label="Predicate"><option value="">Any predicate</option></select>
+      <select id="cr-source" aria-label="Source system">
+        <option value="">All sources</option>
+        <option value="committee_paper_promotion">Committee papers</option>
+        <option value="cdp_document_promotion">Partnership documents</option>
+      </select>
+      <button class="btn" type="submit">Apply</button>
+    </form>
+
+    <div id="claimreview-status" class="muted small" aria-live="polite"></div>
+    <div id="claimreview-list"></div>
+    <div class="pager" id="claimreview-pager"></div>
   </section>
 
   <section id="tab-exports" class="tabpanel">

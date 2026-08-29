@@ -368,7 +368,7 @@ def test_the_admin_modules_are_served(client):
     """A module that 404s takes the whole import graph with it, and the page
     keeps working well enough that nobody notices the palette is gone."""
     for name in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "search"):
+                 "exports", "search", "claimreview"):
         response = client.get(f"/admin/js/{name}.js")
         assert response.status_code == 200, f"/admin/js/{name}.js is not served"
         assert response.headers["Content-Type"].startswith("text/javascript")
@@ -391,7 +391,8 @@ def test_the_api_documentation_answers_at_the_address_a_reader_would_guess(clien
 
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):
     """An operator route answering under /api/v1/ would be published."""
-    for route in ("overview", "schema", "review", "review/facets", "overrides", "search"):
+    for route in ("overview", "schema", "review", "review/facets", "overrides",
+                  "search", "claim-candidates", "claim-gate", "claim-ontology"):
         assert client.get(f"/api/v1/{route}").status_code == 404
 
 

@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-046. Current work: BETA-047. Next:
-  BETA-048.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-047. Current work: BETA-048. Next:
+  BETA-049.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,31 +271,29 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-047 | Semantic claim review and gate dashboard
-  - promoted_from: NEXT on 2026-08-29 after BETA-046 completed
+- [IN_PROGRESS] BETA-048 | OpenAPI 3.1 specification
+  - promoted_from: NEXT on 2026-08-29 after BETA-047 completed
   - started: 2026-08-29
   - priority: P2
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: admin/nlp/review
-  - depends_on: BETA-034, BETA-046
-  - objective: Add admin candidate list/detail/decision/gate endpoints and a
-    keyboard-operable review dashboard with filters, named reviewer decisions,
-    ontology validation and live gate progress.
-  - rationale: BETA-034 is blocked on human review labour; a careful workbench
-    makes that labour feasible while preserving individual accountability.
-  - suggested_first_action: Wrap existing candidate and decision functions in
-    authenticated admin routes; permit only individual decisions into
-    `claim_candidate_decisions`, with no bulk approval, `graph_claims` write,
-    SetFit training or public AI output.
-  - next_action: Add `/api/admin/claim-candidates` (list/detail),
-    `/api/admin/claim-candidates/decide` (one candidate, named reviewer, via
-    `pipeline/nlp/decisions.decide`, ontology-validated `corrected` fields)
-    and `/api/admin/claim-gate` (read-only `pipeline/nlp/gate` report); a
-    keyboard-operable admin dashboard tab; tests that no bulk approve /
-    `graph_claims` write / SetFit path exists.
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: api/docs
+  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045
+  - objective: Serve `/api/openapi.json` as an OpenAPI 3.1 description of all
+    public routes, parameters, pagination, errors, provenance and examples.
+  - rationale: A precise machine-readable contract makes the public API safer
+    to reuse and provides a testable inventory of what is intentionally public.
+  - suggested_first_action: Introduce a compact route-spec structure and an
+    exact route/spec parity test; keep it additive and avoid a framework
+    migration or generated client toolchain.
+  - next_action: Add a `pipeline/web/openapi.py` that builds an OpenAPI 3.1
+    document from a compact per-route spec table covering every
+    `PUBLIC_API_ROUTES` / pattern / `export`; serve it at `/api/openapi.json`
+    (static-map dispatch, GET only); a parity test binding the spec's paths to
+    `test_portal_isolation.PUBLIC_API_ROUTES|PATTERNS|EXTRA` in both
+    directions; document the route on `api.html` and in `<noscript>`.
 
 ### BLOCKED
 
@@ -479,26 +477,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-048 | OpenAPI 3.1 specification
-  - promoted_from: READY on 2026-08-29 after BETA-046 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: api/docs
-  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045
-  - objective: Serve `/api/openapi.json` as an OpenAPI 3.1 description of all
-    public routes, parameters, pagination, errors, provenance and examples.
-  - rationale: A precise machine-readable contract makes the public API safer
-    to reuse and provides a testable inventory of what is intentionally public.
-  - suggested_first_action: Introduce a compact route-spec structure and an
-    exact route/spec parity test; keep it additive and avoid a framework
-    migration or generated client toolchain.
-
-### READY
-
-- [READY] BETA-049 | Accessibility and performance guardrails
+- [NEXT] BETA-049 | Accessibility and performance guardrails
+  - promoted_from: READY on 2026-08-29 after BETA-047 completed
   - priority: P1
   - impact: 5
   - effort: 4
@@ -516,6 +496,12 @@ DONE
     require focus/live-region/text-node rules, route limits/pagination, local
     assets, PostgreSQL plan checks and cache assertions, then fix all critical
     or serious findings before completion.
+
+### READY
+
+_(empty — BETA-049 is the last item of the BETA-038–049 round; the
+BETA-050–067 successor round is promoted per its delivery sequence once
+BETA-049 is DONE.)_
 
 ### DEFERRED
 
@@ -558,6 +544,67 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-047 | Semantic claim review and gate dashboard
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: admin/nlp/review
+  - depends_on: BETA-034 (implemented 034A–034G foundation), BETA-046
+  - objective: Add admin candidate list/detail/decision/gate endpoints and a
+    keyboard-operable review dashboard with filters, named reviewer decisions,
+    ontology validation and live gate progress.
+  - result: New `pipeline/web/claim_review.py` — the one-way bridge (same
+    shape as `pipeline/web/semantic.py`) over the already-implemented nlp
+    functions: `decisions.decide` / `decisions.history`,
+    `gate.check`, and `ontology.default()`. It adds no policy — decisions are
+    one candidate at a time, nothing writes `graph_claims`, nothing trains a
+    model. New admin routes:
+    `GET /api/admin/claim-candidates` (filtered/paged list over
+    `document_claim_candidates` joined to chunk/document/evidence, each row
+    carrying its triple, `predicate_label`/`object_concept_label` resolved
+    from the ontology, evidence sentence, source identity, and the latest
+    decision), `GET /api/admin/claim-candidates/{id}` (detail + chunk text +
+    full `decisions` history + `ontology_version`),
+    `GET /api/admin/claim-gate` (the read-only 034G `gate.check` report
+    verbatim), `GET /api/admin/claim-ontology` (predicate / concept /
+    reason-code vocabularies for the correction dropdowns), and
+    `POST /api/admin/claim-candidates/decide` (one candidate, `decided_by`
+    required and never defaulted, `corrected` needs an ontology-valid
+    `corrected_*` — all enforced by `decisions.decide`, its
+    `ClaimDecisionError` → 400). Route not-public: added to
+    `test_portal_isolation.py`'s "not reachable under `/api/v1/`" list.
+  - ui: New admin tab **Claim review** (`#tab-claimreview`, `'claimreview'` in
+    `app.js` `TABS`, `/admin/js/claimreview.js` registered, `initClaimReview`
+    in `shell.js`). A gate strip (overall READY/not, decision counts,
+    inter-reviewer agreement, per-category positive/negative/subjects/years
+    and the shortfall list), a filter bar (sentence search, status,
+    predicate, source), and one panel per candidate: the triple, the
+    quoted sentence, source link, last decision, and a `<form>` decision
+    control — approve / reject / corrected, with the correction row
+    (predicate + object-concept + object-literal dropdowns, ontology-bound)
+    revealed only for `corrected`, a reason-code select, a note field. The
+    reviewer name comes from the operator UI's existing `#reviewer` box; a
+    blank name is refused client- and server-side. No bulk control exists,
+    pinned by a test.
+  - validation: New `tests/test_web_claim_review.py` (9 tests) — the nlp
+    chain seeds one real candidate; list labels + caveat, detail chunk +
+    empty history, unknown-id 400, ontology options, the gate report's five
+    categories + blocking list, the named-reviewer refusal, an approve that
+    records the decision and moves the candidate (with `graph_claim_id`
+    NULL — no draft), `corrected` needing an ontology-valid correction, and
+    a source-scan that no `decide-all` / `bulk` / `approve-all` route
+    exists. `test_portal_isolation.py`'s admin-modules and admin-not-public
+    lists updated. Full offline suite green — **2720 passed, 109 skipped, 34
+    deselected, 0 failed**. `ruff check pipeline tests` clean.
+    Browser-verified against a seeded scratch SQLite warehouse (no
+    candidates): the tab activates, the gate strip renders all five
+    categories with their shortfalls, the predicate dropdown fills from the
+    ontology (29 predicates), the empty-list message shows, zero console
+    errors.
 
 - [DONE] BETA-046 | Admin semantic-search workbench
   - completed: 2026-08-29
@@ -2599,9 +2646,9 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | DONE (BETA-044) |
 | P2 | Provider comparison enhancements | 4 | 4 | 4 | DONE (BETA-045) |
 | P2 | Admin semantic-search workbench | 4 | 3 | 5 | DONE (BETA-046) |
-| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | IN_PROGRESS (BETA-047) |
-| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | NEXT (BETA-048) |
-| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |
+| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | DONE (BETA-047) |
+| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | IN_PROGRESS (BETA-048) |
+| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | NEXT (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | Approved successor backlog (BETA-051) |
 | P1 | Structured review-item context | 5 | 2 | 5 | Approved successor backlog (BETA-052) |
