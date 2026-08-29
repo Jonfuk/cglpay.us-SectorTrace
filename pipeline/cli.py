@@ -839,6 +839,36 @@ def list_modules() -> None:
         typer.echo(name)
 
 
+@app.command("docs-check")
+def docs_check() -> None:
+    """Fail if a machine-owned documentation block is stale (BETA-067).
+
+    Read-only. Prints a unified diff per stale block and exits non-zero, so
+    CI catches a registry change that a hand edit did not follow.
+    """
+    from pipeline import docs_matrix
+
+    stale = docs_matrix.check()
+    if not stale:
+        typer.echo("docs blocks in sync")
+        return
+    for entry in stale:
+        typer.echo(f"\n{entry['name']} ({entry['path']}):")
+        typer.echo(entry.get("diff") or f"  ERROR: {entry['error']}")
+    typer.echo("\nRun `pipeline docs-sync` to regenerate.")
+    raise typer.Exit(code=1)
+
+
+@app.command("docs-sync")
+def docs_sync() -> None:
+    """Rewrite every machine-owned documentation block in place (BETA-067)."""
+    from pipeline import docs_matrix
+
+    changed = docs_matrix.sync()
+    typer.echo("updated: " + (", ".join(changed) if changed
+                               else "nothing (already in sync)"))
+
+
 @app.command()
 def export(
     target: str = typer.Argument(

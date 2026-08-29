@@ -163,7 +163,14 @@ produce worklists reviewed in the operator UI — see
 ```bash
 uv run python -m pytest          # full suite — offline, fixture-backed, ~2.5 min
 uv run ruff check pipeline tests
+uv run python -m pipeline docs-check   # generated doc blocks vs the registries
 ```
+
+Some facts in `docs/` are a projection of an in-code registry — currently the
+source capability matrix in [`docs/SOURCES.md`](docs/SOURCES.md), rendered
+from `pipeline/web/datasets.py` and `pipeline/licences.py`. `docs-check`
+fails CI when a block is stale; `pipeline docs-sync` rewrites it. Only the
+text between the `<!-- BEGIN/END GENERATED -->` markers is machine-owned.
 
 Tests never touch a real source. Live-source smoke tests sit behind the
 `integration` marker and are deselected by default; they exist because a

@@ -32,9 +32,11 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-066. Current
-  work: BETA-067 (the final Wave 4 item). Next: none — the successor
-  programme closes when BETA-067 lands.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-067. No
+  IN_PROGRESS item: the approved successor programme (BETA-050 through
+  BETA-067, delivered in four waves) is complete, as is the original
+  BETA-038–049 round. The next round has not been approved.** BETA-028 and
+  BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -273,39 +275,9 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-067 | Capability-documentation consistency checker
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-066 completed
-  - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 1
-  - area: documentation/tooling
-  - depends_on: BETA-038, BETA-048
-  - objective: Add machine-owned documentation blocks generated from module,
-    source, route, export, licence and caveat registries, with non-mutating
-    `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
-  - rationale: Capability prose has already drifted behind implemented committee
-    system support; machine-owned factual matrices can prevent recurrence while
-    narrative documentation remains manually reviewed.
-  - suggested_first_action: Reconcile the stale committee-system statements and
-    define the first generated source-capability matrix.
-  - next_action: Add `pipeline/docs_matrix.py` that renders factual matrices
-    from the existing in-code registries — the module registry
-    (`pipeline/registry.py`), the dataset catalogue
-    (`pipeline/web/datasets.py`), the frozen public route set + `openapi.py`,
-    the export schema, `pipeline/licences.py::MODULE_LICENCES` and the
-    `CAVEATS` keys — into delimited `<!-- BEGIN GENERATED: name -->` /
-    `<!-- END GENERATED: name -->` blocks in `docs/SOURCES.md` /
-    `README.md`. `pipeline docs-check` (CI, non-mutating: exit 1 with a diff
-    when a block is stale) and `pipeline docs-sync` (rewrites the blocks).
-    First matrix: one row per collecting module — id, source, cadence,
-    public tables, licence — which reconciles the stale committee-system
-    prose the rationale names. Offline tests: the generator is deterministic,
-    `docs-check` passes on a freshly synced tree and fails on a hand-edited
-    block, and every generated block is bounded by its markers. No schema
-    change; narrative docs outside the markers are untouched.
+_(none — BETA-067 completed the approved successor programme. A new round is
+not yet approved; the Candidate Feature Backlog below holds unscheduled
+ideas.)_
 
 ### BLOCKED
 
@@ -538,6 +510,52 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-067 | Capability-documentation consistency checker
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 1
+  - area: documentation/tooling
+  - depends_on: BETA-038, BETA-048
+  - objective: Add machine-owned documentation blocks generated from module,
+    source, route, export, licence and caveat registries, with non-mutating
+    `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
+  - result: New `pipeline/docs_matrix.py` — `GENERATED_BLOCKS` maps a block
+    name to `(path, renderer)`; `check()` diffs the committed block against a
+    fresh render (read-only, returns a unified diff per stale block),
+    `sync()` rewrites it in place, `render()` emits the full marker-bounded
+    block for a first insertion. `_locate()` finds the span *between* the
+    `<!-- BEGIN GENERATED: name -->` / `<!-- END GENERATED: name -->` markers
+    and raises if they are missing or reversed — the narrative around them is
+    never touched. First (and currently only) block:
+    `source-capability-matrix` in `docs/SOURCES.md`, one row per collecting
+    module rendered from `pipeline/web/datasets.py::DATASETS` joined to
+    `pipeline/licences.py::for_module` — module id, source, evidence layer,
+    cadence, public tables, licence. A registry change without
+    `pipeline docs-sync` now fails.
+  - api/ui: `pipeline docs-check` (read-only; prints a diff per stale block
+    and exits 1) and `pipeline docs-sync` (rewrites, reports which blocks
+    changed). `docs-check` added to the CI workflow beside the beta-queue
+    validation. Reconciled the stale committee-system prose in
+    `docs/SOURCES.md` (the Sources row for Modules 9/10 now states plainly
+    that only ModernGov is searched and other systems are recorded
+    unsupported). `README.md` Development section documents the mechanism.
+  - validation: New `tests/test_docs_matrix.py` (8 — the matrix is
+    deterministic, every collecting module is a row carrying its registry
+    licence, **the committed block is in sync** (the CI guard),
+    `render()` is marker-bounded, `_locate()` raises on a missing marker,
+    `check()` flags a hand-edited block and `sync()` repairs it idempotently
+    without touching the surrounding text, and the CLI exits 0 on a synced
+    tree / 1 on a stale block). `test_docs_coverage.py` / `test_licences.py`
+    / `test_web_catalogue.py` still green. No migration, no schema change.
+    Full offline suite green — **2876 passed, 113 skipped, 35 deselected, 0
+    failed**. `ruff` clean. Not browser-observable (CLI + docs tooling), so
+    no preview check.
+  - closes: the approved successor programme BETA-050–067. No further round
+    is approved.
 
 - [DONE] BETA-066 | Provider predecessor and successor lineage
   - completed: 2026-08-29
@@ -3616,7 +3634,7 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | DONE (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | DONE (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | DONE (BETA-066) |
-| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | IN_PROGRESS (BETA-067) |
+| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | DONE (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-successor

@@ -58,6 +58,14 @@ jobs:
         # `beta`), so this is safe to run on every push.
         run: uv run python scripts/validate_beta_queue.py
 
+      - name: Check machine-owned documentation blocks
+        # BETA-067: the generated blocks in docs/ (currently the source
+        # capability matrix in docs/SOURCES.md) must match what the in-code
+        # registries produce. A registry change without `pipeline docs-sync`
+        # fails here with a diff. `test_docs_matrix.py` covers the same thing
+        # from the suite; this is the fast standalone signal.
+        run: uv run python -m pipeline docs-check
+
       - name: Tests
         # Run WITHOUT the postgres extra, which is the configuration pyproject
         # claims must keep working: "a fresh checkout, CI, and every test that
