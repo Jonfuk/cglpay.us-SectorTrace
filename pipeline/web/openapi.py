@@ -194,6 +194,12 @@ ROUTES: dict[str, dict] = {
         "summary": "OHID Fingertips local-authority indicators, each with its interval.",
         "parameters": [_p("indicator_id"), _p("topic"), _p("ons_code"), _p("substance")],
     },
+    "/api/v1/treatment_metrics": {
+        "surface": "treatment_metrics",
+        "summary": "Catalogue of treatment metrics — definition, unit, whether a "
+                   "95% CI is published, exact periods, coverage and provenance.",
+        "parameters": [],
+    },
     "/api/v1/ndtms": {
         "surface": "ndtms",
         "summary": "NDTMS published estimates with their confidence intervals.",

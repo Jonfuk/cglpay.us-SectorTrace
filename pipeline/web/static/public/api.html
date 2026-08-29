@@ -732,6 +732,22 @@
     <p><a href="/api/v1/fingertips"><code>/api/v1/fingertips</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="treatment_metrics">
+    <h3><code>/api/v1/treatment_metrics</code></h3>
+    <p>
+      A catalogue of treatment metrics to read <em>before</em> a chart: one row
+      per Fingertips indicator and per NDTMS source table, each with its
+      definition, unit, whether a 95% confidence interval is published, the
+      exact periods held (never gap-filled), authority and England coverage,
+      and provenance. Computed from the same tables the treatment page charts.
+    </p>
+    <p class="small">
+      Returns <code>metrics</code>, <code>count</code>, <code>caveat</code>.
+      Takes no parameters.
+    </p>
+    <p><a href="/api/v1/treatment_metrics"><code>/api/v1/treatment_metrics</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="ndtms">
     <h3><code>/api/v1/ndtms</code></h3>
     <p>

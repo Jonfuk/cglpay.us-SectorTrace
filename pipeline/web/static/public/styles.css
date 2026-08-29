@@ -515,6 +515,16 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-075: treatment metric catalogue. */
+.metric-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); max-height: 520px; overflow-y: auto; }
+.metric-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); }
+.metric-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.metric-pick { font-weight: 600; font-size: 14px; }
+.metric-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-4); margin: var(--space-2) 0 0; font-size: 12.5px; }
+.metric-meta dt { color: var(--text-muted); }
+.metric-meta dd { margin: 0; }
+.metric-def { margin-top: var(--space-2); }
+
 /* BETA-073: "My area" card on the overview. */
 .myarea-card {
   margin: var(--space-6) 0; padding: var(--space-5);

@@ -2175,6 +2175,101 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
     }
 
 
+def treatment_metrics(conn: sqlite3.Connection) -> dict:
+    """A catalogue of treatment metrics, shown before a chart is drawn
+    (BETA-075).
+
+    Definition, unit, whether a 95% CI is published, the exact periods held,
+    authority and England coverage, and provenance — computed from the same
+    tables the treatment page charts, so a catalogue row cannot claim coverage
+    the chart does not have. Missing periods stay missing: `periods` is exactly
+    what was published for that metric, ordered, with no gap filled or zeroed.
+    """
+    _public(["fingertips_indicators", "fingertips_la_values",
+              "ndtms_la_statistics"])
+
+    metrics: list[dict] = []
+
+    indicators = _rows(conn, """
+        SELECT indicator_id, indicator_name, topic, substance, unit,
+               definition, source_url, retrieved_at
+        FROM fingertips_indicators
+        ORDER BY topic, indicator_name""")
+    for ind in indicators:
+        cov = _one(conn, """
+            SELECT COUNT(DISTINCT CASE WHEN area_level = 'local_authority'
+                                       THEN ons_code END) AS authority_count,
+                   MAX(CASE WHEN area_level = 'england' THEN 1 ELSE 0 END) AS england,
+                   MAX(CASE WHEN lower_ci_95 IS NOT NULL THEN 1 ELSE 0 END) AS has_ci,
+                   MAX(retrieved_at) AS retrieved_at
+            FROM fingertips_la_values WHERE indicator_id = ?""",
+            (ind["indicator_id"],))
+        periods = [r["time_period"] for r in _rows(conn, """
+            SELECT DISTINCT time_period, time_period_sortable
+            FROM fingertips_la_values WHERE indicator_id = ?
+            ORDER BY time_period_sortable""", (ind["indicator_id"],))]
+        metrics.append({
+            "source": "fingertips",
+            "key": f"fingertips:{ind['indicator_id']}",
+            "indicator_id": ind["indicator_id"],
+            "name": ind["indicator_name"],
+            "topic": ind["topic"],
+            "substance": ind["substance"],
+            "unit": ind["unit"],
+            "definition": ind["definition"],
+            "has_confidence_interval": bool(cov.get("has_ci")),
+            "periods": periods,
+            "period_count": len(periods),
+            "period_range": [periods[0], periods[-1]] if periods else None,
+            "authority_count": cov.get("authority_count") or 0,
+            "england_available": bool(cov.get("england")),
+            "source_url": ind["source_url"],
+            "retrieved_at": cov.get("retrieved_at") or ind["retrieved_at"],
+        })
+
+    # NDTMS: one catalogue row per source table seen, labelled from the
+    # edition-independent map. Every NDTMS figure is a modelled estimate
+    # published with a 95% CI, so `has_confidence_interval` is always true.
+    ndtms_refs = _rows(conn, """
+        SELECT table_ref,
+               COUNT(DISTINCT ons_code) AS authority_count,
+               COUNT(DISTINCT time_period) AS period_count,
+               MIN(time_period) AS first_period,
+               MAX(time_period) AS last_period,
+               MAX(retrieved_at) AS retrieved_at,
+               MAX(source_url) AS source_url
+        FROM ndtms_la_statistics
+        GROUP BY table_ref ORDER BY table_ref""")
+    for r in ndtms_refs:
+        ref = r["table_ref"] or ""
+        prevalence = ref in ("Table_2_1", "2_1_Drug_prevalence", "Table_2_2",
+                              "2_2_Alcohol_prevalence") or "prevalence" in ref.lower()
+        metrics.append({
+            "source": "ndtms",
+            "key": f"ndtms:{ref}",
+            "name": NDTMS_TABLES.get(ref, ref or "NDTMS estimate"),
+            "topic": "prevalence" if prevalence else "harm",
+            "substance": None,
+            "unit": "modelled estimate with 95% CI",
+            "definition": "NDTMS modelled local-authority estimate, published "
+                          "by OHID with a 95% confidence interval.",
+            "has_confidence_interval": True,
+            "periods": None,
+            "period_count": r["period_count"] or 0,
+            "period_range": [r["first_period"], r["last_period"]],
+            "authority_count": r["authority_count"] or 0,
+            "england_available": False,
+            "source_url": r["source_url"],
+            "retrieved_at": r["retrieved_at"],
+        })
+
+    return {
+        "metrics": metrics,
+        "count": len(metrics),
+        "caveat": CAVEATS["treatment_not_need"],
+    }
+
+
 def authorities(conn: sqlite3.Connection) -> list[dict]:
     _public(["authorities"])
     return _rows(conn, "SELECT ons_code, name, type, region FROM authorities "

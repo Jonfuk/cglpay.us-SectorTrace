@@ -48,9 +48,20 @@ export async function render(main) {
       el('summary', { text: 'What treatment data can answer' }),
       el('p', { text: 'The figures show published indicators and estimates. They cannot show unmet need by subtracting one measure from another.' }),
       el('p', { text: 'A blank, suppressed value, or missing confidence interval is not zero and is shown separately from a published value.' })),
+    el('div', { id: 'metric-catalogue' }),
     el('div', { id: 'ft' }),
     el('div', { id: 'ndtms' }));
   replace(main, page);
+
+  // BETA-075: the metric catalogue comes before the chart. It exposes what a
+  // metric is, its unit, whether a 95% CI is published, the exact periods it
+  // holds, its authority/England coverage and its provenance — so choosing a
+  // technically named indicator is no longer the entry price to understanding
+  // the page.
+  renderMetricCatalogue(page.querySelector('#metric-catalogue'), (topic) => {
+    if (topic) { state.topic = topic; load(); }
+    page.querySelector('#ft')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   const tabs = el('div', { class: 'metrictabs' });
   const areaInput = el('input', {
@@ -171,6 +182,77 @@ export async function render(main) {
   await load();
   await loadNdtms(page.querySelector('#ndtms'), state, charts);
   return () => disposeCharts(charts);
+}
+
+// BETA-075: searchable metric catalogue rendered before any chart.
+async function renderMetricCatalogue(container, onPick) {
+  let data;
+  try {
+    data = await fetchJSON('treatment_metrics');
+  } catch (error) {
+    replace(container, section('Treatment metric catalogue', null,
+      errorCard(error, () => renderMetricCatalogue(container, onPick))));
+    return;
+  }
+  const metrics = data.metrics || [];
+  const listHolder = el('div', { class: 'metric-list' });
+  const countLine = el('p', { class: 'small muted' });
+
+  const paint = (term) => {
+    const q = (term || '').trim().toLowerCase();
+    const shown = q
+      ? metrics.filter((m) => `${m.name} ${m.topic || ''} ${m.unit || ''} ${m.definition || ''}`
+          .toLowerCase().includes(q))
+      : metrics;
+    countLine.textContent = `${shown.length} of ${metrics.length} metrics`;
+    replace(listHolder, shown.map((m) => {
+      const range = m.period_range && m.period_range[0]
+        ? `${m.period_range[0]}–${m.period_range[1]} (${m.period_count})`
+        : (m.period_count ? `${m.period_count} periods` : 'no periods published');
+      const row = el('div', { class: 'metric-row' },
+        el('div', { class: 'metric-row-head' },
+          el('button', {
+            class: 'linklike metric-pick', type: 'button',
+            onclick: () => onPick(m.source === 'fingertips' ? m.topic : null),
+          }, m.name),
+          el('span', { class: `badge ${m.source === 'ndtms' ? 'neutral' : 'good'}`,
+            text: m.source === 'ndtms' ? 'NDTMS' : 'Fingertips' }),
+          m.has_confidence_interval
+            ? el('span', { class: 'badge good', text: '95% CI' })
+            : el('span', { class: 'badge unverified', text: 'no CI' })),
+        el('dl', { class: 'metric-meta' },
+          el('dt', { text: 'Unit' }), el('dd', { text: m.unit || 'published with the metric' }),
+          el('dt', { text: 'Periods' }), el('dd', { text: range }),
+          el('dt', { text: 'Authorities' }), el('dd', { text: String(m.authority_count) }),
+          el('dt', { text: 'England figure' }), el('dd', { text: m.england_available ? 'available' : 'not held' }),
+          el('dt', { text: 'Retrieved' }), el('dd', { text: isoDate(m.retrieved_at) })),
+        m.definition
+          ? el('details', { class: 'metric-def' },
+              el('summary', { text: 'Definition' }),
+              el('p', { class: 'small', text: m.definition }))
+          : null,
+        m.source_url
+          ? el('p', { class: 'small' },
+              el('a', { href: m.source_url, target: '_blank', rel: 'noopener noreferrer' }, 'Source ↗'))
+          : null);
+      return row;
+    }));
+  };
+
+  const search = el('input', {
+    type: 'search', placeholder: 'Search metrics by name, unit or definition',
+    'aria-label': 'Search treatment metrics',
+    oninput: (e) => paint(e.target.value),
+  });
+
+  replace(container, section(
+    'Treatment metric catalogue',
+    'What each metric measures, its unit, whether a confidence interval is '
+    + 'published, the exact periods it holds and its coverage — before a chart.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveat, 'Different measures, not one scale'),
+      search, countLine, listHolder)));
+  paint('');
 }
 
 function indicatorGuide(data, state) {

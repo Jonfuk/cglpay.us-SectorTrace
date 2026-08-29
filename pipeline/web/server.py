@@ -1482,6 +1482,10 @@ class Handler(BaseHTTPRequestHandler):
                 topic=_str(params, "topic") or None,
                 ons_code=_str(params, "ons_code") or None,
                 substance=_str(params, "substance") or None)
+        if route == "treatment_metrics":
+            # The metric catalogue shown before a chart (BETA-075): definition,
+            # unit, CI availability, exact periods, coverage and provenance.
+            return public_queries.treatment_metrics(conn)
         if route == "pfd":
             return public_queries.pfd(conn)
         if route == "safety":

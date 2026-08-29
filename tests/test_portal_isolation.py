@@ -89,6 +89,7 @@ PUBLIC_API_ROUTES = {
     "geography",
     "boundaries",
     "fingertips",
+    "treatment_metrics",
     "ndtms",
     "compare",
     "layers",

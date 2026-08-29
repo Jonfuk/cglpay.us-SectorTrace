@@ -297,24 +297,22 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-075 | Treatment metric explorer
+- [IN_PROGRESS] BETA-076 | Navigable provider and authority workbenches
   - priority: P1
   - impact: 5
   - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: public/treatment
-  - depends_on: BETA-043, BETA-049, BETA-072
-  - objective: Reframe treatment data around a searchable metric catalogue
-    that exposes definitions, units, confidence intervals, periods,
-    publication coverage, authority/region views and provenance before drawing
-    a chart.
-  - next_action: Build the metric metadata model from existing endpoint fields
-    and catalogue records; preserve missing periods as missing, never zero or
-    interpolated.
+  - confidence: 5
+  - risk: 2
+  - area: public/entity detail
+  - depends_on: BETA-017, BETA-045, BETA-065, BETA-066
+  - objective: Add sticky section indexes, counts, deep-link anchors,
+    progressive disclosure, section search and back-to-top controls; paginate
+    or collapse large collections while preserving complete exports.
+  - next_action: Define stable section IDs and availability/count metadata,
+    then refactor provider CQC and filing sections before authorities.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–074 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–075 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -550,6 +548,49 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-075 | Treatment metric explorer
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/treatment
+  - depends_on: BETA-043, BETA-049, BETA-072
+  - objective: Reframe treatment data around a searchable metric catalogue
+    that exposes definitions, units, confidence intervals, periods,
+    publication coverage, authority/region views and provenance before drawing
+    a chart.
+  - result: New additive read-only route `/api/v1/treatment_metrics`
+    (`public_queries.treatment_metrics`). One catalogue row per Fingertips
+    indicator and per NDTMS source table, each carrying: name, topic,
+    substance, unit, definition, `has_confidence_interval` (true iff a
+    `lower_ci_95` is actually present — always true for NDTMS), `periods` (the
+    exact published `time_period` values, ordered by `time_period_sortable`,
+    **never gap-filled or zeroed** — a metric with no values gets `[]` and a
+    null range), `period_count`, `period_range`, `authority_count`,
+    `england_available`, `source_url` and `retrieved_at`. Computed from the
+    same `fingertips_*` / `ndtms_la_statistics` tables the treatment page
+    charts, so a catalogue row cannot claim coverage the chart lacks.
+    `treatment.js` renders the catalogue in a `#metric-catalogue` section
+    *above* the chart: a search box (name / unit / definition), a "N of M
+    metrics" count, and a scrollable list where each row shows the source and
+    CI badges, a unit / periods / authorities / England / retrieved metadata
+    grid, an expandable definition and a source link. Picking a Fingertips
+    metric sets its topic tab and scrolls to the chart.
+  - api/ui: additive route `/api/v1/treatment_metrics` (no params). Added to
+    the OpenAPI document, the `<noscript>` route list, `api.html`, and the
+    `test_portal_isolation` `PUBLIC_API_ROUTES`. New CSS `.metric-*`.
+  - validation: New `tests/test_web_treatment_metrics.py` (4 — the catalogue
+    carries unit / definition / CI / periods / coverage / provenance; a metric
+    with no values reports no coverage rather than zero; periods are exactly
+    what was published in order with a deleted year simply absent; the route
+    is in the OpenAPI document). `test_portal_isolation` / `test_web_openapi` /
+    `test_web_public` green. `ruff` clean. Browser-verified: the catalogue
+    lists two seeded Fingertips metrics with the right CI badge (one "95% CI",
+    one "no CI"), search narrows to "1 of 2 metrics", picking the opiates
+    metric activates the "Numbers in treatment" tab; no overflow at 1440.
 
 - [DONE] BETA-074 | Inspectable visualisations
   - completed: 2026-08-29
@@ -4027,8 +4068,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | DONE (BETA-072) |
 | P1 | My area context | 5 | 4 | 4 | DONE (BETA-073) |
 | P2 | Inspectable visualisations | 4 | 3 | 5 | DONE (BETA-074) |
-| P1 | Treatment metric explorer | 5 | 4 | 4 | IN_PROGRESS (BETA-075) |
-| P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | APPROVED, not queued (BETA-076) |
+| P1 | Treatment metric explorer | 5 | 4 | 4 | DONE (BETA-075) |
+| P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | IN_PROGRESS (BETA-076) |
 | P2 | Navigation continuity | 4 | 3 | 5 | APPROVED, not queued (BETA-077) |
 | P1 | Unified evidence atlas | 5 | 5 | 4 | APPROVED, not queued (BETA-078) |
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | APPROVED, not queued (BETA-079) |
