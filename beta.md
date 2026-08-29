@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-055. Current
-  work: BETA-059. Next: BETA-060, BETA-056.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-059. Current
+  work: BETA-060. Next: BETA-056, BETA-057.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,32 +272,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-059 | Coverage completion action board
-  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-055 completed
+- [IN_PROGRESS] BETA-060 | Raw-archive inventory and integrity trends
+  - promoted_from: NEXT (Wave 2) on 2026-08-29 after BETA-059 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
+  - priority: P2
+  - impact: 4
+  - effort: 3
   - confidence: 4
   - risk: 2
-  - area: admin/coverage
-  - depends_on: BETA-043, BETA-058
-  - objective: Distinguish run needed, review needed, source blocked, not
-    published and complete; add `GET /api/admin/completeness` with links to the
-    relevant run, candidate, review or dataset view.
-  - rationale: Coverage measurements become operationally useful only when each
-    gap has an honest reason and a permitted, non-destructive next action.
-  - suggested_first_action: Map every current completeness state to one reason
-    code and one action destination.
-  - next_action: For each catalogued dataset (`pipeline/web/datasets.py`),
-    derive one reason code — `complete` / `run_needed` (0 rows, never
-    collected) / `review_needed` (pending `review_queue` items for its
-    module) / `not_published` (collected but no public route) / `source_blocked`
-    (a documented robots/appeal gap) — and one non-destructive next
-    destination (a run, the review filter, the dataset catalogue entry).
-    `GET /api/admin/completeness`; an admin Health-tab board; tests that
-    every reason code maps to a permitted action and nothing here deletes
-    or runs anything on its own.
+  - area: archive/operations
+  - depends_on: BETA-058
+  - objective: Track archive count, size, source distribution, missing
+    references, duplicate hashes, deterministic hash samples and growth through
+    `pipeline archive audit` and an admin audit-history endpoint.
+  - rationale: A point-in-time size scan cannot reveal integrity drift or future
+    storage pressure.
+  - suggested_first_action: Define immutable summaries and deterministic sampling
+    rules; this item measures only and never deletes, compacts or chooses
+    retention policy.
+  - next_action: Add a migration for an append-only `archive_audits` table
+    (audit_id, run_at, object_count, total_bytes, by_source JSON,
+    missing_refs, duplicate_hashes, sample_json, git_revision); a
+    `pipeline archive audit` CLI command that walks `archive_objects` /
+    `data/raw`, computes those and inserts one row (never deletes or
+    compacts); `GET /api/admin/archive-audits` history + a Health-tab
+    panel; tests that the command is measurement-only.
 
 ### BLOCKED
 
@@ -481,24 +480,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-060 | Raw-archive inventory and integrity trends
-  - promoted_from: Approved successor backlog (Wave 2) on 2026-08-29 after BETA-054 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: archive/operations
-  - depends_on: BETA-058
-  - objective: Track archive count, size, source distribution, missing
-    references, duplicate hashes, deterministic hash samples and growth through
-    `pipeline archive audit` and an admin audit-history endpoint.
-  - rationale: A point-in-time size scan cannot reveal integrity drift or future
-    storage pressure.
-  - suggested_first_action: Define immutable summaries and deterministic sampling
-    rules; this item measures only and never deletes, compacts or chooses
-    retention policy.
-
 - [NEXT] BETA-056 | Human alias-resolution workflow
   - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-055 completed
   - priority: P1
@@ -516,6 +497,22 @@ DONE
   - suggested_first_action: Design the decision schema and SQLite/PostgreSQL
     invariants around named reviewer, timestamp, evidence and canonical entity
     ID; automatic fuzzy application remains forbidden.
+
+- [NEXT] BETA-057 | Candidate URL overlap signals
+  - promoted_from: Approved successor backlog (Wave 3) on 2026-08-29 after BETA-059 completed
+  - priority: P2
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: data-quality/review
+  - depends_on: BETA-052
+  - objective: Show when a conservatively canonicalised URL appears across
+    source tables or workflow roles.
+  - rationale: Overlap can expose duplicate discovery or related evidence, but
+    it is not proof that records should be merged, discarded or reprioritised.
+  - suggested_first_action: Define fixtures for fragments, tracking parameters,
+    redirects and genuinely distinct documents before writing the normaliser.
 
 ### READY
 
@@ -564,6 +561,49 @@ round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-059 | Coverage completion action board
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: admin/coverage
+  - depends_on: BETA-043, BETA-058
+  - objective: Distinguish run needed, review needed, source blocked, not
+    published and complete; add `GET /api/admin/completeness` with links to the
+    relevant run, candidate, review or dataset view.
+  - result: New `pipeline/web/completeness_board.py` + route
+    `GET /api/admin/completeness` (admin only). For each catalogued dataset
+    (`pipeline/web/datasets.py`, BETA-043) it derives **one** reason code in
+    precedence order — `run_needed` (0 rows across the dataset's public
+    tables) → `review_needed` (pending `review_queue` items for its module) →
+    `source_blocked` (a curated `_SOURCE_BLOCKED` note: the unvalidated HSE
+    parser, the WhatDoTheyKnow robots deadline) → `not_published` (rows but
+    the module is not in the curated `_PUBLICLY_ROUTED` set) → `complete` —
+    and **one** non-destructive next step: a `run` link to the Pipeline tab,
+    a `review` link to the Review queue filtered to the module, or a
+    `dataset` link to the public catalogue entry. Nothing on the board runs
+    a module, decides an item or deletes anything — a test greps the module
+    for `INSERT`/`UPDATE`/`DELETE`/`run_waves`/`commit(`. Payload also
+    carries `by_reason` counts and a caveat spelling out the read-only
+    boundary.
+  - ui: The Health tab gains a "Coverage actions" panel — a chip row of the
+    reason counts and a table (reason badge / dataset / module / rows / next
+    step / note), the "next step" being the appropriate link.
+  - validation: New `tests/test_web_completeness_board.py` (7) — one row per
+    catalogued dataset, every row has one reason + one permitted action
+    kind, the reason derivation (`run_needed` with a run action,
+    `review_needed` with a review action and the pending count,
+    `source_blocked` with its note), the summary counts add up, the caveat
+    wording, the "never writes or runs" source scan, and the admin-only
+    route. Full offline suite green — **2789 passed, 109 skipped, 35
+    deselected, 0 failed**. `ruff` clean. Browser-verified against a seeded
+    scratch warehouse: the board shows 34 rows with the summary chips (run
+    needed 27 / review needed 1 / source blocked 1 / complete 5), the
+    per-row next-step links resolve to the Pipeline / Review / catalogue
+    destinations, zero console errors.
 
 - [DONE] BETA-055 | Review-session workflow polish
   - completed: 2026-08-29
@@ -3107,10 +3147,10 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | DONE (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | DONE (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | NEXT (BETA-056) |
-| P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
+| P2 | Candidate URL overlap signals | 3 | 3 | 4 | NEXT (BETA-057) |
 | P1 | Unified durable run ledger | 5 | 4 | 4 | DONE (BETA-058) |
-| P1 | Coverage completion action board | 5 | 4 | 4 | IN_PROGRESS (BETA-059) |
-| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | NEXT (BETA-060) |
+| P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
+| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | IN_PROGRESS (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |

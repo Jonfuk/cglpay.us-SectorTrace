@@ -393,6 +393,63 @@ function loadAll() {
   loadFailures();
   loadStorage();
   loadFreshness();
+  loadCompleteness();
+}
+
+/* BETA-059: the coverage completion action board. One reason code + one
+ * non-destructive next step per catalogued dataset. */
+const _REASON_LABEL = {
+  run_needed: 'run needed', review_needed: 'review needed',
+  source_blocked: 'source blocked', not_published: 'not published',
+  complete: 'complete',
+};
+
+function _actionNode(action) {
+  if (action.kind === 'run') {
+    return el('a', { href: '#pipeline', title: 'Open the Pipeline tab to run it' },
+      action.label);
+  }
+  if (action.kind === 'review') {
+    return el('a', {
+      href: `#review?module=${encodeURIComponent(action.target)}&status=pending`,
+      title: 'Open the Review queue filtered to this module',
+    }, action.label);
+  }
+  return el('a', {
+    href: `/#/catalogue?dataset=${encodeURIComponent(action.target)}`,
+    target: '_blank', rel: 'noopener',
+    title: 'Open this dataset in the public catalogue',
+  }, action.label);
+}
+
+async function loadCompleteness() {
+  const board = $('completeness-board');
+  if (!board) return;
+  let data;
+  try { data = await api('/api/admin/completeness'); }
+  catch (e) { return; }
+
+  $('completeness-summary').replaceChildren(
+    ...data.reasons.map((r) => el('span', { class: 'chip',
+      text: `${_REASON_LABEL[r]}: ${data.by_reason[r] || 0}` })));
+
+  const rows = data.datasets.map((d) => el('tr', {},
+    el('td', {}, el('span', {
+      class: `badge ${d.reason === 'complete' ? 'approved'
+        : (d.reason === 'run_needed' ? 'rejected' : 'pending')}`,
+      text: _REASON_LABEL[d.reason] })),
+    el('td', { text: d.title }),
+    el('td', { class: 'muted small mono', text: d.module }),
+    el('td', { class: 'num', text: String(d.row_count) }),
+    el('td', {}, _actionNode(d.action)),
+    el('td', { class: 'muted small', text: d.reason_note || '' })));
+
+  board.replaceChildren(el('table', {},
+    el('thead', {}, el('tr', {},
+      el('th', { text: 'Reason' }), el('th', { text: 'Dataset' }),
+      el('th', { text: 'Module' }), el('th', { text: 'Rows' }),
+      el('th', { text: 'Next step' }), el('th', { text: 'Note' }))),
+    el('tbody', {}, rows)));
 }
 
 export function initHealth() {

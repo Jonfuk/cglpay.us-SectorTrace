@@ -1240,6 +1240,12 @@ class Handler(BaseHTTPRequestHandler):
                      "staleness": artefacts.staleness(
                          self.settings, conn, listed["files"])}
 
+        if path == "/api/admin/completeness":
+            # The coverage completion action board (BETA-059): one reason
+            # code + one non-destructive next step per catalogued dataset.
+            from pipeline.web import completeness_board
+            return completeness_board.board(conn)
+
         if path == "/api/admin/run-ledger":
             # The durable run ledger (BETA-058) — every module-run, whatever
             # entry point started it, not only the browser-started jobs.
