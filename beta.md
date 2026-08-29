@@ -26,16 +26,17 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). As reconciled for this roadmap update on
-  2026-08-29, local `beta` and `origin/beta` are both at **`b6aba7b`**,
-  which records the first approved front-end refinement programme after
-  BETA-067; see Recent Commits for the delivered sequence.
+  directly, not `beta`). Before this roadmap update, local `beta` and
+  `origin/beta` were both at **`b5ff6a9`**, which records the second approved
+  front-end refinement programme after BETA-067; see Recent Commits for the
+  delivered sequence.
 - **BETA-038–049 is complete. Last completed queue item: BETA-067. No
   IN_PROGRESS item: the approved successor programme (BETA-050 through
   BETA-067, delivered in four waves) is complete, as is the original
   BETA-038–049 round. The project owner has approved the next twenty-item
-  front-end refinement programme, BETA-068–087, and a further nineteen-item
-  programme, BETA-088–106, but neither has been promoted into the execution
+  front-end refinement programme, BETA-068–087, a further nineteen-item
+  programme, BETA-088–106, and the seven-item local analyst-assistant
+  programme BETA-107–113, but none has been promoted into the execution
   queue.** BETA-028 and
   BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
@@ -55,6 +56,11 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   document-table inspection, resilient source access, and deeper read-only
   operator diagnostics. The explicitly rejected reference-network proposal
   is not part of the programme. BETA-068–087 retains execution priority.
+- The project owner subsequently approved BETA-107–113 as a third, local-only
+  programme: a Needle 2-routed, Liquid Foundation Model analyst assistant over
+  existing read-only SectorTrace tools and retrieval. It is approved but
+  unqueued **after BETA-068–106**. It authorises an operator finding aid, not
+  model-generated evidence, claim publication or a new public API.
 - Recent feature commits record the full offline suite green up to **2615
   passed**. BETA-035's earlier documentation run recorded the known flaky
   concurrency timing test once and then passing in isolation. This journal-
@@ -127,6 +133,12 @@ comparison, relationship paths, careful co-occurrence/discrepancy views,
 contract and document inspection, and operator-side run, parser, validation
 and review-quality tools. It is also approved but unqueued and does not
 displace BETA-068–087.
+
+The approved BETA-107–113 programme then adds a deliberately narrow local
+analyst assistant: Needle 2 chooses one read-only tool, and LFM explains only
+the public evidence that tool returns with validated citations. It follows
+BETA-068–106 and leaves collection, evidence status, human review and public
+interfaces unchanged.
 
 ## Comparable Product Research (2026-08-26, per the project owner's request)
 
@@ -457,8 +469,11 @@ started.)_
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
     column; a min-precision gate before any prediction is written) worth
-    doing. **034H** (active learning → BERTopic → RAG) is gated / deferred
-    behind a named decision. Still open regardless: the `graph_claims`
+    doing. **034H** active learning and BERTopic remain gated/deferred. The
+    owner has made the separate named decision for a local, read-only RAG
+    finding aid only, fully specified as BETA-107–113; it does not authorise
+    LLM-derived claims or weaken this item's human-review gate. Still open
+    regardless: the `graph_claims`
     wiring decision above; browser-verify `/api/admin/search`; grow
     `retrieval_queries.json` / `gold_spans.json` / `assertion_cases.json`
     from the live warehouse; decide on medSpaCy; admin-UI surfaces for
@@ -3580,11 +3595,17 @@ when the programme is started.)_
    continuity and monitoring, evidence/version exploration, contract and
    document inspection, pipeline diagnostics and quality-control workflows.
    These items remain behind BETA-068–087 unless explicitly reprioritised.
+7. **BETA-107–113 — local analyst-assistant programme:** optional Needle 2
+   routing and LFM grounded synthesis over public, read-only SectorTrace
+   tools, with model/run provenance, citation validation and measurable
+   release gates. These items remain behind BETA-068–106.
 
 **Hard boundary:** BETA-034 stays BLOCKED until `gate-034g` succeeds on a
 human-reviewed corpus. BETA-046 may expose the already-built search diagnostic;
 BETA-047 may collect individual named decisions. Neither may train SetFit,
 write `graph_claims`, bulk-approve candidates or publish semantic claims.
+BETA-107–113 is the named decision to permit local, read-only RAG as an
+operator finding aid only; it does not relax any of those boundaries.
 
 ## Candidate Feature Backlog
 
@@ -3689,12 +3710,20 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Validation-rule explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
+| P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |
+| P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |
+| P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |
+| P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |
+| P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | APPROVED, not queued (BETA-111) |
+| P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | APPROVED, not queued (BETA-112) |
+| P1 | Assistant evaluation and release gate | 5 | 5 | 4 | APPROVED, not queued (BETA-113) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-programme
 subsections below preserve the owner's selected scope before promotion. The
 second programme contains nineteen items because its final reference-network
-candidate was explicitly discarded rather than replaced.
+candidate was explicitly discarded rather than replaced. The third programme
+contains seven items and follows both approved front-end programmes.
 
 ### Approved successor round (BETA-050–067)
 
@@ -4785,11 +4814,230 @@ BETA-092, BETA-093 and BETA-097. Wave 3 is BETA-094–096, BETA-098 and BETA-100
 Wave 4 is BETA-099, BETA-103, BETA-105 and BETA-106. Maintain exactly one
 IN_PROGRESS item and no more than five NEXT items.
 
+### Approved local analyst-assistant programme (BETA-107–113)
+
+Approved by the project owner on 2026-08-29 after repository inspection and
+current-product research. These seven IDs are persistent, approved backlog
+items but are **not execution-queue entries**. They follow BETA-068–106 and do
+not displace either approved front-end programme.
+
+The approved design adds two optional local models alongside, not instead of,
+`pipeline/nlp`. Needle 2 is the small, confidence-gated router over a closed
+read-only tool catalogue; `LiquidAI/LFM2.5-1.2B-Instruct` is the answer and
+summarisation model over passages and status payloads returned by those tools.
+Existing chunking, `all-MiniLM-L6-v2` embeddings, pgvector, ontology labels,
+GLiNER, assertion context and human claim review remain authoritative.
+
+This programme is the named decision BETA-034 required before any RAG/LLM
+work, but only for an **operator finding aid**. It does not authorise model-
+generated claims, automated review decisions, writes to `graph_claims`, public
+answers, collection-time model calls or a paid/cloud AI dependency. SetFit and
+claim publication remain blocked by `pipeline nlp gate-034g`.
+
+#### BETA-107 | Optional Needle 2 and LFM assistant runtimes
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: nlp/assistant/runtime
+- depends_on: BETA-034 (implemented retrieval foundation), BETA-046
+- objective: Add an `assistant` optional dependency/runtime boundary with a
+  pinned Needle 2 adapter and an OpenAI-compatible local Ollama adapter for
+  pinned `LiquidAI/LFM2.5-1.2B-Instruct` Q4_K_M; both disabled by default,
+  excluded from Railway and loaded lazily on the local analysis host.
+- rationale: Needle's bounded router and LFM's 32K-context synthesis can add a
+  natural-language operator layer without enlarging collection processes or
+  replacing the existing NLP stack.
+- acceptance: A checkout without the extra, model files or Ollama starts and
+  passes the offline suite unchanged; enabling the feature reports exact
+  model/runtime versions and artifact hashes; missing or unhealthy runtimes
+  fail with a bounded operator-facing unavailable state, never a web crash.
+- next_action: Define settings, adapter protocols, health checks, fixed model
+  identities, local-only defaults and telemetry opt-out before installing any
+  runtime package.
+
+#### BETA-108 | Assistant provenance and run ledger
+
+- priority: P1
+- impact: 5
+- effort: 3
+- confidence: 5
+- risk: 2
+- area: nlp/assistant/provenance
+- depends_on: BETA-058, BETA-107
+- objective: Add equivalent SQLite/PostgreSQL storage for one immutable
+  assistant run: request and filters, Needle/LFM identities, prompt-template
+  hashes, routing confidence and validated arguments, retrieved chunk IDs,
+  answer and citation IDs, timings, outcome and error class.
+- rationale: Model names are not reproducible identities, and an analyst must
+  be able to reconstruct which stored evidence and configuration produced an
+  answer without storing unrestricted hidden model state.
+- acceptance: Successful, abstained, clarified, timed-out and failed runs are
+  recorded without secrets or model files; citation and chunk references are
+  auditable; migration equivalence and fallback pre-migration behaviour are
+  tested; no ledger row is treated as evidence or a review decision.
+- next_action: Specify the minimum append-only schema and redaction rules,
+  reusing the BETA-058 run identity where it fits without copying full logs.
+
+#### BETA-109 | Public-safe read-only analyst tool catalogue
+
+- priority: P1
+- impact: 5
+- effort: 3
+- confidence: 5
+- risk: 2
+- area: nlp/assistant/tools
+- depends_on: BETA-046, BETA-059, BETA-084, BETA-107
+- objective: Expose exactly five typed in-process tools to the router:
+  `search_document_passages`, `inspect_claim_candidates`,
+  `inspect_claim_gate`, `inspect_source_coverage` and `inspect_freshness`.
+  Each wraps existing query code and accepts only documented, bounded filters.
+- rationale: A closed catalogue gives analysts one language front door while
+  retaining the database's existing read-only, caveated and provenance-rich
+  views instead of teaching a model arbitrary SQL or HTTP access.
+- acceptance: Every tool is side-effect free, source/date/result limits are
+  validated, output contains only public-corpus or non-sensitive aggregate
+  data, restricted tables and internal annotations are unreachable, and
+  SQLite/PostgreSQL fixtures return the same contract.
+- next_action: Define JSON schemas and adapters over existing query functions;
+  reject arbitrary table names, URLs, SQL, filesystem paths and write verbs.
+
+#### BETA-110 | Needle routing and confidence gate
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: nlp/assistant/routing
+- depends_on: BETA-107, BETA-109
+- objective: Route a single analyst question to at most one allowlisted tool
+  using Needle 2's schema-constrained output and calibrated confidence head;
+  validate the returned name and arguments independently before execution.
+- rationale: Needle's small local footprint, built-in tool retrieval and
+  confidence signal make it a better bounded dispatcher than spending LFM
+  context on the whole tool catalogue, provided SectorTrace's own evaluation
+  determines the execution threshold.
+- acceptance: Below-threshold, ambiguous, out-of-scope and invalid calls return
+  a clarification without tool execution; above-threshold calls conform to a
+  closed schema; timeouts fail closed; telemetry is disabled; no document text
+  is shown to Needle, preventing retrieved prompt injection from changing the
+  selected action.
+- next_action: Create a development routing set, tune the threshold there and
+  freeze it before scoring the held-out BETA-113 suite.
+
+#### BETA-111 | LFM grounded answers and citation validation
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 3
+- risk: 4
+- area: nlp/assistant/grounding
+- depends_on: BETA-107–110
+- objective: Give LFM only the validated tool result and produce a concise
+  answer whose factual statements cite result-local identifiers; return an
+  explicit abstention when the supplied evidence is insufficient.
+- rationale: LFM can summarise and connect retrieved passages locally, but its
+  prose must remain a reading aid: stored SectorTrace provenance, not model
+  fluency, determines what can be displayed as supported.
+- acceptance: The model receives no executable tools; retrieved text is
+  delimited as untrusted data; generated citation IDs are checked against the
+  result set; unresolved citations or grounding-check failures suppress the
+  answer; every displayed citation resolves to chunk, document, page, source
+  URL, retrieval time and archived payload provenance.
+- next_action: Define the fixed system prompt, result envelope, abstention
+  shape and deterministic post-generation citation/grounding checks before
+  tuning answer style.
+
+#### BETA-112 | Single-turn assistant API and CLI
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: admin/assistant
+- depends_on: BETA-108–111
+- objective: Add `POST /api/admin/assistant` and `pipeline nlp assistant` for
+  one question plus optional source-system, publication-date and result-limit
+  filters; return answer, citations, tool, model identities, timings, outcome
+  and the existing finding-aid caveat.
+- rationale: A single-turn operator contract is enough to test value and
+  safety without prematurely introducing conversation storage, public access
+  or autonomous multi-tool loops.
+- acceptance: The route uses the existing admin-enabled and same-origin write
+  guards, is absent when admin or assistant support is disabled, never appears
+  under `/api/v1`, permits one read-only call only, applies a short router
+  timeout and a 30-second overall timeout, and degrades to explicit
+  unavailable/clarify/abstain states. The CLI returns the same domain payload.
+- next_action: Build one orchestration service shared by HTTP and CLI; neither
+  entry point may bypass schema, confidence, citation or provenance checks.
+
+#### BETA-113 | Assistant evaluation and release gate
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 4
+- risk: 3
+- area: nlp/assistant/evaluation
+- depends_on: BETA-108–112
+- objective: Add frozen routing, grounding, adversarial and performance suites
+  plus operator documentation and a machine-readable gate controlling whether
+  the experimental assistant may be enabled.
+- rationale: Vendor benchmarks do not establish usefulness or safety on
+  SectorTrace's vocabulary, evidence boundaries, hardware or source corpus;
+  promotion must depend on representative local measurements.
+- acceptance: At least 100 routing prompts cover all five tools, ambiguity,
+  malformed filters, injection and forbidden actions; automatically executed
+  routes achieve >=95% held-out precision with zero write/destructive calls.
+  At least 50 human-authored analyst questions test answer correctness,
+  citation entailment/resolution, unsupported claims and abstention. Every
+  displayed factual statement is supported, every citation resolves and zero
+  evidence IDs are invented. Record p50/p95 latency, peak RAM and timeout rate
+  on the target local host; adversarial retrieved instructions cannot affect
+  routing or execution.
+- next_action: Freeze fixtures and scoring rubrics before any fine-tuning or
+  threshold adjustment; keep the feature experimental and disabled until the
+  gate passes.
+
+**Interface and compatibility contract:** The only new web interface is the
+admin-only single-turn POST route; `/api/v1`, public search, exports,
+collectors, review decisions and graph writes are unchanged. The assistant
+accepts `question`, optional `source_system`, `date_from`, `date_to` and a
+bounded `limit`; it returns `outcome`, optional `answer`, citations, selected
+tool, model identities, timings, caveat and run ID. All additions are optional
+and backward compatible.
+
+**Data, deployment and licence contract:** Only already-public document text
+and non-sensitive aggregates may enter either model. Processing remains local;
+Needle telemetry is disabled and no cloud fallback is permitted. Model weights
+and Ollama are not installed in the Railway image. Pin artifacts and retain
+required notices. Liquid's LFM Open License permits free commercial use only
+while annual revenue remains below USD 10 million; crossing that threshold
+requires a commercial licence. Recheck the licence before each model upgrade.
+
+**Deferred by design:** LFM embedding and ColBERT models do not replace the
+current 384-dimensional pgvector path in this programme; they require a
+separate retrieval benchmark and migration decision. LFM/Needle extraction,
+classification, multi-turn memory, autonomous tool loops and public assistant
+access are also out of scope and require separate named decisions and gates.
+
+**Delivery sequence:** Do not promote BETA-107–113 until BETA-068–106 is
+complete unless the owner explicitly reprioritises it. Then deliver BETA-107,
+followed by BETA-108 and BETA-109, then BETA-110, BETA-111, BETA-112 and
+BETA-113. Maintain exactly one IN_PROGRESS item and no more than five NEXT
+items; do not enable the feature merely because BETA-112 is code-complete.
+
 ## Features Under Investigation
 
 BETA-006 remains RESEARCH-only and must not restart without new operational
 scheduling information. BETA-034's remaining model work is BLOCKED, not an
-open-ended investigation; its resumption condition is the explicit gate.
+open-ended investigation; its SetFit/claim resumption condition is the explicit
+gate. BETA-107–113 is a separately bounded, approved finding-aid programme.
 
 ## Implemented Features
 
@@ -4797,7 +5045,7 @@ See the authoritative DONE queue above. The most recent completed additions
 are BETA-067 (capability-documentation consistency), BETA-066 (provider
 lineage), BETA-065 (CQC regulated-location explorer), BETA-064 (temporary-
 accommodation B&B measures), BETA-063 (PostgreSQL capability gate) and
-BETA-062 (human-readable document titles). BETA-068–106 are approved plans,
+BETA-062 (human-readable document titles). BETA-068–113 are approved plans,
 not implemented features.
 
 ## Dataset Additions
@@ -5076,6 +5324,26 @@ aids.** BETA-053, BETA-054, BETA-056 and BETA-057 may order or group work and
 record a person's alias decision, but may not preselect, auto-merge,
 auto-promote or silently change canonical identity. BETA-061 retains the
 existing one-candidate-at-a-time promotion boundary.
+
+**Decision (2026-08-29): BETA-107–113 permits a local analyst finding aid,
+not an evidentiary actor.** Needle 2 may choose one closed read-only tool and
+LFM may summarise only its returned public evidence. Neither model may write,
+review, promote, collect, execute arbitrary SQL/HTTP/filesystem operations or
+appear in `/api/v1`. Unsupported or uncited output is suppressed, and BETA-034
+remains blocked for SetFit and semantic-claim work.
+
+**Decision (2026-08-29): existing NLP retrieval stays authoritative for the
+assistant pilot.** LFM embedding/ColBERT models, model-based extraction,
+multi-turn memory and autonomous tool loops are not hidden parts of this
+programme. Each would require its own representative evaluation and named
+decision. Assistant inference is local, disabled by default, excluded from
+Railway and limited to the public corpus; telemetry and cloud fallback are
+off.
+
+**Decision (2026-08-29): the third approved programme follows both front-end
+programmes.** BETA-107–113 remains unqueued until BETA-068–106 is complete
+unless the owner explicitly reprioritises it. Its final release gate, not code
+completion of the endpoint, determines whether operators may enable it.
 
 **Decision (2026-08-29): successor-round public evidence remains explicit and
 caveated.** BETA-050 uses only published procurement lifecycle facts;
@@ -5542,6 +5810,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `b5ff6a9` — approve and fully specify the second front-end refinement
+  programme BETA-088–106 (`beta`, documentation only).
 - `b6aba7b` — approve and fully specify the first front-end refinement
   programme BETA-068–087 (`beta`, documentation only).
 - `980b681` — machine-owned capability documentation blocks and consistency
@@ -5658,13 +5928,14 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Handoff snapshot reconciled against local/origin `beta` at `b6aba7b` before
+*(Handoff snapshot reconciled against local/origin `beta` at `b5ff6a9` before
 this roadmap-only working-tree update, 2026-08-29.)*
 
 **What is currently being worked on?** Nothing. BETA-067 completed the prior
-implemented programme. BETA-068–087 and BETA-088–106 are approved and fully
-specified in Candidate Feature Backlog but have deliberately not been promoted
-into the execution queue by these roadmap-only updates.
+implemented programme. BETA-068–087, BETA-088–106 and BETA-107–113 are
+approved and fully specified in Candidate Feature Backlog but have
+deliberately not been promoted into the execution queue by these roadmap-only
+updates.
 
 **What was the last successful queue item?** BETA-067 (`980b681`), the
 capability-documentation consistency checker. Immediately before it,
@@ -5682,6 +5953,11 @@ a shared prerequisite rather than attempted as a blocking rewrite.
 programme. Unless the owner explicitly reprioritises it, complete BETA-068–087
 first, then promote BETA-090 as the first change-awareness foundation and no
 more than five dependency-safe items under the recorded delivery sequence.
+
+**What follows both front-end programmes?** BETA-107–113 is the approved
+local analyst-assistant programme. Start with BETA-107, then BETA-108/109,
+then BETA-110–113 in order. It remains disabled until BETA-113's routing,
+grounding, adversarial and target-host performance gates pass.
 
 **What is blocked and why?** BETA-034 is blocked pending a successful
 human-review corpus from `pipeline nlp gate-034g`. `194ea33` and the pgvector
