@@ -3860,7 +3860,8 @@ def document_search(conn: sqlite3.Connection, *, query: str,
         document_type, year_from, year_to, since_retrieved_at)
 
     is_sqlite = db.backend_of(conn) == "sqlite"
-    _tail_cols = ("d.document_type, d.title, d.filename, d.published_at, "
+    _tail_cols = ("d.document_type, d.title, d.display_title, d.title_basis, "
+                  "d.filename, d.published_at, "
                   "e.source_url, e.retrieved_at, e.source_system")
 
     if is_sqlite:
@@ -3939,7 +3940,13 @@ def document_search(conn: sqlite3.Connection, *, query: str,
             "document_element_id": r["document_element_id"],
             "document_type": r["document_type"],
             "source_system": r["source_system"],
-            "title": r["title"] or r["filename"],
+            # BETA-062: the derived display title, falling back to the raw
+            # source label then the filename for rows the backfill has not
+            # reached. `title_basis` says which rung `title` came from so the
+            # portal can mark a title it did not get from the source itself.
+            "title": r["display_title"] or r["title"] or r["filename"],
+            "title_basis": r["title_basis"],
+            "source_title": r["title"],
             "page_number": r["page_number"],
             "element_type": r["element_type"],
             "text": r["text"],
@@ -3989,7 +3996,8 @@ def document_context(conn: sqlite3.Connection, document_id: str, *,
 
     meta = _one(
         conn,
-        "SELECT d.document_id, d.document_type, d.title, d.filename, "
+        "SELECT d.document_id, d.document_type, d.title, d.display_title, "
+        "d.title_basis, d.filename, "
         "d.published_at, e.source_url, e.retrieved_at, e.source_system "
         "FROM document_records d "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
@@ -4041,7 +4049,9 @@ def document_context(conn: sqlite3.Connection, document_id: str, *,
     return {
         "document_id": meta["document_id"],
         "document_type": meta["document_type"],
-        "title": meta["title"] or meta["filename"],
+        "title": meta["display_title"] or meta["title"] or meta["filename"],
+        "title_basis": meta["title_basis"],
+        "source_title": meta["title"],
         "source_url": meta["source_url"],
         "retrieved_at": meta["retrieved_at"],
         "published_at": meta["published_at"],

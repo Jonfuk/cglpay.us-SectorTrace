@@ -286,17 +286,34 @@ function highlightedSnippet(passage, query) {
   return holder;
 }
 
+// BETA-062: how the displayed title was arrived at, when it was not the
+// source's own label. `source_label` and a missing basis (a row the backfill
+// has not reached) get no marker — only a title we derived is flagged, so a
+// reader never takes it for verbatim source text.
+const TITLE_BASIS_NOTE = {
+  pdf_metadata: 'title from PDF metadata',
+  heading: 'title from first heading',
+  filename: 'title from file name',
+  unknown: 'no document title — showing file name',
+};
+
 function renderResult(result, query) {
   const label = result.title || `${result.document_type} page ${result.page_number ?? ''}`.trim();
+  const basisNote = TITLE_BASIS_NOTE[result.title_basis];
   // The snippet arrives centred on the match; against an older cached API
   // response without one, fall back to the head of the page rather than
   // rendering nothing at all.
   const passage = result.snippet ?? truncate(result.text || '', 320);
+  const strong = el('strong', { text: label });
+  if (basisNote && result.source_title && result.source_title !== label) {
+    strong.setAttribute('title', `source title: ${result.source_title}`);
+  }
   return el('article', { class: 'claim' },
     el('div', { class: 'row wrap', style: 'justify-content:space-between;align-items:baseline;gap:8px;' },
-      el('strong', { text: label }),
+      strong,
       el('span', { class: 'small muted',
-        text: [result.document_type, result.page_number ? `page ${result.page_number}` : null]
+        text: [result.document_type, result.page_number ? `page ${result.page_number}` : null,
+               basisNote]
           .filter(Boolean).join(' · ') })),
     highlightedSnippet(passage, query),
     contextExpander(result, query),

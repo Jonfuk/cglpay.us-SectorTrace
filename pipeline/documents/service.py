@@ -160,6 +160,11 @@ class DocumentService:
             quality_status, metrics, warnings = assess(parsed, inspection.page_count)
             version_id = repository.persist_parse(self.conn, document_id, parsed, config_hash, source_artifact_id,
                                                   quality_status, metrics, warnings, self.settings)
+            # BETA-062: name the document from the best available signal now
+            # that its headings exist. inspection.metadata is {} for non-PDFs,
+            # so .get("title") is simply None there.
+            repository.refresh_display_title(self.conn, document_id, source_title=title,
+                                             pdf_title=inspection.metadata.get("title"))
             self.conn.execute("UPDATE document_processing_states SET ocr_status=? WHERE evidence_id=?",
                               (ocr_status, reference.evidence_id))
             self.conn.execute(

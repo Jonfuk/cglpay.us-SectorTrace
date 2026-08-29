@@ -63,6 +63,45 @@ def test_document_search_finds_committee_paper_text(conn, settings):
     assert row["source_url"] == "https://example.test/ev-committee"
 
 
+def test_document_search_surfaces_the_derived_title_and_its_basis(conn, settings):
+    """BETA-062: the portal shows document_records.display_title, falling back
+    to the raw source label, and reports title_basis so a derived title can be
+    marked as such. Also carries source_title for a tooltip."""
+    from pipeline.documents import repository
+
+    _seed_document(
+        conn, settings, evidence_id="ev-derived", source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER",
+        text="Overdose prevention recruitment plan for 2026.",
+        title="a3f91c2b8e4d5f6071829304a5b6c7d8.pdf")
+    document_id = repository.stable_id("document", "ev-derived")
+    conn.execute(
+        "UPDATE document_records SET display_title=?, title_basis='filename' "
+        "WHERE document_id=?", ("Kent recruitment plan 2026", document_id))
+    conn.commit()
+
+    row = public_queries.document_search(conn, query="recruitment")["results"][0]
+
+    assert row["title"] == "Kent recruitment plan 2026"
+    assert row["title_basis"] == "filename"
+    assert row["source_title"] == "a3f91c2b8e4d5f6071829304a5b6c7d8.pdf"
+
+    context = public_queries.document_context(conn, document_id)
+    assert context["title"] == "Kent recruitment plan 2026"
+    assert context["title_basis"] == "filename"
+
+
+def test_document_search_without_a_backfilled_title_still_falls_back(conn, settings):
+    _seed_document(
+        conn, settings, evidence_id="ev-nofill", source_system="committee_paper_promotion",
+        document_type="COMMITTEE_PAPER", text="Recruitment pressures continue.",
+        title="Quarterly workforce report")
+
+    row = public_queries.document_search(conn, query="recruitment")["results"][0]
+    assert row["title"] == "Quarterly workforce report"
+    assert row["title_basis"] is None
+
+
 def test_document_search_finds_cdp_document_text(conn, settings):
     _seed_document(
         conn, settings, evidence_id="ev-cdp", source_system="cdp_document_promotion",

@@ -392,7 +392,12 @@
       Returns <code>results</code> — one row per matching page/element, each
       with <code>document_id</code>, <code>document_element_id</code>,
       <code>document_type</code>, <code>source_system</code>,
-      <code>title</code>, <code>page_number</code>, the matched
+      <code>title</code>, <code>title_basis</code>
+      (<code>source_label</code>, <code>pdf_metadata</code>,
+      <code>heading</code>, <code>filename</code> or <code>unknown</code> —
+      how <code>title</code> was derived; <code>null</code> until the
+      backfill has run), <code>source_title</code> (the collecting module's
+      raw label), <code>page_number</code>, the matched
       <code>text</code>, <code>source_url</code>, <code>retrieved_at</code>
       and <code>published_at</code> — plus <code>total</code>,
       <code>facets</code> (a <code>value</code>/<code>count</code> list per
@@ -426,7 +431,8 @@
       </tbody>
     </table>
     <p class="small">
-      Returns the document's <code>title</code>, <code>source_url</code>,
+      Returns the document's <code>title</code>, <code>title_basis</code>,
+      <code>source_title</code>, <code>source_url</code>,
       <code>source_system</code>, <code>published_at</code>,
       <code>retrieved_at</code>, the <code>parser</code> identity, and an
       ordered <code>elements</code> window — each with <code>text</code>,

@@ -235,6 +235,29 @@ def documents_stats() -> None:
         conn.close()
 
 
+@documents_app.command("backfill-titles")
+def documents_backfill_titles(
+    recompute: bool = typer.Option(
+        False, "--recompute",
+        help="Recompute every row, not only those with no display title yet."),
+) -> None:
+    """Fill document_records.display_title / title_basis (BETA-062).
+
+    Deterministic and idempotent. A row whose only usable signal is a
+    hash-like filename resolves to title_basis='unknown' and the portal keeps
+    showing its raw fallback. pdf_metadata is only reachable on a reparse, not
+    here.
+    """
+    from pipeline.documents.repository import backfill_display_titles
+
+    conn, _ = _document_connection()
+    try:
+        result = backfill_display_titles(conn, recompute=recompute)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @documents_app.command("search")
 def documents_search(query: str = typer.Argument(...), limit: int = typer.Option(25, min=1)) -> None:
     """Search active parsed elements and return source/page provenance."""

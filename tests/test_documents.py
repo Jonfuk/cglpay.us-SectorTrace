@@ -379,3 +379,98 @@ def test_unrecognised_format_is_skipped_not_raised(conn, settings):
 
     assert result["status"] == "SKIPPED_UNSUPPORTED_FORMAT"
     assert "application/vnd.ms-excel" in result["error"]
+
+
+# --- display titles (BETA-062) ----------------------------------------------
+
+
+def _seed_parsed(conn, settings, *, source_title, headings, paragraph="Body text."):
+    source = reference()
+    repository.upsert_evidence(conn, source)
+    document_id = repository.upsert_document(
+        conn, source, "COMMITTEE_PAPER", "fixture", 1.0,
+        "a3f91c2b8e4d5f6071829304a5b6c7d8.pdf", "application/pdf", 1, source_title)
+    elements, seq = [], 1
+    for heading in headings:
+        elements.append(ParsedElement("HEADING", seq, text=heading, page_number=1, heading_level=1))
+        seq += 1
+    elements.append(ParsedElement("PARAGRAPH", seq, text=paragraph, page_number=1))
+    repository.persist_parse(conn, document_id, ParsedDocument("fixture", "1", elements),
+                             "config", None, "GOOD", {}, [], settings)
+    return document_id
+
+
+def test_refresh_display_title_prefers_the_source_label(conn, settings):
+    document_id = _seed_parsed(
+        conn, settings, source_title="Kent Substance Misuse JSNA 2024",
+        headings=["Contents", "Executive summary"])
+
+    display, basis = repository.refresh_display_title(
+        conn, document_id, source_title="Kent Substance Misuse JSNA 2024")
+
+    assert (display, basis) == ("Kent Substance Misuse JSNA 2024", "source_label")
+    row = conn.execute("SELECT display_title, title_basis FROM document_records "
+                       "WHERE document_id=?", (document_id,)).fetchone()
+    assert row["display_title"] == "Kent Substance Misuse JSNA 2024"
+    assert row["title_basis"] == "source_label"
+
+
+def test_refresh_display_title_falls_to_the_first_usable_heading(conn, settings):
+    document_id = _seed_parsed(
+        conn, settings, source_title=None,
+        headings=["Page 1", "Cabinet Report on Treatment Recommissioning"])
+
+    display, basis = repository.refresh_display_title(
+        conn, document_id, source_title=None)
+
+    # "Page 1" is a running-header artefact and is skipped.
+    assert (display, basis) == ("Cabinet Report on Treatment Recommissioning", "heading")
+
+
+def test_processing_a_document_names_it_from_its_heading(conn, settings):
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    body = b"<html><body><h1>Adult Treatment Plan 2026</h1><p>Recruitment.</p></body></html>"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_path = archive.put("committee_papers", digest, "text/html", body)
+    doc_reference = EvidenceReference(
+        evidence_id="evidence-html-title", source_system="committee_papers",
+        source_url="https://example.test/plan", retrieved_at="2026-08-19T00:00:00+00:00",
+        http_status=200, payload_sha256=digest, raw_object_path=raw_path, mime_type="text/html")
+
+    result = DocumentService(conn, settings).process(doc_reference)
+    assert result["status"] == "SUCCESS"
+
+    row = conn.execute(
+        "SELECT display_title, title_basis FROM document_records d "
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE e.evidence_id=?",
+        (doc_reference.evidence_id,)).fetchone()
+    assert row["display_title"] == "Adult Treatment Plan 2026"
+    assert row["title_basis"] == "heading"
+
+
+def test_backfill_names_rows_without_a_display_title_and_leaves_hashes_unknown(conn, settings):
+    good = _seed_parsed(conn, settings, source_title="Overdose Prevention Strategy",
+                        headings=["Intro"])
+    # No source label, no usable heading, only a hash-like filename.
+    source = EvidenceReference(
+        evidence_id="evidence-hash", source_system="fixture",
+        source_url="https://example.test/x", retrieved_at="2026-08-19T00:00:00+00:00",
+        http_status=200, payload_sha256="b" * 64,
+        raw_object_path="data/raw/fixture/" + "b" * 64 + ".pdf", mime_type="application/pdf")
+    repository.upsert_evidence(conn, source)
+    bad = repository.upsert_document(
+        conn, source, "COMMITTEE_PAPER", "fixture", 1.0,
+        "b7c1e2c3d4f5a6b7c8d9e0f1a2b3c4d5.pdf", "application/pdf", 1, None)
+
+    result = repository.backfill_display_titles(conn)
+
+    assert result["updated"] == 2
+    assert result["by_basis"] == {"source_label": 1, "unknown": 1}
+    assert conn.execute("SELECT title_basis FROM document_records WHERE document_id=?",
+                        (good,)).fetchone()[0] == "source_label"
+    row = conn.execute("SELECT display_title, title_basis FROM document_records "
+                       "WHERE document_id=?", (bad,)).fetchone()
+    assert row["display_title"] is None and row["title_basis"] == "unknown"
+
+    # Idempotent: a second run without --recompute finds nothing to do.
+    assert repository.backfill_display_titles(conn)["updated"] == 0

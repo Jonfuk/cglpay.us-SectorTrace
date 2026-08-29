@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-061. Current
-  work: BETA-062. Next: BETA-063, BETA-064.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-062. Current
+  work: BETA-063. Next: BETA-064, BETA-065.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,31 +272,32 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-062 | Human-readable document titles
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-061 completed
+- [IN_PROGRESS] BETA-063 | PostgreSQL extension readiness gate
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-062 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 4
-  - effort: 3
+  - priority: P1
+  - impact: 5
+  - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: documents/public-ux
-  - depends_on: BETA-041, BETA-042
-  - objective: Replace hash-like labels with deterministic display titles while
-    preserving raw source titles and recording `title_basis` as source label,
-    PDF metadata, first heading or filename.
-  - rationale: Search results need readable identity, but a derived title must
-    remain explainable rather than being presented as source text.
-  - suggested_first_action: Add fixtures for blank, misleading, duplicated and
-    personal-name-heavy metadata, then specify deterministic precedence.
-  - next_action: Add a `documents.display_title` + `title_basis` column pair
-    (SQLite migration + postgres pair), a pure `pipeline/documents/titles.py`
-    with a deterministic precedence (source-provided label → PDF `/Title`
-    metadata → first heading of the extracted text → cleaned filename), a
-    backfill step, and portal + admin surfacing that shows the derived title
-    with the raw source title still available and `title_basis` labelled.
-    Fixtures for blank / misleading / duplicated / personal-name-heavy
-    metadata; no title is ever presented as verbatim source text.
+  - risk: 3
+  - area: database/deployment
+  - depends_on: BETA-036, BETA-039
+  - objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
+    version, extensions, operator classes, expected indexes and active fallbacks;
+    exercise core and extension-enabled disposable PostgreSQL paths in CI.
+  - rationale: BETA-036 has focused coverage but its optional extension matrix
+    has not yet been proven in a disposable live PostgreSQL deployment.
+  - suggested_first_action: Codify the trigram, PostGIS and pgvector capability
+    matrix and its fallback expectations.
+  - next_action: Add a read-only `pipeline pg-capabilities` command (and an
+    `/api/admin/pg-capabilities` surface) that reports `server_version`, the
+    installed vs expected extension set (`pg_trgm`, `postgis`, `vector`),
+    the operator classes and expected indexes each one backs, and which
+    query paths are currently running on the SQL fallback because an
+    extension is absent. No writes, no `CREATE EXTENSION`. Exercise it in CI
+    against a disposable PostgreSQL with and without the optional extensions
+    so both the accelerated and the fallback paths are proven. On SQLite the
+    command states plainly that the gate does not apply.
 
 ### BLOCKED
 
@@ -480,23 +481,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-063 | PostgreSQL extension readiness gate
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-057 completed
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: database/deployment
-  - depends_on: BETA-036, BETA-039
-  - objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
-    version, extensions, operator classes, expected indexes and active fallbacks;
-    exercise core and extension-enabled disposable PostgreSQL paths in CI.
-  - rationale: BETA-036 has focused coverage but its optional extension matrix
-    has not yet been proven in a disposable live PostgreSQL deployment.
-  - suggested_first_action: Codify the trigram, PostGIS and pgvector capability
-    matrix and its fallback expectations.
-
 - [NEXT] BETA-064 | Temporary-accommodation B&B breakdown
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-061 completed
   - priority: P2
@@ -515,6 +499,25 @@ DONE
   - suggested_first_action: Verify archived workbook header variants and define
     the exact permitted measure codes; surface contextually without rankings or
     provider-performance comparison.
+
+- [NEXT] BETA-065 | CQC regulated-location explorer
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-062 completed
+  - priority: P1
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/cqc
+  - depends_on: BETA-045, BETA-049
+  - objective: Add a filterable map, accessible table and paginated
+    `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
+    locations, filtered by provider, authority, status, regulated activity,
+    service type and rating.
+  - rationale: Existing location evidence is difficult to explore, but CQC
+    registration is not a complete service map and location counts are neither
+    coverage nor quality scores.
+  - suggested_first_action: Define the public-column allowlist, map/table parity
+    and missing-coordinate behaviour; exclude every restricted contact field.
 
 ### READY
 
@@ -563,6 +566,70 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-062 | Human-readable document titles
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: documents/public-ux
+  - depends_on: BETA-041, BETA-042
+  - objective: Replace hash-like labels with deterministic display titles while
+    preserving raw source titles and recording `title_basis` as source label,
+    PDF metadata, first heading or filename.
+  - result: New migration `0076_document_display_title.sql` (+ postgres pair,
+    count bump 75→76) — `document_records.display_title` and `title_basis`,
+    both nullable, plus an index on `title_basis`. `TEXT` → `text` the only
+    dialect difference.
+    New pure module `pipeline/documents/titles.py` — `derive(source_title,
+    pdf_title, headings, filename)` returns `(display_title, title_basis)` by
+    a fixed precedence: the collecting module's own label
+    (`source_label`) → the PDF `/Title` from inspection (`pdf_metadata`) →
+    the first heading of the active parse that reads as a name (`heading`) →
+    a de-slugified filename (`filename`) → `(None, "unknown")`. Every rung is
+    normalised (whitespace, surrounding quotes, a 200-char cap) and screened:
+    a hash-like or UUID-ish string, a bare number, a short code like `TA1`, a
+    running-header artefact like `Page 1`, and generic filler words
+    (`document`, `final`, `minutes`, …) are all rejected rather than shown as
+    a title. No IO; `rank_of()` exposes the ordering.
+    `pipeline/documents/repository.py` gained `refresh_display_title(conn,
+    document_id, *, source_title, pdf_title=None)` (reads the active
+    version's first headings, calls `derive`, writes the pair) and
+    `backfill_display_titles(conn, *, recompute=False)` (deterministic,
+    idempotent, commits per row). `pipeline/documents/service.py` calls
+    `refresh_display_title` right after a successful `persist_parse`, passing
+    `inspection.metadata.get("title")` for the PDF rung (`{}` for non-PDFs,
+    so simply `None`). New CLI `pipeline documents backfill-titles
+    [--recompute]`.
+  - api/ui: `GET /api/v1/document_search` and `GET /api/v1/documents/{id}`
+    now return `title` = `display_title or title or filename`, plus
+    `title_basis` (nullable until the backfill runs) and `source_title` (the
+    raw collecting-module label). The portal document-search result card
+    shows the derived title and, when `title_basis` is not `source_label`,
+    a muted "title from first heading / PDF metadata / file name" marker and
+    a `source title:` tooltip — so a reader never mistakes a reconstructed
+    title for the document's own words. No route added; the frozen public
+    surface is unchanged (`test_portal_isolation.py` still green).
+  - validation: New `tests/test_documents_titles.py` (8 — the precedence, and
+    each thing `_is_identity` refuses: hash/UUID filenames, bare dates,
+    `TA1`, `v2.3`, `Page 1`, generic filler, plus normalisation and
+    `rank_of`). `tests/test_documents.py` gained 5 (source-label preference,
+    heading fallback, an end-to-end HTML `process()` that lands
+    `title_basis='heading'`, and a backfill that names the good row and
+    leaves the hash-filename row `unknown`, idempotently).
+    `tests/test_web_documents.py` gained 2 (the portal surfaces
+    `display_title` + `title_basis` + `source_title`; an un-backfilled row
+    still falls back with `title_basis=None`). `tests/test_migration_
+    equivalence.py` count 75→76. Docs: `docs/CAVEATS.md` (only
+    `source_label` is the document's own words; the backfill cannot reach
+    `pdf_metadata` for old parses), `docs/document-analysis.md`,
+    `api.html`. Full offline suite green — **2838 passed, 109 skipped, 35
+    deselected, 0 failed**. `ruff` clean. Browser-verified against a seeded
+    scratch warehouse: a document whose only stored name was
+    `a3f91c…d8.pdf` renders in search as "Adult Substance Misuse Treatment
+    Recommissioning · title from first heading", zero console errors.
 
 - [DONE] BETA-061 | Candidate-promotion campaign workspace
   - completed: 2026-08-29
@@ -3356,10 +3423,10 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Coverage completion action board | 5 | 4 | 4 | DONE (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | DONE (BETA-061) |
-| P2 | Human-readable document titles | 4 | 3 | 4 | IN_PROGRESS (BETA-062) |
-| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | NEXT (BETA-063) |
+| P2 | Human-readable document titles | 4 | 3 | 4 | DONE (BETA-062) |
+| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | IN_PROGRESS (BETA-063) |
 | P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | NEXT (BETA-064) |
-| P1 | CQC regulated-location explorer | 4 | 4 | 4 | Approved successor backlog (BETA-065) |
+| P1 | CQC regulated-location explorer | 4 | 4 | 4 | NEXT (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | Approved successor backlog (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | Approved successor backlog (BETA-067) |
 

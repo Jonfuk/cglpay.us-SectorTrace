@@ -337,6 +337,18 @@ anyone using it.
   which has no viewstate field. The search is a plain GET on
   `/ieSearchResults2.aspx`. Both faults produced the same symptom: a council
   that looked like it published nothing.
+- **A document's `display_title` is derived, and `title_basis` says how
+  (BETA-062).** `document_records.title` is whatever the collecting module
+  supplied — often a hash-like filename, sometimes nothing — so the portal
+  shows a `display_title` picked by a fixed precedence: the source's own
+  label, then the PDF `/Title`, then the first usable heading, then a
+  de-slugified filename. Only `title_basis='source_label'` is the document's
+  own words; anything else is our reconstruction and must not be quoted as
+  the document's title. `title_basis='unknown'` means nothing usable was
+  found and the raw fallback is shown. `pipeline documents backfill-titles`
+  cannot reach the `pdf_metadata` rung for versions parsed before the
+  migration — that needs a reparse — so an old scanned PDF may sit at
+  `filename` or `unknown` until it is reprocessed.
 - **Semantic search over these documents (BETA-034A, `/api/admin/search`,
   `pipeline nlp search`) returns leads, not findings.** A chunk is retrieved
   because its wording, its embedding, or both are close to the query — an

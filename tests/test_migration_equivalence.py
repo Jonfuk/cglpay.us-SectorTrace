@@ -155,7 +155,10 @@ class TestTheTreesMatch:
         # and the verified_aliases view (latest accepted, non-superseded per
         # name). TEXT/INTEGER -> text/bigint; CREATE VIEW IF NOT EXISTS ->
         # CREATE OR REPLACE VIEW.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 75
+        # 76 adds document_records.display_title / title_basis (BETA-062) — a
+        # derived human-readable title and which rung it came from. Two
+        # ADD COLUMN plus an index; TEXT -> text only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 76
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

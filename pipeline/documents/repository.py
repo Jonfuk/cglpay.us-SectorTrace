@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from pipeline.documents import titles
 from pipeline.documents.classify import topic_matches
 from pipeline.documents.models import EvidenceReference, ParsedDocument
 
@@ -58,6 +59,61 @@ def upsert_document(conn, reference: EvidenceReference, document_type: str, meth
          method, confidence, mime_type, title, filename, page_count, now, now),
     )
     return document_id
+
+
+def _active_headings(conn, document_id: str, limit: int = 8) -> list[str]:
+    """The first few heading texts of the active parsed version, in order.
+
+    `titles.derive` takes the first that reads as a real name, so a short head
+    is enough — and a document with hundreds of headings should not scan them
+    all to name itself."""
+    rows = conn.execute(
+        "SELECT de.text FROM document_elements de "
+        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+        "WHERE dv.document_id = ? AND dv.is_active = 1 "
+        "AND (de.heading_level IS NOT NULL OR de.element_type IN ('HEADING', 'TITLE')) "
+        "ORDER BY de.sequence LIMIT ?", (document_id, limit))
+    return [row[0] for row in rows if row[0]]
+
+
+def refresh_display_title(conn, document_id: str, *, source_title: str | None,
+                          pdf_title: str | None = None) -> tuple[str | None, str]:
+    """Recompute `document_records.display_title` / `title_basis` from the
+    source label, the PDF /Title, the active version's headings and the
+    filename. Deterministic and safe to re-run; caller commits."""
+    row = conn.execute(
+        "SELECT filename FROM document_records WHERE document_id = ?",
+        (document_id,)).fetchone()
+    filename = row[0] if row else None
+    display, basis = titles.derive(
+        source_title=source_title, pdf_title=pdf_title,
+        headings=_active_headings(conn, document_id), filename=filename)
+    conn.execute(
+        "UPDATE document_records SET display_title = ?, title_basis = ?, updated_at = ? "
+        "WHERE document_id = ?", (display, basis, utcnow(), document_id))
+    return display, basis
+
+
+def backfill_display_titles(conn, *, recompute: bool = False) -> dict:
+    """Fill `display_title` / `title_basis` for existing rows (BETA-062).
+
+    Without `recompute`, only rows that have neither set. No `pdf_title` is
+    available here — that rung is only reachable on a reparse — so a row whose
+    only signal is a hash-like filename resolves to `title_basis='unknown'`
+    and the portal keeps showing its raw fallback. Commits per row, the way
+    the rest of this pipeline does."""
+    clause = "" if recompute else "WHERE display_title IS NULL AND title_basis IS NULL"
+    ids = [r[0] for r in conn.execute(
+        f"SELECT document_id FROM document_records {clause} ORDER BY document_id")]
+    by_basis: dict[str, int] = {}
+    for document_id in ids:
+        source_title = conn.execute(
+            "SELECT title FROM document_records WHERE document_id = ?",
+            (document_id,)).fetchone()[0]
+        _, basis = refresh_display_title(conn, document_id, source_title=source_title)
+        by_basis[basis] = by_basis.get(basis, 0) + 1
+        conn.commit()
+    return {"updated": len(ids), "by_basis": by_basis}
 
 
 def add_artifact(conn, reference: EvidenceReference, artifact_type: str, storage_path: str,
