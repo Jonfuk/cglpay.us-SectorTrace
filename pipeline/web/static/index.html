@@ -264,6 +264,32 @@
          catalogue, the live foreign keys and the export tab registry —
          source -> module -> table -> table -> export. Every edge is derived;
          none is hand-maintained. Read-only. -->
+    <!-- BETA-106: reproducible random / stratified samples of previously
+         decided records, with append-only second-look findings. -->
+    <details class="panel" id="qc-panel">
+      <summary><h2 style="display:inline">QC sampling workspace</h2></summary>
+      <p class="muted small">A deterministic draw — the same seed + source +
+        method + filter reproduce the same sample. Findings are append-only and
+        change no review decision.</p>
+      <div class="qc-controls">
+        <label>Seed <input id="qc-seed" type="text" value="audit"></label>
+        <label>Source
+          <select id="qc-source">
+            <option value="review_queue">review_queue (resolved)</option>
+            <option value="alias_decisions">alias_decisions</option>
+          </select></label>
+        <label>Method
+          <select id="qc-method">
+            <option value="random">random</option>
+            <option value="stratified">stratified</option>
+          </select></label>
+        <label>Stratify by <input id="qc-stratify" type="text" placeholder="module / item_type"></label>
+        <label>Size <input id="qc-size" type="number" min="1" max="500" value="25"></label>
+        <button class="btn primary" id="qc-draw" type="button">Draw sample</button>
+      </div>
+      <div id="qc-sample"></div>
+    </details>
+
     <!-- BETA-103: replay a stdlib parser against one archived object in
          memory and diff its proposed output against the stored active
          version. Read-only -- nothing is written. -->

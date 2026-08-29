@@ -11,7 +11,6 @@ import sqlite3
 
 from pipeline.web import review_analytics
 
-
 _seq = [0]
 
 

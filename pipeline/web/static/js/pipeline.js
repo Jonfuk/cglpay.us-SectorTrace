@@ -632,6 +632,80 @@ async function loadLineage() {
   linRenderDetail();
 }
 
+/* BETA-106: QC sampling workspace. A deterministic draw of previously
+ * decided records, with append-only second-look findings. Runs on demand. */
+let qcSample = null;
+async function qcDraw() {
+  const holder = $('qc-sample');
+  if (!holder) return;
+  holder.replaceChildren(el('p', { class: 'muted small', text: 'Drawing…' }));
+  const method = $('qc-method').value;
+  const body = {
+    seed: $('qc-seed').value.trim(), source: $('qc-source').value,
+    method, size: Number($('qc-size').value) || 25,
+  };
+  if (method === 'stratified' && $('qc-stratify').value.trim()) body.stratify_by = $('qc-stratify').value.trim();
+  try {
+    qcSample = await api('/api/admin/qc-sample/draw', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    holder.replaceChildren(el('p', { class: 'bad small', text: e.message || 'Draw failed.' }));
+    return;
+  }
+  qcRender();
+}
+
+function qcRender() {
+  const holder = $('qc-sample');
+  const s = qcSample;
+  if (!holder || !s) return;
+  const reviewed = new Set(s.findings.map((f) => f.record_ref));
+  const idOf = (r) => String(r.id ?? r.decision_id);
+  const label = (r) => s.source === 'review_queue'
+    ? `${r.module} · ${r.item_type} · ${r.status} · ${(r.raw_value || '').slice(0, 60)}`
+    : `${r.target_scheme} · ${r.status} · ${(r.canonical_name || r.unmatched_name || '').slice(0, 60)}`;
+
+  const rows = s.records.map((r) => {
+    const ref = idOf(r);
+    const verdict = el('select', {},
+      ...['agree', 'disagree', 'unclear'].map((v) => el('option', { value: v, text: v })));
+    const note = el('input', { type: 'text', placeholder: 'note (optional)', class: 'qc-note' });
+    const done = reviewed.has(ref);
+    return el('tr', { class: done ? 'qc-done' : '' },
+      el('td', { class: 'mono small', text: ref }),
+      el('td', { class: 'small', text: label(r) }),
+      el('td', {}, done ? el('span', { class: 'badge approved', text: 'finding recorded' })
+        : el('span', {}, verdict, note,
+            el('button', {
+              class: 'btn tiny', type: 'button',
+              onclick: async () => {
+                try {
+                  await api('/api/admin/qc-finding', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sample_id: s.sample_id, record_ref: ref, verdict: verdict.value, note: note.value }),
+                  });
+                  qcSample = await api(`/api/admin/qc-samples/${s.sample_id}`);
+                  qcRender();
+                } catch (e) { alert(e.message || 'Append failed.'); }
+              },
+            }, 'Append finding'))));
+  });
+
+  holder.replaceChildren(
+    el('p', { class: 'small' },
+      el('strong', { text: `Sample ${s.sample_id} ` }),
+      el('span', { text: `— ${s.sample_size} of ${s.population_size} · seed "${s.seed}" · ${s.method}`
+        + (s.stratify_by ? ` by ${s.stratify_by}` : '') })),
+    el('p', { class: 'muted small', text: `${s.reviewed} of ${s.sample_size} reviewed`
+      + (Object.keys(s.finding_counts).length ? ` — ${Object.entries(s.finding_counts).map(([k, v]) => `${v} ${k}`).join(', ')}` : '') }),
+    el('p', { class: 'muted small', text: s.note }),
+    el('table', {}, el('thead', {}, el('tr', {},
+      el('th', { text: 'ref' }), el('th', { text: 'record' }), el('th', { text: 'second look' }))),
+      el('tbody', {}, ...rows)));
+}
+
 /* BETA-103: parser replay sandbox. Replay a stdlib parser against one
  * archived object in memory and diff the proposed output against the stored
  * active version. Read-only — nothing is written. Runs on demand only. */
@@ -742,6 +816,8 @@ export function initPipeline() {
   });
   // BETA-103: parser replay runs only when the button is pressed.
   $('rp-run')?.addEventListener('click', loadParserReplay);
+  // BETA-106: QC sample draw runs only when the button is pressed.
+  $('qc-draw')?.addEventListener('click', qcDraw);
 
   document.addEventListener('tabshown', (event) => {
     if (event.detail.tab !== 'pipeline') return;

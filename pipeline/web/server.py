@@ -1421,6 +1421,16 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import validation
             return validation.rules(conn, today=_str(params, "today") or None)
 
+        if path == "/api/admin/qc-samples":
+            # BETA-106: the recent quality-control sample manifests.
+            from pipeline.web import qc_sampling
+            return qc_sampling.list_samples(conn, _int(params, "limit", 25))
+
+        match = re.fullmatch(r"/api/admin/qc-samples/([0-9a-f]{16})", path)
+        if match:
+            from pipeline.web import qc_sampling
+            return qc_sampling.get(conn, match.group(1))
+
         if path == "/api/admin/review-analytics":
             # BETA-105: review decisions over time by source, item type,
             # reason and evidence age. Aggregates only; small groups
@@ -1861,7 +1871,52 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/claims/reset": self._reset_claim,
             "/api/admin/claim-candidates/decide": self._decide_claim_candidate,
             "/api/admin/aliases/decide": self._decide_alias,
+            "/api/admin/qc-sample/draw": self._qc_draw,
+            "/api/admin/qc-finding": self._qc_finding,
         }
+
+    def _qc_draw(self, body: dict) -> Any:
+        """Draw a reproducible QC sample (BETA-106). Deterministic on the
+        seed + source + method + filter; re-drawing returns the same sample."""
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import qc_sampling
+            result = qc_sampling.draw(
+                conn,
+                seed=str(body.get("seed", "")),
+                source=str(body.get("source", "")),
+                size=int(body.get("size") or 25),
+                method=str(body.get("method") or "random"),
+                stratify_by=body.get("stratify_by") or None,
+                filters=body.get("filters") or {},
+                created_by=body.get("created_by") or None)
+        except queries.QueryError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.qc_sample_drawn", sample_id=result["sample_id"],
+                  source=result["source"], size=result["sample_size"])
+        return result
+
+    def _qc_finding(self, body: dict) -> Any:
+        """Append one second-look finding to a QC sample. Append-only — it
+        changes no review decision."""
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import qc_sampling
+            result = qc_sampling.record_finding(
+                conn,
+                sample_id=str(body.get("sample_id", "")),
+                record_ref=str(body.get("record_ref", "")),
+                verdict=str(body.get("verdict", "")),
+                note=body.get("note") or None,
+                created_by=body.get("created_by") or None)
+        except queries.QueryError as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+        log.info("web.qc_finding_appended", finding_id=result["finding_id"])
+        return result
 
     def _decide_alias(self, body: dict) -> Any:
         """Record one human alias-resolution decision (BETA-056).

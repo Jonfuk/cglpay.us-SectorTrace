@@ -161,7 +161,10 @@ class TestTheTreesMatch:
         # 77 adds temporary_accommodation_breakdowns (BETA-064) — the narrow
         # bed-and-breakfast "of which" rows of H-CLIC Table TA1, one per
         # authority/quarter/measure. TEXT/INTEGER -> text/bigint only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 77
+        # 78 adds qc_samples + qc_sample_findings (BETA-106) — reproducible
+        # quality-control sample manifests and their append-only second-look
+        # findings, plus one index. TEXT/INTEGER -> text/integer only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 78
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

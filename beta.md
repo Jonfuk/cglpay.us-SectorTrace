@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-106 | Quality-control sampling workspace
+- [IN_PROGRESS] BETA-107 | Optional Needle 2 and LFM assistant runtimes
   - priority: P1
   - impact: 5
-  - effort: 5
-  - confidence: 3
-  - risk: 4
-  - area: admin/review quality
-  - depends_on: BETA-052, BETA-055, BETA-087
-  - objective: Generate reproducible random or stratified samples of
-    previously decided records for append-only second-look findings.
-  - next_action: Seeded deterministic sampling over resolved review_queue /
-    alias_decisions with a recorded manifest (seed, filter, method, ids);
-    the same seed + filter reproduces the same sample.
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: nlp/assistant/runtime
+  - depends_on: BETA-034, BETA-046
+  - objective: Add an `assistant` optional dependency/runtime boundary with a
+    pinned Needle 2 adapter and an OpenAI-compatible local Ollama adapter for
+    pinned `LiquidAI/LFM2.5-1.2B-Instruct` Q4_K_M; both disabled by default,
+    excluded from Railway and loaded lazily on the local analysis host.
+  - next_action: Define the `assistant` extra and a runtime-boundary module
+    that stays importable with nothing installed; a checkout without the
+    extra / model / Ollama must pass the offline suite unchanged.
 
-_(The first refinement programme BETA-068–087 is complete. Wave 1 of the
-second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
-BETA-092, BETA-093, BETA-097) is complete. Wave 3 is BETA-094, BETA-095,
-BETA-096, BETA-098, BETA-100.)_
+_(The first and second refinement programmes (BETA-068–106) are complete.
+BETA-107 is the local analyst-assistant programme.)_
 
 ### BLOCKED
 
@@ -549,6 +549,58 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-106 | Quality-control sampling workspace
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: admin/review quality
+  - depends_on: BETA-052, BETA-055, BETA-087
+  - objective: Generate reproducible random or stratified samples of
+    previously decided records for append-only second-look findings.
+  - result: New migration `0078_qc_sampling.sql` (+ postgres twin) adds
+    `qc_samples` (the manifest of a draw) and `qc_sample_findings`
+    (append-only, same discipline as `alias_decisions`), plus an index. New
+    `pipeline/web/qc_sampling.py`. `draw()` — a **deterministic** draw over
+    resolved `review_queue` rows or `alias_decisions`: each candidate id is
+    hashed with the seed (`sha256(seed|id)`), sorted, and the first N taken;
+    a `stratified` method allocates per stratum proportionally then tops up
+    in global order to hit exactly `size`. The `sample_id` is a hash of
+    (seed, source, method, stratify_by, size, filter), so re-drawing with the
+    same parameters returns the same manifest and writes no new row. The
+    manifest records the seed, method, `population_filter`, `population_size`
+    and the drawn `record_ids` in order. `record_finding()` appends one
+    `qc_sample_findings` row — validated against the sample's id list and a
+    fixed verdict vocabulary — and **never updates or deletes** (a test
+    greps the module for `UPDATE`/`DELETE`). `get()` / `list_samples()` read
+    them back with per-verdict counts and a distinct-records-reviewed count.
+    New admin routes: GET `/api/admin/qc-samples` + `/api/admin/qc-samples/<id>`,
+    POST `/api/admin/qc-sample/draw` + `/api/admin/qc-finding`
+    (network-trust-gated).
+  - api/ui: additive admin routes above. New collapsed "QC sampling
+    workspace" panel on the pipeline tab — seed / source / method /
+    stratify-by / size controls, a "Draw sample" button, then a manifest
+    line (sample id, N of population, seed, method) and a table of the drawn
+    records each with a verdict select + note + "Append finding"; a recorded
+    row shows a badge and dims. `styles.css` gained a `.qc-*` block.
+  - validation: New `tests/test_web_qc_sampling.py` (7 — the draw is
+    reproducible and seed-sensitive and excludes unresolved items; a
+    stratified draw hits the size and spreads across strata; the manifest is
+    written once (re-draw = same `sample_id`, one row); findings are
+    append-only (two on one ref both kept, `reviewed` counts distinct refs)
+    and a bad verdict / out-of-sample ref raise; the module contains no
+    `UPDATE`/`DELETE` of findings; `alias_decisions` is a valid source; the
+    four HTTP routes round-trip). Updated `test_migration_equivalence.py`
+    for the 78th migration. `test_web_catalogue` / `test_web_lineage` /
+    `test_web_schema_graph` / `test_portal_isolation` / `test_web_admin`
+    green; `ruff` clean (also fixed a stray blank line in
+    `test_web_review_analytics.py`). Browser-verified on the pipeline tab:
+    "Sample … — 6 of 30 · seed \"browser-demo\" · random", and clicking
+    "Append finding" flips the row to "finding recorded" and updates
+    "1 of 6 reviewed — 1 agree".
 
 - [DONE] BETA-105 | Review-outcome analytics
   - completed: 2026-08-29
@@ -5548,8 +5600,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Parser replay sandbox | 4 | 5 | 3 | DONE (BETA-103) |
 | P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | DONE (BETA-105) |
-| P1 | Quality-control sampling workspace | 5 | 5 | 3 | IN_PROGRESS (BETA-106) |
-| P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | APPROVED, not queued (BETA-107) |
+| P1 | Quality-control sampling workspace | 5 | 5 | 3 | DONE (BETA-106) |
+| P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | IN_PROGRESS (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |

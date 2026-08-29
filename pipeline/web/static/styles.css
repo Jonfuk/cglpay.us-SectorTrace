@@ -724,6 +724,14 @@ td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
 .ra-grid h3 { margin: 8px 0 4px; }
 .ra-grid table { width: 100%; }
 
+/* BETA-106: QC sampling workspace. */
+#qc-panel > summary { cursor: pointer; }
+.qc-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0; }
+.qc-controls label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.qc-controls input, .qc-controls select { padding: 3px 6px; }
+.qc-note { min-width: 160px; margin: 0 6px; }
+tr.qc-done td { opacity: .7; }
+
 /* BETA-104: validation-rule explorer. A flat card list — schema rules and
  * observed rules together, filtered by kind and text. Failure examples show
  * shape only. */
