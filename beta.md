@@ -297,22 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-085 | Responsive admin navigation
+- [IN_PROGRESS] BETA-086 | Operator action cockpit
   - priority: P1
   - impact: 5
   - effort: 4
-  - confidence: 5
-  - risk: 2
-  - area: admin/navigation
-  - depends_on: BETA-049, BETA-080
-  - objective: Replace twelve horizontal tabs with a grouped sidebar —
-    Review, Evidence, Operations, Data and System — using a narrow-screen
-    drawer while retaining Ctrl-K, badges and existing deep links.
-  - next_action: Define the exact old-tab → group/destination map and make
-    the router accept both old and new links before changing presentation.
+  - confidence: 4
+  - risk: 3
+  - area: admin/overview
+  - depends_on: BETA-058, BETA-059, BETA-060, BETA-063, BETA-068, BETA-085
+  - objective: Replace long overview tables with prioritised cards for review
+    pressure, failed/stale runs, blocked sources, coverage actions, archive
+    health, schema drift and resumable work; every card opens a pre-filtered
+    existing workflow.
+  - next_action: Add a read-only `/api/admin/cockpit` aggregate with
+    deterministic priority reasons; the UI may rank operational states, never
+    evidence quality or review outcomes.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–084 are complete, see DONE. Wave 4 (BETA-082–087) is
+on 2026-08-29. BETA-068–085 are complete, see DONE. Wave 4 (BETA-082–087) is
 in progress. The remaining items are being delivered in the approved wave
 order.)_
 
@@ -549,6 +551,46 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-085 | Responsive admin navigation
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 5
+  - risk: 2
+  - area: admin/navigation
+  - depends_on: BETA-049, BETA-080
+  - objective: Replace twelve horizontal tabs with a grouped sidebar —
+    Review, Evidence, Operations, Data and System — using a narrow-screen
+    drawer while retaining Ctrl-K, badges and existing deep links.
+  - result: Presentation only — every `.tab[data-tab]` button, `showTab()`,
+    the `#<tab>` hash deep links, the Ctrl-K palette and the count pills are
+    unchanged. The tab strip is now a fixed 208px **left rail** grouped into
+    Overview (standalone), Review (review / candidates / census / claims /
+    claim review), Evidence (search / exports), Operations (pipeline /
+    health) and Data (database / sql), each `.tabgroup` carrying a small
+    label. `main` reserves `padding-left: 224px` for it. Below 1000px the
+    rail becomes a slide-in drawer (`transform: translateX(-100%)` →
+    `.open`), a `#nav-toggle` hamburger appears in the topbar, `main` drops
+    its left padding, and selecting a tab closes the drawer
+    (`aria-expanded` tracked). The narrow `@media` block sits after the base
+    `main` rule so it wins the source-order tie (found in the browser: it did
+    not, and the padding stuck at 224px).
+  - api/ui: no API change. HTML: the flat `<nav class="tabs">` regrouped into
+    `.tabgroup` blocks + a `#nav-toggle` button. CSS: `.tabs` as a fixed
+    rail, `.tabgroup*`, the `max-width: 1000px` drawer. JS: the nav-toggle
+    handler and drawer-close-on-select.
+  - validation: New `tests/test_admin_navigation.py` (5 — all twelve tabs
+    survive the regroup as `.tab[data-tab]` buttons; they are grouped into
+    the four labelled groups; the pills stay on their tabs; the rail becomes
+    a drawer on narrow screens with the media override after the base rule;
+    selecting a tab closes the drawer). `test_web_admin` / `test_console` /
+    security-header suites green. Browser-verified at 1400px (208px left
+    rail, `main` padded 224px, `#review` / `#sql` / `#health` deep links and
+    grouped-button clicks all work) and 805px (hamburger shown, drawer slid
+    off-screen at `translateX(-208px)`, `main` padding 16px, toggle opens it,
+    picking a tab closes it; no page overflow).
 
 - [DONE] BETA-084 | Page-level evidence health strip
   - completed: 2026-08-29
@@ -4500,8 +4542,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Pipeline mission control | 5 | 5 | 4 | DONE (BETA-082) |
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | DONE (BETA-083) |
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | DONE (BETA-084) |
-| P1 | Responsive admin navigation | 5 | 4 | 5 | IN_PROGRESS (BETA-085) |
-| P1 | Operator action cockpit | 5 | 4 | 4 | APPROVED, not queued (BETA-086) |
+| P1 | Responsive admin navigation | 5 | 4 | 5 | DONE (BETA-085) |
+| P1 | Operator action cockpit | 5 | 4 | 4 | IN_PROGRESS (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | APPROVED, not queued (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
 | P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |

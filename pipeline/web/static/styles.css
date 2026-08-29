@@ -104,15 +104,32 @@ a { color: var(--accent); }
 }
 .brand { display: flex; flex-direction: column; line-height: 1.25; }
 .brand .muted { font-size: 11.5px; font-family: var(--mono); }
-.tabs { display: flex; gap: 4px; }
+
+/* BETA-085: the sections are a grouped left rail, not twelve tabs in a row.
+   `.tab[data-tab]` buttons and `showTab()` are unchanged — this is layout. */
+.navtoggle { display: none; }
+.tabs {
+  position: fixed; left: 0; top: var(--topbar-h, 53px); bottom: 0;
+  width: 208px; overflow-y: auto; z-index: 15;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 8px; background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.tabgroup { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.tabgroup-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); padding: 2px 8px 0;
+}
 .tab {
   border: 1px solid transparent; background: none; color: var(--muted);
-  padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13.5px;
+  text-align: left;
 }
 .tab:hover { background: var(--bg); color: var(--ink); }
 .tab[aria-selected="true"] {
   background: var(--bg); color: var(--ink); border-color: var(--line); font-weight: 600;
 }
+@media (prefers-reduced-motion: reduce) { .tabs { transition: none; } }
 .pill {
   background: var(--pending-bg); color: var(--pending);
   border-radius: 999px; padding: 1px 7px; font-size: 11.5px; font-weight: 600;
@@ -130,7 +147,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 }
 textarea { width: 100%; font-family: var(--mono); resize: vertical; }
 
-main { padding: 16px; max-width: 1500px; margin: 0 auto; }
+main { padding: 16px 16px 16px 224px; max-width: 1720px; margin: 0 auto; }  /* BETA-085: room for the left rail */
+/* BETA-085: below the rail breakpoint the nav becomes a slide-in drawer.
+   After the base `main` rule so it wins the source-order tie. */
+@media (max-width: 1000px) {
+  .navtoggle { display: inline-flex; }
+  .tabs {
+    transform: translateX(-100%); transition: transform .16s ease;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+  }
+  .tabs.open { transform: none; }
+  main { padding: 16px; }
+}
 .tabpanel { display: none; }
 .tabpanel.active { display: block; }
 .panel {

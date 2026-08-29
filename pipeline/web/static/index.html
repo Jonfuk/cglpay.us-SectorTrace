@@ -37,19 +37,36 @@
     <strong>Evidence pipeline</strong>
     <span class="muted" id="db-path" title="Warehouse being read"></span>
   </div>
-  <nav class="tabs" role="tablist">
+  <button class="navtoggle iconbtn" id="nav-toggle" type="button"
+          aria-expanded="false" aria-controls="admin-nav" title="Menu">☰</button>
+  <!-- BETA-085: the twelve tabs, grouped. Still `.tab[data-tab]` buttons so
+       every deep link (`#review`, `#sql`, …) and `showTab()` are unchanged;
+       only the presentation is a grouped rail with a narrow-screen drawer. -->
+  <nav class="tabs" id="admin-nav" role="tablist" aria-label="Sections">
     <button class="tab" data-tab="overview" role="tab">Overview</button>
-    <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
-    <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
-    <button class="tab" data-tab="health" role="tab">Health</button>
-    <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
-    <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
-    <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
-    <button class="tab" data-tab="search" role="tab">Search</button>
-    <button class="tab" data-tab="claimreview" role="tab">Claim review</button>
-    <button class="tab" data-tab="exports" role="tab">Exports</button>
-    <button class="tab" data-tab="database" role="tab">Database</button>
-    <button class="tab" data-tab="sql" role="tab">SQL</button>
+    <div class="tabgroup" data-group="Review">
+      <span class="tabgroup-label" aria-hidden="true">Review</span>
+      <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
+      <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
+      <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
+      <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
+      <button class="tab" data-tab="claimreview" role="tab">Claim review</button>
+    </div>
+    <div class="tabgroup" data-group="Evidence">
+      <span class="tabgroup-label" aria-hidden="true">Evidence</span>
+      <button class="tab" data-tab="search" role="tab">Search</button>
+      <button class="tab" data-tab="exports" role="tab">Exports</button>
+    </div>
+    <div class="tabgroup" data-group="Operations">
+      <span class="tabgroup-label" aria-hidden="true">Operations</span>
+      <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
+      <button class="tab" data-tab="health" role="tab">Health</button>
+    </div>
+    <div class="tabgroup" data-group="Data">
+      <span class="tabgroup-label" aria-hidden="true">Data</span>
+      <button class="tab" data-tab="database" role="tab">Database</button>
+      <button class="tab" data-tab="sql" role="tab">SQL</button>
+    </div>
   </nav>
   <label class="reviewer">
     <span>Reviewer</span>

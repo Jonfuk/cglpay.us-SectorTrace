@@ -1774,7 +1774,18 @@ function init() {
   $('#reviewer').addEventListener('change', () => localStorage.setItem('cglpay.reviewer', reviewer()));
 
   document.querySelectorAll('.tab').forEach((button) =>
-    button.addEventListener('click', () => showTab(button.dataset.tab)));
+    button.addEventListener('click', () => {
+      showTab(button.dataset.tab);
+      // BETA-085: a selection closes the narrow-screen nav drawer.
+      $('#admin-nav')?.classList.remove('open');
+      $('#nav-toggle')?.setAttribute('aria-expanded', 'false');
+    }));
+
+  $('#nav-toggle')?.addEventListener('click', () => {
+    const nav = $('#admin-nav');
+    const open = nav.classList.toggle('open');
+    $('#nav-toggle').setAttribute('aria-expanded', String(open));
+  });
 
   for (const id of ['#f-status', '#f-module', '#f-type', '#f-limit', '#f-oldest', '#f-clusters']) {
     const node = $(id);
