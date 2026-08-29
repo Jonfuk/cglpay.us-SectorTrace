@@ -361,6 +361,35 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-source_link" data-route="source_link">
+    <h3><code>/api/v1/source_link</code></h3>
+    <p>
+      Whether an original source URL was <em>live</em>, <em>redirected</em>,
+      <em>gone</em> or <em>errored</em> the last time this pipeline fetched
+      it, and whether a checksum-verified archive copy of the bytes is held.
+      <strong>No live request is made</strong> — every state is read from the
+      HTTP status, the SHA-256 and the archived file recorded at collection
+      time. The archive is provenance, not a mirror: it is the bytes fetched
+      on a past date and is never presented as the current publisher page.
+      Omit <code>url</code> for a corpus-wide count of cited rows at each
+      state.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>url</code></td><td>An http(s) source URL cited somewhere in the warehouse. Omit for the breakdown.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Per-URL: <code>state</code>, <code>last_http_status</code>,
+      <code>last_checked</code>, <code>archive</code> (<code>held</code>,
+      <code>verified</code>, <code>sha256</code>), <code>note</code>,
+      <code>caveat</code>. Breakdown: <code>by_state</code>,
+      <code>tables_checked</code>.
+    </p>
+    <p><code>/api/v1/source_link?url=https://www.gov.uk/…</code></p>
+  </article>
+
   <article class="apiroute" id="route-contract_diary" data-route="contract_diary">
     <h3><code>/api/v1/contract_diary</code></h3>
     <p>

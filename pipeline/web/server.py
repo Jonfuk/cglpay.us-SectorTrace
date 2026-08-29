@@ -126,7 +126,7 @@ for _page in ("overview", "pay", "contracts", "geography", "treatment", "provide
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
               "revisions", "pathfinder", "timeline",
-              "cooccurrence", "discrepancies", "diary"):
+              "cooccurrence", "discrepancies", "diary", "links"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1629,6 +1629,17 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "source_link":
+            # BETA-100: whether a source URL was live / redirected / gone at
+            # the last fetch, and whether a checksum-verified archive copy is
+            # held. Derived from collection-time metadata only -- no live
+            # request. No `url` -> the warehouse-wide state breakdown.
+            from pipeline.web import link_check
+            target = _str(params, "url")
+            if target:
+                return link_check.check(conn, self.settings, target)
+            return link_check.overview(conn)
+
         if route == "contract_diary":
             # BETA-098: procurement lifecycle records as dated events --
             # published, award, contract period start/end. Every date is

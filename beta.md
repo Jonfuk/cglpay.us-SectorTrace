@@ -297,20 +297,20 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-100 | Source-link resilience checker
+- [IN_PROGRESS] BETA-099 | Document table extraction viewer
   - priority: P1
   - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: public/provenance
-  - depends_on: BETA-060, BETA-081, BETA-084
-  - objective: Show whether an original source URL is live, redirected,
-    changed or unavailable and whether a checksum-verified archive copy is
-    held.
-  - next_action: Derive conservative link states from collection-time
-    metadata only (http_status, payload_sha256, archive path) — no live
-    fetch — and never present the archive as the current publisher page.
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: public/documents
+  - depends_on: BETA-042, BETA-081
+  - objective: Display tables detected in parsed documents with page context,
+    original structure, extraction status and a structured download.
+  - next_action: Read the Docling `table` elements already in
+    `document_elements` (text + metadata_json), render the grid where the
+    parse produced one and mark it partial where it did not; CSV of what was
+    extracted, never a reconstruction.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -550,6 +550,54 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-100 | Source-link resilience checker
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/provenance
+  - depends_on: BETA-060, BETA-081, BETA-084
+  - objective: Show whether an original source URL is live, redirected,
+    changed or unavailable and whether a checksum-verified archive copy is
+    held.
+  - result: New `pipeline/web/link_check.py`. `check(conn, settings, url)` —
+    the URL's state read **only from collection-time metadata**: the module
+    imports no HTTP client and opens no socket (pinned by a test). It scans
+    every table carrying `source_url` + `http_status` + `retrieved_at` (found
+    from the live schema, not a hand-list) plus `evidence_records` for the
+    most recent observation, and maps the recorded status to a conservative
+    state — `live_at_last_check` (200), `redirected_at_last_check` (3xx),
+    `gone_at_last_check` (404/410), `error_at_last_check`, `not_recorded`,
+    `unknown_url`. Archive: if `evidence_records.raw_object_path` resolves to
+    a file under `settings.raw_archive_dir`, it is **re-hashed** and compared
+    to `payload_sha256` (`verified` true/false, or null when the file is over
+    64 MB); a recorded path with no file says so. The `caveat` states the
+    archive is the bytes fetched on a past date, kept as provenance, and is
+    never the live publisher page. `overview(conn)` gives a corpus-wide count
+    of cited rows by state (grouped counts, no per-URL scan). New additive
+    public route `/api/v1/source_link` (`url`, or omit for the breakdown) on
+    the frozen surface, OpenAPI, `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/source_link`. New `/links` route + page
+    ("Source-link resilience"): a URL input, a per-URL card (state badge and
+    sentence, last-checked date, HTTP status, which table it was seen in,
+    archive held / verified / bytes), and the warehouse-wide state
+    breakdown. Linked from the footer nav. `styles.css` gained a `.lk-*`
+    block.
+  - validation: New `tests/test_web_link_check.py` (13 — the state comes from
+    the last HTTP status; 301/404/410/500/None each map to their conservative
+    state; an unknown URL and a non-http URL are handled; the archive copy is
+    verified by re-hashing the file and flips to `verified: false` when the
+    file is tampered; a recorded-but-missing archive says "not on disk"; the
+    module imports no live HTTP client; the overview counts by state; the
+    route is in the OpenAPI doc). `test_portal_isolation` /
+    `test_portal_navigation` / `test_web_openapi` / `test_portal_offline_reading`
+    / `test_portal_design_system` green; `ruff` clean. Browser-verified on
+    `#/links?url=…`: "live at last check · HTTP 200 · seen in contracts · No
+    archive copy is held", and an "Across the warehouse" breakdown "live at
+    last check 57 (100%)".
 
 - [DONE] BETA-098 | Contract diary and milestone calendar
   - completed: 2026-08-29
@@ -5360,8 +5408,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | DONE (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | DONE (BETA-098) |
-| P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
-| P1 | Source-link resilience checker | 5 | 4 | 4 | IN_PROGRESS (BETA-100) |
+| P1 | Document table extraction viewer | 5 | 5 | 3 | IN_PROGRESS (BETA-099) |
+| P1 | Source-link resilience checker | 5 | 4 | 4 | DONE (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |

@@ -111,6 +111,19 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/source_link": {
+        "surface": "source_link",
+        "summary": "Whether a source URL was live, redirected or gone at the "
+                   "last fetch, and whether a checksum-verified archive copy "
+                   "is held. Derived from collection-time metadata only — no "
+                   "live request is made, and the archive is never presented "
+                   "as the current publisher page. No url returns the "
+                   "warehouse-wide state breakdown.",
+        "parameters": [
+            _p("url", desc="An http(s) source URL cited in the warehouse. "
+                           "Omit for the corpus-wide breakdown."),
+        ],
+    },
     "/api/v1/contract_diary": {
         "surface": "contract_diary",
         "summary": "Procurement lifecycle records as dated events — notice "

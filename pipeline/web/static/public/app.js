@@ -327,6 +327,7 @@ const ROUTES = {
   '/cooccurrence': () => import('/js/pages/cooccurrence.js'),
   '/discrepancies': () => import('/js/pages/discrepancies.js'),
   '/diary': () => import('/js/pages/diary.js'),
+  '/links': () => import('/js/pages/links.js'),
 };
 
 /* One <title> per route. Until now all thirteen shared index.html's static
@@ -362,6 +363,7 @@ const ROUTE_TITLES = {
   '/cooccurrence': 'Co-occurrence explorer',
   '/discrepancies': 'Evidence discrepancies',
   '/diary': 'Contract diary',
+  '/links': 'Source-link resilience',
 };
 
 let disposeCurrent = null;

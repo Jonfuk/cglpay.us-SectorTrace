@@ -1407,6 +1407,14 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .dy-date { flex: 0 0 92px; }
 .dy-kind { font-size: 12px; color: var(--text-secondary); flex: 0 0 220px; }
 
+/* BETA-100: source-link resilience. State from collection-time metadata; the
+ * archive copy is provenance, not the live page. */
+.lk-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.lk-input { min-width: 340px; flex: 1 1 340px; padding: var(--space-1) var(--space-2); }
+.lk-sha { font-size: 11px; color: var(--text-muted); }
+.lk-overview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lk-overview li { display: flex; align-items: baseline; gap: var(--space-2); }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status
