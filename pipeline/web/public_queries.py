@@ -4846,7 +4846,13 @@ def document_search(conn: sqlite3.Connection, *, query: str,
 # ceiling, not a default a caller can raise: bounded context aids scrutiny of
 # one hit; an unbounded one is a way to reassemble a whole copyrighted
 # document a page at a time, which docs/CAVEATS.md does not allow.
-_DOCUMENT_CONTEXT_MAX = 3
+#
+# BETA-081 (the reading room) raised this from 3 to 8. A single response is
+# still a bounded window — a readable passage, not the document — and the
+# reading room's "earlier/later" re-anchors on an edge element rather than
+# asking for one enormous window. The source URL is always shown for the
+# whole document.
+_DOCUMENT_CONTEXT_MAX = 8
 
 
 def document_context(conn: sqlite3.Connection, document_id: str, *,

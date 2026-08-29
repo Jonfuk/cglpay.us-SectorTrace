@@ -516,18 +516,20 @@ def test_document_context_clamps_the_window_at_the_edges(conn, settings):
     assert result["has_more_after"] is False
 
 
-def test_document_context_caps_the_context_parameter_at_three(conn, settings):
+def test_document_context_caps_the_context_parameter(conn, settings):
+    # BETA-081 raised the ceiling from 3 to 8 for the reading room; it is
+    # still a ceiling a caller cannot exceed.
     document_id = _seed_multi_element(
         conn, settings, evidence_id="ev-ctx-cap",
         source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
-        texts=[f"Row {i}." for i in range(30)])
+        texts=[f"Row {i}." for i in range(40)])
     elements = _elements(conn, document_id)
 
     result = public_queries.document_context(
-        conn, document_id, element_id=elements[15]["document_element_id"], context=99)
+        conn, document_id, element_id=elements[20]["document_element_id"], context=99)
 
-    assert result["context"] == 3
-    assert len(result["elements"]) == 7  # 3 + anchor + 3
+    assert result["context"] == 8
+    assert len(result["elements"]) == 17  # 8 + anchor + 8
 
 
 def test_document_context_without_an_anchor_returns_the_head(conn, settings):

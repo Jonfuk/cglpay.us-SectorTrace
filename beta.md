@@ -297,24 +297,25 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-081 | Document reading room
+- [IN_PROGRESS] BETA-082 | Pipeline mission control
   - priority: P1
   - impact: 5
   - effort: 5
   - confidence: 4
-  - risk: 3
-  - area: public/documents
-  - depends_on: BETA-041, BETA-042, BETA-062, BETA-072
-  - objective: Open a search result in a split reading view containing the
-    matched passage, surrounding text, document metadata, element/page
-    navigation, linked evidence, provenance and stable passage links;
-    returning restores search and scroll state.
-  - next_action: Pin stable document/element identifiers and passage anchors
-    across SQLite and PostgreSQL before building the split layout.
+  - risk: 4
+  - area: admin/operations
+  - depends_on: BETA-058, BETA-063, BETA-080, BETA-085
+  - objective: Present dependency waves, active/queued/completed states,
+    progress, durable history, failure summaries, freshness consequences and
+    a focused log viewer while retaining the existing run safeguards and
+    polling.
+  - next_action: Define one read model over module registry, active job and
+    run ledger; do not add cancellation, SSE, WebSockets or new write
+    semantics.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–080 are complete, see DONE. The remaining items are
-being delivered in the approved wave order.)_
+on 2026-08-29. BETA-068–081 are complete, see DONE. Wave 4 (BETA-082–087)
+follows. The remaining items are being delivered in the approved wave order.)_
 
 ### BLOCKED
 
@@ -549,6 +550,54 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-081 | Document reading room
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: public/documents
+  - depends_on: BETA-041, BETA-042, BETA-062, BETA-072
+  - objective: Open a search result in a split reading view containing the
+    matched passage, surrounding text, document metadata, element/page
+    navigation, linked evidence, provenance and stable passage links;
+    returning restores search and scroll state.
+  - result: Built on the existing `GET /api/v1/documents/{id}` context
+    endpoint (BETA-042) — the stable `document_id` / `document_element_id`
+    identifiers and the `is_anchor` / `has_more_before` / `has_more_after`
+    passage model already work on both databases. `_DOCUMENT_CONTEXT_MAX`
+    raised 3 → 8: a single response is still a bounded window (a readable
+    passage, not the document), and the reading room's "earlier / later"
+    re-anchors on an edge element rather than asking for one huge window.
+    `documents.js` gains `renderReadingRoom()`, opened by page-owned hash
+    keys `#/documents?q=…&doc=<id>&el=<element_id>` (each search result now
+    has an "Open in reading room" button). It renders a split view:
+    left — a metadata/provenance panel (type, source system, published,
+    retrieved, parser name+version, element count, a source-document link, a
+    "Copy passage link" button that writes the full `#/documents?…&doc=…&el=…`
+    URL to the clipboard, a "← Back to results" that removes only `doc`/`el`,
+    and the search caveat); right — the element window with the anchor
+    highlighted and scrolled to centre, and an "↑ Earlier / Later ↓" nav
+    (disabled at the document ends) that re-fetches anchored on the first or
+    last visible element. Returning keeps the query in the hash (so the
+    search re-runs) and the router's `scrollByHash` (BETA-077) restores the
+    results scroll.
+  - api/ui: no new route. `_DOCUMENT_CONTEXT_MAX` 3 → 8 (still a hard
+    ceiling). New CSS `.reading-room`, `.reading-split` (stacks below 900px),
+    `.reading-meta`, `.reading-body`, `.reading-nav`, `.reading-anchor`.
+  - validation: New `tests/test_portal_reading_room.py` (6 — a result opens
+    the room via hash keys; the room shows metadata / provenance / a passage
+    link / the caveat; earlier/later re-anchor on an edge element;
+    back-to-results keeps the search; the context ceiling is raised but still
+    a ceiling; the split layout stacks on narrow screens). Updated
+    `test_web_documents.py`'s context-cap test to 8. `test_documents` /
+    `test_portal_isolation` green. `ruff` clean. Browser-verified against a
+    seeded committee-paper document: the split reading room renders with the
+    six metadata fields, the "Officers reported…" anchor highlighted, the
+    seven-element passage; "← Back to results" returns to
+    `#/documents?q=treatment` with the results list.
 
 - [DONE] BETA-080 | Shared responsive design system
   - completed: 2026-08-29
@@ -4317,8 +4366,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Unified evidence atlas | 5 | 5 | 4 | DONE (BETA-078) |
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | DONE (BETA-079) |
 | P1 | Shared responsive design system | 4 | 4 | 5 | DONE (BETA-080) |
-| P1 | Document reading room | 5 | 5 | 4 | IN_PROGRESS (BETA-081) |
-| P1 | Pipeline mission control | 5 | 5 | 4 | APPROVED, not queued (BETA-082) |
+| P1 | Document reading room | 5 | 5 | 4 | DONE (BETA-081) |
+| P1 | Pipeline mission control | 5 | 5 | 4 | IN_PROGRESS (BETA-082) |
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-083) |
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | APPROVED, not queued (BETA-084) |
 | P1 | Responsive admin navigation | 5 | 4 | 5 | APPROVED, not queued (BETA-085) |

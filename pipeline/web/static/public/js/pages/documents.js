@@ -77,6 +77,7 @@ export async function render(main, { params = null } = {}) {
     },
   }, input, el('button', { class: 'btn', type: 'submit', text: 'Search' }));
 
+  const readingHolder = el('div', {});
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('h1', { text: 'Document search' }),
@@ -96,8 +97,18 @@ export async function render(main, { params = null } = {}) {
       el('summary', { text: 'What this searches, and what it does not' }),
       el('p', { text: 'A result is a page that contains the term, not a finding. Read the source page, and its own caveats, before citing anything found here. Only two document types are searchable today: council committee papers and community drug partnership documents. PFD reports, tribunal judgments and every structured table have their own pages and are not included here.' })),
     el('div', { class: 'panel' }, form),
+    readingHolder,
     resultsHolder);
   replace(main, page);
+
+  // BETA-081: `#/documents?...&doc=<id>&el=<element_id>` opens the reading
+  // room above the results. Removing those keys returns to the search, whose
+  // query stays in the hash and whose scroll is restored by the router.
+  const readingDoc = params ? params.get('doc') : null;
+  if (readingDoc) {
+    renderReadingRoom(readingHolder, readingDoc,
+      (params && params.get('el')) || null, initialQuery);
+  }
 
   if (!initialQuery) {
     replace(resultsHolder, el('div', { class: 'section' },
@@ -318,6 +329,14 @@ function renderResult(result, query) {
     highlightedSnippet(passage, query),
     contextExpander(result, query),
     el('div', { class: 'row wrap', style: 'gap:8px;', },
+      result.document_id && result.document_element_id
+        ? el('button', {
+            class: 'btn tiny', type: 'button',
+            onclick: () => setDocParams({
+              doc: result.document_id, el: result.document_element_id,
+            }),
+          }, 'Open in reading room')
+        : null,
       result.source_url ? sourceLink(result.source_url, 'Read the source page') : null,
       el('span', { class: 'small muted',
         text: [result.published_at ? `published ${isoDate(result.published_at)}` : null,
@@ -325,8 +344,97 @@ function renderResult(result, query) {
           .filter(Boolean).join(' · ') })));
 }
 
+/* BETA-081: the reading room. A split view over one document: metadata and
+ * provenance on the left, the matched passage with its surrounding elements
+ * on the right, "earlier / later" that re-anchors on an edge element (each
+ * response stays a bounded window — this is not the whole document), a
+ * stable passage link, and a back link that keeps the search behind it. */
+async function renderReadingRoom(holder, docId, elId, query) {
+  replace(holder, el('div', { class: 'section reading-room' },
+    el('div', { class: 'panel' }, el('div', { class: 'shimmer' }))));
+
+  const load = async (anchorId) => {
+    let data;
+    try {
+      data = await fetchJSON(`documents/${encodeURIComponent(docId)}`,
+        { element_id: anchorId || undefined, context: 8 });
+    } catch (error) {
+      replace(holder, el('div', { class: 'section reading-room' },
+        errorCard(error, () => renderReadingRoom(holder, docId, elId, query))));
+      return;
+    }
+    paint(data);
+  };
+
+  const paint = (data) => {
+    const passageLink = () => {
+      const p = new URLSearchParams(location.hash.split('?')[1] || '');
+      p.set('doc', docId);
+      if (data.anchor_element_id) p.set('el', data.anchor_element_id);
+      return `${location.origin}/#/documents?${p.toString()}`;
+    };
+
+    const meta = el('div', { class: 'reading-meta panel' },
+      el('h3', { text: data.title || docId }),
+      el('dl', {},
+        el('dt', { text: 'Type' }), el('dd', { text: data.document_type || '—' }),
+        el('dt', { text: 'Source' }), el('dd', { text: data.source_system || '—' }),
+        el('dt', { text: 'Published' }), el('dd', { text: isoDate(data.published_at) }),
+        el('dt', { text: 'Retrieved' }), el('dd', { text: isoDate(data.retrieved_at) }),
+        el('dt', { text: 'Parser' }),
+        el('dd', { text: `${data.parser?.name || '—'} ${data.parser?.version || ''}`.trim() }),
+        el('dt', { text: 'Elements' }), el('dd', { text: num(data.element_count) })),
+      data.source_url
+        ? el('p', {}, sourceLink(data.source_url, 'Open the source document ↗'))
+        : null,
+      el('button', {
+        class: 'btn tiny', type: 'button',
+        onclick: (e) => {
+          const link = passageLink();
+          if (navigator.clipboard) navigator.clipboard.writeText(link);
+          e.target.textContent = 'Link copied';
+          setTimeout(() => { e.target.textContent = 'Copy passage link'; }, 1500);
+        },
+      }, 'Copy passage link'),
+      el('button', {
+        class: 'btn ghost tiny', type: 'button',
+        onclick: () => setDocParams({ doc: '', el: '' }),
+      }, '← Back to results'),
+      pinnedCaveat(data.caveat, 'Read this with the passage'));
+
+    const elements = data.elements || [];
+    const body = el('div', { class: 'reading-body panel' },
+      el('div', { class: 'reading-nav' },
+        el('button', {
+          class: 'btn tiny', type: 'button', disabled: !data.has_more_before,
+          onclick: () => load(elements[0]?.document_element_id),
+        }, '↑ Earlier'),
+        el('span', { class: 'small muted',
+          text: elements[0]?.page_number != null ? `page ${elements[0].page_number}` : '' }),
+        el('button', {
+          class: 'btn tiny', type: 'button', disabled: !data.has_more_after,
+          onclick: () => load(elements[elements.length - 1]?.document_element_id),
+        }, 'Later ↓')),
+      ...elements.map((element) => {
+        const node = element.is_anchor
+          ? highlightedSnippet(element.text || '', query)
+          : el('p', { class: 'small muted', text: element.text || '' });
+        if (element.is_anchor) node.classList.add('reading-anchor');
+        node.id = `el-${element.document_element_id}`;
+        return node;
+      }));
+
+    replace(holder, el('div', { class: 'section reading-room' },
+      el('h2', { text: 'Reading room' }),
+      el('div', { class: 'reading-split' }, meta, body)));
+    holder.querySelector('.reading-anchor')?.scrollIntoView({ block: 'center' });
+  };
+
+  await load(elId);
+}
+
 /* BETA-042: a lazily-loaded window of the surrounding elements, from
- * /api/v1/documents/{id}. Bounded server-side to three elements either side —
+ * /api/v1/documents/{id}. Bounded server-side to a few elements either side —
  * enough to read a hit in context, not enough to reassemble the document. */
 function contextExpander(result, query) {
   if (!result.document_id || !result.document_element_id) return null;

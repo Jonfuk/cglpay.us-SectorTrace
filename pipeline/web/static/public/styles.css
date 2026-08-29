@@ -538,6 +538,18 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-081: document reading room. */
+.reading-split { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+@media (max-width: 900px) { .reading-split { grid-template-columns: 1fr; } }
+.reading-meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-3); font-size: 12.5px; margin: var(--space-2) 0; }
+.reading-meta dt { color: var(--text-muted); }
+.reading-meta dd { margin: 0; }
+.reading-meta .btn { margin-top: var(--space-2); }
+.reading-body { max-height: 70vh; overflow-y: auto; }
+.reading-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); position: sticky; top: 0; background: var(--bg-surface); padding-bottom: var(--space-2); }
+.reading-body p { margin: var(--space-2) 0; }
+.reading-anchor { border-left: 3px solid var(--accent-teal); padding-left: var(--space-3); color: var(--text-primary); }
+
 /* BETA-079: safety & legal chronology. */
 .sl-chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-2) 0 var(--space-4); }
 .sl-relationship-key { margin: var(--space-3) 0; padding: var(--space-3); border-left: 3px solid var(--accent-amber); background: var(--caveat-bg, var(--bg-elevated)); }
