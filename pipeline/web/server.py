@@ -125,7 +125,7 @@ for _module in ("theme", "components", "palette", "filterstate", "myarea",
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
-              "revisions"):
+              "revisions", "pathfinder"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1628,6 +1628,18 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "relationship_path":
+            # BETA-093: the shortest *verified* path between two entities
+            # through v_entity_edges. Unconfirmed name-match edges are
+            # excluded; the traversal is deterministic and hop-bounded.
+            from pipeline.web import pathfinder
+            return pathfinder.find_path(
+                conn,
+                from_type=_str(params, "from_type") or "provider",
+                from_id=_str(params, "from_id"),
+                to_type=_str(params, "to_type") or "authority",
+                to_id=_str(params, "to_id"),
+                max_hops=_int(params, "max_hops", 6))
         if route == "document_search":
             # Preflighted (BETA-068): schema drift on this surface was the
             # original bug — a `UndefinedTable` where results should be.

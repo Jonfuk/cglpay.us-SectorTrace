@@ -297,24 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-093 | Relationship pathfinder
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: public/relationships
-  - depends_on: BETA-010, BETA-044, BETA-076, BETA-080
-  - objective: Find and explain the shortest verified path between two
-    selected entities through source-backed graph edges.
-  - next_action: Define the permitted edge types (verified only, no extracted
-    or analytical edges), deterministic tie-breaking and a path length cap;
-    BFS over the existing graph edges with a table equivalent.
+- [IN_PROGRESS] BETA-097 | Temporal coverage navigator
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/navigation and coverage
+  - depends_on: BETA-043, BETA-075, BETA-076, BETA-084
+  - objective: Show exactly which periods each source holds for a selected
+    provider, authority or metric and link every available period to its view.
+  - next_action: Define a shared coverage-interval response (per source, the
+    periods actually held — never gap-filled) and a timeline view that keeps
+    absence distinguishable from a published zero.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
 complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
-BETA-097; BETA-088, BETA-089 and BETA-092 are complete.)_
+BETA-097; BETA-088, BETA-089, BETA-092 and BETA-093 are complete.)_
 
 ### BLOCKED
 
@@ -549,6 +549,57 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-093 | Relationship pathfinder
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: public/relationships
+  - depends_on: BETA-010, BETA-044, BETA-076, BETA-080
+  - objective: Find and explain the shortest verified path between two
+    selected entities through source-backed graph edges.
+  - result: New `pipeline/web/pathfinder.py::find_path()` — BFS for the
+    shortest path between two entities over `v_entity_edges`, the
+    source-backed entity graph. **Verified edges only**: an edge whose
+    `basis` is an unconfirmed name match (`name_only_unconfirmed`,
+    `supplier_name_unmatched`, `name_match_only`, empty) has not passed the
+    review gate that makes it a fact and is excluded; the restricted
+    shared-officer edges are not in `v_entity_edges` and never reach the
+    portal anyway. **Deterministic**: each node's edge list is pre-sorted by
+    `(relationship, node id)` and the queue is FIFO, so among equally short
+    paths the same one is always returned. **Bounded**: `max_hops` 1–8
+    (default 6) and a frontier cap. Edges are deduplicated on
+    `(source node, target node, relationship)` so a provider with fifty
+    contract notices to one authority is one edge. Endpoints are limited to
+    `provider` / `authority` / `supplier`; a path may pass *through* company /
+    scheme / tribunal nodes but they are not queryable endpoints. The payload
+    returns `found`, `hops`, `path` (one row per hop: from, relationship,
+    basis, to, `source_url`, `retrieved_at` — the table equivalent),
+    `nodes`, and a `note`; no path within `max_hops` is `found: false` with a
+    reason, not an error. New additive public route
+    `/api/v1/relationship_path` on the frozen surface, OpenAPI, `<noscript>`
+    and `api.html`.
+  - api/ui: additive `/api/v1/relationship_path` (from_type/from_id/to_type/
+    to_id/max_hops). New `/pathfinder` route + page ("Relationship
+    pathfinder"): two endpoint pickers (kind select + id), a chain visual
+    (node → relationship → node …), and the per-hop table with a source link
+    per row. Linked from the footer nav. `styles.css` gained a `.pf-*`
+    block.
+  - validation: New `tests/test_web_pathfinder.py` (6 — finds the shortest
+    verified path with its `alias_matched` basis and source URL; an
+    unconfirmed name-match edge is not followed (endpoint reports no verified
+    edges); a genuine two-hop path is byte-identical across repeated calls
+    and `max_hops=1` refuses it "within 1 hops"; same endpoint is zero hops;
+    a bad endpoint kind raises; the route is in the OpenAPI doc).
+    `test_portal_isolation` / `test_portal_navigation` / `test_web_openapi`
+    green; `ruff` clean. Browser-verified: `#/pathfinder?from_type=authority&from_id=E09000007&to_type=supplier&to_id=cgl`
+    shows the chain "authority E09000007 → supplier CHANGE GROW LIVE", a
+    "Verified path · 1 hop" finding block and one table row (awarded a
+    contract to · alias_matched · source ↗); an unknown authority renders
+    "no verified edges" rather than an error.
 
 - [DONE] BETA-092 | Record revision comparison
   - completed: 2026-08-29
@@ -5076,11 +5127,11 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | DONE (BETA-092) |
-| P1 | Relationship pathfinder | 5 | 4 | 4 | IN_PROGRESS (BETA-093) |
+| P1 | Relationship pathfinder | 5 | 4 | 4 | DONE (BETA-093) |
 | P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |
-| P2 | Temporal coverage navigator | 4 | 3 | 5 | APPROVED, not queued (BETA-097) |
+| P2 | Temporal coverage navigator | 4 | 3 | 5 | IN_PROGRESS (BETA-097) |
 | P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
 | P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |

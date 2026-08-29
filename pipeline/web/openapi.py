@@ -111,6 +111,21 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/relationship_path": {
+        "surface": "relationship_path",
+        "summary": "The shortest *verified* path between two entities through "
+                   "the source-backed entity graph. Unconfirmed name-match "
+                   "edges are excluded; the traversal is deterministic "
+                   "((relationship, node id) order) and hop-bounded. Every hop "
+                   "carries its source URL.",
+        "parameters": [
+            _p("from_type", desc="provider, authority or supplier. Default provider."),
+            _p("from_id", required=True, desc="The start entity's id (provider_key / ONS code)."),
+            _p("to_type", desc="provider, authority or supplier. Default authority."),
+            _p("to_id", required=True, desc="The end entity's id."),
+            _p("max_hops", typ="integer", desc="1–8, default 6."),
+        ],
+    },
     "/api/v1/relationships/{relationship_id}": {
         "surface": r"relationships/(relationship:[0-9a-f]{64})",
         "summary": "One AWARDED_TO edge and the dated contract notices behind the pair.",

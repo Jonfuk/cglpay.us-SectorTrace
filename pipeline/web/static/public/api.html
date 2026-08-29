@@ -361,6 +361,37 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-relationship_path" data-route="relationship_path">
+    <h3><code>/api/v1/relationship_path</code></h3>
+    <p>
+      A neighbourhood view answers what surrounds one entity; this answers how
+      two known entities are connected. It returns the <strong>shortest
+      verified path</strong> between them through the source-backed entity
+      graph (<code>v_entity_edges</code>). An edge whose basis is an
+      unconfirmed name match — the review gate not yet passed — is not
+      followed, and the restricted shared-officer edges never reach this
+      surface at all. The traversal is deterministic: among equally short
+      paths the one first in <code>(relationship, node id)</code> order is
+      returned. Every hop carries its own source URL and retrieval date.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>from_type</code> / <code>to_type</code></td><td>provider, authority or supplier. Default provider / authority.</td></tr>
+        <tr><td><code>from_id</code> / <code>to_id</code></td><td>The two entity ids (provider_key or ONS code). Both required.</td></tr>
+        <tr><td><code>max_hops</code></td><td>1–8, default 6.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>found</code>, <code>hops</code>, <code>path</code> (one
+      row per hop: from, relationship, basis, to, source_url, retrieved_at),
+      <code>nodes</code> and a <code>note</code>. No path within
+      <code>max_hops</code> returns <code>found: false</code> with a reason,
+      not an error.
+    </p>
+    <p><code>/api/v1/relationship_path?from_type=provider&amp;from_id=cgl&amp;to_type=authority&amp;to_id=E09000007</code></p>
+  </article>
+
   <article class="apiroute" id="route-relationship-detail"
            data-route="relationships/{relationship_id}"
            data-route-pattern="relationships/(relationship:[0-9a-f]{64})">
