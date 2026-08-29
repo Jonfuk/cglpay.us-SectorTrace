@@ -22,11 +22,11 @@ import structlog
 
 from pipeline.assistant import grounding, routing, tools
 from pipeline.assistant.runtime import (
-    LFM_MODEL,
-    LFM_QUANT,
-    NEEDLE_MODEL,
     AssistantUnavailable,
     require_enabled,
+    resolved_lfm_model,
+    resolved_lfm_quant,
+    resolved_needle_model,
 )
 
 log = structlog.get_logger()
@@ -46,9 +46,10 @@ OUTCOMES = ("ok", "abstained", "clarified", "timeout", "unavailable", "failed")
 
 def _models(settings) -> dict:
     return {
-        "router": {"id": NEEDLE_MODEL,
+        "router": {"id": resolved_needle_model(settings),
                    "endpoint": getattr(settings, "assistant_needle_url", None)},
-        "answerer": {"id": LFM_MODEL, "quant": LFM_QUANT,
+        "answerer": {"id": resolved_lfm_model(settings),
+                     "quant": resolved_lfm_quant(settings),
                      "endpoint": getattr(settings, "assistant_ollama_url", None)},
     }
 
@@ -97,9 +98,10 @@ def ask(conn, settings, question: str, *, source_system: str | None = None,
         return ledger.record(
             conn,
             question=question, filters=filters, outcome=outcome,
-            needle_model=NEEDLE_MODEL,
+            needle_model=resolved_needle_model(settings),
             needle_endpoint=getattr(settings, "assistant_needle_url", None),
-            lfm_model=LFM_MODEL, lfm_quant=LFM_QUANT,
+            lfm_model=resolved_lfm_model(settings),
+            lfm_quant=resolved_lfm_quant(settings),
             lfm_endpoint=getattr(settings, "assistant_ollama_url", None),
             router_prompt_sha256=routing.router_prompt_sha256(),
             answer_prompt_sha256=grounding.answer_prompt_sha256(),

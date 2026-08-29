@@ -469,13 +469,14 @@ docker compose exec app python -m pipeline graph rebuild --clear
 
 `assistant_runtime_enabled: false` by default. Set it true and the deploy
 adds one more container from `docker-compose.assistant.yml` — an Ollama
-serving `LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` (731 MB), aliased
-(`ollama cp`) to the two model strings the assistant sends:
-`LiquidAI/LFM2.5-1.2B-Instruct` for synthesis and `needle-2` for the
-router. Both `ASSISTANT_OLLAMA_URL` and
-`ASSISTANT_NEEDLE_URL` in `.env` then point at `http://ollama:11434`, and
-both the `app` and the documents-worker images are rebuilt with the
-`assistant` extra (`openai`). Weights live in the
+that `ollama pull`s `assistant_lfm_ollama_ref`
+(`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` by default, 1.59 GB; override to
+`hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` on a small box). Both
+`ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` in `.env` point at
+`http://ollama:11434`, `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` are
+set to that same pulled reference (no alias — the code sends the name
+Ollama has), and both the `app` and the documents-worker images are
+rebuilt with the `assistant` extra (`openai`). Weights live in the
 `sectortrace-assistant_ollama-models` volume, not in `state_dir/data`.
 
 The CLI and the release gate run in the **documents worker** (it has the
@@ -492,10 +493,10 @@ and it reports `gate.may_enable: true` (see [`docs/assistant.md`](../../docs/ass
 Then set `assistant_app_enabled: true` and re-run the playbook.
 
 The Ollama container's `mem_limit` is **not** in the preflight RAM budget —
-leave headroom yourself on a box that also runs a document worker. If a
-model call 400s with an unknown-model error, Ollama has normalised the tag
-away from the string the code sends; the fix is in the `ollama cp` note in
-`roles/sectortrace/tasks/main.yml`.
+leave headroom yourself on a box that also runs a document worker. A model
+call that 400s with an unknown-model error means `assistant_lfm_model` and
+the actually-pulled `assistant_lfm_ollama_ref` have drifted apart; they
+default to the same value, so this only happens if you set one by hand.
 
 ## What ufw doesn't cover
 

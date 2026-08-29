@@ -63,14 +63,15 @@ Postgres:
 * `assistant_runtime_enabled: true` renders `docker-compose.assistant.yml`
   (one Ollama service on the stack's Docker network), builds **both** the
   `app` and the documents-worker images with `--build-arg
-  INSTALL_ASSISTANT=true` so `openai` is present, brings Ollama up,
-  `ollama pull`s `assistant_lfm_ollama_ref`
-  (`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`), and `ollama cp`s it to **both**
-  strings the adapters send — `LFM_MODEL` and `NEEDLE_MODEL`. One Ollama,
-  one endpoint, two model names: `ASSISTANT_OLLAMA_URL` and
-  `ASSISTANT_NEEDLE_URL` both become `http://ollama:11434/v1`. Ollama's
-  context window is raised to 32K (`OLLAMA_CONTEXT_LENGTH`); the 2048
-  default would truncate the grounding step's passages.
+  INSTALL_ASSISTANT=true` so `openai` is present, brings Ollama up, and
+  `ollama pull`s `assistant_lfm_ollama_ref`. Both `ASSISTANT_OLLAMA_URL`
+  and `ASSISTANT_NEEDLE_URL` become `http://ollama:11434/v1`, and
+  `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` are set to that same
+  pulled reference — so the string the code sends is the name Ollama has,
+  with no `ollama cp` alias, and `assistant_runs` records the model that
+  actually answered. Ollama's context window is raised to 32K
+  (`OLLAMA_CONTEXT_LENGTH`); the 2048 default would truncate the grounding
+  step's passages.
 * `assistant_app_enabled: true` writes `ASSISTANT_ENABLED=true`. Keep it
   false until step 3's gate passes. On a `beta` mirror, set
   `ASSISTANT_ENABLED=true` in `.env.merge` instead so it survives the
@@ -88,21 +89,25 @@ Railway is unaffected: it builds `Dockerfile` with no build args and does
 not build `Dockerfile.documents` at all, so `INSTALL_ASSISTANT` stays
 `false` and neither image it produces gets `openai`.
 
-**The `needle-2` alias.** `NEEDLE_MODEL` is served by the same LFM weights
-under a second Ollama tag rather than a distinct router model — a
-deployment choice, made because one Ollama is simpler to run. The run
-ledger still records `needle_model = "needle-2"` as its own identity, so
-swapping in a real router later is a deployment change, not a code one.
-Ollama compares model names case-insensitively (`types/model`:
-`EqualFold`), so the mixed-case `LiquidAI/LFM2.5-1.2B-Instruct` the code
-sends resolves to the lowercase copy the `ollama cp` creates.
+**Model identity is configurable.** `LFM_MODEL` / `LFM_QUANT` /
+`NEEDLE_MODEL` in `pipeline/assistant/runtime.py` are defaults. The
+`assistant_lfm_model` / `assistant_lfm_quant` / `assistant_needle_model`
+settings (empty on a checkout and in CI — nothing changes) override what
+the adapters send and what `assistant_runs` records. The Ansible roles set
+them to the pulled reference, so serving a different LFM2.5 size does not
+leave the ledger claiming the pin. One Ollama still serves both roles;
+`needle_model` recording the same string as `lfm_model` is the truth on
+that layout — run a distinct router by setting `assistant_needle_model`
+and pulling it too.
 
-**The reference.** `assistant_lfm_ollama_ref` must name a model that
-exists on `ollama.com` — `ollama.com/library/lfm2` is a **24B** model
-(14 GB), not this one. The default,
-`ollama.com/LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`, is the exact model and
-quant pinned above (731 MB, 1.17B params). A missing reference fails the
-provisioning task with `ollama pull`'s own error in the message.
+**The reference.** `assistant_lfm_ollama_ref` must name a model Ollama can
+pull. The default is `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` — LiquidAI's
+GGUF repo on Hugging Face, via Ollama's `hf.co/` syntax (3B params,
+1.59 GB). `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` (0.4B, 219 MB) is the
+small-box option; the 1.2B pinned in the code sits between them. NOT
+`ollama.com/library/lfm2`, which is a 24B model at 14 GB. A missing
+reference fails the provisioning task with `ollama pull`'s own error in the
+message.
 
 ## Using it
 

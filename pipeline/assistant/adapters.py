@@ -1,10 +1,11 @@
 """Assistant adapters (BETA-107): two OpenAI-chat-compatible HTTP backends.
 
-  * `LFMOllamaAdapter` — a local Ollama serving
-    `LiquidAI/LFM2.5-1.2B-Instruct` (Q4_K_M) at its `/v1` endpoint, for
-    32K-context synthesis over what the warehouse already holds.
+  * `LFMOllamaAdapter` — a local Ollama serving `LiquidAI/LFM2.5-1.2B-Instruct`
+    (Q4_K_M) by default at its `/v1` endpoint, for 32K-context synthesis over
+    what the warehouse already holds. The model name is `resolved_lfm_model`,
+    so a deployment can serve a different LFM2.5 size.
   * `NeedleAdapter` — the Needle 2 bounded retrieval router at its own local
-    `/v1` endpoint.
+    `/v1` endpoint (model name `resolved_needle_model`).
 
 Both talk HTTP through the `openai` client (the only `[assistant]` pin), so
 neither needs a native model runtime *in this process*. Every path that
@@ -18,10 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 from pipeline.assistant.runtime import (
-    LFM_MODEL,
-    NEEDLE_MODEL,
     AssistantUnavailable,
     require_enabled,
+    resolved_lfm_model,
+    resolved_needle_model,
 )
 
 _DEFAULT_MAX_TOKENS = 1024
@@ -89,7 +90,7 @@ class LFMOllamaAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_ollama_url", ""),
-            model=LFM_MODEL)
+            model=resolved_lfm_model(settings))
 
 
 class NeedleAdapter(_OpenAICompatAdapter):
@@ -98,7 +99,7 @@ class NeedleAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_needle_url", ""),
-            model=NEEDLE_MODEL)
+            model=resolved_needle_model(settings))
 
 
 _ADAPTERS = {

@@ -29,6 +29,9 @@ from pipeline.assistant.runtime import (
     is_enabled,
     openai_client_installed,
     require_enabled,
+    resolved_lfm_model,
+    resolved_lfm_quant,
+    resolved_needle_model,
     runtime_status,
 )
 
@@ -43,5 +46,8 @@ __all__ = [
     "is_enabled",
     "openai_client_installed",
     "require_enabled",
+    "resolved_lfm_model",
+    "resolved_lfm_quant",
+    "resolved_needle_model",
     "runtime_status",
 ]

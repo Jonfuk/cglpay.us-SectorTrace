@@ -339,31 +339,38 @@ backup_s3_secret: ""
 assistant_runtime_enabled: false
 assistant_app_enabled: false
 
-# One Ollama serves both roles the assistant calls. It pulls this reference
-# once, then `ollama cp`s it to the two model strings
-# pipeline/assistant/adapters.py sends — LFM_MODEL for synthesis and
-# NEEDLE_MODEL for the router — so a request for either resolves to the same
-# weights. Ollama compares model names case-insensitively (types/model:
-# EqualFold), so the pulled lowercase name and the mixed-case constant the
-# code sends match; the `ollama cp` gives each an alias at the :latest tag
-# the code assumes.
+# One Ollama serves both roles the assistant calls (synthesis and the
+# router). It `ollama pull`s this reference once, and the app is told to
+# send exactly this string as the model name — no `ollama cp` alias, so the
+# name the code sends is the name Ollama has, and the run ledger records
+# what actually answered.
 #
-# This is `ollama.com/LiquidAI/lfm2.5-1.2b-instruct` at Q4_K_M — the exact
-# model and quant docs/assistant.md pins (731 MB, 1.17B params, ~125K ctx).
-# NOT `ollama.com/library/lfm2`, which is a 24B model at 14 GB.
-assistant_lfm_ollama_ref: "LiquidAI/lfm2.5-1.2b-instruct:q4_k_m"
-assistant_lfm_model_tag: "LiquidAI/LFM2.5-1.2B-Instruct"
-assistant_needle_model_tag: "needle-2"
+# Default: `LiquidAI/LFM2.5-2.6B-GGUF` at Q4_K_M, pulled from Hugging Face
+# via Ollama's `hf.co/` syntax (3B params, 1.59 GB). The pinned constant in
+# pipeline/assistant/runtime.py is the 1.2B-Instruct; serving a different
+# LFM2.5 size is exactly what assistant_lfm_model below is for. For a small
+# box, `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` (0.4B, 219 MB) — faster,
+# less likely to clear the eval gate. NOT `ollama.com/library/lfm2`, a 24B
+# model at 14 GB.
+assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+
+# What the adapters put in the `model` field and the ledger records
+# (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). Default to the
+# pulled reference so the wire call matches; override independently only to
+# run a genuinely separate router model on the same Ollama.
+assistant_lfm_model: "{{ assistant_lfm_ollama_ref }}"
+assistant_lfm_quant: "Q4_K_M"
+assistant_needle_model: "{{ assistant_lfm_ollama_ref }}"
 
 # Pinned like every other image here (neo4j:5-community, caddy:2-alpine).
-# Bump deliberately; lfm2 needs a build recent enough to know the
+# Bump deliberately; LFM2.5 needs a build recent enough to know the
 # architecture. A wrong tag fails cleanly at `docker compose pull` and
 # breaks nothing already running.
 assistant_ollama_image: "ollama/ollama:0.6.0"
 
 # A ceiling, not a reservation — the same blast-radius reasoning as
-# documents_mem_limit_mb. Inference of a 1.2B Q4 model sits well inside this.
-# NOT part of the preflight role's RAM budget: that role predates this
+# documents_mem_limit_mb. A 2.6B Q4 model plus a 32K KV cache sits inside
+# this. NOT part of the preflight role's RAM budget: that role predates this
 # service and does not know to reserve for it, so leave headroom yourself on
 # a box that also runs a document worker.
-assistant_ollama_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.2) | int, 1536] | max, 4096] | min }}"
+assistant_ollama_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.25) | int, 3072] | max, 6144] | min }}"

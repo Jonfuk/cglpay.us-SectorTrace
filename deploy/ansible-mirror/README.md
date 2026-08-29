@@ -531,15 +531,16 @@ Set the list back to empty and re-run to tear all of it down again.
 ## The local analyst assistant (optional, off)
 
 `assistant_runtime_enabled: false` by default, the same switch and the same
-`docker-compose.assistant.yml` as the self-host build — an Ollama serving
-`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m`, aliased to
-`LiquidAI/LFM2.5-1.2B-Instruct` and `needle-2`, with
-`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it and both the
-`app` and documents-worker images rebuilt with `openai`. `sectortrace-mirror
-nlp assistant` and `nlp assistant-eval` run in the documents worker (where
-the `nlp` extra and the eval fixtures are); the `app` container carries
-`openai` for the HTTP admin endpoint only. It reads only warehouse content,
-so a mirror is a legitimate host for it.
+`docker-compose.assistant.yml` as the self-host build — an Ollama that
+pulls `assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
+by default; `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` for a small box), with
+`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it,
+`ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` set to that same reference
+(no alias), and both the `app` and documents-worker images rebuilt with
+`openai`. `sectortrace-mirror nlp assistant` and `nlp assistant-eval` run
+in the documents worker (where the `nlp` extra and the eval fixtures are);
+the `app` container carries `openai` for the HTTP admin endpoint only. It
+reads only warehouse content, so a mirror is a legitimate host for it.
 
 Two mirror-specific things:
 

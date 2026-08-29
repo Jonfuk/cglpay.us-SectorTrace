@@ -292,11 +292,23 @@ class Settings(BaseSettings):
     # and configured without connecting. Two OpenAI-chat-compatible HTTP
     # endpoints: a local Ollama serving `LiquidAI/LFM2.5-1.2B-Instruct`
     # (Q4_K_M) for 32K-context synthesis, and the Needle 2 bounded retrieval
-    # router. The model id and quant are pinned in
-    # `pipeline/assistant/adapters.py`, not here.
+    # router. The default model id and quant are pinned in
+    # `pipeline/assistant/runtime.py`, not here.
     assistant_enabled: bool = False
     assistant_ollama_url: str = "http://127.0.0.1:11434/v1"
     assistant_needle_url: str = "http://127.0.0.1:8422/v1"
+
+    # What the adapters put in the `model` field of each request, and what
+    # `assistant_runs` records as the model that answered. Empty means the
+    # pinned defaults (`LFM_MODEL` / `LFM_QUANT` / `NEEDLE_MODEL` in
+    # `pipeline/assistant/runtime.py`) — CI and a fresh checkout leave them
+    # empty and nothing changes. A deployment serving a different LFM2.5
+    # size, or an Ollama that knows the weights by a `hf.co/...` name, sets
+    # these so the wire call matches the served model and the ledger records
+    # what actually ran rather than the pin.
+    assistant_lfm_model: str = ""
+    assistant_lfm_quant: str = ""
+    assistant_needle_model: str = ""
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 

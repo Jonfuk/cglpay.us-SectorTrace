@@ -27,7 +27,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from pipeline.assistant.runtime import LFM_MODEL, LFM_QUANT
+from pipeline.assistant.runtime import (
+    LFM_MODEL,
+    LFM_QUANT,
+    resolved_lfm_model,
+    resolved_lfm_quant,
+)
 
 _ABSTAIN = "INSUFFICIENT_EVIDENCE"
 _MAX_ANSWER_TOKENS = 700
@@ -186,4 +191,6 @@ def answer(question: str, tool_envelope: dict, *, settings: Any,
 
     return GroundedAnswer(
         outcome="answered", reason="grounded", answer=text,
-        citations=[resolved[c] for c in cited], cited_ids=cited, raw=raw)
+        citations=[resolved[c] for c in cited], cited_ids=cited, raw=raw,
+        model={"id": resolved_lfm_model(settings),
+               "quant": resolved_lfm_quant(settings)})

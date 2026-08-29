@@ -382,20 +382,15 @@
         or 'Error:' in (sectortrace_mirror_ollama_pull.stdout + sectortrace_mirror_ollama_pull.stderr)
         or 'file does not exist' in (sectortrace_mirror_ollama_pull.stdout + sectortrace_mirror_ollama_pull.stderr)
 
-    # pipeline/assistant/adapters.py sends fixed model strings (LFM_MODEL and
-    # NEEDLE_MODEL in runtime.py). Alias the pulled weights to both, at the
-    # :latest tag those strings resolve to. Ollama matches names
-    # case-insensitively (types/model: EqualFold), so the mixed-case
-    # constants find the lowercase copy. `ollama cp` overwrites, so a re-run
-    # is a no-op.
-    - name: Alias the pulled weights to the tags the assistant sends
+    # No `ollama cp` alias: env.j2 sets ASSISTANT_LFM_MODEL /
+    # ASSISTANT_NEEDLE_MODEL to assistant_lfm_ollama_ref, so the string the
+    # app sends is the exact name Ollama pulled — nothing to rename, and the
+    # ledger records the model that actually answered.
+    - name: Confirm Ollama now has the model
       ansible.builtin.command:
-        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama cp {{ assistant_lfm_ollama_ref }} {{ item }}
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama show {{ assistant_lfm_ollama_ref }}
         chdir: "{{ state_dir }}"
-      loop:
-        - "{{ assistant_lfm_model_tag }}"
-        - "{{ assistant_needle_model_tag }}"
-      changed_when: true
+      changed_when: false
   rescue:
     - name: Collect Ollama logs
       ansible.builtin.command:

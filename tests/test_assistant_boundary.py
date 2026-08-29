@@ -42,6 +42,30 @@ def test_runtime_status_is_off_by_default_and_contacts_nothing(settings) -> None
     assert "no endpoint was contacted" in status["note"].lower()
 
 
+def test_model_identity_is_overridable_and_defaults_to_the_pin(settings, monkeypatch) -> None:
+    from pipeline.assistant import runtime_status
+    from pipeline.assistant.runtime import (
+        resolved_lfm_model,
+        resolved_lfm_quant,
+        resolved_needle_model,
+    )
+
+    # Empty settings -> the pinned constants, unchanged.
+    assert resolved_lfm_model(settings) == "LiquidAI/LFM2.5-1.2B-Instruct"
+    assert resolved_lfm_quant(settings) == "Q4_K_M"
+    assert resolved_needle_model(settings) == "needle-2"
+
+    # A deployment serving a different size sets them; status reflects it.
+    monkeypatch.setattr(settings, "assistant_lfm_model",
+                        "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M", raising=False)
+    monkeypatch.setattr(settings, "assistant_needle_model",
+                        "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M", raising=False)
+    status = runtime_status(settings)
+    assert status["model"]["id"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+    assert status["adapters"]["lfm-ollama"]["model"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+    assert status["adapters"]["needle-2"]["model"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+
+
 def test_get_adapter_refuses_while_the_layer_is_disabled(settings) -> None:
     from pipeline.assistant import AssistantUnavailable, get_adapter
 

@@ -16,10 +16,25 @@ from typing import Any
 
 # The pinned local model, kept here (not in `adapters.py`) so `runtime.py`
 # has no import cycle with the adapters. Installed out of band on the
-# analysis host via Ollama; never by pip.
+# analysis host via Ollama; never by pip. These are the defaults — a
+# deployment overrides them through the `assistant_*_model` / `_quant`
+# settings (see `resolved_*` below), e.g. to serve a larger LFM2.5 size or
+# to name the weights by the `hf.co/...` string an Ollama pulled them under.
 LFM_MODEL = "LiquidAI/LFM2.5-1.2B-Instruct"
 LFM_QUANT = "Q4_K_M"
 NEEDLE_MODEL = "needle-2"
+
+
+def resolved_lfm_model(settings: Any) -> str:
+    return getattr(settings, "assistant_lfm_model", "") or LFM_MODEL
+
+
+def resolved_lfm_quant(settings: Any) -> str:
+    return getattr(settings, "assistant_lfm_quant", "") or LFM_QUANT
+
+
+def resolved_needle_model(settings: Any) -> str:
+    return getattr(settings, "assistant_needle_model", "") or NEEDLE_MODEL
 
 
 class AssistantUnavailable(RuntimeError):
@@ -49,15 +64,16 @@ def runtime_status(settings: Any) -> dict:
         "enabled": enabled,
         "openai_client_installed": installed,
         "ready": enabled and installed,
-        "model": {"id": LFM_MODEL, "quant": LFM_QUANT},
+        "model": {"id": resolved_lfm_model(settings),
+                  "quant": resolved_lfm_quant(settings)},
         "adapters": {
             "lfm-ollama": {
                 "endpoint": getattr(settings, "assistant_ollama_url", None),
-                "model": LFM_MODEL,
+                "model": resolved_lfm_model(settings),
             },
             "needle-2": {
                 "endpoint": getattr(settings, "assistant_needle_url", None),
-                "model": NEEDLE_MODEL,
+                "model": resolved_needle_model(settings),
             },
         },
         "note": "Off by default; local analysis host only; the Railway image "
