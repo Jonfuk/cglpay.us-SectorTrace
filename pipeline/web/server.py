@@ -1109,6 +1109,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/schema":
             return {"objects": queries.list_objects(conn)}
 
+        if path == "/api/admin/schema-graph":
+            # BETA-083: a read-only schema graph — tables, columns, FK edges
+            # and short descriptions — from the existing catalogue helpers.
+            return queries.schema_graph(conn)
+
         if path == "/api/review":
             return queries.review_items(
                 conn,

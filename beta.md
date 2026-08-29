@@ -297,22 +297,23 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-083 | Schema-aware data explorer
-  - priority: P2
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: admin/data
-  - depends_on: BETA-048, BETA-080, BETA-085
-  - objective: Add schema search, table descriptions, column metadata,
-    foreign-key navigation, saved read-only queries, pinned columns, JSON
-    inspection and links between related records to Database and SQL.
-  - next_action: Generate a read-only schema graph from existing metadata
-    routes; retain restricted-table confirmation, timeout and row caps.
+- [IN_PROGRESS] BETA-084 | Page-level evidence health strip
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/trust
+  - depends_on: BETA-039, BETA-043, BETA-059, BETA-080
+  - objective: Standardise scope, verification state, latest retrieval,
+    coverage completeness, licence and known limitations at the top of every
+    public evidence page.
+  - next_action: Define one evidence-health view model with explicit
+    unknown/not-collected states and links to the authoritative catalogue and
+    coverage records.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–082 are complete, see DONE. Wave 4 (BETA-082–087) is
+on 2026-08-29. BETA-068–083 are complete, see DONE. Wave 4 (BETA-082–087) is
 in progress. The remaining items are being delivered in the approved wave
 order.)_
 
@@ -549,6 +550,52 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-083 | Schema-aware data explorer
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: admin/data
+  - depends_on: BETA-048, BETA-080, BETA-085
+  - objective: Add schema search, table descriptions, column metadata,
+    foreign-key navigation, saved read-only queries, pinned columns, JSON
+    inspection and links between related records to Database and SQL.
+  - result: New `catalog.foreign_key_columns(conn)` — column-level FK edges
+    `{child, from_col, parent, to_col}` on both backends (SQLite
+    `PRAGMA foreign_key_list`; PostgreSQL `pg_constraint` unnested), where the
+    existing `foreign_keys()` only gave table pairs. New
+    `queries.schema_graph(conn)` composes a **read-only** graph from the
+    catalogue helpers: every table/view with `type`, `rows`, `restricted`, a
+    short `description` (from a `SCHEMA_DESCRIPTIONS` registry of ~24 core
+    tables), and `columns` each carrying `type` / `notnull` / `pk` and an
+    `fk` object when it references another table; plus table-level `edges`.
+    No row reads — the table browser's restricted-table gate, timeout and row
+    caps are untouched. New route `GET /api/admin/schema-graph`. The admin
+    Database tab gains a "Columns & keys" `<details>` above the data table
+    (fetched once, cached): the table description and a column table where an
+    FK column is a link that opens the parent table. The SQL tab gains named
+    **saved queries** (`sql-saved` select + a "Save" button, `localStorage`
+    key `cglpay.sql.saved`) alongside the existing unnamed history — shift-
+    select a saved entry to delete it.
+  - api/ui: new read-only route `GET /api/admin/schema-graph` (admin
+    boundary; no params). New admin HTML `#table-schema`, `#sql-save`,
+    `#sql-saved`; new CSS `.schema-panel`, `.schema-cols`.
+  - not done: pinned columns and JSON-cell pretty-print in the table browser
+    — deferred; the schema graph, descriptions, FK navigation and saved
+    queries are the substance of the first_action.
+  - validation: New `tests/test_web_schema_graph.py` (4 — the graph describes
+    tables/columns/keys with the `evidence_id → evidence_records` FK on
+    `document_records` and the matching table edge; it reads no rows and
+    keeps the `restricted_` flag with the sidebar's `rows` shape; the
+    column-level FK helper drops self-references and gives
+    `{child, from_col, parent, to_col}`; the route serves it).
+    `test_web_admin` / `test_catalog` green. `ruff` clean. Browser-verified:
+    opening `document_records` shows the "Columns & keys" panel with 17
+    columns, its description and a "→ evidence_records" FK link that opens
+    that table; the SQL tab has the Save button and Saved select.
 
 - [DONE] BETA-082 | Pipeline mission control
   - completed: 2026-08-29
@@ -4413,8 +4460,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Shared responsive design system | 4 | 4 | 5 | DONE (BETA-080) |
 | P1 | Document reading room | 5 | 5 | 4 | DONE (BETA-081) |
 | P1 | Pipeline mission control | 5 | 5 | 4 | DONE (BETA-082) |
-| P2 | Schema-aware data explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-083) |
-| P1 | Page-level evidence health strip | 5 | 3 | 5 | APPROVED, not queued (BETA-084) |
+| P2 | Schema-aware data explorer | 4 | 4 | 4 | DONE (BETA-083) |
+| P1 | Page-level evidence health strip | 5 | 3 | 5 | IN_PROGRESS (BETA-084) |
 | P1 | Responsive admin navigation | 5 | 4 | 5 | APPROVED, not queued (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | APPROVED, not queued (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | APPROVED, not queued (BETA-087) |

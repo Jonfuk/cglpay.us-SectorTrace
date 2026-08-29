@@ -1533,6 +1533,43 @@ async function loadTable(search) {
     return toast(e.message, true);
   }
   renderTable(data, term);
+  renderSchemaPanel(name);
+}
+
+// BETA-083: the read-only schema graph, fetched once and reused. Tables,
+// columns, foreign keys and short descriptions from /api/admin/schema-graph.
+let schemaGraph = null;
+async function renderSchemaPanel(name) {
+  const holder = $('#table-schema');
+  if (!holder) return;
+  if (!schemaGraph) {
+    try { schemaGraph = await api('/api/admin/schema-graph'); }
+    catch (e) { holder.hidden = true; return; }
+  }
+  const table = (schemaGraph.tables || []).find((t) => t.name === name);
+  if (!table) { holder.hidden = true; return; }
+  holder.hidden = false;
+
+  const rows = table.columns.map((column) => el('tr', {},
+    el('td', { class: 'mono small', text: column.name }),
+    el('td', { class: 'small', text: column.type || '' }),
+    el('td', { class: 'small', text: [column.pk ? 'pk' : null, column.notnull ? 'not null' : null].filter(Boolean).join(' ') }),
+    el('td', { class: 'small' }, column.fk
+      ? el('a', {
+          href: `#database?table=${encodeURIComponent(column.fk.table)}`,
+          onclick: () => openObject(column.fk.table),
+          title: `references ${column.fk.table}.${column.fk.column}`,
+        }, `→ ${column.fk.table}`)
+      : null)));
+
+  replace(holder,
+    el('summary', { text: `Columns & keys — ${table.columns.length} columns` }),
+    table.description ? el('p', { class: 'muted small', text: table.description }) : null,
+    el('table', { class: 'schema-cols' },
+      el('thead', {}, el('tr', {},
+        el('th', { text: 'column' }), el('th', { text: 'type' }),
+        el('th', { text: 'key' }), el('th', { text: 'references' }))),
+      el('tbody', {}, ...rows)));
 }
 
 function renderRestrictedGate(name, message) {
@@ -1636,6 +1673,36 @@ function renderSqlHistory() {
       // multi-line query renders as a run of spaces without this.
       text: sql.replace(/\s+/g, ' ').slice(0, 90),
     })),
+  ]);
+  select.value = '';
+}
+
+// BETA-083: named, saved read-only queries — distinct from `sql-history`
+// (which is the last N run, unnamed). Local to this browser.
+const SQL_SAVED_KEY = 'cglpay.sql.saved';
+function savedSql() {
+  try { return JSON.parse(localStorage.getItem(SQL_SAVED_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+function saveSql(name, sql) {
+  const all = { ...savedSql(), [name]: sql };
+  try { localStorage.setItem(SQL_SAVED_KEY, JSON.stringify(all)); }
+  catch (e) { /* private mode */ }
+  renderSavedSql();
+}
+function deleteSavedSql(name) {
+  const all = savedSql(); delete all[name];
+  try { localStorage.setItem(SQL_SAVED_KEY, JSON.stringify(all)); }
+  catch (e) { /* private mode */ }
+  renderSavedSql();
+}
+function renderSavedSql() {
+  const select = $('#sql-saved');
+  if (!select) return;
+  const names = Object.keys(savedSql()).sort();
+  replace(select, [
+    el('option', { value: '', text: names.length ? `${names.length} saved` : '—' }),
+    ...names.map((name) => el('option', { value: name, text: name })),
   ]);
   select.value = '';
 }
@@ -1769,7 +1836,22 @@ function init() {
     $('#sql-input').focus();
     event.target.value = '';
   });
+  $('#sql-save').addEventListener('click', () => {
+    const sql = $('#sql-input').value.trim();
+    if (!sql) return;
+    const name = prompt('Save this query as:');
+    if (name && name.trim()) saveSql(name.trim(), sql);
+  });
+  $('#sql-saved').addEventListener('change', (event) => {
+    const name = event.target.value;
+    if (!name) return;
+    if (event.shiftKey) { deleteSavedSql(name); return; }
+    $('#sql-input').value = savedSql()[name] || '';
+    $('#sql-input').focus();
+    event.target.value = '';
+  });
   renderSqlHistory();
+  renderSavedSql();
 
   setInterval(retickTimes, 60_000);
 

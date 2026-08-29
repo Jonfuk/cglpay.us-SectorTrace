@@ -611,3 +611,10 @@ a.jump:hover { border-bottom-style: solid; }
 .mc-wave h3 { margin: 0 0 6px; }
 .mc-modules { list-style: none; margin: 0; padding: 0; }
 .mc-modules li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 0; }
+
+/* BETA-083: schema panel on the Database tab. */
+.schema-panel { margin: 6px 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.schema-panel > summary { cursor: pointer; color: var(--accent); }
+.schema-panel p { margin: 4px 0; }
+.schema-cols { margin-top: 6px; }
+.schema-cols th { font-size: 11.5px; }

@@ -688,6 +688,9 @@
       </aside>
       <div class="tablearea">
         <div class="tablehead" id="table-head"></div>
+        <!-- BETA-083: the selected table's description, columns and
+             foreign keys, from the read-only schema graph. -->
+        <details class="schema-panel" id="table-schema"></details>
         <div class="tablewrap"><table id="data-table"></table></div>
         <div class="pager" id="table-pager"></div>
       </div>
@@ -713,8 +716,12 @@
         <button class="btn primary" id="sql-run">Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
         <button class="btn" id="sql-explain" title="How SQLite would answer this: which indexes it uses, and where it scans">Explain</button>
         <button class="btn" id="sql-csv" title="Download these results as CSV">CSV</button>
+        <button class="btn" id="sql-save" title="Save this query under a name (this browser only)">Save</button>
         <span id="sql-status" class="muted"></span>
         <span class="spacer"></span>
+        <label class="small muted">Saved
+          <select id="sql-saved"><option value="">—</option></select>
+        </label>
         <label class="small muted">History
           <select id="sql-history"><option value="">—</option></select>
         </label>

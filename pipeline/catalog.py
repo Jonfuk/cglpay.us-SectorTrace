@@ -207,6 +207,47 @@ def primary_key(conn, name: str) -> list[str]:
     return [c["name"] for c in columns_of(conn, name) if c["pk"]]
 
 
+def foreign_key_columns(conn) -> list[dict]:
+    """Column-level foreign keys: `{child, from_col, parent, to_col}` per edge.
+
+    `foreign_keys` above collapses these to `(child, parent)` table pairs for
+    load ordering. The schema-aware data explorer (BETA-083) wants the column
+    a value in a browsed row can be followed *from*, and the column it lands
+    *on*, so a cell can become a link to the matching parent row.
+    """
+    out: list[dict] = []
+    if db.backend_of(conn) == "postgres":
+        rows = conn.execute(
+            "SELECT r.relname AS child, "
+            "       a.attname AS from_col, "
+            "       cr.relname AS parent, "
+            "       af.attname AS to_col "
+            "FROM pg_constraint c "
+            "JOIN pg_class r ON r.oid = c.conrelid "
+            "JOIN pg_class cr ON cr.oid = c.confrelid "
+            "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+            "JOIN unnest(c.confkey) WITH ORDINALITY AS fk(attnum, ord) "
+            "  ON fk.ord = k.ord "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "JOIN pg_attribute af ON af.attrelid = c.confrelid AND af.attnum = fk.attnum "
+            "WHERE c.contype = 'f' "
+            "  AND r.relnamespace = current_schema()::regnamespace"
+        ).fetchall()
+        for r in rows:
+            if r["child"] != r["parent"]:
+                out.append({"child": r["child"], "from_col": r["from_col"],
+                            "parent": r["parent"], "to_col": r["to_col"]})
+        return sorted(out, key=lambda e: (e["child"], e["from_col"]))
+
+    for child in table_names(conn):
+        for row in conn.execute(
+                f"PRAGMA foreign_key_list({quote(child)})").fetchall():
+            if row["table"] != child:
+                out.append({"child": child, "from_col": row["from"],
+                            "parent": row["table"], "to_col": row["to"]})
+    return sorted(out, key=lambda e: (e["child"], e["from_col"]))
+
+
 def foreign_keys(conn) -> list[tuple[str, str]]:
     """Every `(child, parent)` foreign-key edge, deduplicated and sorted.
 

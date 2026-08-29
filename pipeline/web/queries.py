@@ -308,6 +308,87 @@ def object_type(conn, name: str) -> str | None:
     return catalog.object_type(conn, name)
 
 
+# BETA-083: one-line descriptions for the tables an operator opens most. Not
+# exhaustive — an undescribed table simply has no description line. Kept short
+# and factual; the authoritative account of a source table is its migration
+# comment and docs/SOURCES.md.
+SCHEMA_DESCRIPTIONS = {
+    "authorities": "One row per English local authority (ONS geography).",
+    "providers": "Tracked provider organisations; `is_target` marks campaign subjects.",
+    "provider_identifiers": "External ids (charity number, company number) per provider.",
+    "contracts": "Procurement notices matched to the sector keyword set.",
+    "council_spend": "Published council payment lines from spend-transparency files.",
+    "public_health_grants": "Public health grant allocations per authority per year.",
+    "la_revenue_budgets": "Local-authority budgeted spend, by section and line code.",
+    "fingertips_indicators": "OHID Fingertips indicator catalogue.",
+    "fingertips_la_values": "Per-authority Fingertips values with 95% intervals.",
+    "ndtms_la_statistics": "NDTMS modelled local-authority estimates.",
+    "cqc_locations": "CQC-registered locations for tracked providers.",
+    "hse_enforcement_notices": "HSE enforcement notices matched to a provider.",
+    "pfd_reports": "Coroners' Prevention of Future Deaths reports (metadata).",
+    "pfd_provider_mentions": "A provider mentioned in a PFD report; `mention_type` distinguishes recipient from body text.",
+    "sar_documents": "Safeguarding Adult Review documents from the National SAR Library.",
+    "tribunal_cases": "Employment tribunal cases with a provider as a party.",
+    "document_records": "Parsed documents (committee papers, CDP documents).",
+    "document_elements": "One row per parsed element of a document version.",
+    "document_versions": "Parse versions of a document; `is_active` is the current one.",
+    "evidence_records": "The provenance envelope: source URL, retrieval time, payload hash.",
+    "review_queue": "Candidates awaiting a human decision.",
+    "run_ledger": "One durable row per run of the shared module runner.",
+    "schema_migrations": "Which migration files have been applied.",
+    "parse_failures": "Rows a module could not parse, with a logged reason.",
+}
+
+
+def schema_graph(conn: db.Connection) -> dict:
+    """A read-only schema graph (BETA-083): every table and view with its
+    columns, its foreign-key edges (table- and column-level) and a short
+    description where one is registered.
+
+    Composed from the existing catalogue helpers; no new SQL surface and no
+    row reads. The table browser's own restricted-table gate, timeout and row
+    caps are unchanged — this only describes the shape.
+    """
+    objects = sorted(catalog.list_objects(conn), key=lambda o: (o["type"], o["name"]))
+    with _guarded(conn):
+        counts = catalog.row_counts(
+            conn, [o["name"] for o in objects if o["type"] == "table"])
+
+    fk_cols = catalog.foreign_key_columns(conn)
+    fk_by_child: dict[str, dict[str, dict]] = {}
+    for edge in fk_cols:
+        fk_by_child.setdefault(edge["child"], {})[edge["from_col"]] = {
+            "table": edge["parent"], "column": edge["to_col"],
+        }
+
+    tables = []
+    for obj in objects:
+        name = obj["name"]
+        cols = catalog.columns_of(conn, name)
+        fks = fk_by_child.get(name, {})
+        tables.append({
+            "name": name,
+            "type": obj["type"],
+            "restricted": is_restricted(name),
+            "rows": counts.get(name),
+            "description": SCHEMA_DESCRIPTIONS.get(name),
+            "columns": [
+                {
+                    "name": c["name"], "type": c["type"],
+                    "notnull": c["notnull"], "pk": c["pk"],
+                    "fk": fks.get(c["name"]),
+                }
+                for c in cols
+            ],
+        })
+
+    return {
+        "tables": tables,
+        "edges": [list(pair) for pair in catalog.foreign_keys(conn)],
+        "described": sum(1 for t in tables if t["description"]),
+    }
+
+
 def columns_of(conn, name: str) -> list[dict]:
     return catalog.columns_of(conn, name)
 
