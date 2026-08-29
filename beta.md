@@ -27,14 +27,16 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
   directly, not `beta`). As reconciled for this roadmap update on
-  2026-08-29, local `beta` and `origin/beta` are both at **`980b681`**,
-  completing BETA-067; see Recent Commits for the delivered sequence.
+  2026-08-29, local `beta` and `origin/beta` are both at **`b6aba7b`**,
+  which records the first approved front-end refinement programme after
+  BETA-067; see Recent Commits for the delivered sequence.
 - **BETA-038–049 is complete. Last completed queue item: BETA-067. No
   IN_PROGRESS item: the approved successor programme (BETA-050 through
   BETA-067, delivered in four waves) is complete, as is the original
   BETA-038–049 round. The project owner has approved the next twenty-item
-  front-end refinement programme, BETA-068–087, but it has not yet been
-  promoted into the execution queue.** BETA-028 and
+  front-end refinement programme, BETA-068–087, and a further nineteen-item
+  programme, BETA-088–106, but neither has been promoted into the execution
+  queue.** BETA-028 and
   BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
@@ -47,6 +49,12 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   programme. The final selection deliberately excludes the proposed homepage
   hierarchy, public download centre and terminology layer, replacing them
   with focused workforce-pay, treatment-metric and safety/legal explorers.
+- The project owner then approved BETA-088–106 after a second audit and three
+  selection rounds. This additional programme adds local research continuity,
+  change and publication awareness, version and relationship exploration,
+  document-table inspection, resilient source access, and deeper read-only
+  operator diagnostics. The explicitly rejected reference-network proposal
+  is not part of the programme. BETA-068–087 retains execution priority.
 - Recent feature commits record the full offline suite green up to **2615
   passed**. BETA-035's earlier documentation run recorded the known flaky
   concurrency timing test once and then passing in isolation. This journal-
@@ -112,6 +120,13 @@ reading, focused pay/treatment/safety exploration, navigable entity and
 document workbenches, geographic discovery, evidence-health context and
 operator workflows. It adds no dataset or speculative analysis and remains
 unqueued until implementation is explicitly started.
+
+The approved BETA-088–106 programme extends that foundation into a research
+workspace: local notebooks and alerts, visible source/release change, record
+comparison, relationship paths, careful co-occurrence/discrepancy views,
+contract and document inspection, and operator-side run, parser, validation
+and review-quality tools. It is also approved but unqueued and does not
+displace BETA-068–087.
 
 ## Comparable Product Research (2026-08-26, per the project owner's request)
 
@@ -3561,6 +3576,10 @@ when the programme is started.)_
 5. **Queue state:** the programme is approved but unqueued. When implementation
    is explicitly started, promote BETA-068 to IN_PROGRESS and no more than the
    next five dependency-safe items to NEXT.
+6. **BETA-088–106 — second approved refinement programme:** research
+   continuity and monitoring, evidence/version exploration, contract and
+   document inspection, pipeline diagnostics and quality-control workflows.
+   These items remain behind BETA-068–087 unless explicitly reprioritised.
 
 **Hard boundary:** BETA-034 stays BLOCKED until `gate-034g` succeeds on a
 human-reviewed corpus. BETA-046 may expose the already-built search diagnostic;
@@ -3651,10 +3670,31 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Responsive admin navigation | 5 | 4 | 5 | APPROVED, not queued (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | APPROVED, not queued (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | APPROVED, not queued (BETA-087) |
+| P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
+| P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
+| P1 | “What changed?” evidence feed | 5 | 5 | 4 | APPROVED, not queued (BETA-090) |
+| P2 | Source publication calendar | 4 | 3 | 4 | APPROVED, not queued (BETA-091) |
+| P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |
+| P1 | Relationship pathfinder | 5 | 4 | 4 | APPROVED, not queued (BETA-093) |
+| P2 | Visual research journey | 4 | 3 | 4 | APPROVED, not queued (BETA-094) |
+| P1 | Entity co-occurrence explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-095) |
+| P1 | Evidence discrepancy explorer | 5 | 5 | 3 | APPROVED, not queued (BETA-096) |
+| P2 | Temporal coverage navigator | 4 | 3 | 5 | APPROVED, not queued (BETA-097) |
+| P1 | Contract diary and milestone calendar | 5 | 4 | 4 | APPROVED, not queued (BETA-098) |
+| P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
+| P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
+| P1 | Run-to-run output comparison | 5 | 4 | 4 | APPROVED, not queued (BETA-101) |
+| P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | APPROVED, not queued (BETA-102) |
+| P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
+| P2 | Validation-rule explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-104) |
+| P2 | Review-outcome analytics | 4 | 4 | 4 | APPROVED, not queued (BETA-105) |
+| P1 | Quality-control sampling workspace | 5 | 5 | 3 | APPROVED, not queued (BETA-106) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-programme
-subsections below preserve the owner's selected scope before promotion.
+subsections below preserve the owner's selected scope before promotion. The
+second programme contains nineteen items because its final reference-network
+candidate was explicitly discarded rather than replaced.
 
 ### Approved successor round (BETA-050–067)
 
@@ -4388,6 +4428,363 @@ BETA-078–081, and Wave 4 is BETA-082–087. BETA-080 is a dependency for sever
 later UI items but must be incremental, not a blocking rewrite. Maintain one
 IN_PROGRESS item and no more than five NEXT items.
 
+### Second approved front-end refinement programme (BETA-088–106)
+
+Approved by the project owner on 2026-08-29 after auditing the first refinement
+round and completing three explicit selection passes. These nineteen IDs are
+persistent, approved backlog items but are **not execution-queue entries**.
+BETA-068–087 remains the next programme. The proposed explicit-reference
+network and all ideas discarded from the first round remain excluded.
+
+This programme inherits the existing architecture and evidence boundaries. It
+adds no public account or write path. Personal research state stays local and
+exportable. Change, discrepancy, co-occurrence, path and quality-control views
+must expose their deterministic basis and must not infer identity, causation,
+culpability, evidence quality or reviewer performance.
+
+#### BETA-088 | Evidence notebook
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 2
+- area: public/research workspace
+- depends_on: BETA-072, BETA-077, BETA-080
+- objective: Let readers pin records, passages, charts, providers and
+  authorities into named, reorderable local collections with private notes and
+  lossless JSON import/export.
+- rationale: The portal supports discovery and sharing but not sustained
+  collection of evidence across routes; an account system is unnecessary for
+  a useful single-browser workspace.
+- suggested_first_action: Define a versioned, size-bounded local collection
+  schema using stable public identifiers and explicit missing-item states.
+
+#### BETA-089 | Saved searches and change alerts
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: public/search and monitoring
+- depends_on: BETA-072, BETA-090
+- objective: Save complete searches locally, show new-match counts after a
+  later release and provide stable Atom feeds for external subscription.
+- rationale: Repeat researchers should not need to reconstruct queries or
+  manually rescan unchanged result sets; local state and feeds avoid accounts
+  and email infrastructure.
+- suggested_first_action: Specify canonical query fingerprints, release
+  cursors and an additive read-only feed endpoint with explicit retention.
+
+#### BETA-090 | “What changed?” evidence feed
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 4
+- risk: 4
+- area: public/change awareness
+- depends_on: BETA-058, BETA-068, BETA-084
+- objective: Publish a filterable chronology of evidence added, changed,
+  withdrawn, superseded or newly verified by source, provider, authority,
+  evidence type and release.
+- rationale: Current pages show the latest warehouse state but do not reveal
+  what changed between collections or decisions.
+- suggested_first_action: Define an append-only change-event model that
+  distinguishes source changes, parser changes and human-review changes.
+
+#### BETA-091 | Source publication calendar
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: public/source coverage
+- depends_on: BETA-043, BETA-059, BETA-084
+- objective: Show each source's stated or observed release cadence, last
+  publication, next expected window and overdue/unknown status.
+- rationale: A publisher not releasing data and SectorTrace not collecting it
+  are different conditions that freshness alone cannot explain.
+- suggested_first_action: Add nullable cadence and expectation metadata to the
+  dataset catalogue, labelling observed estimates separately from stated dates.
+
+#### BETA-092 | Record revision comparison
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 4
+- risk: 3
+- area: public/version inspection
+- depends_on: BETA-050, BETA-060, BETA-081, BETA-090
+- objective: Compare successive procurement notices, documents, provider
+  records and regulatory entries with field-aware and text-aware diffs.
+- rationale: Readers need to distinguish a source amendment from parser or
+  normalisation changes rather than treating the latest row as timeless.
+- suggested_first_action: Prove stable version identity and before/after
+  fixtures for one OCDS record and one parsed document on both databases.
+
+#### BETA-093 | Relationship pathfinder
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 4
+- area: public/relationships
+- depends_on: BETA-010, BETA-044, BETA-076, BETA-080
+- objective: Find and explain the shortest verified path between two selected
+  entities through source-backed graph edges.
+- rationale: Neighbourhood views answer what surrounds one entity but not how
+  two known entities are connected.
+- suggested_first_action: Define permitted edge types, deterministic tie
+  breaking, path limits and a table equivalent; exclude extracted or
+  analytical edges that have not passed their existing review gates.
+
+#### BETA-094 | Visual research journey
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: public/research continuity
+- depends_on: BETA-072, BETA-077, BETA-088
+- objective: Render the current local session as a branching trail of
+  searches, entities, documents and comparisons with named checkpoints.
+- rationale: Browser back history is linear and does not preserve the branches
+  a researcher follows while testing different evidence paths.
+- suggested_first_action: Define a bounded local event model that records only
+  SectorTrace route state, supports selective deletion and exports with the
+  notebook without server telemetry.
+
+#### BETA-095 | Entity co-occurrence explorer
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 4
+- area: public/documents
+- depends_on: BETA-041, BETA-042, BETA-081
+- objective: Find documents or notices in which two or more selected tracked
+  entities occur together and expose each exact passage or structured field.
+- rationale: Co-occurrence can locate relevant source material without
+  asserting that the entities have a relationship.
+- suggested_first_action: Restrict v1 to verified entity aliases and same-
+  record co-occurrence, with fixtures that prevent cross-document joining and
+  labels that explicitly deny inferred relationships.
+
+#### BETA-096 | Evidence discrepancy explorer
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 3
+- risk: 4
+- area: public/evidence comparison
+- depends_on: BETA-043, BETA-070, BETA-075, BETA-076
+- objective: Surface different values, dates, names or statuses reported by
+  public sources for the same verified entity, field and compatible period.
+- rationale: Disagreement between sources is material evidence context, but it
+  must not be silently resolved or automatically labelled an error.
+- suggested_first_action: Define a closed registry of comparable field pairs,
+  equality/normalisation rules and fixtures for legitimate semantic difference.
+
+#### BETA-097 | Temporal coverage navigator
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 5
+- risk: 2
+- area: public/navigation and coverage
+- depends_on: BETA-043, BETA-075, BETA-076, BETA-084
+- objective: Show exactly which periods each source holds for a selected
+  provider, authority or metric and link every available period to its view.
+- rationale: Readers currently discover gaps only after opening sections or
+  selectors; absence must remain distinguishable from a published zero.
+- suggested_first_action: Define a shared coverage-interval response with
+  available, suppressed, not-collected and unknown states.
+
+#### BETA-098 | Contract diary and milestone calendar
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: public/procurement
+- depends_on: BETA-050, BETA-072, BETA-076
+- objective: Present published tender dates, awards, contract periods,
+  amendments, milestones, expected expiries and performance events in calendar
+  and accessible agenda views.
+- rationale: Lifecycle records are easier to monitor as dated events than as
+  disconnected notice rows, provided no renewal or completion is predicted.
+- suggested_first_action: Map only explicit OCDS and source dates into typed
+  events, preserving unknown dates and extension caveats.
+
+#### BETA-099 | Document table extraction viewer
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 3
+- risk: 4
+- area: public/documents
+- depends_on: BETA-042, BETA-081
+- objective: Display tables detected in parsed documents with page context,
+  original structure, extraction status and a structured download.
+- rationale: Important evidence often sits in tables that paragraph search and
+  plain-text snippets make difficult to inspect accurately.
+- suggested_first_action: Audit the current Docling element payloads and build
+  fixtures for merged cells, repeated headers, OCR tables and extraction
+  failure before defining a public table shape.
+
+#### BETA-100 | Source-link resilience checker
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: public/provenance
+- depends_on: BETA-060, BETA-081, BETA-084
+- objective: Show whether an original source URL is live, redirected, changed
+  or unavailable and whether a checksum-verified archive copy is held.
+- rationale: A citation should remain inspectable when publishers move or
+  remove files, without presenting the archive as the current publisher page.
+- suggested_first_action: Define conservative link states from collection-time
+  observations and archive references; do not probe external URLs on page load.
+
+#### BETA-101 | Run-to-run output comparison
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: admin/operations
+- depends_on: BETA-058, BETA-082, BETA-085
+- objective: Compare two pipeline runs by modules, rows added/changed/removed,
+  failures, review items, coverage, durations and freshness effects.
+- rationale: A durable ledger explains each run independently but not why two
+  runs produced materially different warehouse outcomes.
+- suggested_first_action: Define immutable per-module comparison summaries;
+  retain drill-down links to existing records and logs rather than duplicating
+  full payloads.
+
+#### BETA-102 | Interactive pipeline and data-lineage map
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 4
+- risk: 3
+- area: admin/system understanding
+- depends_on: BETA-043, BETA-058, BETA-067, BETA-082, BETA-083, BETA-085
+- objective: Map modules, sources, archives, tables, entity links, APIs,
+  exports and public pages as searchable dependencies with health and consumer
+  details.
+- rationale: The expanded system is difficult to reason about from separate
+  registries even though most dependency metadata already exists.
+- suggested_first_action: Generate a read-only typed graph from machine-owned
+  registries and migrations; forbid hand-maintained edges where a registry can
+  be authoritative.
+
+#### BETA-103 | Parser replay sandbox
+
+- priority: P2
+- impact: 4
+- effort: 5
+- confidence: 3
+- risk: 4
+- area: admin/document diagnostics
+- depends_on: BETA-060, BETA-082, BETA-085, BETA-087
+- objective: Replay one parser against one archived object and compare its
+  non-persisted proposed output with the stored normalised output and warnings.
+- rationale: Diagnosing extraction changes currently requires CLI context and
+  risks confusing a test run with a committed warehouse change.
+- suggested_first_action: Create an isolated read-only replay contract with
+  strict time, memory and output limits and no promotion or database-write path.
+
+#### BETA-104 | Validation-rule explorer
+
+- priority: P2
+- impact: 4
+- effort: 4
+- confidence: 4
+- risk: 2
+- area: admin/data quality
+- depends_on: BETA-059, BETA-060, BETA-067, BETA-082, BETA-085
+- objective: Catalogue validation rules with purpose, affected modules and
+  fields, recent pass/failure counts and protected representative failures.
+- rationale: Validation outcomes are visible in scattered logs and worklists,
+  but operators cannot see the active rule set or recurring failure shape.
+- suggested_first_action: Add stable rule IDs and a read-only registry; redact
+  restricted values before any failure example reaches the browser.
+
+#### BETA-105 | Review-outcome analytics
+
+- priority: P2
+- impact: 4
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: admin/review operations
+- depends_on: BETA-052, BETA-053, BETA-055, BETA-087
+- objective: Show review decisions over time by source, item type, reason code
+  and evidence age without scoring or ranking reviewers.
+- rationale: Aggregate outcomes can reveal recurring source and workflow
+  problems while individual productivity metrics would distort careful review.
+- suggested_first_action: Define minimum aggregate group sizes and omit named
+  reviewer dimensions from the analytics endpoint and UI.
+
+#### BETA-106 | Quality-control sampling workspace
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 3
+- risk: 4
+- area: admin/review quality
+- depends_on: BETA-052, BETA-055, BETA-087
+- objective: Generate reproducible random or stratified samples of previously
+  decided records for append-only second-look findings.
+- rationale: Review audit history records what happened but provides no focused
+  interface for checking a defensible sample after the fact.
+- suggested_first_action: Define seeded sampling, sample manifests and a new
+  append-only quality-control finding that never edits or silently supersedes
+  the original decision.
+
+**Interface and compatibility contract:** Implementation may add only additive
+read-only public routes for change events, feeds, publication expectations,
+versions/diffs, paths, co-occurrences, discrepancies, coverage intervals,
+calendar events, document tables and source-link states. Local notebook,
+saved-search and journey formats are versioned, size-bounded and contain no
+server-side personal profile. Admin comparison, lineage, replay, validation,
+analytics and sampling routes retain the existing admin boundary. Parser replay
+cannot persist. Quality-control findings are append-only and cannot mutate an
+original review decision.
+
+**Acceptance contract:** Verify stable identifiers and equivalent SQLite/
+PostgreSQL results; deterministic change classification, paths, comparison and
+sampling; honest unavailable/unknown/suppressed states; no cross-document
+co-occurrence; no automatic discrepancy resolution; no reviewer ranking; no
+external link probes during page rendering; import/export round trips for local
+research state; keyboard, mobile, print and reduced-motion behaviour inherited
+from BETA-049/BETA-080; and safe empty, stale, partial and pre-migration states.
+
+**Delivery sequence:** Do not promote this programme while BETA-068–087 remains
+approved and unfinished unless the owner explicitly reprioritises it. After the
+first programme, start with the change/operations foundations BETA-090,
+BETA-091, BETA-101, BETA-102 and BETA-104. Wave 2 is BETA-088, BETA-089,
+BETA-092, BETA-093 and BETA-097. Wave 3 is BETA-094–096, BETA-098 and BETA-100.
+Wave 4 is BETA-099, BETA-103, BETA-105 and BETA-106. Maintain exactly one
+IN_PROGRESS item and no more than five NEXT items.
+
 ## Features Under Investigation
 
 BETA-006 remains RESEARCH-only and must not restart without new operational
@@ -4400,7 +4797,7 @@ See the authoritative DONE queue above. The most recent completed additions
 are BETA-067 (capability-documentation consistency), BETA-066 (provider
 lineage), BETA-065 (CQC regulated-location explorer), BETA-064 (temporary-
 accommodation B&B measures), BETA-063 (PostgreSQL capability gate) and
-BETA-062 (human-readable document titles). BETA-068–087 are approved plans,
+BETA-062 (human-readable document titles). BETA-068–106 are approved plans,
 not implemented features.
 
 ## Dataset Additions
@@ -4616,6 +5013,34 @@ LAN Postgres was hand-seeded at the 21-provider stage and will catch up
 on the next module run.
 
 ## Architecture Decisions
+
+**Decision (2026-08-29): BETA-088–106 are a second approved, unqueued
+front-end refinement programme behind BETA-068–087.** The nineteen selected
+items turn the expanded portal into a stronger local research and monitoring
+workspace and make run, parser, validation and review quality easier to inspect.
+They do not displace the first refinement round or enter the authoritative
+execution queue through this documentation update. The proposed explicit-
+reference network was discarded and has no reserved ID.
+
+**Decision (2026-08-29): research continuity remains local; monitoring remains
+read-only.** Notebooks, saved searches and journey history use versioned,
+size-bounded browser storage and lossless import/export, not accounts or server-
+side profiles. Public change feeds and Atom subscriptions expose published
+evidence state only and create no notification or personal-data store.
+
+**Decision (2026-08-29): second-round analytical views expose observations,
+not conclusions.** Co-occurrence is same-record presence, never a relationship;
+discrepancies show compatible source statements without choosing a winner;
+relationship paths use permitted reviewed edge types only; expected publication
+windows distinguish publisher statements from observed cadence. Review outcome
+analytics omit named-reviewer rankings, and quality-control findings append to
+rather than rewrite the original audit trail.
+
+**Decision (2026-08-29): diagnostic execution is isolated from production
+writes.** Parser replay is bounded, non-persistent and admin-only. Pipeline and
+validation maps are generated from authoritative registries where possible.
+Source-link states come from collection-time observations and never trigger
+external probes during public page rendering.
 
 **Decision (2026-08-29): BETA-068–087 are the owner-approved front-end
 refinement programme, preserved but not auto-started.** The round follows a
@@ -5117,6 +5542,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `b6aba7b` — approve and fully specify the first front-end refinement
+  programme BETA-068–087 (`beta`, documentation only).
 - `980b681` — machine-owned capability documentation blocks and consistency
   checker (BETA-067).
 - `a2ccce4` — verified provider predecessor/successor lineage (BETA-066).
@@ -5231,13 +5658,13 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Handoff snapshot reconciled against local/origin `beta` at `980b681` before
+*(Handoff snapshot reconciled against local/origin `beta` at `b6aba7b` before
 this roadmap-only working-tree update, 2026-08-29.)*
 
 **What is currently being worked on?** Nothing. BETA-067 completed the prior
-programme. BETA-068–087 are approved and fully specified in Candidate Feature
-Backlog but have deliberately not been promoted into the execution queue by
-this planning-only update.
+implemented programme. BETA-068–087 and BETA-088–106 are approved and fully
+specified in Candidate Feature Backlog but have deliberately not been promoted
+into the execution queue by these roadmap-only updates.
 
 **What was the last successful queue item?** BETA-067 (`980b681`), the
 capability-documentation consistency checker. Immediately before it,
@@ -5250,6 +5677,11 @@ establishes safe compatibility/error contracts observed missing during the
 live review; BETA-069 then fixes the 390px first-screen defect. Continue under
 the recorded waves and dependencies, with BETA-080 delivered incrementally as
 a shared prerequisite rather than attempted as a blocking rewrite.
+
+**What follows that programme?** BETA-088–106 is the approved second refinement
+programme. Unless the owner explicitly reprioritises it, complete BETA-068–087
+first, then promote BETA-090 as the first change-awareness foundation and no
+more than five dependency-safe items under the recorded delivery sequence.
 
 **What is blocked and why?** BETA-034 is blocked pending a successful
 human-review corpus from `pipeline nlp gate-034g`. `194ea33` and the pgvector
