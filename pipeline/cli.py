@@ -660,6 +660,29 @@ def nlp_assistant(
         conn.close()
 
 
+@nlp_app.command("assistant-eval")
+def nlp_assistant_eval(
+    routing_set: Path = typer.Option(
+        None, help="Routing prompt set (default: tests/fixtures/assistant/routing_prompts.jsonl)"),
+    grounding_set: Path = typer.Option(
+        None, help="Analyst question set (default: tests/fixtures/assistant/analyst_questions.jsonl)"),
+) -> None:
+    """Score the frozen routing and grounding suites and print the
+    machine-readable release gate (BETA-113). `may_enable` is the only thing
+    that authorises turning the assistant on."""
+    from pipeline.assistant import evaluation
+
+    conn, settings = _document_connection()
+    try:
+        report = evaluation.gate_report(
+            conn, settings, routing_path=routing_set, grounding_path=grounding_set)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+        if not report["gate"]["may_enable"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
 @nlp_app.command("eval-retrieval")
 def nlp_eval_retrieval(
     queries: Path = typer.Option(

@@ -34,10 +34,11 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   IN_PROGRESS item: the approved successor programme (BETA-050 through
   BETA-067, delivered in four waves) is complete, as is the original
   BETA-038–049 round. The project owner has approved the next twenty-item
-  front-end refinement programme, BETA-068–087, a further nineteen-item
-  programme, BETA-088–106, and the seven-item local analyst-assistant
-  programme BETA-107–113, but none has been promoted into the execution
-  queue.** BETA-028 and
+  front-end refinement programme, BETA-068–087, and a further nineteen-item
+  programme, BETA-088–106, neither yet promoted into the execution queue. The
+  seven-item local analyst-assistant programme BETA-107–113 was reprioritised
+  ahead of that tail and is DONE (2026-08-29), delivered code-complete but
+  left disabled behind its release gate.** BETA-028 and
   BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
@@ -534,6 +535,48 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-113 | Assistant evaluation and release gate
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 3
+  - area: nlp/assistant/evaluation
+  - depends_on: BETA-108–112
+  - objective: Frozen routing, grounding, adversarial and performance suites
+    plus operator documentation and a machine-readable gate controlling
+    whether the experimental assistant may be enabled.
+  - result: New `pipeline/assistant/evaluation.py` — `load_routing_cases` /
+    `load_grounding_cases` read frozen JSONL fixtures; `routing_coverage` /
+    `grounding_coverage` are the static structure checks (size, five-tool
+    coverage, all five prompt kinds present); `score_routing` runs the router
+    over every prompt and reports held-out precision over the `route` kind,
+    prompts wrongly executed, write/destructive calls (structurally zero — the
+    catalogue has no such tool) and p50/p95 router latency; `score_grounding`
+    runs each analyst question through `service.ask` and checks citation
+    resolution, invented identifiers, abstention recall, timeout rate and
+    p50/p95/peak-RSS. `gate_report(conn, settings)` runs the static checks
+    always and the dynamic ones only when `require_enabled` passes; on a
+    checkout without the runtimes the dynamic checks report
+    `ok:false, "runtimes unavailable"` and `gate.may_enable` is therefore
+    `false` — the intended resting state. `may_enable` is the only field that
+    authorises enabling the feature. New frozen fixtures
+    `tests/fixtures/assistant/routing_prompts.jsonl` (108 prompts: 70 `route`
+    across all five tools, 14 `clarify`, 8 `malformed`, 8 `injection`, 8
+    `forbidden`) and `analyst_questions.jsonl` (53: 35 answerable, 18
+    abstain). New `pipeline nlp assistant-eval` prints the gate and exits
+    non-zero unless `may_enable`. New `docs/assistant.md` (operator
+    documentation) and a CAVEATS.md section; README gains a docs row.
+  - api/ui: new CLI command `pipeline nlp assistant-eval`. No web surface.
+  - validation: New `tests/test_assistant_evaluation.py` (5 — the routing
+    fixture meets the size + five-tool + all-kinds bar with >=5 of each
+    adversarial kind; the grounding fixture meets the size bar with both
+    expectations; every fixture line is well-formed and names a real tool;
+    the gate is closed without local runtimes while its static checks pass;
+    the note names `may_enable`). `test_migration_equivalence` (79th),
+    `test_docs_coverage`, `test_portal_isolation` green; `ruff` clean.
 
 - [DONE] BETA-112 | Single-turn assistant API and CLI
   - completed: 2026-08-29
@@ -5838,7 +5881,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | DONE (BETA-110) |
 | P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | DONE (BETA-111) |
 | P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | DONE (BETA-112) |
-| P1 | Assistant evaluation and release gate | 5 | 5 | 4 | APPROVED, not queued (BETA-113) |
+| P1 | Assistant evaluation and release gate | 5 | 5 | 4 | DONE (BETA-113) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-programme
@@ -7148,11 +7191,16 @@ separate retrieval benchmark and migration decision. LFM/Needle extraction,
 classification, multi-turn memory, autonomous tool loops and public assistant
 access are also out of scope and require separate named decisions and gates.
 
-**Delivery sequence:** Do not promote BETA-107–113 until BETA-068–106 is
-complete unless the owner explicitly reprioritises it. Then deliver BETA-107,
-followed by BETA-108 and BETA-109, then BETA-110, BETA-111, BETA-112 and
-BETA-113. Maintain exactly one IN_PROGRESS item and no more than five NEXT
-items; do not enable the feature merely because BETA-112 is code-complete.
+**Delivery sequence:** DONE (2026-08-29). BETA-107 through BETA-113 were
+delivered in order — BETA-107, then BETA-108/109, then BETA-110, BETA-111,
+BETA-112, BETA-113 — after the owner reprioritised the programme ahead of the
+BETA-068–106 tail. The code is complete and the offline suite is green with
+none of the optional runtime present. **The feature remains disabled:**
+`assistant_enabled` is `False`, the `[assistant]` extra is not installed, and
+`pipeline nlp assistant-eval` reports `gate.may_enable = false` (the dynamic
+routing/grounding suites need the local Needle 2 and LFM runtimes, which are
+not present in CI or on a fresh checkout). Enabling it is a separate act,
+gated on that report passing on the target local host.
 
 ## Features Under Investigation
 
@@ -7462,10 +7510,11 @@ decision. Assistant inference is local, disabled by default, excluded from
 Railway and limited to the public corpus; telemetry and cloud fallback are
 off.
 
-**Decision (2026-08-29): the third approved programme follows both front-end
-programmes.** BETA-107–113 remains unqueued until BETA-068–106 is complete
-unless the owner explicitly reprioritises it. Its final release gate, not code
-completion of the endpoint, determines whether operators may enable it.
+**Decision (2026-08-29): the third approved programme was reprioritised and
+delivered.** BETA-107–113 is code-complete (see DONE). Its final release gate
+(`pipeline nlp assistant-eval` -> `gate.may_enable`), not code completion of
+the endpoint, determines whether operators may enable it; that gate is
+currently closed because the local model runtimes are absent.
 
 **Decision (2026-08-29): successor-round public evidence remains explicit and
 caveated.** BETA-050 uses only published procurement lifecycle facts;
@@ -8076,10 +8125,12 @@ programme. Unless the owner explicitly reprioritises it, complete BETA-068–087
 first, then promote BETA-090 as the first change-awareness foundation and no
 more than five dependency-safe items under the recorded delivery sequence.
 
-**What follows both front-end programmes?** BETA-107–113 is the approved
-local analyst-assistant programme. Start with BETA-107, then BETA-108/109,
-then BETA-110–113 in order. It remains disabled until BETA-113's routing,
-grounding, adversarial and target-host performance gates pass.
+**What follows both front-end programmes?** BETA-107–113, the local
+analyst-assistant programme, is DONE (2026-08-29): BETA-107, then BETA-108/109,
+then BETA-110–113 in order. It remains **disabled** until BETA-113's routing,
+grounding, adversarial and target-host performance gates pass on the machine
+with the Needle 2 and LFM runtimes — `pipeline nlp assistant-eval` reports
+`gate.may_enable` and is currently `false` (runtimes absent).
 
 **What is blocked and why?** BETA-034 is blocked pending a successful
 human-review corpus from `pipeline nlp gate-034g`. `194ea33` and the pgvector

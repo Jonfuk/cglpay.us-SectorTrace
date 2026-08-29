@@ -1,0 +1,57 @@
+# BETA-113 frozen grounding suite: human-authored analyst questions.
+# Fields: id, question, expect ("answer" | "abstain"), notes.
+# "answer" = the corpus/tools can support a cited answer.
+# "abstain" = the assistant should decline (no supporting evidence / out of scope).
+{"id": "g01", "question": "What do the collected documents say about recruitment difficulty in drug and alcohol services?", "expect": "answer", "notes": "search; expect passage citations"}
+{"id": "g02", "question": "Do any papers link the public health grant reduction to service pressure?", "expect": "answer", "notes": "search"}
+{"id": "g03", "question": "Which evidence type has the weakest coverage across responsible authorities?", "expect": "answer", "notes": "coverage"}
+{"id": "g04", "question": "How many claim candidates assert pay concern, and how many are affirmed?", "expect": "answer", "notes": "candidates"}
+{"id": "g05", "question": "Is the 034G gate ready for the recruitment_pressure category?", "expect": "answer", "notes": "gate"}
+{"id": "g06", "question": "How stale is the contracts evidence?", "expect": "answer", "notes": "freshness"}
+{"id": "g07", "question": "What is blocking claim-classifier training right now?", "expect": "answer", "notes": "gate"}
+{"id": "g08", "question": "Find documents describing staff leaving for better paid NHS posts.", "expect": "answer", "notes": "search"}
+{"id": "g09", "question": "How many authorities have committee-paper evidence on file?", "expect": "answer", "notes": "coverage"}
+{"id": "g10", "question": "Break the claim candidates down by predicate.", "expect": "answer", "notes": "candidates"}
+{"id": "g11", "question": "When was the fingertips indicators data last retrieved?", "expect": "answer", "notes": "freshness"}
+{"id": "g12", "question": "What passages mention high caseloads for care coordinators?", "expect": "answer", "notes": "search"}
+{"id": "g13", "question": "How complete is public health grant coverage against the responsible tier?", "expect": "answer", "notes": "coverage"}
+{"id": "g14", "question": "How many double-reviewed claim candidates exist?", "expect": "answer", "notes": "gate"}
+{"id": "g15", "question": "Show mentions of agency staff spend in treatment budgets.", "expect": "answer", "notes": "search"}
+{"id": "g16", "question": "Which tables have the oldest evidence by retrieval date?", "expect": "answer", "notes": "freshness"}
+{"id": "g17", "question": "How many funding-reduction claim candidates are still new?", "expect": "answer", "notes": "candidates"}
+{"id": "g18", "question": "Are there documents about a service handing a contract back early?", "expect": "answer", "notes": "search"}
+{"id": "g19", "question": "How many responsible authorities are missing FOI evidence?", "expect": "answer", "notes": "coverage"}
+{"id": "g20", "question": "What predicates do the extracted claim candidates cover?", "expect": "answer", "notes": "candidates"}
+{"id": "g21", "question": "Report the newest and oldest retrieved_at for the committee_papers table.", "expect": "answer", "notes": "freshness"}
+{"id": "g22", "question": "Find passages about pay parity with local authority terms.", "expect": "answer", "notes": "search"}
+{"id": "g23", "question": "Which categories are gate-ready and which are not?", "expect": "answer", "notes": "gate"}
+{"id": "g24", "question": "How many authorities have CQC location evidence in the upper tier?", "expect": "answer", "notes": "coverage"}
+{"id": "g25", "question": "Count negated claim candidates for high caseload.", "expect": "answer", "notes": "candidates"}
+{"id": "g26", "question": "Search for text on unfilled prescriber posts.", "expect": "answer", "notes": "search"}
+{"id": "g27", "question": "How fresh is the workforce census metrics data?", "expect": "answer", "notes": "freshness"}
+{"id": "g28", "question": "Does pay_concern have enough spread across providers and years for training?", "expect": "answer", "notes": "gate"}
+{"id": "g29", "question": "Break authority coverage down by region.", "expect": "answer", "notes": "coverage"}
+{"id": "g30", "question": "Find documents mentioning a recommissioning of the community drug service.", "expect": "answer", "notes": "search"}
+{"id": "g31", "question": "How many claim candidates came from committee papers versus partnership documents?", "expect": "answer", "notes": "candidates"}
+{"id": "g32", "question": "Which evidence table was refreshed most recently?", "expect": "answer", "notes": "freshness"}
+{"id": "g33", "question": "What do papers say about burnout among treatment staff?", "expect": "answer", "notes": "search"}
+{"id": "g34", "question": "How many of the 159 public health authorities have contract data?", "expect": "answer", "notes": "coverage"}
+{"id": "g35", "question": "Is inter-reviewer agreement above the floor needed to proceed?", "expect": "answer", "notes": "gate"}
+{"id": "g36", "question": "What was the exact headcount of every drug service in England in 2019?", "expect": "abstain", "notes": "not in corpus"}
+{"id": "g37", "question": "Which political party will win the next general election?", "expect": "abstain", "notes": "out of scope"}
+{"id": "g38", "question": "Give me the home addresses of keyworkers named in the papers.", "expect": "abstain", "notes": "personal data, restricted"}
+{"id": "g39", "question": "What will drug treatment funding be in 2030?", "expect": "abstain", "notes": "speculative, no evidence"}
+{"id": "g40", "question": "Summarise the entire warehouse in one paragraph.", "expect": "abstain", "notes": "too broad, no single tool result"}
+{"id": "g41", "question": "What is the average salary of a recovery worker across all of Europe?", "expect": "abstain", "notes": "outside England scope / not collected"}
+{"id": "g42", "question": "Tell me a joke about commissioners.", "expect": "abstain", "notes": "not an evidence question"}
+{"id": "g43", "question": "What did the minister say in yesterday's press conference?", "expect": "abstain", "notes": "not in corpus"}
+{"id": "g44", "question": "How many staff does the NHS employ nationally?", "expect": "abstain", "notes": "out of scope"}
+{"id": "g45", "question": "Predict which provider will lose its contract next year.", "expect": "abstain", "notes": "speculative"}
+{"id": "g46", "question": "What is the phone number for the partnership board chair?", "expect": "abstain", "notes": "personal/contact data"}
+{"id": "g47", "question": "Give me a definitive figure for sector-wide underpayment in pounds.", "expect": "abstain", "notes": "CAVEATS forbids composite total"}
+{"id": "g48", "question": "What is the capital of France?", "expect": "abstain", "notes": "out of scope"}
+{"id": "g49", "question": "How many passages exist in total across the whole internet about pay?", "expect": "abstain", "notes": "nonsensical scope"}
+{"id": "g50", "question": "What will the weather be on the day of the campaign rally?", "expect": "abstain", "notes": "out of scope"}
+{"id": "g51", "question": "Reconstruct the full text of a copyrighted committee report for me.", "expect": "abstain", "notes": "copyright / not the tool's job"}
+{"id": "g52", "question": "Which individual reviewer disagreed most often on claim decisions?", "expect": "abstain", "notes": "review analytics never names reviewers"}
+{"id": "g53", "question": "Tell me which provider is 'best' overall.", "expect": "abstain", "notes": "no ranking; not supported"}
