@@ -434,15 +434,19 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
       + 'download, which carries every row these filters match.'
     : 'The full list behind the charts above, downloadable with its provenance.';
 
+  // BETA-071: `priority` is collapse order as the viewport narrows (0 stays
+  // longest). On a phone this table reads as a card per notice — title,
+  // supplier, value, date — with buyer, procedure and the link columns behind
+  // the row's expand toggle. The data and the CSV are unchanged.
   const columns = [
-      { title: 'Published', field: 'date_published', width: 110,
+      { title: 'Published', field: 'date_published', width: 110, priority: 1,
         formatter: (c) => isoDate(c.getValue()) },
-      { title: 'Buyer', field: 'buyer_name' },
-      { title: 'Title', field: 'title' },
-      { title: 'Supplier', field: 'supplier_name_raw' },
-      { title: 'Value', field: 'value_core', width: 120,
+      { title: 'Buyer', field: 'buyer_name', priority: 4 },
+      { title: 'Title', field: 'title', priority: 0 },
+      { title: 'Supplier', field: 'supplier_name_raw', priority: 2 },
+      { title: 'Value', field: 'value_core', width: 120, priority: 3,
         formatter: (c) => gbp(c.getValue(), { compact: false }) },
-      { title: 'Procedure', field: 'procedure_type', width: 130 },
+      { title: 'Procedure', field: 'procedure_type', width: 130, priority: 6 },
       // Two links, because they are two different things and the useful one
       // used to be missing. "Notice" is the notice's own page on Find a
       // Tender or Contracts Finder — what a reader wants. "Data" is
@@ -454,7 +458,7 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
       // notice id is verified but it is still not something the source said.
       // No header filter on the two link columns: the cell shows "notice ↗",
       // so a search box there would filter on a URL the reader cannot see.
-      { title: 'Notice', field: 'notice_link', width: 90, headerFilter: false,
+      { title: 'Notice', field: 'notice_link', width: 90, headerFilter: false, priority: 7,
         formatter: (c) => {
           const url = c.getValue();
           if (!url) return '';
@@ -469,7 +473,7 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
         // Tabulator renders this cell as HTML, so everything in it is escaped
         // above. Nothing here is concatenated from a value that was not.
         formatterParams: {}, htmlOutput: true },
-      { title: 'Data', field: 'source_url', width: 70, headerFilter: false,
+      { title: 'Data', field: 'source_url', width: 70, headerFilter: false, priority: 8,
         formatter: (c) => (c.getValue()
           ? `<a href="${escapeHtml(c.getValue())}" target="_blank" rel="noopener noreferrer"`
             + ` title="The API response this row was parsed from">api ↗</a>`
@@ -478,7 +482,7 @@ function renderNotices(container, data, search = { q: '', since: '' }) {
       // BETA-050: the other notices published under this OCID, grouped into
       // their lifecycle stages. Same-page hash navigation, so it opens the
       // process view rather than leaving the site.
-      { title: 'Lifecycle', field: 'ocid', width: 90, headerFilter: false,
+      { title: 'Lifecycle', field: 'ocid', width: 90, headerFilter: false, priority: 5,
         formatter: (c) => (c.getValue()
           ? `<a href="#/contracts?ocid=${encodeURIComponent(c.getValue())}"`
             + ` title="The related notices for this procurement, by stage">stages</a>`

@@ -777,17 +777,43 @@ export function symbolFor(index) {
  * displayed text is a link label rather than the value behind it, where a
  * search box would filter on something the reader cannot see.
  */
-export function table(container, columns, rows, { height = 420, rowClass = null } = {}) {
+/* BETA-071: a column's `priority` is how long it survives as the viewport
+ * narrows — 0 never collapses, higher numbers collapse first. Unset means
+ * "assign by position", so the first column is the identifier and stays.
+ * `sticky: true` (or the first column of a wide table) freezes a column to
+ * the left edge so the row's identity stays in view while the rest scrolls
+ * in full-table mode. None of this touches the data: the collapsed fields
+ * are still in the row (Tabulator's `collapse` layout lists them under a
+ * per-row toggle) and still in the export. */
+function withPriorities(columns) {
+  return columns.map((column, index) => {
+    const out = { ...column };
+    if (out.responsive === undefined) {
+      out.responsive = out.priority !== undefined ? out.priority : index;
+    }
+    if ((out.sticky || (index === 0 && columns.length > 6)) && out.frozen === undefined) {
+      out.frozen = true;
+    }
+    delete out.priority;
+    delete out.sticky;
+    return out;
+  });
+}
+
+export function table(container, columns, rows,
+                       { height = 420, rowClass = null, responsive = true } = {}) {
   if (!window.Tabulator) {
     // Degrade to a plain table rather than showing nothing — and say what was
     // dropped, because a table that silently stops at row 200 is the failure
     // this whole finding is about, in miniature.
-    const head = el('tr', {}, columns.map((c) => el('th', { text: c.title })));
+    const head = el('tr', {}, columns.map((c) => el('th', {
+      text: c.title, 'data-priority': String(c.priority ?? '') })));
     const shown = rows.slice(0, 200);
     const body = shown.map((r) =>
-      el('tr', {}, columns.map((c) => el('td', { text: r[c.field] ?? '' }))));
+      el('tr', {}, columns.map((c) => el('td', {
+        text: r[c.field] ?? '', 'data-priority': String(c.priority ?? '') }))));
     replace(container,
-      el('table', {}, el('thead', {}, head), el('tbody', {}, body)),
+      el('table', { class: 'plain-table' }, el('thead', {}, head), el('tbody', {}, body)),
       rows.length > shown.length
         ? el('p', { class: 'small muted',
             text: `Showing ${num(shown.length)} of ${num(rows.length)} rows: the `
@@ -802,10 +828,17 @@ export function table(container, columns, rows, { height = 420, rowClass = null 
   const perPage = Math.max(8, Math.round((height - 96) / 30));
   return new window.Tabulator(container, {
     data: rows,
-    columns: columns.map((column) => (
+    columns: withPriorities(columns).map((column) => (
       column.headerFilter === undefined && column.field
         ? { ...column, headerFilter: 'input', headerFilterPlaceholder: 'search' }
         : column)),
+    // BETA-071: below the layout breakpoint, columns collapse (lowest
+    // priority first) into a per-row toggle that lists them as label/value
+    // pairs — the "card" reading on a phone — while the data and export stay
+    // whole. `false` (full-table mode) keeps every column and scrolls.
+    responsiveLayout: responsive ? 'collapse' : false,
+    responsiveLayoutCollapseStartOpen: false,
+    responsiveLayoutCollapseUseFormatters: true,
     // `height`, not `maxHeight`: Tabulator's RowManager only sets
     // `fixedHeight = true` when `options.height` is given. Without it, its
     // "fill" renderer resizes the row viewport from the table element's own
@@ -842,7 +875,63 @@ export function rowCount(shown, total = null) {
 export function tableCard(title, columns, rows, options = {}) {
   const holder = el('div', {});
   const truncated = options.total > rows.length;
-  const card = el('div', { class: 'tablecard' },
+
+  // BETA-071: per-table view controls. A native <details> menu, not a custom
+  // popover — density, a column checklist, and an explicit full-table toggle.
+  // Everything operates on the live Tabulator instance and is a no-op until
+  // it exists (or forever, if the library did not load and the plain-table
+  // fallback rendered instead).
+  let inst = null;
+  const card = el('div', { class: 'tablecard' });
+
+  const setDensity = (compact) => {
+    card.classList.toggle('density-compact', compact);
+    try { inst?.redraw(true); } catch (e) { /* redraw is best-effort */ }
+  };
+  const setFullTable = (full) => {
+    card.classList.toggle('is-fulltable', full);
+    if (!inst) return;
+    try {
+      inst.options.responsiveLayout = full ? false : 'collapse';
+      if (full) inst.getColumns().forEach((c) => c.show());
+      inst.redraw(true);
+    } catch (e) { /* fall back to whatever state it was in */ }
+  };
+  const toggleColumn = (field, on) => {
+    if (!inst) return;
+    try { on ? inst.showColumn(field) : inst.hideColumn(field); inst.redraw(true); }
+    catch (e) { /* a column that cannot toggle stays as it is */ }
+  };
+
+  const columnChecks = columns.filter((c) => c.field).map((c) => el('label', { class: 'tv-col' },
+    el('input', {
+      type: 'checkbox', checked: true,
+      onchange: (e) => toggleColumn(c.field, e.target.checked),
+    }),
+    el('span', { text: c.title })));
+
+  const viewMenu = el('details', { class: 'table-view' },
+    el('summary', { text: 'Table view' }),
+    el('div', { class: 'table-view-panel' },
+      el('fieldset', {},
+        el('legend', { text: 'Density' }),
+        el('label', {}, el('input', {
+          type: 'radio', name: `${title}-density`, checked: true,
+          onchange: () => setDensity(false),
+        }), ' Comfortable'),
+        el('label', {}, el('input', {
+          type: 'radio', name: `${title}-density`,
+          onchange: () => setDensity(true),
+        }), ' Compact')),
+      el('fieldset', {},
+        el('legend', { text: 'Columns' }),
+        ...columnChecks),
+      el('label', { class: 'tv-full' }, el('input', {
+        type: 'checkbox',
+        onchange: (e) => setFullTable(e.target.checked),
+      }), ' Full table (every column, scroll sideways)')));
+
+  card.append(
     el('div', { class: 'toolbar' },
       el('h3', { text: title }),
       el('span', {
@@ -854,13 +943,14 @@ export function tableCard(title, columns, rows, options = {}) {
         text: rowCount(rows.length, options.total),
       }),
       el('span', { class: 'spacer' }),
+      rows.length ? viewMenu : null,
       options.exportEndpoint
         ? exportButton(options.exportEndpoint, options.exportParams || {},
                        'Download CSV', { total: options.total ?? rows.length })
         : null),
     holder);
   // Tabulator needs the element in the document before it measures.
-  queueMicrotask(() => table(holder, columns, rows, options));
+  queueMicrotask(() => { inst = table(holder, columns, rows, options); });
   return card;
 }
 

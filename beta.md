@@ -297,24 +297,22 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-071 | Responsive public data tables
+- [IN_PROGRESS] BETA-072 | Consistent filters and URL-restored query state
   - priority: P1
   - impact: 5
-  - effort: 4
-  - confidence: 4
+  - effort: 3
+  - confidence: 5
   - risk: 2
-  - area: public/tables
-  - depends_on: BETA-049, BETA-080
-  - objective: Give every public table a mobile card mode, priority columns,
-    column chooser, density control, sticky identifiers and explicit
-    full-table mode while retaining complete accessible tabular data and
-    exports.
-  - next_action: Extend the shared table component with declarative priority
-    metadata, then migrate one narrow and one very wide table as the contract
-    tests.
+  - area: public/filtering
+  - depends_on: BETA-024, BETA-049
+  - objective: Standardise filter bars with active chips, result counts,
+    clear-all, basic/advanced disclosure, validation and hash-query
+    persistence; browser history and shared URLs must restore the exact query.
+  - next_action: Define one typed filter-state serializer and migrate
+    providers, treatment and contracts before applying it portal-wide.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–070 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–071 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -550,6 +548,56 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-071 | Responsive public data tables
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: public/tables
+  - depends_on: BETA-049, BETA-080
+  - objective: Give every public table a mobile card mode, priority columns,
+    column chooser, density control, sticky identifiers and explicit
+    full-table mode while retaining complete accessible tabular data and
+    exports.
+  - result: The shared `table()` / `tableCard()` in `components.js` — every
+    public table goes through it. `withPriorities()` maps a column's optional
+    `priority` (0 stays longest, higher collapses first; unset = column
+    position, so column 0 is the identifier) onto Tabulator's `responsive`
+    weight, and the table runs `responsiveLayout: 'collapse'`
+    (`…CollapseUseFormatters: true`): as the viewport narrows, low-priority
+    columns fold into a per-row toggle that lists them as formatted
+    label/value pairs — the phone "card" reading — with the row data and the
+    CSV export untouched. The first column of a wide table (>6 cols), or one
+    flagged `sticky: true`, is `frozen` so the identifier stays in view while
+    the rest scrolls in full-table mode. `tableCard()` gains a "Table view"
+    `<details>` menu: density (comfortable / compact, a redraw), a column
+    checklist (`showColumn`/`hideColumn`), and an explicit "Full table" toggle
+    that shows every column and scrolls sideways. The contracts "Published
+    notices" table (9 columns, the widest public table) is migrated with
+    explicit priorities; narrow tables (≤4 columns) inherit the position
+    default and never freeze or collapse.
+  - fix in passing: `.grid.two` / `.grid.cards` used `minmax(420px, 1fr)` /
+    `minmax(215px, 1fr)`, whose track keeps its stated minimum even in a
+    narrower container — the contracts table panels overran a 375px viewport
+    by ~60px. Now `minmax(min(420px, 100%), 1fr)`, plus `min-width: 0` on grid
+    children and `.tablecard`, and `overflow-x: auto` on the table holder so
+    any residual width scrolls inside the card, never the page body.
+  - api/ui: no API change. New CSS: `.table-view*`, `.tablecard.density-compact`,
+    `.tablecard.is-fulltable`, the grid `min()` fix.
+  - validation: New `tests/test_portal_responsive_tables.py` (7 — priority →
+    responsive mapping, collapse keeps the fields, the view menu carries
+    density/columns/full-table and acts on the live instance, the plain-table
+    fallback carries `data-priority`, `.grid.two` can shrink below its track
+    minimum, table overrun is contained in the card, the contracts table
+    ranks every column). Portal table / chart / control / isolation suites
+    green. `ruff` clean. Browser-verified at 1440 and 375: desktop shows all
+    9 contract columns with a frozen identifier and no page overflow; 375
+    shows the 4 highest-priority columns with the rest behind the row toggle,
+    the view menu opens, "Full table" restores every column, and the
+    pre-existing ~60px mobile overrun is gone.
 
 - [DONE] BETA-070 | Workforce pay explorer
   - completed: 2026-08-29
@@ -3834,8 +3882,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Release compatibility and graceful degradation | 5 | 3 | 5 | DONE (BETA-068) |
 | P1 | Mobile public-header rebuild | 5 | 3 | 5 | DONE (BETA-069) |
 | P1 | Workforce pay explorer | 5 | 4 | 4 | DONE (BETA-070) |
-| P1 | Responsive public data tables | 5 | 4 | 4 | IN_PROGRESS (BETA-071) |
-| P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | APPROVED, not queued (BETA-072) |
+| P1 | Responsive public data tables | 5 | 4 | 4 | DONE (BETA-071) |
+| P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | IN_PROGRESS (BETA-072) |
 | P1 | My area context | 5 | 4 | 4 | APPROVED, not queued (BETA-073) |
 | P2 | Inspectable visualisations | 4 | 3 | 5 | APPROVED, not queued (BETA-074) |
 | P1 | Treatment metric explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-075) |
