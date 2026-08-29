@@ -26,17 +26,25 @@ not a defect — see BETA-002's DONE entry for the reasoning.
 
 - `beta` created 2026-08-25 from `master` at `c1c3ecd`, which already
   includes BETA-001 (see its note on why that one commit is on `master`
-  directly, not `beta`). As reconciled on 2026-08-29, local `beta` and
-  `origin/beta` are both at **`d2c4bc7`**. The commits since the last journal
-  update include the completed map and overview work (`6d1be0e`), PostgreSQL
-  extension/trigram/PostGIS/pgvector acceleration, public-route caching, and
-  a web-renderer fix; see Recent Commits.
+  directly, not `beta`). As reconciled before this roadmap-only update on
+  2026-08-29, local `beta` and `origin/beta` are both at **`e1602a5`**. That
+  commit reconciled the queue through BETA-049; the application commits
+  immediately before it include the completed map and overview work
+  (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
+  public-route caching, and a web-renderer fix; see Recent Commits.
 - **Last completed queue item: BETA-037. Current work: BETA-038. Next:
   BETA-039.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
   approved twelve-item round is BETA-038 through BETA-049.
+- The project owner has now approved an eighteen-item successor programme,
+  BETA-050 through BETA-067. It is recorded under Candidate Feature Backlog,
+  not inserted into the execution queue: BETA-038–049 must finish first.
+  After BETA-049 is DONE, promote BETA-050 to IN_PROGRESS and BETA-051,
+  BETA-052 and BETA-058 to NEXT. The round intentionally contains eighteen
+  items; the discarded contract-calendar and interactive-API-builder ideas
+  are not part of it.
 - Recent feature commits record the full offline suite green up to **2615
   passed**. BETA-035's earlier documentation run recorded the known flaky
   concurrency timing test once and then passing in isolation. This journal-
@@ -91,13 +99,20 @@ unusually well-reasoned, explicit boundary on exactly those things
 "Rejected" table). Proposing more of that surface without a concrete,
 evidenced need would be scope-seeking, not product judgement.
 
-The 2026-08-29 round keeps that boundary and concentrates on trustworthy
+The active 2026-08-29 round keeps that boundary and concentrates on trustworthy
 access to evidence already collected: queue/release integrity, better
 contract and document discovery, source context, a public dataset catalogue,
 deterministic commissioning views, careful provider comparison, an admin-only
 semantic review workflow, an exact API contract, and accessibility/performance
 guardrails. It adds no speculative dataset and does not unblock semantic claim
 publication.
+
+The approved successor round, BETA-050–067, broadens that same defensible
+evidence workflow in four bounded directions: explicit procurement and HSE
+evidence, faster human review and deterministic identity resolution, durable
+run/archive operations, and carefully caveated public additions (document
+titles, H-CLIC B&B measures, CQC regulated locations and provider lineage).
+It does not alter the active queue until BETA-049 is complete.
 
 ## Comparable Product Research (2026-08-26, per the project owner's request)
 
@@ -149,6 +164,25 @@ has the infrastructure a comparable product would need, and never exposed
 it." That is the more valuable kind of finding this exercise could produce,
 and it is why BETA-022 is the direct result of this research rather than a
 coincidence.
+
+### Successor-round source and pattern check (2026-08-29)
+
+- The official [OCDS reference](https://standard.open-contracting.org/latest/en/schema/reference/)
+  and [Find a Tender developer documentation](https://www.find-tender.service.gov.uk/Developer/Documentation)
+  confirm OCID as the stable link across related releases and expose explicit
+  lifecycle/performance notice fields. That supports BETA-050's lifecycle,
+  but not an inferred completion or performance judgement.
+- The official [HSE enforcement-notice register](https://resources.hse.gov.uk/notices/Notice/default.asp)
+  publishes organisation-level improvement/prohibition notices with stated
+  scope and status limitations. BETA-051 therefore treats it as attributed
+  safety/legal evidence, limits publication to exact tracked-organisation
+  matches and excludes individuals.
+- The remaining selected review, operations and public-interface items were
+  traced to concrete repository gaps: raw `context_json`, browser-only job
+  history, a point-in-time archive size scan, hash-like document titles, the
+  deliberately omitted H-CLIC TA1 B&B breakdown, unexposed CQC coordinates,
+  existing provider successor data and stale committee-system documentation.
+  No discarded idea was reintroduced under a new name.
 
 ## Strategic Reassessment (§52, run 2026-08-26 — the reassessment BETA-026's close-out flagged as owed)
 
@@ -2239,6 +2273,10 @@ DONE
 4. **BETA-044–049 (READY):** deepen deterministic relationships and careful
    comparison, make experimental semantic workflows reviewable in admin, then
    publish the API contract and enforce accessibility/performance guardrails.
+5. **BETA-050–067 (approved successor backlog):** do not promote these while
+   BETA-038–049 remain active. On completion of BETA-049, start BETA-050 and
+   promote BETA-051, BETA-052 and BETA-058 to NEXT; later promotion follows
+   the dependency-aware waves recorded below.
 
 **Hard boundary:** BETA-034 stays BLOCKED until `gate-034g` succeeds on a
 human-reviewed corpus. BETA-046 may expose the already-built search diagnostic;
@@ -2291,9 +2329,358 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | READY (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |
+| P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |
+| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | Approved successor backlog (BETA-051) |
+| P1 | Structured review-item context | 5 | 2 | 5 | Approved successor backlog (BETA-052) |
+| P2 | Review clusters and informational grouping | 4 | 3 | 4 | Approved successor backlog (BETA-053) |
+| P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | Approved successor backlog (BETA-054) |
+| P2 | Review-session workflow polish | 4 | 2 | 5 | Approved successor backlog (BETA-055) |
+| P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
+| P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
+| P1 | Unified durable run ledger | 5 | 4 | 4 | Approved successor backlog (BETA-058) |
+| P1 | Coverage completion action board | 5 | 4 | 4 | Approved successor backlog (BETA-059) |
+| P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
+| P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
+| P2 | Human-readable document titles | 4 | 3 | 4 | Approved successor backlog (BETA-062) |
+| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | Approved successor backlog (BETA-063) |
+| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | Approved successor backlog (BETA-064) |
+| P1 | CQC regulated-location explorer | 4 | 4 | 4 | Approved successor backlog (BETA-065) |
+| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | Approved successor backlog (BETA-066) |
+| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | Approved successor backlog (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
-Queue above remains authoritative for scope, dependencies and state.
+Queue above remains authoritative for queued work; the approved-successor
+subsection below is authoritative for BETA-050–067 until each item is promoted.
+
+### Approved successor round (BETA-050–067)
+
+These are persistent, owner-approved IDs, but they are **not queue-state
+entries yet**. This preserves the active BETA-038–049 round, the one-primary-
+item invariant and the queue's bounded NEXT/READY set. Promote them only under
+the delivery sequence at the end of this subsection.
+
+#### BETA-050 | Procurement lifecycle and performance view
+
+- priority: P1
+- impact: 5
+- effort: 5
+- confidence: 4
+- risk: 4
+- area: procurement
+- depends_on: BETA-040, BETA-044
+- objective: Group notices sharing an OCID into explicit planning, tender,
+  award, contract, amendment, termination and performance stages; add
+  `GET /api/v1/contracts/process/{ocid}` and a public lifecycle view.
+- rationale: A defensible procurement history must connect official related
+  notices without turning missing stages into inferred completion, renewal,
+  KPI achievement or supplier performance.
+- suggested_first_action: Define archived OCDS lifecycle fixtures, then extend
+  m01 for explicit stages, milestones, amendments, performance fields and
+  linked documents.
+
+#### BETA-051 | HSE enforcement-notice evidence
+
+- priority: P1
+- impact: 4
+- effort: 4
+- confidence: 4
+- risk: 4
+- area: safety/legal
+- depends_on: BETA-043, BETA-049
+- objective: Add module `m33` for organisation-level HSE improvement and
+  prohibition notices, publishing exact tracked-organisation matches through
+  `/api/v1/safety` while excluding individuals.
+- rationale: Official enforcement notices add attributable safety evidence,
+  but ambiguous names and register limitations require the same human-review
+  and caveat discipline as the rest of the project.
+- suggested_first_action: Capture offline HSE search/detail fixtures and encode
+  coverage, appeal and withdrawal caveats before defining storage or routes.
+
+#### BETA-052 | Structured review-item context
+
+- priority: P1
+- impact: 5
+- effort: 2
+- confidence: 5
+- risk: 1
+- area: admin/review
+- depends_on: none
+- objective: Render source, entity, reason, evidence and navigation as typed
+  sections while retaining the complete raw JSON under disclosure.
+- rationale: Reviewers should not have to decode implementation-shaped JSON to
+  make a careful decision, but the lossless underlying context must remain
+  available for audit.
+- suggested_first_action: Build typed presenters for every current review-item
+  type and validate all derived internal and source links.
+
+#### BETA-053 | Review clusters and informational grouping
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: admin/review
+- depends_on: BETA-052
+- objective: Group related items by issue type, source, organisation and shared
+  evidence, with facets and an informational/not-actionable state.
+- rationale: Coherent batches reduce reviewer navigation without allowing
+  grouping itself to become a judgement.
+- suggested_first_action: Define deterministic cluster keys and require a
+  transactional recount before every grouped action.
+
+#### BETA-054 | Evidence sidecars and candidate suggestions
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: admin/review
+- depends_on: BETA-036, BETA-052
+- objective: Show source excerpts, archive references and ranked candidate
+  entities beside the decision form.
+- rationale: Side-by-side evidence and alternatives improve decision quality,
+  provided ranking remains a finding aid rather than an automatic verdict.
+- suggested_first_action: Define sidecars and candidate-generation rules for
+  each supported review type; label rankings as similarity, never preselect a
+  candidate and suppress known false-match patterns.
+
+#### BETA-055 | Review-session workflow polish
+
+- priority: P2
+- impact: 4
+- effort: 2
+- confidence: 5
+- risk: 1
+- area: admin/ux
+- depends_on: BETA-052
+- objective: Add next-page prefetch, session progress, saved note/filter
+  presets, a keyboard map and a primary-source shortcut.
+- rationale: These reduce mechanical work without altering the review audit
+  trail or confirmation boundaries.
+- suggested_first_action: Pin focus, history and navigation behaviour in
+  browser tests before introducing shortcuts.
+
+#### BETA-056 | Human alias-resolution workflow
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 3
+- risk: 4
+- area: entity-quality
+- depends_on: BETA-054
+- objective: Resolve unmatched buyer and provider names through append-only
+  proposed, accepted, rejected and superseded decisions, then produce a
+  deterministic verified-alias registry.
+- rationale: Repeated unresolved names reduce coverage, but fuzzy matches must
+  never silently become canonical identity.
+- suggested_first_action: Design the decision schema and SQLite/PostgreSQL
+  invariants around named reviewer, timestamp, evidence and canonical entity
+  ID; automatic fuzzy application remains forbidden.
+
+#### BETA-057 | Candidate URL overlap signals
+
+- priority: P2
+- impact: 3
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: data-quality/review
+- depends_on: BETA-052
+- objective: Show when a conservatively canonicalised URL appears across
+  source tables or workflow roles.
+- rationale: Overlap can expose duplicate discovery or related evidence, but
+  it is not proof that records should be merged, discarded or reprioritised.
+- suggested_first_action: Define fixtures for fragments, tracking parameters,
+  redirects and genuinely distinct documents before writing the normaliser.
+
+#### BETA-058 | Unified durable run ledger
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: operations
+- depends_on: BETA-039
+- objective: Record CLI, admin and scheduled executions through one durable
+  model with origin, revision, environment, parent run, timestamps and
+  per-module results; keep full logs in their current storage.
+- rationale: Browser-started job history alone cannot explain every collection
+  path or support reliable operational handoff.
+- suggested_first_action: Add a backward-compatible migration and instrument
+  the shared module runner used by every entry point.
+
+#### BETA-059 | Coverage completion action board
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 2
+- area: admin/coverage
+- depends_on: BETA-043, BETA-058
+- objective: Distinguish run needed, review needed, source blocked, not
+  published and complete; add `GET /api/admin/completeness` with links to the
+  relevant run, candidate, review or dataset view.
+- rationale: Coverage measurements become operationally useful only when each
+  gap has an honest reason and a permitted, non-destructive next action.
+- suggested_first_action: Map every current completeness state to one reason
+  code and one action destination.
+
+#### BETA-060 | Raw-archive inventory and integrity trends
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: archive/operations
+- depends_on: BETA-058
+- objective: Track archive count, size, source distribution, missing
+  references, duplicate hashes, deterministic hash samples and growth through
+  `pipeline archive audit` and an admin audit-history endpoint.
+- rationale: A point-in-time size scan cannot reveal integrity drift or future
+  storage pressure.
+- suggested_first_action: Define immutable summaries and deterministic sampling
+  rules; this item measures only and never deletes, compacts or chooses
+  retention policy.
+
+#### BETA-061 | Candidate-promotion campaign workspace
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: evidence-promotion
+- depends_on: BETA-052, BETA-054
+- objective: Provide a campaign workspace for CDP documents, committee papers
+  and FOI/SAR candidates with filters, previews, session progress and explicit
+  promote/reject/reset actions.
+- rationale: Candidate promotion is a separate audited human act from general
+  review-queue decisions and needs a focused workflow rather than unattended
+  batching.
+- suggested_first_action: Reuse the existing promotion API through the shared
+  typed presenters; retain one-candidate-at-a-time confirmation and prohibit
+  `promote all`.
+
+#### BETA-062 | Human-readable document titles
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: documents/public-ux
+- depends_on: BETA-041, BETA-042
+- objective: Replace hash-like labels with deterministic display titles while
+  preserving raw source titles and recording `title_basis` as source label,
+  PDF metadata, first heading or filename.
+- rationale: Search results need readable identity, but a derived title must
+  remain explainable rather than being presented as source text.
+- suggested_first_action: Add fixtures for blank, misleading, duplicated and
+  personal-name-heavy metadata, then specify deterministic precedence.
+
+#### BETA-063 | PostgreSQL extension readiness gate
+
+- priority: P1
+- impact: 5
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: database/deployment
+- depends_on: BETA-036, BETA-039
+- objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
+  version, extensions, operator classes, expected indexes and active fallbacks;
+  exercise core and extension-enabled disposable PostgreSQL paths in CI.
+- rationale: BETA-036 has focused coverage but its optional extension matrix
+  has not yet been proven in a disposable live PostgreSQL deployment.
+- suggested_first_action: Codify the trigram, PostGIS and pgvector capability
+  matrix and its fallback expectations.
+
+#### BETA-064 | Temporary-accommodation B&B breakdown
+
+- priority: P2
+- impact: 3
+- effort: 3
+- confidence: 4
+- risk: 2
+- area: dataset/comparators
+- depends_on: BETA-043
+- objective: Extend m31 with the source-published bed-and-breakfast household
+  breakdown from H-CLIC Table TA1, stored in
+  `temporary_accommodation_breakdowns` with authority, quarter, value, unit
+  and full provenance.
+- rationale: The data was deliberately omitted from the smallest coherent v1
+  and is now a bounded extension of the same official comparator source.
+- suggested_first_action: Verify archived workbook header variants and define
+  the exact permitted measure codes; surface contextually without rankings or
+  provider-performance comparison.
+
+#### BETA-065 | CQC regulated-location explorer
+
+- priority: P1
+- impact: 4
+- effort: 4
+- confidence: 4
+- risk: 3
+- area: public/cqc
+- depends_on: BETA-045, BETA-049
+- objective: Add a filterable map, accessible table and paginated
+  `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
+  locations, filtered by provider, authority, status, regulated activity,
+  service type and rating.
+- rationale: Existing location evidence is difficult to explore, but CQC
+  registration is not a complete service map and location counts are neither
+  coverage nor quality scores.
+- suggested_first_action: Define the public-column allowlist, map/table parity
+  and missing-coordinate behaviour; exclude every restricted contact field.
+
+#### BETA-066 | Provider predecessor and successor lineage
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 4
+- risk: 3
+- area: provider-identity
+- depends_on: BETA-056
+- objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
+  detail timeline for explicit active, merged, dissolved, predecessor and
+  successor relationships.
+- rationale: Older evidence remains attached to historical provider entities;
+  users need the verified lineage without inferred ownership or personal
+  officer data.
+- suggested_first_action: Normalise existing `status` and `superseded_by`
+  configuration into explicit, testable lineage edges with verified identifier
+  roles only.
+
+#### BETA-067 | Capability-documentation consistency checker
+
+- priority: P2
+- impact: 4
+- effort: 3
+- confidence: 5
+- risk: 1
+- area: documentation/tooling
+- depends_on: BETA-038, BETA-048
+- objective: Add machine-owned documentation blocks generated from module,
+  source, route, export, licence and caveat registries, with non-mutating
+  `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
+- rationale: Capability prose has already drifted behind implemented committee
+  system support; machine-owned factual matrices can prevent recurrence while
+  narrative documentation remains manually reviewed.
+- suggested_first_action: Reconcile the stale committee-system statements and
+  define the first generated source-capability matrix.
+
+**Delivery sequence:** After BETA-049 completes, promote BETA-050 to
+IN_PROGRESS and BETA-051, BETA-052 and BETA-058 to NEXT. Wave 2 is BETA-053,
+BETA-054, BETA-055, BETA-059 and BETA-060. Wave 3 is BETA-056, BETA-057,
+BETA-061, BETA-062 and BETA-063. Wave 4 is BETA-064–067. Maintain exactly one
+IN_PROGRESS item and no more than five NEXT items.
 
 ## Features Under Investigation
 
@@ -2521,6 +2908,36 @@ LAN Postgres was hand-seeded at the 21-provider stage and will catch up
 on the next module run.
 
 ## Architecture Decisions
+
+**Decision (2026-08-29): BETA-050–067 are approved successor-backlog items,
+not current queue entries.** Reserving persistent IDs now preserves the owner's
+decisions, while waiting to promote them until BETA-049 is DONE keeps the
+authoritative execution queue bounded and recoverable. The first promotion is
+BETA-050 to IN_PROGRESS with BETA-051, BETA-052 and BETA-058 to NEXT.
+
+**Decision (2026-08-29): similarity, clustering and overlap remain review
+aids.** BETA-053, BETA-054, BETA-056 and BETA-057 may order or group work and
+record a person's alias decision, but may not preselect, auto-merge,
+auto-promote or silently change canonical identity. BETA-061 retains the
+existing one-candidate-at-a-time promotion boundary.
+
+**Decision (2026-08-29): successor-round public evidence remains explicit and
+caveated.** BETA-050 uses only published procurement lifecycle facts;
+BETA-051 publishes only exact organisation-level HSE matches and no
+individuals; BETA-064 keeps H-CLIC measures contextual; BETA-065 states that
+CQC-regulated locations are not a complete service map or quality score; and
+BETA-066 exposes verified predecessor/successor facts without inferred
+ownership or officer data.
+
+**Decision (2026-08-29): operational additions observe before they act.**
+BETA-058 records runs without copying full logs, BETA-059 links coverage gaps
+to non-destructive actions, BETA-060 audits the archive without deletion or
+retention decisions, and BETA-063 inspects PostgreSQL capabilities read-only.
+
+**Decision (2026-08-29): generated documentation covers factual matrices, not
+narrative judgement.** BETA-067 may generate and verify machine-owned module,
+source, route, export, licence and caveat blocks. Human-authored reasoning and
+caveat prose remain manually reviewed.
 
 **Decision (2026-08-29): the approved BETA-038–049 round improves access,
 reviewability and release confidence before adding more datasets.** Contract
@@ -2848,6 +3265,17 @@ should not assume otherwise, especially before testing anything that writes
   smoke gate yet. BETA-039 is NEXT specifically to close that ambiguity; until
   then confirm the deployed revision out of band and remember this checkout's
   `.env` points at production data.
+- Persistent browser-started job history does not yet cover CLI and scheduled
+  module executions. BETA-058 is the approved successor item for a unified run
+  ledger; BETA-059 and BETA-060 intentionally depend on it.
+- `docs/SOURCES.md` and `docs/CAVEATS.md` still describe committee search as
+  ModernGov-only even though m10 now has fixture-backed CMIS support. This is a
+  known documentation drift, not a reason to remove the adapter; BETA-067 will
+  reconcile the prose and add a generated capability check after the current
+  round.
+- Module 31 deliberately stores only the top-level H-CLIC TA1 temporary-
+  accommodation measures. The approved BETA-064 follow-up adds the bounded B&B
+  breakdown; until then its absence must not be read as zero.
 - **2026-08-26: `refs/heads/beta` was found corrupted** (a file of spaces,
   not a SHA) immediately after the BETA-027 commit, blocking `git push`,
   `git log` and `git status` ("your current branch appears to be broken";
@@ -2961,6 +3389,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Recent Commits
 
+- `e1602a5` — reconcile the queue through BETA-049, restore the handoff
+  snapshot and record BETA-036/037 as completed (`beta`, documentation only).
 - `d2c4bc7` — close a missing parenthesis in the operator name-match renderer;
   reconciled `beta` / `origin/beta` HEAD for this handoff.
 - `777828a` — move pgvector backfill off health-gated web startup and make
@@ -3066,7 +3496,8 @@ should not assume otherwise, especially before testing anything that writes
 
 ## Next Recommended Actions
 
-*(Handoff snapshot reconciled against `beta` at `d2c4bc7`, 2026-08-29.)*
+*(Handoff snapshot reconciled against `beta` at `e1602a5` before this
+roadmap-only working-tree update, 2026-08-29.)*
 
 **What is currently being worked on?** BETA-038, the dependency-free queue
 integrity validator. It should make duplicate IDs, invalid states,
@@ -3078,12 +3509,17 @@ metadata absent from historical DONE entries.
 optional bounded public-API LRU caching with route-specific TTLs. Immediately
 before it, BETA-036 delivered PostgreSQL extension plumbing plus trigram,
 PostGIS and pgvector acceleration and follow-up hardening. The branch and
-remote are reconciled at `d2c4bc7`.
+remote were reconciled at `e1602a5` before this uncommitted documentation
+update.
 
 **What should happen next?** BETA-039: add the safe release-identity endpoint,
 surface it in footer/admin, and establish a GET-only beta smoke gate. Keep
 `/health` plain `ok`; do not deploy production or exercise write routes merely
 to complete the smoke check. Then proceed through BETA-040–043 in queue order.
+Continue through BETA-044–049 before touching the approved successor backlog.
+When BETA-049 is DONE, promote BETA-050 to IN_PROGRESS and BETA-051, BETA-052
+and BETA-058 to NEXT; the remaining BETA-053–067 items stay in the Candidate
+Feature Backlog until their recorded wave and dependencies permit promotion.
 
 **What is blocked and why?** BETA-034 is blocked pending a successful
 human-review corpus from `pipeline nlp gate-034g`. `194ea33` and the pgvector
@@ -3096,7 +3532,11 @@ bounded and allowlisted; commissioning timelines use only provenanced
 `AWARDED_TO` events; provider comparisons preserve unlike evidence layers and
 use structured JSON rather than a flattening CSV; semantic tools remain admin-
 only and individually reviewed; accessibility and performance guardrails close
-the round.
+the active round. In the successor round, lifecycle, HSE, H-CLIC, CQC and
+provider-lineage surfaces must remain explicit and caveated; review clusters,
+similarity suggestions, aliases and URL overlaps remain human-controlled;
+archive and PostgreSQL diagnostics remain non-destructive and read-only where
+specified.
 
 Do not touch the `m15-web-unlocker`/`zenrows`/`wdtk-html-fallback` branches
 without asking — see BETA-004's notes. `docs/upgrade-roadmap.md` claims
