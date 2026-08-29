@@ -396,6 +396,61 @@ function loadAll() {
   loadCompleteness();
   loadArchiveAudits();
   loadUrlOverlaps();
+  loadPgCapabilities();
+}
+
+/* BETA-063: PostgreSQL extension + extension-backed-index readiness, and the
+ * query paths currently on their fallback. Empty on SQLite — the gate does
+ * not apply there. Not lazy: it is two catalogue lookups. */
+async function loadPgCapabilities() {
+  const holder = $('pg-capabilities');
+  if (!holder) return;
+
+  let data;
+  try { data = await api('/api/admin/pg-capabilities'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'bad small', text: e.message })); return; }
+
+  if (!data.applies) {
+    return holder.replaceChildren(el('p', { class: 'muted small', text: data.note }));
+  }
+
+  const parts = [
+    el('p', { class: 'small' },
+      el('strong', { text: data.ready ? 'ready' : 'degraded' }),
+      el('span', { class: 'muted', text: ` · PostgreSQL ${data.server_version}` })),
+  ];
+
+  parts.push(el('table', {},
+    el('thead', {}, el('tr', {},
+      el('th', { text: 'Index' }), el('th', { text: 'Extension' }),
+      el('th', { text: 'Expected' }), el('th', { text: 'State' }))),
+    el('tbody', {}, data.indexes.map((row) => el('tr', {},
+      el('td', { class: 'mono small', text: row.index }),
+      el('td', { class: 'small', text: row.extension }),
+      el('td', { class: 'mono small',
+        text: row.expected_opclass
+          ? `${row.expected_method} / ${row.expected_opclass}` : row.expected_method }),
+      el('td', { class: row.healthy ? 'small good' : 'small bad',
+        text: row.healthy ? 'ok'
+          : (!row.present ? 'missing'
+            : (!row.method_ok ? 'wrong method' : 'wrong opclass')) }))))));
+
+  const fallbacks = data.active_fallbacks || [];
+  if (fallbacks.length) {
+    parts.push(el('p', { class: 'small bad',
+      text: `${fallbacks.length} query path(s) on a fallback:` }));
+    parts.push(el('ul', { class: 'small' }, fallbacks.map((f) => el('li', {},
+      el('span', { text: f.feature }),
+      el('span', { class: 'muted', text: ` — ${f.reason}; using ${f.fallback}` })))));
+  } else {
+    parts.push(el('p', { class: 'muted small',
+      text: 'Every extension-backed query path is on its accelerated index.' }));
+  }
+
+  (data.notes || []).forEach((note) =>
+    parts.push(el('p', { class: 'muted small', text: note })));
+
+  holder.replaceChildren(...parts);
 }
 
 /* BETA-057: one canonical URL appearing in more than one source table. A

@@ -1333,6 +1333,34 @@ def verify_migration(
         raise typer.Exit(code=1)
 
 
+@app.command("pg-capabilities")
+def pg_capabilities(
+    strict: bool = typer.Option(
+        False, "--strict",
+        help="Exit non-zero unless every warehouse extension is installed and "
+              "every extension-backed index is present and built correctly."),
+) -> None:
+    """Report PostgreSQL extension and index readiness, and active fallbacks.
+
+    Read-only: catalogue lookups only, no CREATE EXTENSION and no CREATE
+    INDEX. On SQLite it reports that the gate does not apply and exits 0.
+    Point it at a deployment (or a disposable server) with `DATABASE_URL`.
+    """
+    from pipeline import pg_capabilities as caps
+
+    configure_logging("pg_capabilities")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        result = caps.report(conn)
+    finally:
+        conn.close()
+
+    typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    if strict and not result["ready"]:
+        raise typer.Exit(code=1)
+
+
 @app.command("sync-sqlite")
 def sync_sqlite(
     check: bool = typer.Option(

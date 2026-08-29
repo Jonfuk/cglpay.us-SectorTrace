@@ -89,6 +89,19 @@ The Health tab shows, per extension, whether the server carries it and which
 version is installed. A migration that adds an extension-backed index or
 column guards the DDL so a server without the extension still migrates.
 
+`pipeline pg-capabilities` is the deployment-time and CI check of the same
+thing, and goes further: for every extension it names the indexes and
+operator classes that are meant to back it, verifies they exist and were
+built the right way (`USING gin` + `gin_trgm_ops`, `USING gist`, `USING
+hnsw` + `vector_cosine_ops`), and lists every query path currently running
+on its fallback. Read-only — catalogue lookups only, no `CREATE EXTENSION`.
+`--strict` exits non-zero unless the warehouse is fully ready. On SQLite it
+prints that the gate does not apply and exits 0. The same report is at
+`GET /api/admin/pg-capabilities` and in the Health tab.
+`tests/test_pg_capabilities_live.py` exercises it against a disposable
+server with and without the optional extensions (CI runs it in the
+driver-installed job; it self-skips without `POSTGRES_TEST_URL`).
+
 `authorities.geom` (migration 0070) is a **derived** column: a PostGIS
 MultiPolygon rebuilt from `authorities.geometry_geojson` — which stays the
 source of truth and the only geometry the SQLite mirror carries — by

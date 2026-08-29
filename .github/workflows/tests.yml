@@ -100,5 +100,6 @@ jobs:
             tests/test_backend_selection.py \
             tests/test_sqldialect.py \
             tests/test_postgres_live.py \
-            tests/test_pg_migration_live.py
+            tests/test_pg_migration_live.py \
+            tests/test_pg_capabilities_live.py
 

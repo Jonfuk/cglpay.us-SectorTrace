@@ -1091,6 +1091,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/coverage":
             return health.coverage(conn, tier=_str(params, "tier") or "upper")
 
+        if path == "/api/admin/pg-capabilities":
+            # BETA-063: extension + extension-backed-index readiness and the
+            # list of query paths currently on their fallback. Read-only.
+            from pipeline import pg_capabilities
+
+            return pg_capabilities.report(conn)
+
         if path == "/api/admin/failures":
             return health.failures(
                 conn,

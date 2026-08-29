@@ -394,7 +394,8 @@ def test_the_api_documentation_answers_at_the_address_a_reader_would_guess(clien
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):
     """An operator route answering under /api/v1/ would be published."""
     for route in ("overview", "schema", "review", "review/facets", "overrides",
-                  "search", "claim-candidates", "claim-gate", "claim-ontology"):
+                  "search", "claim-candidates", "claim-gate", "claim-ontology",
+                  "pg-capabilities"):
         assert client.get(f"/api/v1/{route}").status_code == 404
 
 

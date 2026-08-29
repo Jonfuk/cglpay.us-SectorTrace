@@ -274,6 +274,16 @@
       <div id="completeness-board"></div>
     </div>
 
+    <div class="panel" style="margin-top: 12px">
+      <h2>PostgreSQL capabilities</h2>
+      <p class="muted small">Which optional extensions are installed, whether
+        the indexes they back exist and were built the right way, and the
+        query paths currently running on a fallback because one is missing.
+        Empty on SQLite — the gate does not apply. Also
+        <code>pipeline pg-capabilities [--strict]</code>.</p>
+      <div id="pg-capabilities"></div>
+    </div>
+
     <details class="panel" style="margin-top: 12px">
       <summary><strong>URL overlaps</strong> <span class="muted small">— one canonical URL in more than one source table</span></summary>
       <p class="muted small">A lead, not proof: it can mean the same document

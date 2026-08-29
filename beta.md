@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-062. Current
-  work: BETA-063. Next: BETA-064, BETA-065.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-063. Current
+  work: BETA-064. Next: BETA-065, BETA-066.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,32 +272,37 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-063 | PostgreSQL extension readiness gate
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-062 completed
+- [IN_PROGRESS] BETA-064 | Temporary-accommodation B&B breakdown
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-063 completed
   - started: 2026-08-29
-  - priority: P1
-  - impact: 5
-  - effort: 4
+  - priority: P2
+  - impact: 3
+  - effort: 3
   - confidence: 4
-  - risk: 3
-  - area: database/deployment
-  - depends_on: BETA-036, BETA-039
-  - objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
-    version, extensions, operator classes, expected indexes and active fallbacks;
-    exercise core and extension-enabled disposable PostgreSQL paths in CI.
-  - rationale: BETA-036 has focused coverage but its optional extension matrix
-    has not yet been proven in a disposable live PostgreSQL deployment.
-  - suggested_first_action: Codify the trigram, PostGIS and pgvector capability
-    matrix and its fallback expectations.
-  - next_action: Add a read-only `pipeline pg-capabilities` command (and an
-    `/api/admin/pg-capabilities` surface) that reports `server_version`, the
-    installed vs expected extension set (`pg_trgm`, `postgis`, `vector`),
-    the operator classes and expected indexes each one backs, and which
-    query paths are currently running on the SQL fallback because an
-    extension is absent. No writes, no `CREATE EXTENSION`. Exercise it in CI
-    against a disposable PostgreSQL with and without the optional extensions
-    so both the accelerated and the fallback paths are proven. On SQLite the
-    command states plainly that the gate does not apply.
+  - risk: 2
+  - area: dataset/comparators
+  - depends_on: BETA-043
+  - objective: Extend m31 with the source-published bed-and-breakfast household
+    breakdown from H-CLIC Table TA1, stored in
+    `temporary_accommodation_breakdowns` with authority, quarter, value, unit
+    and full provenance.
+  - rationale: The data was deliberately omitted from the smallest coherent v1
+    and is now a bounded extension of the same official comparator source.
+  - suggested_first_action: Verify archived workbook header variants and define
+    the exact permitted measure codes; surface contextually without rankings or
+    provider-performance comparison.
+  - next_action: Extend `m31` (statutory homelessness / H-CLIC) to also read
+    Table TA1's bed-and-breakfast household breakdown from the same archived
+    workbook it already fetches. New `temporary_accommodation_breakdowns`
+    table (SQLite migration + postgres pair): `ons_code`, `quarter_start`,
+    `quarter_label`, `measure` (a closed set of permitted codes),
+    `households` INTEGER + `households_text` TEXT for the source's
+    `[x]`/`[z]`/`[c]` placeholders, plus full provenance columns. Parse the
+    header variants seen across archived vintages; anything unrecognised is
+    a `parse_failures` row, never a guess. Surface it on the existing
+    temporary-accommodation portal view as context only — no ranking, no
+    cross-authority league table, no arithmetic against the treatment or
+    pay layers (docs/CAVEATS.md).
 
 ### BLOCKED
 
@@ -481,25 +486,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-064 | Temporary-accommodation B&B breakdown
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-061 completed
-  - priority: P2
-  - impact: 3
-  - effort: 3
-  - confidence: 4
-  - risk: 2
-  - area: dataset/comparators
-  - depends_on: BETA-043
-  - objective: Extend m31 with the source-published bed-and-breakfast household
-    breakdown from H-CLIC Table TA1, stored in
-    `temporary_accommodation_breakdowns` with authority, quarter, value, unit
-    and full provenance.
-  - rationale: The data was deliberately omitted from the smallest coherent v1
-    and is now a bounded extension of the same official comparator source.
-  - suggested_first_action: Verify archived workbook header variants and define
-    the exact permitted measure codes; surface contextually without rankings or
-    provider-performance comparison.
-
 - [NEXT] BETA-065 | CQC regulated-location explorer
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-062 completed
   - priority: P1
@@ -518,6 +504,25 @@ DONE
     coverage nor quality scores.
   - suggested_first_action: Define the public-column allowlist, map/table parity
     and missing-coordinate behaviour; exclude every restricted contact field.
+
+- [NEXT] BETA-066 | Provider predecessor and successor lineage
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-063 completed
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 4
+  - risk: 3
+  - area: provider-identity
+  - depends_on: BETA-056
+  - objective: Add `GET /api/v1/providers/{provider_key}/lineage` and a provider
+    detail timeline for explicit active, merged, dissolved, predecessor and
+    successor relationships.
+  - rationale: Older evidence remains attached to historical provider entities;
+    users need the verified lineage without inferred ownership or personal
+    officer data.
+  - suggested_first_action: Normalise existing `status` and `superseded_by`
+    configuration into explicit, testable lineage edges with verified identifier
+    roles only.
 
 ### READY
 
@@ -566,6 +571,60 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-063 | PostgreSQL extension readiness gate
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: database/deployment
+  - depends_on: BETA-036, BETA-039
+  - objective: Add read-only `pipeline pg-capabilities` reporting PostgreSQL
+    version, extensions, operator classes, expected indexes and active fallbacks;
+    exercise core and extension-enabled disposable PostgreSQL paths in CI.
+  - result: New `pipeline/pg_capabilities.py` — `report(conn)`, strictly
+    read-only (`pg_catalog` / `information_schema` only, no `CREATE
+    EXTENSION`, no `CREATE INDEX`). It carries a hand-maintained matrix,
+    `BACKED_INDEXES`: for each of the five `pg_trgm` GIN indexes, the PostGIS
+    GiST `authorities.geom` index and the pgvector HNSW
+    `document_embeddings.embedding_vec` index, the access method, the
+    operator class (`gin_trgm_ops` / `vector_cosine_ops`), the query path it
+    accelerates and the fallback that runs without it. The report gives
+    `server_version`, an extension list (available / installed / version /
+    what it backs), a per-index row (present, `method_ok`, `opclass_ok`,
+    `healthy`), the `active_fallbacks` list — one entry per query path
+    currently degraded, with the reason (extension missing / index missing /
+    wrong method / wrong opclass) — and `ready`, true only when every
+    warehouse extension is installed and nothing is on a fallback. A note
+    fires when pgvector is installed but the derived `embedding_vec` column
+    is absent. On SQLite it returns `applies: false`, `ready: true` and a
+    one-line explanation.
+  - api/ui: `pipeline pg-capabilities [--strict]` (JSON to stdout; `--strict`
+    exits non-zero unless `ready`; SQLite always exits 0).
+    `GET /api/admin/pg-capabilities` (admin only). A "PostgreSQL
+    capabilities" panel in the Health tab — the index table plus the active
+    fallbacks list, or the "gate does not apply" line on SQLite.
+  - validation: New `tests/test_pg_capabilities.py` (6 offline — the SQLite
+    branch, every matrix row names a `db.WAREHOUSE_EXTENSIONS` member, every
+    matrix index is declared `USING <method>` in the PostgreSQL migration
+    tree with its opclass present, the CLI reports and stays exit 0 on
+    SQLite with and without `--strict`, and the route is admin-only /
+    404 under `/api/v1`). New `tests/test_pg_capabilities_live.py` (4,
+    self-skipping without `POSTGRES_TEST_URL`, `scratch_schema` isolation
+    like `test_postgres_live.py`) — the report applies and names the server,
+    `ready` is exactly "no fallbacks and every extension installed", each
+    extension state is described correctly (missing → a fallback per feature
+    and `healthy: false`; installed with its index → `healthy: true` and no
+    fallback for that feature), and the module is read-only. Added to the CI
+    "tests that need the driver" job, which runs it with and without the
+    optional extensions on a disposable server. `docs/DEPLOYMENT.md` updated.
+    `tests/test_portal_isolation.py` pins the admin-only route. No migration.
+    Full offline suite green — **2843 passed, 113 skipped, 35 deselected, 0
+    failed**. `ruff` clean. Browser-verified against a SQLite scratch
+    warehouse: the Health panel shows the "gate does not apply" line, zero
+    console errors.
 
 - [DONE] BETA-062 | Human-readable document titles
   - completed: 2026-08-29
@@ -3424,10 +3483,10 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | DONE (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | DONE (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | DONE (BETA-062) |
-| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | IN_PROGRESS (BETA-063) |
-| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | NEXT (BETA-064) |
+| P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | DONE (BETA-063) |
+| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | IN_PROGRESS (BETA-064) |
 | P1 | CQC regulated-location explorer | 4 | 4 | 4 | NEXT (BETA-065) |
-| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | Approved successor backlog (BETA-066) |
+| P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | NEXT (BETA-066) |
 | P2 | Capability-documentation consistency checker | 4 | 3 | 5 | Approved successor backlog (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
