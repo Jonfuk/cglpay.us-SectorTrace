@@ -126,7 +126,7 @@ for _page in ("overview", "pay", "contracts", "geography", "treatment", "provide
               "pfd", "authority", "compare", "claims", "coverage", "relationships",
               "documents", "catalogue", "cqc", "changes", "calendar",
               "revisions", "pathfinder", "timeline",
-              "cooccurrence", "discrepancies"):
+              "cooccurrence", "discrepancies", "diary"):
     STATIC_FILES[f"/js/pages/{_page}.js"] = (f"js/pages/{_page}.js", JS, PUBLIC_DIR)
 
 # Third-party builds, committed under static/public/vendor. See its README for
@@ -1629,6 +1629,19 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 ons_code=_str(params, "ons_code") or None,
                 provider_key=_str(params, "provider_key") or None)
+        if route == "contract_diary":
+            # BETA-098: procurement lifecycle records as dated events --
+            # published, award, contract period start/end. Every date is
+            # transcribed from the notice; no renewal or completion is
+            # predicted.
+            from pipeline.web import contract_diary
+            return contract_diary.diary(
+                conn,
+                provider_key=_str(params, "provider_key") or None,
+                buyer_ons_code=_str(params, "buyer_ons_code") or None,
+                year=_str(params, "year") or None,
+                ocid=_str(params, "ocid") or None)
+
         if route == "discrepancies":
             # BETA-096: fields two or more public sources report differently
             # for one verified entity. Both values shown, neither resolved or

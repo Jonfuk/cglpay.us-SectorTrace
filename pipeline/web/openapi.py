@@ -111,6 +111,20 @@ ROUTES: dict[str, dict] = {
         "parameters": [_p("ons_code", desc="Exactly one of ons_code or provider_key."),
                        _p("provider_key")],
     },
+    "/api/v1/contract_diary": {
+        "surface": "contract_diary",
+        "summary": "Procurement lifecycle records as dated events — notice "
+                   "published, award, contract period start/end. Every date is "
+                   "transcribed from the notice; an “ends” event is the period "
+                   "as published, never a prediction of renewal or completion. "
+                   "Scope by provider_key, buyer_ons_code or ocid.",
+        "parameters": [
+            _p("provider_key", desc="Contracts whose supplier matched this key."),
+            _p("buyer_ons_code", desc="Contracts bought by this authority."),
+            _p("ocid", desc="One OCDS process."),
+            _p("year", desc="Keep only events in this calendar year."),
+        ],
+    },
     "/api/v1/discrepancies": {
         "surface": "discrepancies",
         "summary": "Fields that two or more public sources report differently "

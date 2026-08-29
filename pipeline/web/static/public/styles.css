@@ -1389,6 +1389,24 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .dx-agreed { margin: 0; padding-left: var(--space-4); }
 .dx-agreed li { padding: 2px 0; }
 
+/* BETA-098: contract diary. A dated agenda grouped by month, plus a small
+ * per-month event-count overview. Every date is transcribed from a notice. */
+.dy-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dy-controls select, .dy-id, .dy-year { padding: var(--space-1) var(--space-2); }
+.dy-id { min-width: 260px; }
+.dy-year { width: 120px; }
+.dy-overview { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
+.dy-bar { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; }
+.dy-bar-fill { width: 14px; background: var(--accent-teal, var(--accent-amber)); border-radius: 2px 2px 0 0; }
+.dy-month { margin: var(--space-3) 0; }
+.dy-month h3 { margin: 0 0 var(--space-1); }
+.dy-event { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--border-subtle); border-left: 3px solid var(--border-subtle); padding-left: var(--space-2); }
+.dy-event.dy-award { border-left-color: var(--accent-amber); }
+.dy-event.dy-end { border-left-color: #d9534f; }
+.dy-event.dy-start { border-left-color: #3fb27f; }
+.dy-date { flex: 0 0 92px; }
+.dy-kind { font-size: 12px; color: var(--text-secondary); flex: 0 0 220px; }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status

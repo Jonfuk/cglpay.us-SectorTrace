@@ -361,6 +361,37 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-contract_diary" data-route="contract_diary">
+    <h3><code>/api/v1/contract_diary</code></h3>
+    <p>
+      Procurement lifecycle records read as dated events rather than
+      disconnected notice rows: a notice published, an award, a contract
+      period starting, a contract period ending. <strong>Every date is
+      transcribed from the notice.</strong> An “ends” event is the contract
+      period <em>as published</em> — it is not a forecast of renewal,
+      re-tender, or completion — and no milestone or performance event is
+      shown because the warehouse does not collect them. Scope the diary by
+      provider, buyer authority, or a single OCDS process.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Contracts whose supplier name matched this key (via <code>supplier_aliases</code>).</td></tr>
+        <tr><td><code>buyer_ons_code</code></td><td>Contracts bought by this authority.</td></tr>
+        <tr><td><code>ocid</code></td><td>One OCDS process.</td></tr>
+        <tr><td><code>year</code></td><td>Keep only events in this calendar year.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code> (each with <code>date</code>,
+      <code>kind</code>, <code>title</code>, <code>value_core</code>,
+      <code>source_url</code>), <code>months</code> (event counts, for a
+      calendar overview), <code>span</code>, <code>counts</code>,
+      <code>note</code> and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/contract_diary?buyer_ons_code=E08000025</code></p>
+  </article>
+
   <article class="apiroute" id="route-discrepancies" data-route="discrepancies">
     <h3><code>/api/v1/discrepancies</code></h3>
     <p>

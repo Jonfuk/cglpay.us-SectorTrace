@@ -297,20 +297,20 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-098 | Contract diary and milestone calendar
+- [IN_PROGRESS] BETA-100 | Source-link resilience checker
   - priority: P1
   - impact: 5
   - effort: 4
   - confidence: 4
   - risk: 3
-  - area: public/procurement
-  - depends_on: BETA-050, BETA-072, BETA-076
-  - objective: Present published tender dates, awards, contract periods,
-    amendments, milestones, expected expiries and performance events in
-    calendar and accessible agenda views.
-  - next_action: Build a dated-event agenda from the OCDS notice fields only
-    (published, award, period start/end); mark an expiry as "as published",
-    predict no renewal or completion.
+  - area: public/provenance
+  - depends_on: BETA-060, BETA-081, BETA-084
+  - objective: Show whether an original source URL is live, redirected,
+    changed or unavailable and whether a checksum-verified archive copy is
+    held.
+  - next_action: Derive conservative link states from collection-time
+    metadata only (http_status, payload_sha256, archive path) — no live
+    fetch — and never present the archive as the current publisher page.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme is complete, see DONE. Wave 2 (BETA-088, BETA-089,
@@ -550,6 +550,52 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-098 | Contract diary and milestone calendar
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: public/procurement
+  - depends_on: BETA-050, BETA-072, BETA-076
+  - objective: Present published tender dates, awards, contract periods,
+    amendments, milestones, expected expiries and performance events in
+    calendar and accessible agenda views.
+  - result: New `pipeline/web/contract_diary.py::diary()` — every dated field
+    a matched notice carries, flattened into a chronological agenda:
+    `date_published` becomes a `published` event (or `award` when the notice
+    type is an award/contract), `date_start` a `period_start`, `date_end` a
+    `period_end`. **Every date is transcribed from the notice.** A
+    `period_end` event's label reads "Contract period ends (as published)"
+    and the `note` states plainly that this diary never predicts a renewal,
+    a re-tender or a completion, and shows no milestone or performance event
+    because the warehouse does not collect them — only the OCDS notice
+    fields are used. Scope by `provider_key` (via `supplier_aliases`),
+    `buyer_ons_code`, or `ocid`, with an optional `year`. Returns `events`,
+    `months` (per-month counts for a calendar overview), `span`, `counts`.
+    New additive public route `/api/v1/contract_diary` on the frozen surface,
+    OpenAPI, `<noscript>` and `api.html`.
+  - api/ui: additive `/api/v1/contract_diary`. New `/diary` route + page
+    ("Contract diary"): a scope picker (provider / buyer / OCDS + optional
+    year), an "at a glance" per-month bar strip, and an accessible agenda
+    grouped by month with a kind badge and value per event. Linked from the
+    footer nav. `styles.css` gained a `.dy-*` block.
+  - validation: New `tests/test_web_contract_diary.py` (7 — notice dates
+    become three ordered events with their source URL and a computed span;
+    an award notice type marks the published event `award`; a `period_end`
+    is labelled "as published" and the note forecasts nothing; the `year`
+    filter keeps only that year; a scope is required; provider scope uses
+    verified aliases; the route is in the OpenAPI doc). `test_portal_isolation`
+    / `test_portal_navigation` / `test_web_openapi` / `test_portal_offline_reading`
+    / `test_portal_design_system` green; `ruff` clean. (Restored
+    `pipeline/web/server.py` and `app.js` after a bare-`python` edit wrote
+    them as cp1252 and corrupted an em-dash; re-applied the route with the
+    Edit tool.) Browser-verified on `#/diary?buyer=E09000007` against a
+    seeded award: a 5-bar month overview and month sections Nov 2024 → Mar
+    2029 with "Award notice £8.2m", "Contract period starts (as published)"
+    and "Contract period ends (as published)".
 
 - [DONE] BETA-096 | Evidence discrepancy explorer
   - completed: 2026-08-29
@@ -5313,9 +5359,9 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Entity co-occurrence explorer | 5 | 4 | 4 | DONE (BETA-095) |
 | P1 | Evidence discrepancy explorer | 5 | 5 | 3 | DONE (BETA-096) |
 | P2 | Temporal coverage navigator | 4 | 3 | 5 | DONE (BETA-097) |
-| P1 | Contract diary and milestone calendar | 5 | 4 | 4 | IN_PROGRESS (BETA-098) |
+| P1 | Contract diary and milestone calendar | 5 | 4 | 4 | DONE (BETA-098) |
 | P1 | Document table extraction viewer | 5 | 5 | 3 | APPROVED, not queued (BETA-099) |
-| P1 | Source-link resilience checker | 5 | 4 | 4 | APPROVED, not queued (BETA-100) |
+| P1 | Source-link resilience checker | 5 | 4 | 4 | IN_PROGRESS (BETA-100) |
 | P1 | Run-to-run output comparison | 5 | 4 | 4 | DONE (BETA-101) |
 | P1 | Interactive pipeline and data-lineage map | 5 | 5 | 4 | DONE (BETA-102) |
 | P2 | Parser replay sandbox | 4 | 5 | 3 | APPROVED, not queued (BETA-103) |
