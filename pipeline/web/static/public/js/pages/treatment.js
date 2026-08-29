@@ -17,7 +17,7 @@
 import { el, replace, fetchJSON, setFilterResultCount, num, isoDate, typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
-          exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
+          exportButton, shareButton, findingBlock, evidenceMeta, evidenceHealthStrip } from '/js/components.js';
 
 const TOPICS = [
   ['numbers_in_treatment', 'Numbers in treatment'],
@@ -48,10 +48,26 @@ export async function render(main) {
       el('summary', { text: 'What treatment data can answer' }),
       el('p', { text: 'The figures show published indicators and estimates. They cannot show unmet need by subtracting one measure from another.' }),
       el('p', { text: 'A blank, suppressed value, or missing confidence interval is not zero and is shown separately from a published value.' })),
+    el('div', { id: 'evidence-health' }),
     el('div', { id: 'metric-catalogue' }),
     el('div', { id: 'ft' }),
     el('div', { id: 'ndtms' }));
   replace(main, page);
+
+  // BETA-084: the standardised evidence-health strip. Filled after the first
+  // fingertips load so it can show the latest retrieval; verification is not
+  // applicable to a published statistic, and coverage is partial by design
+  // (only local authorities with a public health role publish).
+  const healthSlot = page.querySelector('#evidence-health');
+  replace(healthSlot, evidenceHealthStrip({
+    scope: 'OHID Fingertips and NDTMS treatment indicators, by English local authority, against the England figure.',
+    retrievedAt: null,
+    verification: 'n/a',
+    coverage: 'partial',
+    licence: { name: 'Open Government Licence v3.0', url: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/' },
+    limitation: 'Unmet need cannot be derived by subtracting one measure from another; missing periods are shown as missing, never zero.',
+    catalogueSlug: 'fingertips',
+  }));
 
   // BETA-075: the metric catalogue comes before the chart. It exposes what a
   // metric is, its unit, whether a 95% CI is published, the exact periods it
@@ -166,6 +182,20 @@ export async function render(main) {
       module: 'm12_fingertips',
     }) || el('span', {}));
     replace(guideHolder, indicatorGuide(data, state));
+
+    // BETA-084: fill the health strip's latest-retrieval now the data is in.
+    const ftMeta = evidenceMeta({ indicators: data.indicators });
+    if (ftMeta.retrievedAt) {
+      replace(healthSlot, evidenceHealthStrip({
+        scope: 'OHID Fingertips and NDTMS treatment indicators, by English local authority, against the England figure.',
+        retrievedAt: ftMeta.retrievedAt,
+        verification: 'n/a',
+        coverage: 'partial',
+        licence: { name: 'Open Government Licence v3.0', url: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/' },
+        limitation: 'Unmet need cannot be derived by subtracting one measure from another; missing periods are shown as missing, never zero.',
+        catalogueSlug: 'fingertips',
+      }));
+    }
 
     setFilterResultCount(data.indicators?.length ?? 0, 'indicator');
 

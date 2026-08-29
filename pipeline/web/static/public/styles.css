@@ -538,6 +538,21 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-084: page-level evidence health strip. */
+.evidence-health {
+  margin: var(--space-4) 0 var(--space-6); padding: var(--space-4);
+  border: 1px solid var(--border-subtle); border-left: 3px solid var(--accent-teal);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+}
+.ehs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-3); }
+.ehs-cell { display: flex; flex-direction: column; gap: 2px; }
+.ehs-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.ehs-value { font-size: 13px; color: var(--text-primary); }
+.ehs-unknown { color: var(--text-muted); font-style: italic; }
+.ehs-cell.ehs-warn .ehs-value { color: var(--accent-amber); }
+.ehs-limitation { margin: var(--space-3) 0 0; font-size: 13px; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); padding-top: var(--space-2); }
+.ehs-links { margin: var(--space-2) 0 0; }
+
 /* BETA-081: document reading room. */
 .reading-split { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 @media (max-width: 900px) { .reading-split { grid-template-columns: 1fr; } }

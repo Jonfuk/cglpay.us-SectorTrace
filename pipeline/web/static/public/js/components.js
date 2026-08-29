@@ -416,6 +416,73 @@ export function evidenceMeta(payload) {
   return { sources, retrievedAt };
 }
 
+/* BETA-084: one evidence-health strip at the top of every public evidence
+ * page. It has one job — say, in the same place and the same shape every
+ * time, whether what follows is current and complete. Every field renders an
+ * explicit state: a missing value is "unknown" or "not collected", never a
+ * blank. The page supplies what it knows; anything it does not pass is shown
+ * as unknown rather than hidden.
+ *
+ * props: { scope, retrievedAt, verification, coverage, licence, limitation,
+ *          catalogueSlug }
+ *   scope        one sentence: what population/period this page covers
+ *   retrievedAt  latest retrieval ISO, or null -> "unknown"
+ *   verification 'verified' | 'partly verified' | 'unverified' | 'n/a' | null
+ *   coverage     'complete' | 'partial' | 'thin' | 'unknown' | 'not collected'
+ *   licence      {name, url?} | 'varies' | null
+ *   limitation   the one known limitation to lead with, or null
+ *   catalogueSlug  links the strip to `#/catalogue/<slug>` for the full record
+ */
+export function evidenceHealthStrip(props = {}) {
+  const {
+    scope = null, retrievedAt = null, verification = null, coverage = null,
+    licence = null, limitation = null, catalogueSlug = null,
+  } = props;
+
+  const cell = (label, valueNode, cls = '') =>
+    el('div', { class: `ehs-cell${cls ? ` ${cls}` : ''}` },
+      el('span', { class: 'ehs-label', text: label }),
+      typeof valueNode === 'string'
+        ? el('span', { class: 'ehs-value', text: valueNode })
+        : (valueNode || el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' })));
+
+  const verificationText = {
+    verified: 'verified', 'partly verified': 'partly verified',
+    unverified: 'unverified', 'n/a': 'not applicable',
+  }[verification] || 'unknown';
+
+  const coverageText = coverage || 'unknown';
+
+  let licenceNode = el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' });
+  if (licence === 'varies') {
+    licenceNode = el('span', { class: 'ehs-value', text: 'varies by source' });
+  } else if (licence && licence.name) {
+    licenceNode = licence.url
+      ? el('a', { class: 'ehs-value', href: licence.url, target: '_blank', rel: 'noopener noreferrer' }, licence.name)
+      : el('span', { class: 'ehs-value', text: licence.name });
+  }
+
+  return el('div', { class: 'evidence-health', role: 'note', 'aria-label': 'Evidence health' },
+    el('div', { class: 'ehs-grid' },
+      cell('Scope', scope || el('span', { class: 'ehs-value ehs-unknown', text: 'not stated' })),
+      cell('Latest retrieval', retrievedAt ? isoDate(retrievedAt)
+        : el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' })),
+      cell('Verification', verificationText,
+        verification === 'unverified' || verification === 'partly verified' ? 'ehs-warn' : ''),
+      cell('Coverage', coverageText,
+        coverage === 'partial' || coverage === 'thin' || coverage === 'not collected' ? 'ehs-warn' : ''),
+      cell('Licence', licenceNode)),
+    limitation
+      ? el('p', { class: 'ehs-limitation', text: `Known limitation: ${limitation}` })
+      : null,
+    el('p', { class: 'ehs-links small' },
+      catalogueSlug
+        ? el('a', { href: `#/catalogue/${catalogueSlug}` }, 'Full dataset record')
+        : el('a', { href: '#/catalogue' }, 'Dataset catalogue'),
+      ' · ',
+      el('a', { href: '#/coverage' }, 'Coverage & limitations')));
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const area = el('textarea', { class: 'clipboard-fallback', text });

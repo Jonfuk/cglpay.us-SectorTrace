@@ -15,7 +15,7 @@ import { el, replace, fetchJSON, setFilterResultCount, num, gbp, pct, isoDate, s
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
-          findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
+          findingBlock, evidenceMeta, evidenceHealthStrip, workbenchNav } from '/js/components.js';
 import { pushRecent } from '/js/recent.js';
 import { chartLabelColor } from '/js/theme.js';
 

@@ -11,7 +11,8 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
-          truncate, shareButton, findingBlock, evidenceMeta, revealOnScroll } from '/js/components.js';
+          truncate, shareButton, findingBlock, evidenceMeta, evidenceHealthStrip,
+          revealOnScroll } from '/js/components.js';
 
 /* BETA-070 workforce pay explorer.
  *
@@ -138,6 +139,20 @@ export async function render(main, { params = null } = {}) {
         el('button', { type: 'button', onclick: () => scrollToLayer('adverts') }, 'Advertised roles'),
         el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
         el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
+    (() => {
+      const meta = evidenceMeta(data);
+      const census = data.census_total || 0;
+      return evidenceHealthStrip({
+        scope: 'Published pay signals for tracked drug and alcohol treatment providers, England.',
+        retrievedAt: meta.retrievedAt,
+        verification: !census ? 'n/a'
+          : data.census_all_unverified ? 'unverified'
+          : data.census_verified_count < data.census_total ? 'partly verified' : 'verified',
+        coverage: 'partial',
+        licence: { name: 'Varies by source (OGL v3.0, NHS Benchmarking, provider-owned)' },
+        limitation: 'None of these layers is payroll data; they are not combined into a pay figure.',
+      });
+    })(),
     explorerStrip(data, explorer),
     (() => {
       const meta = evidenceMeta(data);

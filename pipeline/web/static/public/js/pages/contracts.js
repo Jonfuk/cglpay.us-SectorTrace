@@ -12,7 +12,7 @@ import { el, replace, fetchJSON, filterParams, setFilterResultCount,
           num, gbp, pct, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
+          exportButton, shareButton, findingBlock, evidenceMeta, evidenceHealthStrip } from '/js/components.js';
 
 /* BETA-040. The first window the page asks for; "show more" pages the rest by
  * offset. The charts on this page are computed server-side over the whole
@@ -81,6 +81,18 @@ export async function render(main, { params = null } = {}) {
           text: 'Explore this filtered SectorTrace contracts evidence view with its source and caveat context.',
           label: 'Share filtered view',
         }))),
+    (() => {
+      const meta = evidenceMeta(data);
+      return evidenceHealthStrip({
+        scope: 'Procurement notices matching the sector keyword set, England-wide. Includes health and care awards beyond substance misuse.',
+        retrievedAt: meta.retrievedAt,
+        verification: 'n/a',
+        coverage: 'partial',
+        licence: { name: 'Open Government Licence v3.0', url: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/' },
+        limitation: data.caveats?.value_sum || 'Published values can include framework ceilings and are not sector spend.',
+        catalogueSlug: 'procurement-notices',
+      });
+    })(),
     (() => {
       const meta = evidenceMeta(data);
       return findingBlock({

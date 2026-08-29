@@ -297,23 +297,22 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-084 | Page-level evidence health strip
+- [IN_PROGRESS] BETA-085 | Responsive admin navigation
   - priority: P1
   - impact: 5
-  - effort: 3
+  - effort: 4
   - confidence: 5
   - risk: 2
-  - area: public/trust
-  - depends_on: BETA-039, BETA-043, BETA-059, BETA-080
-  - objective: Standardise scope, verification state, latest retrieval,
-    coverage completeness, licence and known limitations at the top of every
-    public evidence page.
-  - next_action: Define one evidence-health view model with explicit
-    unknown/not-collected states and links to the authoritative catalogue and
-    coverage records.
+  - area: admin/navigation
+  - depends_on: BETA-049, BETA-080
+  - objective: Replace twelve horizontal tabs with a grouped sidebar —
+    Review, Evidence, Operations, Data and System — using a narrow-screen
+    drawer while retaining Ctrl-K, badges and existing deep links.
+  - next_action: Define the exact old-tab → group/destination map and make
+    the router accept both old and new links before changing presentation.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–083 are complete, see DONE. Wave 4 (BETA-082–087) is
+on 2026-08-29. BETA-068–084 are complete, see DONE. Wave 4 (BETA-082–087) is
 in progress. The remaining items are being delivered in the approved wave
 order.)_
 
@@ -550,6 +549,45 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-084 | Page-level evidence health strip
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/trust
+  - depends_on: BETA-039, BETA-043, BETA-059, BETA-080
+  - objective: Standardise scope, verification state, latest retrieval,
+    coverage completeness, licence and known limitations at the top of every
+    public evidence page.
+  - result: New shared `evidenceHealthStrip(props)` in `components.js` — one
+    view model, one shape, every field an explicit state. `props` are
+    `{ scope, retrievedAt, verification, coverage, licence, limitation,
+    catalogueSlug }`; a value the page does not pass renders as "unknown" /
+    "not stated" (`.ehs-unknown`, italic), never a blank. `verification`
+    (`verified` / `partly verified` / `unverified` / `n/a`) and `coverage`
+    (`complete` / `partial` / `thin` / `unknown` / `not collected`) map an
+    absent value to a word and amber the concerning ones; `licence` takes a
+    `{name, url}` or `'varies'`. The strip always links to the dataset
+    catalogue (`#/catalogue/<slug>` when the page maps to one dataset, else
+    `#/catalogue`) and to `#/coverage`. Adopted on the pay, contracts and
+    treatment pages (treatment fills its `retrievedAt` after the first
+    fingertips load); the remaining pages can adopt it incrementally with no
+    API change.
+  - api/ui: no API change. New component + CSS (`.evidence-health`,
+    `.ehs-*`).
+  - validation: New `tests/test_portal_evidence_health.py` (5 — the strip is
+    one shared component with the five labels; missing values render an
+    explicit state not a blank; it links to the catalogue and the coverage
+    page; at least pay/contracts/treatment adopt it; it has its own styles).
+    Chart / table / isolation suites green. Browser-verified: the contracts
+    strip shows scope, "Latest retrieval 2026-08-01", "Verification not
+    applicable", "Coverage partial", "Licence Open Government Licence v3.0",
+    the known-limitation line, and links to `#/catalogue/procurement-notices`
+    and `#/coverage`; the treatment strip fills its retrieval date after the
+    data loads.
 
 - [DONE] BETA-083 | Schema-aware data explorer
   - completed: 2026-08-29
@@ -4461,8 +4499,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Document reading room | 5 | 5 | 4 | DONE (BETA-081) |
 | P1 | Pipeline mission control | 5 | 5 | 4 | DONE (BETA-082) |
 | P2 | Schema-aware data explorer | 4 | 4 | 4 | DONE (BETA-083) |
-| P1 | Page-level evidence health strip | 5 | 3 | 5 | IN_PROGRESS (BETA-084) |
-| P1 | Responsive admin navigation | 5 | 4 | 5 | APPROVED, not queued (BETA-085) |
+| P1 | Page-level evidence health strip | 5 | 3 | 5 | DONE (BETA-084) |
+| P1 | Responsive admin navigation | 5 | 4 | 5 | IN_PROGRESS (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | APPROVED, not queued (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | APPROVED, not queued (BETA-087) |
 | P1 | Evidence notebook | 5 | 4 | 4 | APPROVED, not queued (BETA-088) |
