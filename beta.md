@@ -297,22 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-072 | Consistent filters and URL-restored query state
+- [IN_PROGRESS] BETA-073 | My area context
   - priority: P1
   - impact: 5
-  - effort: 3
-  - confidence: 5
+  - effort: 4
+  - confidence: 4
   - risk: 2
-  - area: public/filtering
-  - depends_on: BETA-024, BETA-049
-  - objective: Standardise filter bars with active chips, result counts,
-    clear-all, basic/advanced disclosure, validation and hash-query
-    persistence; browser history and shared URLs must restore the exact query.
-  - next_action: Define one typed filter-state serializer and migrate
-    providers, treatment and contracts before applying it portal-wide.
+  - area: public/local evidence
+  - depends_on: BETA-017, BETA-043, BETA-044
+  - objective: Let a reader choose and locally retain one council without an
+    account, then present its funding, treatment, contracts, providers,
+    relationships, homelessness comparators, coverage and freshness through
+    links to the underlying evidence.
+  - next_action: Define the minimum local summary exclusively from existing
+    authority/public routes, with localStorage containing only the ONS code
+    and no personal data.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–071 are complete, see DONE. The remaining items are
+on 2026-08-29. BETA-068–072 are complete, see DONE. The remaining items are
 being delivered in the approved wave order.)_
 
 ### BLOCKED
@@ -548,6 +550,55 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-072 | Consistent filters and URL-restored query state
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: public/filtering
+  - depends_on: BETA-024, BETA-049
+  - objective: Standardise filter bars with active chips, result counts,
+    clear-all, basic/advanced disclosure, validation and hash-query
+    persistence; browser history and shared URLs must restore the exact query.
+  - result: New `js/filterstate.js` — the one typed definition of the shared
+    filter state. `FILTER_SCHEMA` maps each key (`provider`, `yearFrom`,
+    `yearTo`) to its query-param name, type and chip label; `parseFilters`,
+    `serializeFilters` (carrying page-owned keys — compare's `ons_code`,
+    contracts' `q`, pay's `source` — through untouched), `validateFilters`
+    (year bounds 2000..currentYear+1 and from ≤ to) and `chipLabels` are the
+    only readers/writers. `app.js`'s `writeStateToUrl` / `readStateFromUrl`
+    now route through it, and a `hashchange` re-syncs the shared state before
+    rendering so the back/forward buttons and an edited address bar restore
+    the exact query, not just the route (previously state was read from the
+    URL only at boot). The filter summary resolves the provider key to its
+    canonical name for the chip, shows a per-page result count beside the
+    chips (`setFilterResultCount(count, noun)`, wired in contracts, providers
+    and treatment; cleared by the router on route change), and shows an inline
+    validation message with `aria-invalid` on the year inputs — an invalid
+    year range is refused rather than sent to an endpoint. "Clear all" now
+    wipes the whole hash query (shared + page-local) and keeps the route.
+  - not done / N/A: basic/advanced disclosure on the *shared* bar — it holds
+    only provider + year range, with nothing to tuck away. Per-page advanced
+    filtering already lives in each page's own search / explorer panel
+    (contracts search, the BETA-070 pay explorer).
+  - api/ui: no API change. New served module `/js/filterstate.js` (added to
+    the `test_portal_isolation.py` public-surface whitelist and the server
+    static map). New CSS: `.filter-summary-count`, `.filter-summary-error`,
+    `[aria-invalid]` year inputs.
+  - validation: New `tests/test_portal_filter_state.py` (8 — the module is
+    served and exports the serializer surface; the schema covers the shared
+    keys; page-owned keys survive serialisation; year validation checks
+    bounds and order; `app.js` re-reads state on `hashchange`; "Clear all"
+    wipes the whole query; contracts/providers/treatment report a count; the
+    chip resolves the provider name). `test_portal_isolation` /
+    `test_portal_controls` / `test_web_meta` / security-header suites green.
+    `ruff` clean. Browser-verified: a deep link restores the resolved-name
+    chip + count, an invalid year range shows the inline message and is not
+    applied, "Clear all" returns to a bare route, the summary hides when no
+    filter is active.
 
 - [DONE] BETA-071 | Responsive public data tables
   - completed: 2026-08-29
@@ -3883,8 +3934,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Mobile public-header rebuild | 5 | 3 | 5 | DONE (BETA-069) |
 | P1 | Workforce pay explorer | 5 | 4 | 4 | DONE (BETA-070) |
 | P1 | Responsive public data tables | 5 | 4 | 4 | DONE (BETA-071) |
-| P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | IN_PROGRESS (BETA-072) |
-| P1 | My area context | 5 | 4 | 4 | APPROVED, not queued (BETA-073) |
+| P1 | Consistent filters and URL-restored query state | 5 | 3 | 5 | DONE (BETA-072) |
+| P1 | My area context | 5 | 4 | 4 | IN_PROGRESS (BETA-073) |
 | P2 | Inspectable visualisations | 4 | 3 | 5 | APPROVED, not queued (BETA-074) |
 | P1 | Treatment metric explorer | 5 | 4 | 4 | APPROVED, not queued (BETA-075) |
 | P1 | Navigable provider and authority workbenches | 5 | 4 | 5 | APPROVED, not queued (BETA-076) |

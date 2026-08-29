@@ -14,7 +14,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, isoDate, typeaheadKeyboard } from '/app.js';
+import { el, replace, fetchJSON, setFilterResultCount, num, isoDate, typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, symbolFor, escapeHtml,
           exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
@@ -155,6 +155,8 @@ export async function render(main) {
       module: 'm12_fingertips',
     }) || el('span', {}));
     replace(guideHolder, indicatorGuide(data, state));
+
+    setFilterResultCount(data.indicators?.length ?? 0, 'indicator');
 
     if (!data.indicators?.length) {
       replace(chartHolder, noData(`${state.topic} indicators`,

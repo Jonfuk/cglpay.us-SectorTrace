@@ -8,7 +8,8 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, filterParams, num, gbp, pct, isoDate } from '/app.js';
+import { el, replace, fetchJSON, filterParams, setFilterResultCount,
+          num, gbp, pct, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
@@ -59,6 +60,10 @@ export async function render(main, { params = null } = {}) {
     replace(main, errorCard(error, () => render(main, { params })));
     return () => {};
   }
+
+  // BETA-072: the shared filter summary shows how many notices this query
+  // returns, beside the active-filter chips.
+  setFilterResultCount(data.total, 'notice');
 
   const concentration = data.value_concentration || {};
   const page = el('div', {},

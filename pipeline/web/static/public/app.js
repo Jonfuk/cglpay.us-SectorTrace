@@ -13,6 +13,8 @@
 
 import { initPortalTheme, registerTheme } from '/js/theme.js';
 import { initPalette } from '/js/palette.js';
+import { parseFilters, serializeFilters, validateFilters, chipLabels }
+  from '/js/filterstate.js';
 
 // --- DOM helpers -------------------------------------------------------------
 
@@ -265,33 +267,17 @@ export function subscribe(fn) {
 function writeStateToUrl() {
   const [path, rawQuery] = (location.hash.slice(1) || '/').split('?');
   const existing = rawQuery ? new URLSearchParams(rawQuery) : null;
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(state)) {
-    if (value !== null && value !== undefined && value !== '') params.set(key, value);
-  }
-  // Page-owned query keys survive a filter change. The compare page's
-  // selection is the whole page — `#/compare?ons_code=...&ons_code=...` —
-  // and a filter change must not wipe it out of a URL that is a shareable
-  // comparison.
-  if (existing) {
-    for (const key of existing.keys()) {
-      if (!(key in state)) {
-        for (const value of existing.getAll(key)) params.append(key, value);
-      }
-    }
-  }
+  // One serializer (BETA-072): shared filter keys in their schema shape,
+  // page-owned keys (compare's `ons_code`, contracts' `q`, pay's `source`)
+  // carried through untouched so one URL restores both.
+  const params = serializeFilters(state, existing);
   const query = params.toString();
   const target = `#${path}${query ? `?${query}` : ''}`;
   if (location.hash !== target) history.replaceState(null, '', target);
 }
 
 function readStateFromUrl() {
-  const params = parseHash().params;
-  setState({
-    provider: params.get('provider') || null,
-    yearFrom: params.get('yearFrom') || null,
-    yearTo: params.get('yearTo') || null,
-  }, { silent: true });
+  setState(parseFilters(parseHash().params), { silent: true });
 }
 
 /** Global filters as API params. Pages pass this straight through, so a filter
@@ -375,6 +361,8 @@ async function render() {
   document.title = routeLabel ? `${routeLabel} · SectorTrace` : 'SectorTrace';
   const navigating = renderedBase !== null && renderedBase !== base;
   renderedBase = base;
+  // BETA-072: the previous page's match count does not describe this one.
+  if (navigating) resultCount = null;
   updateFilterVisibility(base);
 
   for (const link of document.querySelectorAll('.mainnav a')) {
@@ -469,24 +457,70 @@ function updateFilterVisibility(base) {
   renderFilterSummary();
 }
 
+// Cached once by initFilterBar so a chip can show "Provider: Change Grow
+// Live" rather than the raw key.
+let providerNames = new Map();
+
+// BETA-072: the last page's "N notices match" count, so the filter summary
+// can say how much the current query returns. A page sets it after its fetch
+// and the router clears it before the next page renders.
+let resultCount = null;
+
+/** Pages call this after loading so the shared summary can show the count.
+ *  `null` clears it (a page with no single countable result). */
+export function setFilterResultCount(count, noun = 'result') {
+  resultCount = (count === null || count === undefined)
+    ? null : { count: Number(count), noun };
+  renderFilterSummary();
+}
+
 function renderFilterSummary() {
   const summary = $('#filter-summary');
   const s = getState();
-  const active = Object.entries(s).filter(([, value]) => value);
+  const chips = chipLabels(s, { providerName: providerNames.get(s.provider) });
+  const errors = validateFilters(s);
   summary.replaceChildren();
-  summary.hidden = active.length === 0;
-  if (!active.length) return;
-  summary.append(el('span', { class: 'filter-summary-label', text: 'Showing:' }));
-  for (const [key, value] of active) {
-    const label = key === 'provider' ? `Provider: ${value}` : `${key === 'yearFrom' ? 'From' : 'To'} ${value}`;
-    summary.append(el('button', { class: 'filter-chip', type: 'button', onclick: () => setState({ [key]: null }) }, `${label} ×`));
+  // The summary is the active-filter surface: no chips and no error means
+  // nothing to show, even if a page reported a count (its own hero already
+  // states totals).
+  summary.hidden = chips.length === 0 && !errors.length;
+  if (summary.hidden) return;
+
+  if (chips.length) {
+    summary.append(el('span', { class: 'filter-summary-label', text: 'Showing:' }));
+    for (const chip of chips) {
+      summary.append(el('button', {
+        class: 'filter-chip', type: 'button',
+        'aria-label': `Remove filter ${chip.text}`,
+        onclick: () => setState({ [chip.key]: null }),
+      }, `${chip.text} ×`));
+    }
   }
-  summary.append(el('button', { class: 'filter-clear', type: 'button', onclick: () => clearFilters() }, 'Clear all'));
+  if (resultCount && chips.length) {
+    const { count, noun } = resultCount;
+    summary.append(el('span', { class: 'filter-summary-count',
+      text: `${count.toLocaleString('en-GB')} ${noun}${count === 1 ? '' : 's'}` }));
+  }
+  if (errors.length) {
+    summary.append(el('span', { class: 'filter-summary-error', role: 'alert',
+      text: errors.join(' ') }));
+  }
+  if (chips.length) {
+    summary.append(el('button', { class: 'filter-clear', type: 'button',
+      onclick: () => clearFilters() }, 'Clear all'));
+  }
 }
 
+/** Clear-all (BETA-072): the whole hash query, not only the shared keys — a
+ *  reader who clicks "Clear all" expects the page-local search and explorer
+ *  filters gone too. The route path stays. */
 function clearFilters() {
-  setState({ provider: null, yearFrom: null, yearTo: null });
+  const [path] = (location.hash.slice(1) || '/').split('?');
   for (const control of document.querySelectorAll('#filterbar [data-filter]')) control.value = '';
+  const note = $('#filter-note');
+  if (note) note.textContent = '';
+  history.replaceState(null, '', `#${path}`);
+  setState({ provider: null, yearFrom: null, yearTo: null });
 }
 
 // --- global filter bar -------------------------------------------------------
@@ -502,6 +536,7 @@ async function initFilterBar() {
     $('#filter-note').textContent = 'Filters unavailable: ' + e.message;
     return;
   }
+  providerNames = new Map(providers.map((p) => [p.provider_key, p.canonical_name]));
 
   const input = $('#f-provider');
   const list = $('#f-provider-list');
@@ -543,8 +578,27 @@ async function initFilterBar() {
   input.addEventListener('input', showMatches);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
 
-  $('#f-year-from').addEventListener('change', (e) => setState({ yearFrom: e.target.value || null }));
-  $('#f-year-to').addEventListener('change', (e) => setState({ yearTo: e.target.value || null }));
+  // BETA-072: validate the year range before it becomes state. An invalid
+  // pair (out of bounds, or from > to) is refused with an inline message
+  // rather than sent to an endpoint that would 400 or silently return
+  // nothing.
+  const applyYear = (key, raw) => {
+    const next = { ...getState(), [key]: raw || null };
+    const errors = validateFilters(next);
+    const note = $('#filter-note');
+    if (errors.length) {
+      note.textContent = errors[0];
+      $('#f-year-from').setAttribute('aria-invalid', String(Boolean(errors.length)));
+      $('#f-year-to').setAttribute('aria-invalid', String(Boolean(errors.length)));
+      return;
+    }
+    note.textContent = '';
+    $('#f-year-from').removeAttribute('aria-invalid');
+    $('#f-year-to').removeAttribute('aria-invalid');
+    setState({ [key]: raw || null });
+  };
+  $('#f-year-from').addEventListener('change', (e) => applyYear('yearFrom', e.target.value));
+  $('#f-year-to').addEventListener('change', (e) => applyYear('yearTo', e.target.value));
   // Reset walks the controls rather than naming them, so a filter added to the
   // bar is cleared by this without anyone remembering to come back here. It
   // also keeps `data-filter` honest: a wrong key stops reset working, which is
@@ -680,7 +734,11 @@ function boot() {
   initPalette();
   initBuildIdentity();
   subscribe(() => render());
-  window.addEventListener('hashchange', render);
+  // BETA-072: a hash change is also how the back/forward buttons and an
+  // edited address bar arrive. Re-sync the shared filter state from the URL
+  // before rendering so history and shared links restore the exact query,
+  // not just the route.
+  window.addEventListener('hashchange', () => { readStateFromUrl(); render(); });
   window.addEventListener('portalthemechange', render);
   render();
 }

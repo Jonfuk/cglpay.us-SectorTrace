@@ -119,7 +119,7 @@ for _module in ("shell", "dom", "context", "theme", "palette", "pipeline",
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
-for _module in ("theme", "components", "palette"):
+for _module in ("theme", "components", "palette", "filterstate"):
     STATIC_FILES[f"/js/{_module}.js"] = (f"js/{_module}.js", JS, PUBLIC_DIR)
 for _page in ("overview", "pay", "contracts", "geography", "treatment", "providers",
               "pfd", "authority", "compare", "claims", "coverage", "relationships",

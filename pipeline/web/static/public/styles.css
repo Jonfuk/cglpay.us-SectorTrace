@@ -761,6 +761,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .filters-toggle { display: none; }
 .filter-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 1440px; margin: 16px auto -16px; padding: 0 24px; }
 .filter-summary-label { color: var(--text-muted); font-size: 12px; }
+/* BETA-072: the count of what the current query returns, and any validation
+   problem with it, sit inline with the active-filter chips. */
+.filter-summary-count { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.filter-summary-error { color: var(--accent-red); font-size: 12px; }
+#f-year-from[aria-invalid="true"], #f-year-to[aria-invalid="true"] { border-color: var(--accent-red); }
 .filter-chip, .filter-clear { border: 1px solid var(--border-accent); border-radius: 999px; background: var(--bg-elevated); color: var(--text-primary); padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .filter-clear { background: transparent; color: var(--accent-teal); border-color: transparent; }
 .filter-chip.is-active { background: var(--accent-teal); color: #04121d; border-color: var(--accent-teal); }

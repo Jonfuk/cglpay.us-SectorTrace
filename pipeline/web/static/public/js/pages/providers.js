@@ -11,7 +11,7 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
+import { el, replace, fetchJSON, setFilterResultCount, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
@@ -149,6 +149,8 @@ async function renderList(main) {
     replace(main, errorCard(error, () => renderList(main)));
     return () => {};
   }
+
+  setFilterResultCount(providers.length, 'tracked organisation');
 
   const page = el('div', {},
     el('div', { class: 'hero' },
