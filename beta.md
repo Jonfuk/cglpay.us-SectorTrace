@@ -535,6 +535,41 @@ when the programme is started.)_
 
 ### DONE
 
+- [DONE] BETA-111 | LFM grounded answers and citation validation
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 3
+  - risk: 4
+  - area: nlp/assistant/grounding
+  - depends_on: BETA-107–110
+  - objective: Give LFM only the validated tool result and produce a concise
+    answer whose factual statements cite result-local identifiers; return an
+    explicit abstention when the supplied evidence is insufficient.
+  - result: New `pipeline/assistant/grounding.py::answer(question,
+    tool_envelope, …)`. The model receives one user message with the tool
+    payload inside a `<result>` block and a fixed `ANSWER_SYSTEM_PROMPT` that
+    names everything in `<result>` as untrusted data; it is handed no
+    executable tools. Deterministic post-generation checks: `[[identifier]]`
+    tokens are extracted; the sentinel `INSUFFICIENT_EVIDENCE` is honoured
+    verbatim; prose with no citation, any citation not in
+    `envelope["result_ids"]`, or any citation that fails to resolve all
+    suppress the answer and return a `GroundedAnswer(outcome="abstained", …)`.
+    An empty result abstains before the model is called. Surviving citations
+    resolve to provenance — for `search_document_passages`, chunk id +
+    document id + page span + source URL + retrieval time + the SHA-256 of the
+    archived payload (one extra `evidence_records` lookup); for the aggregate
+    tools, the named aggregate. `answer_prompt_sha256()` is recorded on every
+    ledger row.
+  - api/ui: none directly — used by BETA-112's service.
+  - validation: New `tests/test_assistant_grounding.py` (8 — a well-cited
+    answer returns with resolved `source_url`s; an invented identifier
+    suppresses the whole answer; uncited prose is not an answer; the model can
+    self-abstain; an empty result abstains without calling the model;
+    retrieved text is delimited and the system prompt forbids following it;
+    aggregate identifiers resolve as aggregates; the prompt hash is stable).
+
 - [DONE] BETA-110 | Needle routing and confidence gate
   - completed: 2026-08-29
   - priority: P1
@@ -5756,7 +5791,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | DONE (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | DONE (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | DONE (BETA-110) |
-| P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | APPROVED, not queued (BETA-111) |
+| P1 | LFM grounded answers and citation validation | 5 | 5 | 3 | DONE (BETA-111) |
 | P1 | Single-turn assistant API and CLI | 5 | 4 | 4 | APPROVED, not queued (BETA-112) |
 | P1 | Assistant evaluation and release gate | 5 | 5 | 4 | APPROVED, not queued (BETA-113) |
 
