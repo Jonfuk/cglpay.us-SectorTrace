@@ -96,6 +96,7 @@ PUBLIC_API_ROUTES = {
     "document_search",
     "catalogue",
     "provider_compare",
+    "safety",
 }
 
 # Route patterns under /api/v1/ that take a parameter.

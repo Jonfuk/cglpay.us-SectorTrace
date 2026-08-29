@@ -130,6 +130,7 @@ request per two seconds per host enforced process-wide, conditional requests,
 | `m30_statutory_homelessness` | MHCLG statutory homelessness (H-CLIC) | Quarterly LA-level homelessness-duty assessments and outcomes (Table A1 only) — a comparator |
 | `m31_temporary_accommodation` | MHCLG temporary accommodation (H-CLIC) | Households in temporary accommodation per quarter, with the children breakdown (Table TA1) |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | The bounded-crawl exception to `m28`'s one-aggregator rule: SARs a board published but never submitted |
+| `m33_hse_notices` | HSE public enforcement-notices register | Improvement and prohibition notices matched to a tracked provider by exact name; individuals excluded, result kept verbatim |
 
 `run all` prints the order it chose before starting, and grouping modules
 into dependency **waves** (`--jobs N`) lets independent backends run at once

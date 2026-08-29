@@ -141,7 +141,10 @@ class TestTheTreesMatch:
         # parser). SQLite keeps the exact Python cosine path; only the index
         # NAME here, inert. The measurement that opened this gate: one exact
         # semantic query over 167,779 embeddings took ~30 s on the mirror.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 71
+        # 72 adds hse_enforcement_notices — Module 33's HSE improvement /
+        # prohibition notices, one row per notice number, plus an index on
+        # provider_key. TEXT/INTEGER -> text/bigint is the only dialect change.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 72
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

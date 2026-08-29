@@ -1353,6 +1353,10 @@ class Handler(BaseHTTPRequestHandler):
                 substance=_str(params, "substance") or None)
         if route == "pfd":
             return public_queries.pfd(conn)
+        if route == "safety":
+            # HSE enforcement notices attributed to a tracked provider by
+            # exact name match (BETA-051). Individuals excluded at collection.
+            return public_queries.safety(conn)
         if route == "claims":
             return public_queries.claims(conn)
         if route == "freshness":

@@ -896,6 +896,36 @@ every other section on the page already uses, not a missing section.*
   than one sheet name would match after stripping is refused rather than
   guessed at.
 
+### HSE enforcement notices (Module 33)
+
+*Surfaced through `/api/v1/safety`. Only notices whose recipient name exactly
+matches a tracked provider (`provider_key IS NOT NULL`) are published; the
+rest are collected but not served.*
+
+- **A served notice is a point-in-time fact, not a settled outcome.** The
+  register's own `result` field — `Complied`, `Withdrawn`, `Under appeal`,
+  `Appeal — notice affirmed / cancelled / modified` — is stored verbatim and
+  travels with every notice on the portal. A prohibition or improvement
+  notice can be appealed to an employment tribunal and cancelled or
+  modified. This pipeline never infers whether a notice was complied with,
+  and a count of notices is not a count of unsafe workplaces.
+- **Individuals are excluded, at parse time.** The register also lists
+  notices served on named people (directors, sole traders). A recipient that
+  reads as a personal name and carries no organisation token, and does not
+  exactly match a tracked provider, is dropped before anything is written.
+- **Exact name match only** — the same discipline as Modules 4 and 18. A
+  register spelling that is close to a tracked name but not an exact
+  normalised match is a `review_queue` item (`hse_name_near_miss`), never a
+  stored attribution.
+- **Coverage is HSE-enforced workplaces only.** Local authorities enforce
+  health and safety in many care and community settings; those notices are
+  on the LA's own register, not HSE's. An absence of notices here is not a
+  clean bill of health.
+- **The live-fetch path has not been validated against the real register.**
+  The result parser is written to HSE's documented notice-list structure and
+  is exercised by a representative fixture; the first real run should be
+  watched by a person, per the reduced-testing policy for a new source.
+
 ---
 
 ## Personal data

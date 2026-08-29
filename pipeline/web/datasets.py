@@ -412,6 +412,20 @@ DATASETS: tuple[Dataset, ...] = (
         "individuals are held in restricted_ tables, never on this portal.",
     ),
     Dataset(
+        "hse-enforcement-notices", "m33_hse_notices",
+        "HSE enforcement notices",
+        "Health and Safety Executive",
+        "https://resources.hse.gov.uk/notices/",
+        "safety", "Great Britain — HSE-enforced workplaces",
+        "Continuous",
+        ("hse_enforcement_notices",),
+        "Improvement and prohibition notices matched to a tracked provider by "
+        "exact name only; individuals excluded. A notice is a point-in-time "
+        "fact, not a settled outcome — it can be appealed, modified, cancelled "
+        "or withdrawn, and the published result travels with it. Absence of "
+        "notices is not a safety rating.",
+    ),
+    Dataset(
         "sab-site-reviews", "m32_sab_site_reviews",
         "SARs on Safeguarding Adults Board websites",
         "Safeguarding Adults Boards' own websites",

@@ -123,6 +123,17 @@ LICENCES: dict[str, Licence] = {
         caution="A public website, not an open licence. Passages are held as "
                 "evidence rather than republished wholesale.",
     ),
+    "hse_notices": Licence(
+        id="hse_notices",
+        name="HSE public register — Crown copyright / OGL v3.0",
+        url=OGL_URL,
+        attribution="Enforcement notices from the Health and Safety Executive "
+                    "public notices register, Crown copyright.",
+        caution="A served notice is a point-in-time fact, not a settled "
+                "outcome: it can be appealed, affirmed, modified, cancelled "
+                "or withdrawn. The register's own `result` field travels with "
+                "every notice; check it, and the register, before republishing.",
+    ),
     "skills_for_care": Licence(
         id="skills_for_care",
         name="OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)",
@@ -174,6 +185,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m30_statutory_homelessness": "ogl_v3",
     "m31_temporary_accommodation": "ogl_v3",
     "m32_sab_site_reviews": "authority_varies",
+    "m33_hse_notices": "hse_notices",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
@@ -196,6 +208,7 @@ ENDPOINT_MODULES: dict[str, tuple[str, ...]] = {
     # not the SAR half of the same page's payload (m28_sar_reports, a
     # different licence -- "authority_varies" -- and not exported here).
     "pfd": ("m08_pfd_reports",),
+    "safety": ("m33_hse_notices",),
 }
 
 

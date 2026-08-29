@@ -513,6 +513,22 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "sab_name is always set here (it is the board whose site it "
               "is), so it is not a signal column either.",
     ),
+    Smoke(
+        module="m33_hse_notices",
+        produces=("hse_enforcement_notices", "review_queue"),
+        signal=(("hse_enforcement_notices", "notice_type"),
+                ("hse_enforcement_notices", "result")),
+        limit=None,
+        note="The provider-name shape (m18): one HSE notices-register search "
+              "per tracked-provider name variant. A --limit run does not make "
+              "sense -- the register returns the whole match set per name -- "
+              "so this ignores it, like m18. Whether it writes any "
+              "hse_enforcement_notices row at all depends on whether any "
+              "tracked provider has ever been served an HSE notice, so a run "
+              "that only produces review_queue near-miss items is still a "
+              "working run. The live-fetch parser has not yet been validated "
+              "against real HSE HTML -- see the module docstring.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

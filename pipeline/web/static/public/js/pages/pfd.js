@@ -86,7 +86,13 @@ export async function render(main) {
     el('div', { id: 'sar-year' }),
     el('div', { id: 'sar-board' }),
     el('div', { id: 'sar-terms' }),
-    el('div', { id: 'sar-mentions' }));
+    el('div', { id: 'sar-mentions' }),
+    el('h2', { text: 'HSE enforcement notices' }),
+    el('p', { class: 'lede' },
+      'A third, separate evidence stream: improvement and prohibition notices ',
+      'the Health and Safety Executive served on an organisation whose name ',
+      'exactly matches a tracked provider. Not combined with the reports above.'),
+    el('div', { id: 'hse' }));
   replace(main, page);
 
   renderRecent(page.querySelector('#recent'), data);
@@ -94,6 +100,7 @@ export async function render(main) {
   renderAreas(page.querySelector('#area'), data, charts);
   renderTerms(page.querySelector('#terms'), data, charts);
   renderMentions(page.querySelector('#mentions'), data);
+  renderHse(page.querySelector('#hse'));
 
   renderSarRecent(page.querySelector('#sar-recent'), sar);
   renderSarYears(page.querySelector('#sar-year'), sar, charts);
@@ -102,6 +109,38 @@ export async function render(main) {
   renderSarMentions(page.querySelector('#sar-mentions'), sar);
 
   return () => disposeCharts(charts);
+}
+
+/* BETA-051: HSE enforcement notices attributed to a tracked provider by
+ * exact name match. Its own fetch — a separate route (/api/v1/safety) and a
+ * separate evidence stream that must not be summed with the reports above. */
+async function renderHse(container) {
+  let data;
+  try {
+    data = await fetchJSON('safety');
+  } catch (error) {
+    replace(container, section('HSE enforcement notices', null,
+      errorCard(error.message, () => renderHse(container))));
+    return;
+  }
+  const notices = data.notices || [];
+  replace(container, section(
+    `${num(data.total)} enforcement notice${data.total === 1 ? '' : 's'}`,
+    'Served by HSE on an organisation whose name exactly matches a tracked '
+    + 'provider. Individuals are excluded, and the register covers only '
+    + 'HSE-enforced workplaces.',
+    pinnedCaveat(data.caveat, 'A notice is not a settled outcome'),
+    notices.length
+      ? tableCard('Notices', [
+          { title: 'Provider', field: 'provider_name' },
+          { title: 'Type', field: 'notice_type', width: 120 },
+          { title: 'Issued', field: 'issue_date', width: 110 },
+          { title: 'Result', field: 'result', width: 140 },
+          { title: 'Legislation', field: 'legislation' },
+          { title: 'Number', field: 'notice_number', width: 110 },
+        ], notices, { height: 360 })
+      : noData('enforcement notices matched to a tracked provider',
+               './start.sh run m33_hse_notices')));
 }
 
 /* Reports by year, stacked by whether the publication carried the matters of

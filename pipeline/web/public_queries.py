@@ -156,6 +156,16 @@ CAVEATS = {
         "end is not a call-off's end, and none of this is a forecast of what "
         "will be retendered."
     ),
+    "hse_notices": (
+        "Each row is an enforcement notice the Health and Safety Executive "
+        "served on an organisation whose name exactly matches a tracked "
+        "provider. It is a point-in-time fact, not a settled outcome: the "
+        "published `result` — which can be 'Under appeal', 'Withdrawn', or an "
+        "appeal decision — travels with every notice, and this portal never "
+        "infers compliance. Notices served on individuals are excluded, and "
+        "the register covers only HSE-enforced workplaces, so an absence of "
+        "notices is not a safety rating."
+    ),
     "contract_process": (
         "These are the official notices published under one OCID, grouped by "
         "the lifecycle stage each notice's own OCDS tag names — never a stage "
@@ -2242,6 +2252,58 @@ def _sar_payload(conn: sqlite3.Connection) -> dict:
             "mentions": CAVEATS["sar_mentions"],
             "terms": CAVEATS["sar_terms"],
         },
+    }
+
+
+def safety(conn: sqlite3.Connection) -> dict:
+    """HSE enforcement notices attributed to a tracked provider (BETA-051).
+
+    Only `provider_key IS NOT NULL` rows — an exact tracked-name match, made
+    by `m33_hse_notices` — reach here; notices served on individuals were
+    excluded at collection. Every field is the register's own text, and the
+    published `result` (which may be an appeal decision or a withdrawal)
+    travels with each notice. Nothing here infers a compliance outcome.
+    """
+    _public(["hse_enforcement_notices", "providers"])
+
+    if not any(obj["name"] == "hse_enforcement_notices"
+               for obj in catalog.list_objects(conn)):
+        return {"notices": [], "by_provider": [], "by_type": [],
+                "total": 0, "caveat": CAVEATS["hse_notices"]}
+
+    notices = _rows(conn, """
+        SELECT h.notice_number, h.recipient_name, h.provider_key,
+               p.canonical_name AS provider_name,
+               h.notice_type, h.issuing_body, h.issue_date, h.compliance_date,
+               h.revised_compliance_date, h.result, h.industry, h.legislation,
+               h.contravention_text, h.local_authority,
+               h.source_url, h.retrieved_at
+        FROM hse_enforcement_notices h
+        LEFT JOIN providers p ON p.provider_key = h.provider_key
+        WHERE h.provider_key IS NOT NULL
+        ORDER BY h.issue_date DESC NULLS LAST, h.notice_number""")
+
+    by_provider = _rows(conn, """
+        SELECT h.provider_key, p.canonical_name AS provider_name,
+               COUNT(*) AS notice_count
+        FROM hse_enforcement_notices h
+        LEFT JOIN providers p ON p.provider_key = h.provider_key
+        WHERE h.provider_key IS NOT NULL
+        GROUP BY h.provider_key, p.canonical_name
+        ORDER BY notice_count DESC, p.canonical_name""")
+
+    by_type = _rows(conn, """
+        SELECT h.notice_type, COUNT(*) AS notice_count
+        FROM hse_enforcement_notices h
+        WHERE h.provider_key IS NOT NULL
+        GROUP BY h.notice_type ORDER BY notice_count DESC, h.notice_type""")
+
+    return {
+        "notices": notices,
+        "by_provider": by_provider,
+        "by_type": by_type,
+        "total": len(notices),
+        "caveat": CAVEATS["hse_notices"],
     }
 
 

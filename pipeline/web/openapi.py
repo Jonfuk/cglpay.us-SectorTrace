@@ -188,6 +188,12 @@ ROUTES: dict[str, dict] = {
         "summary": "Prevention of Future Deaths reports and SAR documents.",
         "parameters": [],
     },
+    "/api/v1/safety": {
+        "surface": "safety",
+        "summary": "HSE enforcement notices served on a tracked provider "
+                   "(exact name match; individuals excluded; result verbatim).",
+        "parameters": [],
+    },
     "/api/v1/claims": {
         "surface": "claims",
         "summary": "Campaign claims with the evidence rows behind each.",

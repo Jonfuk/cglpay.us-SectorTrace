@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-050. Current
-  work: BETA-051. Next: BETA-052, BETA-058.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-051. Current
+  work: BETA-052. Next: BETA-058.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,31 +272,29 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-051 | HSE enforcement-notice evidence
-  - promoted_from: NEXT on 2026-08-29 after BETA-050 completed
+- [IN_PROGRESS] BETA-052 | Structured review-item context
+  - promoted_from: NEXT on 2026-08-29 after BETA-051 completed
   - started: 2026-08-29
   - priority: P1
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: safety/legal
-  - depends_on: BETA-043, BETA-049
-  - objective: Add module `m33` for organisation-level HSE improvement and
-    prohibition notices, publishing exact tracked-organisation matches through
-    `/api/v1/safety` while excluding individuals.
-  - rationale: Official enforcement notices add attributable safety evidence,
-    but ambiguous names and register limitations require the same human-review
-    and caveat discipline as the rest of the project.
-  - suggested_first_action: Capture offline HSE search/detail fixtures and encode
-    coverage, appeal and withdrawal caveats before defining storage or routes.
-  - next_action: Add migration for `hse_enforcement_notices` + module `m33`
-    (offline fixture-backed parser over the HSE notices register; nothing in
-    CI or tests fetches), a deterministic exact-name match to tracked
-    providers only (individuals excluded), `GET /api/v1/safety` exposing the
-    matched notices with appeal/withdrawal/coverage caveats, licences +
-    docs/SOURCES + docs/CAVEATS + README module table, a catalogue entry
-    (BETA-043), and `test_portal_isolation.py` / openapi updates.
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/review
+  - depends_on: none
+  - objective: Render source, entity, reason, evidence and navigation as typed
+    sections while retaining the complete raw JSON under disclosure.
+  - rationale: Reviewers should not have to decode implementation-shaped JSON to
+    make a careful decision, but the lossless underlying context must remain
+    available for audit.
+  - suggested_first_action: Build typed presenters for every current review-item
+    type and validate all derived internal and source links.
+  - next_action: In the admin Review tab (`/admin/app.js` review detail),
+    parse the review item's `context_json` and render typed sections
+    (source URL(s), entity/provider, reason/selection basis, evidence
+    snippet, internal navigation links) per item_type, with the full raw
+    JSON kept under a `<details>`; a source-pin test that every current
+    `item_type` has a presenter and every derived link resolves.
 
 ### BLOCKED
 
@@ -480,23 +478,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-052 | Structured review-item context
-  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
-  - priority: P1
-  - impact: 5
-  - effort: 2
-  - confidence: 5
-  - risk: 1
-  - area: admin/review
-  - depends_on: none
-  - objective: Render source, entity, reason, evidence and navigation as typed
-    sections while retaining the complete raw JSON under disclosure.
-  - rationale: Reviewers should not have to decode implementation-shaped JSON to
-    make a careful decision, but the lossless underlying context must remain
-    available for audit.
-  - suggested_first_action: Build typed presenters for every current review-item
-    type and validate all derived internal and source links.
-
 - [NEXT] BETA-058 | Unified durable run ledger
   - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
   - priority: P1
@@ -561,6 +542,63 @@ Approved successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-051 | HSE enforcement-notice evidence
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: safety/legal
+  - depends_on: BETA-043, BETA-049
+  - objective: Add module `m33` for organisation-level HSE improvement and
+    prohibition notices, publishing exact tracked-organisation matches through
+    `/api/v1/safety` while excluding individuals.
+  - result: New migration `0072_hse_enforcement.sql` (+ postgres pair, count
+    bump 71→72 in `test_migration_equivalence.py`) — `hse_enforcement_notices`,
+    one row per HSE notice number, every field stored verbatim, nullable
+    `provider_key` set only on an exact tracked-name match. New module
+    `pipeline/modules/m33_hse_notices.py`: one organisation-name search per
+    tracked-provider name variant against the HSE notices register, a
+    header-keyed table parser (`parse_notice_list` reads columns by their
+    `<th>` text, so a reordered column is a NULL not a mis-store),
+    `is_organisation()` (a bare personal name with no org token is dropped
+    unless it exactly matches a tracked provider), and per-provider
+    reconciliation across variants so a notice returned by two searches is
+    one row and a near-miss is judged against the whole variant set (a
+    `hse_name_near_miss` review item, keyed to upsert not duplicate).
+    Individuals are excluded at parse time; the live-fetch parser is written
+    to the register's documented structure and fixture-tested, not yet
+    validated against real HSE HTML — flagged in the module docstring,
+    `docs/SOURCES.md` and `docs/CAVEATS.md` for a human-watched first run.
+  - api: `GET /api/v1/safety` (`public_queries.safety`) — only
+    `provider_key IS NOT NULL` rows, joined to `providers`, ordered newest
+    issue date first, plus `by_provider` / `by_type` facets. New
+    `CAVEATS["hse_notices"]`: a notice is a point-in-time fact with the
+    `result` verbatim (may be an appeal decision or withdrawal), no
+    compliance inferred, individuals excluded, absence is not a safety
+    rating. Route added to `PUBLIC_API_ROUTES`, `openapi.ROUTES`, the
+    `<noscript>` list and an `api.html` article.
+  - docs/plumbing: `pipeline/licences.py` gains the `hse_notices` licence
+    (+ `MODULE_LICENCES["m33_hse_notices"]`, `ENDPOINT_MODULES["safety"]`),
+    mirrored word-for-word into `components.js`'s drawer table (pinned by
+    `test_licences.py`); `README.md` module table row; `docs/SOURCES.md`
+    Module 33 section (viability check was already "VIABLE"); `docs/CAVEATS.md`
+    section; a `datasets.py` catalogue entry (`hse-enforcement-notices`,
+    safety layer). `pfd.js` ("Safety & legal" page) gains an "HSE
+    enforcement notices" section that fetches `/api/v1/safety` — a third,
+    separate stream, never summed with the coroner reports.
+  - validation: New `tests/test_m33_hse_notices.py` (5) — header-keyed parse,
+    column reorder resilience, individual exclusion, exact-match discipline,
+    and the run storing only exact org matches + one near-miss item. New
+    `tests/test_web_safety.py` (4) — only attributed notices published, the
+    `result` verbatim, facets + caveat, frozen-surface pin. Full offline
+    suite green — **2753 passed, 109 skipped, 35 deselected, 0 failed**.
+    `ruff check pipeline tests` clean. Browser-verified against a seeded
+    scratch SQLite warehouse: the pfd page's HSE section renders the two
+    notices with `Under appeal` / `Complied` verbatim and the caveat, zero
+    console errors.
 
 - [DONE] BETA-050 | Procurement lifecycle and performance view
   - completed: 2026-08-29
@@ -2822,8 +2860,8 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | DONE (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | DONE (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | DONE (BETA-050) |
-| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | IN_PROGRESS (BETA-051) |
-| P1 | Structured review-item context | 5 | 2 | 5 | NEXT (BETA-052) |
+| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | DONE (BETA-051) |
+| P1 | Structured review-item context | 5 | 2 | 5 | IN_PROGRESS (BETA-052) |
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | Approved successor backlog (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | Approved successor backlog (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | Approved successor backlog (BETA-055) |

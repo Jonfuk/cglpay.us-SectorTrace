@@ -511,6 +511,17 @@ invisible here.
 | Rate limit | Default |
 | Notes | Shares Module 30's discovery and file-reading code directly (imported, not duplicated — the two modules read the same evergreen page, the same per-quarter attachment and the same revision-preference rule; see Module 30's `read_workbook_sheet` docstring for why this is a genuinely different situation from Modules 13/29's independent, coincidentally-similar `sheet_rows` copies). v1 reads only the top-level totals (households in TA, with children, children in TA) and deliberately drops the bed-and-breakfast breakdown — the same smallest-coherent-slice discipline as Modules 29/30. A real edition (January–March 2023) published Table TA1 under the misnamed sheet `TA1_`; `read_workbook_sheet` resolves a single unambiguous trailing-underscore variant rather than failing that whole quarter |
 
+## Module 33 — HSE enforcement notices
+
+| | |
+| --- | --- |
+| Source | Health and Safety Executive public notices register |
+| Endpoints | `https://resources.hse.gov.uk/notices/notices/notice_list.asp` (organisation-name contains-search) |
+| Licence | Crown copyright; HSE content is generally OGL v3.0 — recorded as `hse_notices` in `pipeline/licences.py` with an appeal/withdrawal caution rather than a bare "OGL" |
+| Key | None |
+| Rate limit | Default (`resources.hse.gov.uk` serves no robots.txt) |
+| Notes | One organisation-name search per tracked-provider name variant. Notices served on **individuals are excluded at parse time**; a notice is attributed to a provider (`provider_key` set) only on an exact normalised name match, the same discipline as Modules 4 and 18, and a near-miss is a `review_queue` item. Every field is stored verbatim, including `result` — a notice can be appealed, affirmed, modified, cancelled or withdrawn after issue, and this pipeline never infers compliance. **The live-fetch parser is written to the register's documented structure and exercised by a representative fixture; not yet validated against real HSE HTML — first run to be watched by a person.** Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety` |
+
 ## Viability checks
 
 Probed live on 2026-08-11 with the pipeline's own User-Agent, one request

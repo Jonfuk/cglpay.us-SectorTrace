@@ -751,6 +751,32 @@
     <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
   </article>
 
+  <article class="apiroute" id="route-safety" data-route="safety">
+    <h3><code>/api/v1/safety</code></h3>
+    <p>
+      Enforcement notices the Health and Safety Executive served on an
+      organisation whose name exactly matches a tracked provider. A notice is
+      a point-in-time fact, not a settled outcome: the register's own
+      <code>result</code> — which can be <code>Under appeal</code>,
+      <code>Withdrawn</code> or an appeal decision — travels with every
+      notice, and nothing here infers compliance. Notices served on
+      individuals are excluded at collection, and the register covers only
+      HSE-enforced workplaces, so an absence of notices is not a safety
+      rating.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>notices</code> (each with <code>notice_number</code>,
+      <code>recipient_name</code>, <code>provider_key</code>,
+      <code>notice_type</code>, <code>issue_date</code>,
+      <code>compliance_date</code>, <code>result</code>,
+      <code>legislation</code>, <code>contravention_text</code> and the
+      source URL), <code>by_provider</code>, <code>by_type</code>,
+      <code>total</code> and <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/safety"><code>/api/v1/safety</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="claims">
     <h3><code>/api/v1/claims</code></h3>
     <p>
