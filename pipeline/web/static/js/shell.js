@@ -17,6 +17,7 @@ import { initExports } from './exports.js';
 import { initHealth } from './health.js';
 import { initPalette } from './palette.js';
 import { initPipeline } from './pipeline.js';
+import { initSearch } from './search.js';
 import { initTheme } from './theme.js';
 
 initTheme();
@@ -27,3 +28,4 @@ initExports();
 initCandidates();
 initCensus();
 initClaims();
+initSearch();

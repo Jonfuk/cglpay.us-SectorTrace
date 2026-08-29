@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-045. Current work: BETA-046. Next:
-  BETA-047.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-046. Current work: BETA-047. Next:
+  BETA-048.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,31 +271,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-046 | Admin semantic-search workbench
-  - promoted_from: NEXT on 2026-08-29 after BETA-045 completed
+- [IN_PROGRESS] BETA-047 | Semantic claim review and gate dashboard
+  - promoted_from: NEXT on 2026-08-29 after BETA-046 completed
   - started: 2026-08-29
   - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: admin/nlp/ui
-  - depends_on: BETA-039, BETA-034 (implemented search foundation only)
-  - objective: Surface the existing keyword, semantic and hybrid search modes
-    in an admin-only workbench with filters, score components, facets, excerpts,
-    sources, model identity and fallback state.
-  - rationale: The search backend exists but cannot be evaluated efficiently by
-    reviewers. An explicit diagnostic UI makes model behaviour inspectable
-    without exposing experimental semantics to the public portal.
-  - suggested_first_action: Browser-verify the existing admin API contract,
-    then build a keyboard-accessible view that labels relevance and fallback
-    behaviour without presenting either as evidence confidence.
-  - next_action: Confirm the existing `/api/admin/search?mode=` contract
-    (`pipeline/web/semantic.py`), then add an admin page (`/admin/js/*`) with
-    a mode switch (keyword/semantic/hybrid), source/date filters, and result
-    cards showing score components, the model identity and the
-    keyword-only fallback banner; admin-only assets/routes, `test_portal_isolation.py`
-    stays green.
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: admin/nlp/review
+  - depends_on: BETA-034, BETA-046
+  - objective: Add admin candidate list/detail/decision/gate endpoints and a
+    keyboard-operable review dashboard with filters, named reviewer decisions,
+    ontology validation and live gate progress.
+  - rationale: BETA-034 is blocked on human review labour; a careful workbench
+    makes that labour feasible while preserving individual accountability.
+  - suggested_first_action: Wrap existing candidate and decision functions in
+    authenticated admin routes; permit only individual decisions into
+    `claim_candidate_decisions`, with no bulk approval, `graph_claims` write,
+    SetFit training or public AI output.
+  - next_action: Add `/api/admin/claim-candidates` (list/detail),
+    `/api/admin/claim-candidates/decide` (one candidate, named reviewer, via
+    `pipeline/nlp/decisions.decide`, ontology-validated `corrected` fields)
+    and `/api/admin/claim-gate` (read-only `pipeline/nlp/gate` report); a
+    keyboard-operable admin dashboard tab; tests that no bulk approve /
+    `graph_claims` write / SetFit path exists.
 
 ### BLOCKED
 
@@ -479,28 +479,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-047 | Semantic claim review and gate dashboard
-  - promoted_from: READY on 2026-08-29 after BETA-045 completed
-  - priority: P2
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: admin/nlp/review
-  - depends_on: BETA-034, BETA-046
-  - objective: Add admin candidate list/detail/decision/gate endpoints and a
-    keyboard-operable review dashboard with filters, named reviewer decisions,
-    ontology validation and live gate progress.
-  - rationale: BETA-034 is blocked on human review labour; a careful workbench
-    makes that labour feasible while preserving individual accountability.
-  - suggested_first_action: Wrap existing candidate and decision functions in
-    authenticated admin routes; permit only individual decisions into
-    `claim_candidate_decisions`, with no bulk approval, `graph_claims` write,
-    SetFit training or public AI output.
-
-### READY
-
-- [READY] BETA-048 | OpenAPI 3.1 specification
+- [NEXT] BETA-048 | OpenAPI 3.1 specification
+  - promoted_from: READY on 2026-08-29 after BETA-046 completed
   - priority: P2
   - impact: 4
   - effort: 3
@@ -515,6 +495,8 @@ DONE
   - suggested_first_action: Introduce a compact route-spec structure and an
     exact route/spec parity test; keep it additive and avoid a framework
     migration or generated client toolchain.
+
+### READY
 
 - [READY] BETA-049 | Accessibility and performance guardrails
   - priority: P1
@@ -576,6 +558,52 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-046 | Admin semantic-search workbench
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: admin/nlp/ui
+  - depends_on: BETA-039, BETA-034 (implemented search foundation only)
+  - objective: Surface the existing keyword, semantic and hybrid search modes
+    in an admin-only workbench with filters, score components, facets, excerpts,
+    sources, model identity and fallback state.
+  - result: Pure front-end — the backend (`/api/admin/search`, modes
+    keyword/semantic/hybrid over `document_chunks`, `pipeline/web/semantic.py`
+    → `pipeline/nlp/semantic_search.search`) already returns `mode`, `query`,
+    `model_key`, `count`, `filters`, `notes` (fallback lines) and `results`
+    (each with a `score` component map). New admin tab **Search** (`#tab-search`
+    in `pipeline/web/static/index.html`, `'search'` added to `app.js` `TABS`,
+    `initSearch` added to `shell.js`, `/admin/js/search.js` registered in
+    `server.py`'s admin module list). The tab is a diagnostic form — query,
+    mode switch (all three), source-system and published-date filters, result
+    limit — and renders, per response: a chip row of `mode` / `model` /
+    `count` / active filters, the `notes` lines verbatim as warnings (the
+    "hybrid degraded to keyword-only" and stub-embedder cases), and the
+    retrieval caveat; then one panel per result showing the score components
+    (`keyword_rank` / `semantic_rank` / `cosine` / `rrf`, each labelled),
+    the snippet, source link and dates. Copy states plainly that relevance
+    order is retrieval behaviour, not evidential weight; nothing here
+    promotes, attributes or exports. `#search-status` is an
+    `aria-live="polite"` region so result counts announce.
+  - result-scope: BETA-034's `next_action` list item "browser-verify
+    `/api/admin/search`" is now done as a side effect.
+  - validation: New `tests/test_web_admin_search.py` (6 source-pin tests) —
+    the tab/panel/controls exist, `search` is in the router `TABS`, the
+    shell boots `initSearch`, the workbench names every score component +
+    `model_key` + `notes` + the caveat, it builds the DOM without
+    `innerHTML` (settled decision 9), and it calls only `/api/admin/*`.
+    `test_portal_isolation.py`'s served-admin-modules tuple gains `search`.
+    Full offline suite green — **2711 passed, 109 skipped, 34 deselected, 0
+    failed**. `ruff check pipeline tests` clean. Browser-verified against a
+    seeded scratch SQLite warehouse (no `document_chunks`, so zero results
+    by construction): the tab activates, the form submits, the meta strip
+    shows `mode: hybrid` / `model: embed:stub` / `0 results` and the
+    "no embeddings … run `pipeline nlp embed`" fallback warning, the status
+    region announces, zero console errors.
 
 - [DONE] BETA-045 | Provider comparison enhancements
   - completed: 2026-08-29
@@ -2570,9 +2598,9 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Public dataset catalogue | 5 | 4 | 4 | DONE (BETA-043) |
 | P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | DONE (BETA-044) |
 | P2 | Provider comparison enhancements | 4 | 4 | 4 | DONE (BETA-045) |
-| P2 | Admin semantic-search workbench | 4 | 3 | 5 | IN_PROGRESS (BETA-046) |
-| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | NEXT (BETA-047) |
-| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
+| P2 | Admin semantic-search workbench | 4 | 3 | 5 | DONE (BETA-046) |
+| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | IN_PROGRESS (BETA-047) |
+| P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | NEXT (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |
 | P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | Approved successor backlog (BETA-051) |

@@ -110,7 +110,7 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # added to that page since is a module loaded alongside it. Listed by name for
 # the same reason the rest of this map is: no directory walk, no traversal.
 for _module in ("shell", "dom", "theme", "palette", "pipeline", "health",
-                 "exports", "candidates", "census", "claims"):
+                 "exports", "candidates", "census", "claims", "search"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.

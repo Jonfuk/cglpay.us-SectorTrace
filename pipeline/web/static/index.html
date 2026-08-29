@@ -45,6 +45,7 @@
     <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
     <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
     <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
+    <button class="tab" data-tab="search" role="tab">Search</button>
     <button class="tab" data-tab="exports" role="tab">Exports</button>
     <button class="tab" data-tab="database" role="tab">Database</button>
     <button class="tab" data-tab="sql" role="tab">SQL</button>
@@ -460,6 +461,55 @@
       </p>
       <div id="claim-history"></div>
     </div>
+  </section>
+
+  <!-- Semantic-search workbench ------------------------------------------------->
+  <!-- Rendered by /admin/js/search.js. A diagnostic view over the existing
+       /api/admin/search finding aid (BETA-034A): keyword / semantic / hybrid
+       retrieval of parsed committee papers and CDP documents. Relevance order
+       and similarity are search behaviour, not evidence confidence, and this
+       tool never promotes or attributes anything. -->
+  <section id="tab-search" class="tabpanel">
+    <p class="muted small">
+      A workbench over <code>/api/admin/search</code> — the retrieval finding
+      aid from the semantic-analysis layer (BETA-034A). It searches
+      paragraph-level chunks of parsed committee papers and community drug
+      partnership documents, in three modes, so a reviewer can see how each
+      one behaves before trusting it.
+    </p>
+    <p class="muted small">
+      A result is a passage that matched the query — by wording, by embedding
+      similarity, or both. The order is a retrieval score, <strong>not</strong>
+      a measure of evidential weight, and nothing here promotes, attributes or
+      exports anything.
+    </p>
+
+    <form id="search-form" class="runbar" role="search">
+      <input id="search-q" type="search" name="q" placeholder="Search parsed documents"
+             aria-label="Search query" autocomplete="off" style="min-width: 18rem">
+      <select id="search-mode" aria-label="Search mode">
+        <option value="hybrid">Hybrid (keyword + semantic)</option>
+        <option value="keyword">Keyword only</option>
+        <option value="semantic">Semantic only</option>
+      </select>
+      <select id="search-source" aria-label="Source system">
+        <option value="">All sources</option>
+        <option value="committee_paper_promotion">Committee papers</option>
+        <option value="cdp_document_promotion">Partnership documents</option>
+      </select>
+      <label class="small muted">From <input id="search-from" type="date" aria-label="Published from"></label>
+      <label class="small muted">To <input id="search-to" type="date" aria-label="Published to"></label>
+      <select id="search-limit" aria-label="Result limit">
+        <option value="20">20 results</option>
+        <option value="50">50 results</option>
+        <option value="100">100 results</option>
+      </select>
+      <button class="btn primary" type="submit">Search</button>
+    </form>
+
+    <div id="search-meta" class="batchnote" hidden></div>
+    <div id="search-status" class="muted small" aria-live="polite"></div>
+    <div id="search-results"></div>
   </section>
 
   <section id="tab-exports" class="tabpanel">

@@ -174,7 +174,7 @@ function replace(container, ...children) {
  * module's business, and it finds out through the event at the end of
  * showTab rather than by being called. */
 const TABS = ['overview', 'review', 'pipeline', 'health', 'candidates', 'census',
-               'claims', 'exports', 'database', 'sql'];
+               'claims', 'search', 'exports', 'database', 'sql'];
 let currentTab = 'overview';
 
 function showTab(name) {
