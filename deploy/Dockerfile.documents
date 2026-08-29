@@ -28,17 +28,32 @@ WORKDIR /app
 # `sectortrace-mirror nlp embed` (034A) and the zero-shot span extractor (034D)
 # run in this worker instead of failing in the app container. CPU torch is
 # fine; it is Docling's CUDA tree that is kept out, above.
+# The local analyst assistant (BETA-107) rides along here too, not in the
+# always-on app image, for the same reason `nlp` does: `nlp assistant` and
+# `nlp assistant-eval` route to this worker (sectortrace[-mirror] wrapper),
+# and the retrieval tool they lean on needs the `nlp` extra that only this
+# image carries. Off unless the deploy asks for it — the Ansible roles pass
+# --build-arg INSTALL_ASSISTANT=true, keyed on assistant_runtime_enabled;
+# Railway builds neither this file nor that arg. See docs/assistant.md.
+ARG INSTALL_ASSISTANT=false
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra graph --extra nlp
+    --extra postgres --extra storage --extra graph --extra nlp \
+    $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 COPY pipeline ./pipeline
 # The committed eval query / gold sets, so `nlp eval-retrieval`, `eval-spans`
 # and `eval-context` work on their defaults in this worker — the paths in
 # pipeline/nlp/eval.py resolve to /app/tests/fixtures/nlp. Pass --queries /
-# --gold to point at an operator-marked set instead.
+# --gold to point at an operator-marked set instead. The assistant's frozen
+# routing/grounding suites (pipeline/assistant/evaluation.py) resolve the
+# same way, so `nlp assistant-eval` — the release gate — works here on its
+# defaults.
 COPY tests/fixtures/nlp ./tests/fixtures/nlp
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph --extra nlp
+COPY tests/fixtures/assistant ./tests/fixtures/assistant
+RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph --extra nlp \
+    $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 # These are the two document packages the PyMuPDF/OCRmyPDF batch actually
 # invokes. Keep them separate from the rich `documents` extra above so this

@@ -533,9 +533,12 @@ Set the list back to empty and re-run to tear all of it down again.
 `assistant_runtime_enabled: false` by default, the same switch and the same
 `docker-compose.assistant.yml` as the self-host build — an Ollama serving
 `lfm2:1.2b`, aliased to `LiquidAI/LFM2.5-1.2B-Instruct` and `needle-2`, with
-`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it and the `app`
-image built with the `openai` extra. It reads only warehouse content, so a
-mirror is a legitimate host for it.
+`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it and both the
+`app` and documents-worker images rebuilt with `openai`. `sectortrace-mirror
+nlp assistant` and `nlp assistant-eval` run in the documents worker (where
+the `nlp` extra and the eval fixtures are); the `app` container carries
+`openai` for the HTTP admin endpoint only. It reads only warehouse content,
+so a mirror is a legitimate host for it.
 
 Two mirror-specific things:
 
@@ -545,11 +548,12 @@ Two mirror-specific things:
   `mirror_nlp_embed_model`), or run `sectortrace-mirror nlp embed` after
   each deliberate reseed, or that tool has nothing to work with.
 - **Enabling stays gated and manual.** `assistant_runtime_enabled` only
-  provisions Ollama. Leave `ASSISTANT_ENABLED` unset until `pipeline nlp
-  assistant-eval` reports `gate.may_enable: true`
+  provisions Ollama and the images. Leave `ASSISTANT_ENABLED` unset until
+  `sectortrace-mirror nlp assistant-eval` reports `gate.may_enable: true`
   ([`docs/assistant.md`](../../docs/assistant.md)); then put
-  `ASSISTANT_ENABLED=true` in `.env.merge` so it survives the beta checkout
-  reset.
+  `ASSISTANT_ENABLED=true` in `.env.merge` and re-run the playbook (the
+  merge is folded into `.env` at render time) so it survives the beta
+  checkout reset.
 
 The Ollama weights volume sits outside the warehouse, so it is untouched by
 a sync and by a `beta` reseed — provisioning is a one-off.

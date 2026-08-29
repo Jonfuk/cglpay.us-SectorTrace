@@ -473,15 +473,18 @@ serving `lfm2:1.2b`, aliased (`ollama cp`) to the two model strings the
 assistant sends: `LiquidAI/LFM2.5-1.2B-Instruct` for synthesis and
 `needle-2` for the router. Both `ASSISTANT_OLLAMA_URL` and
 `ASSISTANT_NEEDLE_URL` in `.env` then point at `http://ollama:11434`, and
-the `app` image is built with the `assistant` extra (`openai`). Weights
-live in the `sectortrace-assistant_ollama-models` volume, not in
-`state_dir/data`.
+both the `app` and the documents-worker images are rebuilt with the
+`assistant` extra (`openai`). Weights live in the
+`sectortrace-assistant_ollama-models` volume, not in `state_dir/data`.
 
-That provisions the runtime; it does **not** turn the feature on.
-`ASSISTANT_ENABLED` stays false until you run
+The CLI and the release gate run in the **documents worker** (it has the
+`nlp` extra the retrieval tool needs and the frozen eval fixtures); the
+`app` container gets `openai` for the `POST /api/admin/assistant` HTTP
+path only. That provisions the runtime; it does **not** turn the feature
+on. `ASSISTANT_ENABLED` stays false until you run
 
 ```bash
-docker compose exec app python -m pipeline nlp assistant-eval
+sectortrace nlp assistant-eval
 ```
 
 and it reports `gate.may_enable: true` (see [`docs/assistant.md`](../../docs/assistant.md)).

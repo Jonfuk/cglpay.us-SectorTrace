@@ -22,6 +22,12 @@ services:
     build:
       context: "{{ repo_root }}"
       dockerfile: deploy/Dockerfile.documents
+      args:
+        # The [assistant] extra (`openai`) when this box provisions the
+        # assistant runtime — `sectortrace-mirror nlp assistant` and
+        # `nlp assistant-eval` run in this worker. Railway builds neither
+        # this file nor this arg.
+        INSTALL_ASSISTANT: "{{ assistant_runtime_enabled | lower }}"
     env_file:
       - "{{ state_dir }}/.env"
     environment:

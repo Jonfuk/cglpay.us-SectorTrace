@@ -61,20 +61,30 @@ the model runtime up as a managed container, the same way they manage
 Postgres:
 
 * `assistant_runtime_enabled: true` renders `docker-compose.assistant.yml`
-  (one Ollama service on the stack's Docker network), builds the `app`
-  image with `--build-arg INSTALL_ASSISTANT=true` so `openai` is present,
-  brings Ollama up, `ollama pull`s `assistant_lfm_ollama_ref`
-  (`lfm2:1.2b`), and `ollama cp`s it to **both** strings the adapters send
-  — `LFM_MODEL` and `NEEDLE_MODEL`. One Ollama, one endpoint, two model
-  names: `ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` both become
+  (one Ollama service on the stack's Docker network), builds **both** the
+  `app` and the documents-worker images with `--build-arg
+  INSTALL_ASSISTANT=true` so `openai` is present, brings Ollama up,
+  `ollama pull`s `assistant_lfm_ollama_ref` (`lfm2:1.2b`), and `ollama
+  cp`s it to **both** strings the adapters send — `LFM_MODEL` and
+  `NEEDLE_MODEL`. One Ollama, one endpoint, two model names:
+  `ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` both become
   `http://ollama:11434/v1`.
 * `assistant_app_enabled: true` writes `ASSISTANT_ENABLED=true`. Keep it
   false until step 3's gate passes. On a `beta` mirror, set
   `ASSISTANT_ENABLED=true` in `.env.merge` instead so it survives the
   checkout reset.
 
-Railway is unaffected: it builds `Dockerfile` with no build args, so
-`INSTALL_ASSISTANT` stays `false` and the image never gets `openai`.
+**Which container runs it.** The CLI (`nlp assistant`, `nlp
+assistant-eval`) routes to the **documents worker** — that image carries
+the `nlp` extra the retrieval tool needs and the frozen eval fixtures, so
+the release gate runs there on its defaults. The **app** container gets
+`openai` too, for the `POST /api/admin/assistant` HTTP path; four of the
+five tools work there, but `search_document_passages` degrades (no `nlp`
+extra in the app image — the same limit as `/admin` semantic search).
+
+Railway is unaffected: it builds `Dockerfile` with no build args and does
+not build `Dockerfile.documents` at all, so `INSTALL_ASSISTANT` stays
+`false` and neither image it produces gets `openai`.
 
 **The `needle-2` alias.** `NEEDLE_MODEL` is served by the same LFM weights
 under a second Ollama tag rather than a distinct router model — a

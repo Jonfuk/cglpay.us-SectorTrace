@@ -86,17 +86,18 @@ def test_the_extra_is_declared_and_kept_out_of_the_default_docker_image() -> Non
     assert "\nassistant = [" in pyproject
     assert '"openai' in pyproject.split("\nassistant = [", 1)[1].split("]", 1)[0]
 
-    # The image can be built with the extra (a self-hosted box that
+    # Both deploy images can be built with the extra (a self-hosted box that
     # provisions the assistant runtime does), but only on an explicit
     # opt-in: ARG INSTALL_ASSISTANT defaults to false, and every
-    # `--extra assistant` in the file is guarded by a test on it. Railway
-    # builds this file with no build args (railway.toml below), so its
-    # image never gets `openai`.
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "ARG INSTALL_ASSISTANT=false" in dockerfile
-    for line in dockerfile.splitlines():
-        if "--extra assistant" in line:
-            assert '"$INSTALL_ASSISTANT" = "true"' in line, line
+    # `--extra assistant` line is guarded by a test on it. Railway builds
+    # `Dockerfile` with no build args (railway.toml below) and does not
+    # build `Dockerfile.documents` at all, so its image never gets `openai`.
+    for name in ("Dockerfile", "deploy/Dockerfile.documents"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "ARG INSTALL_ASSISTANT=false" in text, name
+        for line in text.splitlines():
+            if "--extra assistant" in line:
+                assert '"$INSTALL_ASSISTANT" = "true"' in line, (name, line)
 
     railway = (ROOT / "railway.toml").read_text(encoding="utf-8")
     assert "INSTALL_ASSISTANT" not in railway
