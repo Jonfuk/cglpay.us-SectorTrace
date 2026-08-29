@@ -136,6 +136,69 @@ def test_flat_shape_extracted_values_match_the_real_published_row():
     assert adur["children_in_ta"] == "108"
 
 
+# --- the bed-and-breakfast breakdown (BETA-064) ----------------------------
+
+def _bb_columns(rows):
+    anchor = ta.find_anchor_row(rows)
+    snapshot = ta.locate_ta1_columns(rows, anchor)
+    return anchor, ta.locate_ta1_breakdown_columns(rows, anchor, snapshot)
+
+
+def test_old_shape_splits_bb_households_and_with_children():
+    _anchor, (measures, unknown) = _bb_columns(_old_shape_rows())
+    assert set(measures) == {"bb_households", "bb_households_with_children"}
+    assert unknown == []
+    # The two claims are distinct columns and are not any snapshot column.
+    assert len(set(measures.values())) == 2
+
+
+def test_flat_shape_has_only_the_bb_households_total():
+    _anchor, (measures, unknown) = _bb_columns(_flat_shape_rows())
+    assert set(measures) == {"bb_households"}
+    assert unknown == []
+
+
+def test_bb_values_match_the_real_published_rows():
+    rows = _old_shape_rows()
+    anchor, (measures, _unknown) = _bb_columns(rows)
+    by_code = {e["ons_code"]: e for e in ta.extract_ta1_rows(rows, anchor, measures)}
+    assert by_code["E07000223"]["bb_households"] == "10"
+    assert by_code["E07000223"]["bb_households_with_children"] == "5"
+
+    flat = _flat_shape_rows()
+    f_anchor, (f_measures, _u) = _bb_columns(flat)
+    f_by_code = {e["ons_code"]: e
+                 for e in ta.extract_ta1_rows(flat, f_anchor, f_measures)}
+    assert f_by_code["E07000223"]["bb_households"] == "0"
+
+
+def test_an_unrecognised_bb_column_is_reported_not_guessed():
+    rows = [
+        ["Organisation Identification Code", "Area Name",
+         "Households in TATotal", "Households in area(thousands)",
+         "Households in TA with childrenTotal", "Children in TATotal",
+         "Households in B&Bs Total number of households",
+         "Households in B&Bs Total for more than 6 weeks"],
+        ["E92000001", "ENGLAND", "135580", "24637", "86460", "177530", "12220", "3100"],
+        ["E07000223", "Adur", "129", "28", "63", "108", "10", "4"],
+    ]
+    _anchor, (measures, unknown) = _bb_columns(rows)
+    assert set(measures) == {"bb_households"}
+    assert any("more than 6 weeks" in text for text in unknown)
+
+
+def test_no_bb_column_is_not_an_error():
+    rows = [
+        ["Organisation Identification Code", "Area Name",
+         "Households in TATotal", "Households in area(thousands)",
+         "Households in TA with childrenTotal", "Children in TATotal"],
+        ["E92000001", "ENGLAND", "135580", "24637", "86460", "177530"],
+        ["E07000223", "Adur", "129", "28", "63", "108"],
+    ]
+    _anchor, (measures, unknown) = _bb_columns(rows)
+    assert measures == {} and unknown == []
+
+
 # --- the shared sheet-name-fallback fix, exercised through this module -------
 
 def test_reads_the_ta1_sheet_under_its_real_misnamed_variant():

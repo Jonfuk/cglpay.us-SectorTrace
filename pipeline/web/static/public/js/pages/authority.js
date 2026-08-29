@@ -555,8 +555,7 @@ function renderComparators(container, data) {
       renderRoughSleeping(roughSleeping, comparators.rough_sleeping?.caveat),
       renderStatutoryHomelessness(statutoryHomelessness,
         comparators.statutory_homelessness?.caveat),
-      renderTemporaryAccommodation(temporaryAccommodation,
-        comparators.temporary_accommodation?.caveat))));
+      renderTemporaryAccommodation(comparators.temporary_accommodation || {}))));
 }
 
 function renderRoughSleeping(rows, caveat) {
@@ -591,18 +590,41 @@ function renderStatutoryHomelessness(rows, caveat) {
     }) || el('span', {}));
 }
 
-function renderTemporaryAccommodation(rows, caveat) {
+// BETA-064: the bed-and-breakfast "of which" measure codes, as published.
+const TA_BREAKDOWN_LABEL = {
+  bb_households: 'Households in B&B',
+  bb_households_with_children: 'of which: with children',
+};
+
+function renderTemporaryAccommodation(comparator) {
+  const rows = comparator.rows || [];
   if (!rows.length) return el('span', {});
+  const breakdown = comparator.breakdown || [];
   return el('div', {},
     el('h3', { class: 'small muted', text: 'Temporary accommodation (MHCLG H-CLIC, quarterly)' }),
-    pinnedCaveat(caveat, 'Read before comparing'),
+    pinnedCaveat(comparator.caveat, 'Read before comparing'),
     tableCard('Temporary accommodation', [
       { title: 'Quarter', field: 'quarter_label', width: 200 },
       { title: 'Households in TA', field: 'total_households_ta_text', width: 150 },
       { title: 'With children', field: 'households_ta_with_children', width: 130 },
       { title: 'Children in TA', field: 'children_in_ta', width: 130 },
     ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
-    provenanceFromRows(rows, {
-      module: 'm31_temporary_accommodation', tables: ['temporary_accommodation_snapshot'],
+    breakdown.length
+      ? el('div', {},
+          el('h4', { class: 'small muted', text: 'Bed-and-breakfast breakdown (Table TA1)' }),
+          pinnedCaveat(comparator.breakdown_caveat, 'Read before comparing'),
+          tableCard('B&B breakdown', [
+            { title: 'Quarter', field: 'quarter_label', width: 200 },
+            { title: 'Measure', field: 'measure_label', width: 220 },
+            { title: 'Households', field: 'households_text', width: 130 },
+          ], breakdown.map((r) => ({
+            ...r, measure_label: TA_BREAKDOWN_LABEL[r.measure] || r.measure,
+          })), { height: Math.min(300, 60 + breakdown.length * 32) }))
+      : el('span', {}),
+    provenanceFromRows(rows.concat(breakdown), {
+      module: 'm31_temporary_accommodation',
+      tables: breakdown.length
+        ? ['temporary_accommodation_snapshot', 'temporary_accommodation_breakdowns']
+        : ['temporary_accommodation_snapshot'],
     }) || el('span', {}));
 }

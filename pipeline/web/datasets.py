@@ -469,9 +469,10 @@ DATASETS: tuple[Dataset, ...] = (
         "https://www.gov.uk/government/collections/homelessness-statistics",
         "comparator", "England — local authority",
         "Quarterly",
-        ("temporary_accommodation_snapshot",),
-        "A comparator only. Top-level totals are read; the bed-and-breakfast "
-        "breakdown is not. Never combined with the sector's own evidence.",
+        ("temporary_accommodation_snapshot", "temporary_accommodation_breakdowns"),
+        "A comparator only. Top-level totals plus the bed-and-breakfast "
+        "breakdown where TA1 publishes it. Never combined with the sector's "
+        "own evidence.",
     ),
 )
 

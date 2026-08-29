@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **BETA-038–049 is complete. Last completed queue item: BETA-063. Current
-  work: BETA-064. Next: BETA-065, BETA-066.** BETA-028 and BETA-029 are DONE
+- **BETA-038–049 is complete. Last completed queue item: BETA-064. Current
+  work: BETA-065. Next: BETA-066, BETA-067.** BETA-028 and BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
@@ -272,37 +272,37 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-064 | Temporary-accommodation B&B breakdown
-  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-063 completed
+- [IN_PROGRESS] BETA-065 | CQC regulated-location explorer
+  - promoted_from: NEXT (Wave 4) on 2026-08-29 after BETA-064 completed
   - started: 2026-08-29
-  - priority: P2
-  - impact: 3
-  - effort: 3
+  - priority: P1
+  - impact: 4
+  - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: dataset/comparators
-  - depends_on: BETA-043
-  - objective: Extend m31 with the source-published bed-and-breakfast household
-    breakdown from H-CLIC Table TA1, stored in
-    `temporary_accommodation_breakdowns` with authority, quarter, value, unit
-    and full provenance.
-  - rationale: The data was deliberately omitted from the smallest coherent v1
-    and is now a bounded extension of the same official comparator source.
-  - suggested_first_action: Verify archived workbook header variants and define
-    the exact permitted measure codes; surface contextually without rankings or
-    provider-performance comparison.
-  - next_action: Extend `m31` (statutory homelessness / H-CLIC) to also read
-    Table TA1's bed-and-breakfast household breakdown from the same archived
-    workbook it already fetches. New `temporary_accommodation_breakdowns`
-    table (SQLite migration + postgres pair): `ons_code`, `quarter_start`,
-    `quarter_label`, `measure` (a closed set of permitted codes),
-    `households` INTEGER + `households_text` TEXT for the source's
-    `[x]`/`[z]`/`[c]` placeholders, plus full provenance columns. Parse the
-    header variants seen across archived vintages; anything unrecognised is
-    a `parse_failures` row, never a guess. Surface it on the existing
-    temporary-accommodation portal view as context only — no ranking, no
-    cross-authority league table, no arithmetic against the treatment or
-    pay layers (docs/CAVEATS.md).
+  - risk: 3
+  - area: public/cqc
+  - depends_on: BETA-045, BETA-049
+  - objective: Add a filterable map, accessible table and paginated
+    `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
+    locations, filtered by provider, authority, status, regulated activity,
+    service type and rating.
+  - rationale: Existing location evidence is difficult to explore, but CQC
+    registration is not a complete service map and location counts are neither
+    coverage nor quality scores.
+  - suggested_first_action: Define the public-column allowlist, map/table parity
+    and missing-coordinate behaviour; exclude every restricted contact field.
+  - next_action: Add a `cqc_locations` public query + `GET /api/v1/cqc_locations`
+    (flat route name, added to the frozen surface in
+    `tests/test_portal_isolation.py` and `openapi.py`) — paginated, filterable
+    by provider_key, authority ons_code, registration status, regulated
+    activity, service type and current rating, over a strict public-column
+    allowlist that excludes every registered-manager / contact field
+    (`guard_columns` + a `_public()` assertion). A portal page under
+    `/js/pages/` with a MapLibre map and an accessible table in parity
+    (same rows, same filters), and a documented behaviour for a location
+    with no coordinate. Caveats: CQC registration is not a service map, and
+    a location count is neither coverage nor quality — no arithmetic against
+    any other layer. Extend `datasets.py`, `api.html`, `CAVEATS.md`.
 
 ### BLOCKED
 
@@ -486,25 +486,6 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-065 | CQC regulated-location explorer
-  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-062 completed
-  - priority: P1
-  - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: public/cqc
-  - depends_on: BETA-045, BETA-049
-  - objective: Add a filterable map, accessible table and paginated
-    `/api/v1/cqc_locations` endpoint for tracked providers' CQC-registered
-    locations, filtered by provider, authority, status, regulated activity,
-    service type and rating.
-  - rationale: Existing location evidence is difficult to explore, but CQC
-    registration is not a complete service map and location counts are neither
-    coverage nor quality scores.
-  - suggested_first_action: Define the public-column allowlist, map/table parity
-    and missing-coordinate behaviour; exclude every restricted contact field.
-
 - [NEXT] BETA-066 | Provider predecessor and successor lineage
   - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-063 completed
   - priority: P2
@@ -523,6 +504,24 @@ DONE
   - suggested_first_action: Normalise existing `status` and `superseded_by`
     configuration into explicit, testable lineage edges with verified identifier
     roles only.
+
+- [NEXT] BETA-067 | Capability-documentation consistency checker
+  - promoted_from: Approved successor backlog (Wave 4) on 2026-08-29 after BETA-064 completed
+  - priority: P2
+  - impact: 4
+  - effort: 3
+  - confidence: 5
+  - risk: 1
+  - area: documentation/tooling
+  - depends_on: BETA-038, BETA-048
+  - objective: Add machine-owned documentation blocks generated from module,
+    source, route, export, licence and caveat registries, with non-mutating
+    `pipeline docs-check` for CI and explicit `pipeline docs-sync` regeneration.
+  - rationale: Capability prose has already drifted behind implemented committee
+    system support; machine-owned factual matrices can prevent recurrence while
+    narrative documentation remains manually reviewed.
+  - suggested_first_action: Reconcile the stale committee-system statements and
+    define the first generated source-capability matrix.
 
 ### READY
 
@@ -571,6 +570,60 @@ successor round subsection.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-064 | Temporary-accommodation B&B breakdown
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 3
+  - effort: 3
+  - confidence: 4
+  - risk: 2
+  - area: dataset/comparators
+  - depends_on: BETA-043
+  - objective: Extend m31 with the source-published bed-and-breakfast household
+    breakdown from H-CLIC Table TA1, stored in
+    `temporary_accommodation_breakdowns` with authority, quarter, value, unit
+    and full provenance.
+  - result: New migration `0077_temporary_accommodation_breakdowns.sql`
+    (+ postgres pair, count 76→77) — a **narrow** table, one row per
+    `(ons_code, quarter_start, measure)`: `measure`, `unit` (`'households'`),
+    `households` INTEGER (NULL for a `[x]`/`[z]`/`[c]` placeholder),
+    `households_text` verbatim, full provenance. Narrow because the B&B
+    sub-columns are not stable across the series.
+    `m31_temporary_accommodation` gained `_BB_MEASURES` (a **closed set** —
+    `bb_households`, `bb_households_with_children`) and
+    `locate_ta1_breakdown_columns(rows, anchor, snapshot_columns)`, which
+    bounds the B&B block from its first bed-and-breakfast-named column up to
+    the next snapshot column (a trailing "of which" sub-header —
+    `Total with children`, `Total number of households` — joins; a separate
+    non-B&B group to the right does not) and classifies each column in the
+    block. A B&B column matching no measure, or a measure that would be
+    claimed twice, is a `temporary_accommodation_breakdown_unknown_column`
+    review item for that quarter — never a guessed row. The block is
+    optional: a quarter with no recognisable B&B column writes no breakdown
+    rows and is not an error. The upserts sit in the module's existing
+    per-quarter `conn.commit()`.
+  - api/ui: `authority()` gains
+    `comparators.temporary_accommodation.breakdown` (+ `breakdown_caveat`);
+    `temporary_accommodation_breakdowns` added to the `_public()` allowlist.
+    The portal authority page renders a "Bed-and-breakfast breakdown
+    (Table TA1)" table under the existing TA comparator — measure label,
+    quarter, `households_text` verbatim — with its own pinned caveat. No new
+    route. `datasets.py` m31 `public_tables` extended.
+  - validation: `tests/test_m31_temporary_accommodation.py` gained 5 — the
+    old multi-row-header shape splits `bb_households` / `bb_households_with_
+    children`, the flat-header shape has only `bb_households`, extracted
+    values match the real published rows in both eras, an unrecognised B&B
+    column is reported in `unknown` not guessed, and no B&B column is not an
+    error. `tests/test_web_authority.py` gained the breakdown assertions
+    (a `[c]` placeholder stays `[c]` with a NULL number) and the
+    empty-shape check. `tests/test_migration_equivalence.py` count 76→77.
+    Docs: `docs/CAVEATS.md` (Module 31 — measure absence ≠ zero; context
+    only), `docs/SOURCES.md`, `README.md`. Full offline suite green —
+    **2848 passed, 113 skipped, 35 deselected, 0 failed**. `ruff` clean.
+    Browser-verified against a seeded scratch warehouse: the authority page
+    shows the B&B table with `40` and a preserved `[c]`, its caveat pinned,
+    zero console errors.
 
 - [DONE] BETA-063 | PostgreSQL extension readiness gate
   - completed: 2026-08-29
@@ -3484,10 +3537,10 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | DONE (BETA-061) |
 | P2 | Human-readable document titles | 4 | 3 | 4 | DONE (BETA-062) |
 | P1 | PostgreSQL extension readiness gate | 5 | 4 | 4 | DONE (BETA-063) |
-| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | IN_PROGRESS (BETA-064) |
-| P1 | CQC regulated-location explorer | 4 | 4 | 4 | NEXT (BETA-065) |
+| P2 | Temporary-accommodation B&B breakdown | 3 | 3 | 4 | DONE (BETA-064) |
+| P1 | CQC regulated-location explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-065) |
 | P2 | Provider predecessor and successor lineage | 4 | 3 | 4 | NEXT (BETA-066) |
-| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | Approved successor backlog (BETA-067) |
+| P2 | Capability-documentation consistency checker | 4 | 3 | 5 | NEXT (BETA-067) |
 
 This table is a skimmable index reconciled on 2026-08-29. The Autonomous Work
 Queue above remains authoritative for queued work; the approved-successor

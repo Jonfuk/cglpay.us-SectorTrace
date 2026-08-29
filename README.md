@@ -128,7 +128,7 @@ request per two seconds per host enforced process-wide, conditional requests,
 | `m28_sar_reports` | National SAR Library | Safeguarding Adult Reviews: board name (read from the document), workforce concern terms, provider mentions |
 | `m29_rough_sleeping` | MHCLG rough sleeping snapshot | Annual LA-level estimate of people sleeping rough on one autumn night, since 2010 — a comparator |
 | `m30_statutory_homelessness` | MHCLG statutory homelessness (H-CLIC) | Quarterly LA-level homelessness-duty assessments and outcomes (Table A1 only) — a comparator |
-| `m31_temporary_accommodation` | MHCLG temporary accommodation (H-CLIC) | Households in temporary accommodation per quarter, with the children breakdown (Table TA1) |
+| `m31_temporary_accommodation` | MHCLG temporary accommodation (H-CLIC) | Households in temporary accommodation per quarter, with the children and bed-and-breakfast breakdowns (Table TA1) |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | The bounded-crawl exception to `m28`'s one-aggregator rule: SARs a board published but never submitted |
 | `m33_hse_notices` | HSE public enforcement-notices register | Improvement and prohibition notices matched to a tracked provider by exact name; individuals excluded, result kept verbatim |
 

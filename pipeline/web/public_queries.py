@@ -374,8 +374,16 @@ CAVEATS = {
     "temporary_accommodation_comparator": (
         "This is a comparator, shown for the same reason as the homelessness "
         "figures above — never combined, ratioed or correlated with this "
-        "authority's own evidence. Only the top-level totals are read; the "
-        "bed-and-breakfast breakdown is not."
+        "authority's own evidence. Only the top-level totals are read, plus "
+        "the bed-and-breakfast breakdown where Table TA1 publishes it."
+    ),
+    "temporary_accommodation_breakdown": (
+        "The bed-and-breakfast 'of which' rows of Table TA1, as published. "
+        "The set of B&B columns changes across the series — older quarters "
+        "split households with children out, recent quarters give only the "
+        "households total — so a missing measure for a quarter means the "
+        "source did not publish it, not zero. Context only: not a rate, not "
+        "compared between authorities, not differenced across quarters."
     ),
 }
 
@@ -2757,7 +2765,8 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "committee_paper_candidates", "foi_requests",
               "foi_request_candidates", "rough_sleeping_snapshot",
               "statutory_homelessness_snapshot",
-              "temporary_accommodation_snapshot"])
+              "temporary_accommodation_snapshot",
+              "temporary_accommodation_breakdowns"])
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
@@ -2835,6 +2844,11 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
                children_in_ta, source_url, retrieved_at, payload_sha256
         FROM temporary_accommodation_snapshot WHERE ons_code = ?
         ORDER BY quarter_start""", (ons_code,))
+    temporary_accommodation_breakdown = _rows(conn, """
+        SELECT quarter_start, quarter_label, measure, unit, households,
+               households_text, source_url, retrieved_at, payload_sha256
+        FROM temporary_accommodation_breakdowns WHERE ons_code = ?
+        ORDER BY quarter_start, measure""", (ons_code,))
 
     return {
         "authority": authority_row,
@@ -2856,6 +2870,8 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
                 "caveat": CAVEATS["statutory_homelessness_comparator"]},
             "temporary_accommodation": {
                 "rows": temporary_accommodation,
+                "breakdown": temporary_accommodation_breakdown,
+                "breakdown_caveat": CAVEATS["temporary_accommodation_breakdown"],
                 "caveat": CAVEATS["temporary_accommodation_comparator"]},
         },
         "caveats": {

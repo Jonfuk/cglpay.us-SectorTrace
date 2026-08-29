@@ -893,13 +893,21 @@ every other section on the page already uses, not a missing section.*
   copies — the revision, placeholder (`[x]`/`[z]`/`[n]`/`[c]`) and
   pre-2017-`.xls`-gap caveats in Module 30's entry above apply here
   identically and are not restated in full.
-- **v1 reads only the top-level totals and drops the bed-and-breakfast
-  breakdown.** `total_households_ta`, `households_ta_with_children` and
-  `children_in_ta` are read; how many of those households are in a B&B, and
-  the further "6 weeks", "pending review" and "16/17-year-old applicant"
-  breakdowns within that, are not — the same smallest-coherent-slice
-  discipline as Module 30 (which drops the Section 21 subset) and
-  Module 29 (which drops demographic breakdowns).
+- **The top-level totals are `temporary_accommodation_snapshot`; the
+  bed-and-breakfast "of which" block is `temporary_accommodation_breakdowns`
+  (BETA-064).** `total_households_ta`, `households_ta_with_children` and
+  `children_in_ta` are the snapshot. The breakdown is narrow — one row per
+  authority, quarter and `measure` — because the set of B&B columns is not
+  stable across the series: the older multi-row-header era splits
+  `bb_households` and `bb_households_with_children`, the flat-header era
+  publishes only `bb_households`. `_BB_MEASURES` in the module is a closed
+  set; a B&B column matching none of them is a
+  `temporary_accommodation_breakdown_unknown_column` review item, never a
+  guessed measure. **A measure absent for a quarter means the source did not
+  publish it, not zero.** The further "6 weeks", "pending review" and
+  "16/17-year-old applicant" splits within the B&B block are still not read.
+  This is context only — never a rate, never compared between authorities,
+  never differenced across quarters.
 - **One real edition published this table under a misnamed sheet.**
   January–March 2023's workbook names the sheet `TA1_` rather than `TA1`
   while every other sheet in the same file, including Table A1, is named

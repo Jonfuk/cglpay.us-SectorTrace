@@ -158,7 +158,10 @@ class TestTheTreesMatch:
         # 76 adds document_records.display_title / title_basis (BETA-062) — a
         # derived human-readable title and which rung it came from. Two
         # ADD COLUMN plus an index; TEXT -> text only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 76
+        # 77 adds temporary_accommodation_breakdowns (BETA-064) — the narrow
+        # bed-and-breakfast "of which" rows of H-CLIC Table TA1, one per
+        # authority/quarter/measure. TEXT/INTEGER -> text/bigint only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 77
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

@@ -227,6 +227,18 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         " 160, 'https://gov.example/hclic-ta', '2026-08-01T00:00:00Z', 200, "
         " 'mhclg_temporary_accommodation', 't')",
         (BIRMINGHAM,))
+    for measure, value in (("bb_households", "40"),
+                            ("bb_households_with_children", "[c]")):
+        conn.execute(
+            "INSERT INTO temporary_accommodation_breakdowns (ons_code, "
+            " quarter_start, quarter_label, measure, unit, households, "
+            " households_text, source_url, retrieved_at, http_status, "
+            " source_system, payload_sha256) "
+            "VALUES (?, '2026-01-01', 'January to March 2026', ?, 'households', "
+            " ?, ?, 'https://gov.example/hclic-ta', '2026-08-01T00:00:00Z', "
+            " 200, 'mhclg_temporary_accommodation', 't')",
+            (BIRMINGHAM, measure,
+             int(value) if value.isdigit() else None, value))
 
     conn.commit()
     return conn
@@ -312,6 +324,15 @@ def test_comparators_are_present_and_carry_their_own_caveats(ro):
     assert ta["rows"][0]["children_in_ta"] == 160
     assert "comparator" in ta["caveat"].lower()
 
+    # BETA-064: the bed-and-breakfast breakdown, verbatim — a [c] placeholder
+    # stays [c] with a NULL number, never 0.
+    breakdown = {row["measure"]: row for row in ta["breakdown"]}
+    assert breakdown["bb_households"]["households"] == 40
+    assert breakdown["bb_households_with_children"]["households"] is None
+    assert breakdown["bb_households_with_children"]["households_text"] == "[c]"
+    assert breakdown["bb_households"]["unit"] == "households"
+    assert "not" in ta["breakdown_caveat"].lower()
+
 
 def test_comparators_never_combined_or_scored_against_other_evidence():
     """The three comparator caveats must say, in words, that these figures
@@ -331,6 +352,7 @@ def test_an_authority_with_no_comparator_data_gets_empty_rows_not_an_error(ro):
     assert comparators["rough_sleeping"]["rows"] == []
     assert comparators["statutory_homelessness"]["rows"] == []
     assert comparators["temporary_accommodation"]["rows"] == []
+    assert comparators["temporary_accommodation"]["breakdown"] == []
 
 
 def test_an_authority_with_nothing_returns_the_same_empty_shapes(ro):

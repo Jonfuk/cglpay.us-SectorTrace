@@ -20,12 +20,16 @@ docstring on `read_workbook_sheet`.
 
 TA1's layout is simpler than A1's — one level of "of which" nesting (a
 household total, then a breakdown by bed-and-breakfast use) rather than
-A1's two. **v1 reads only the top-level totals** (households in TA,
-households with children, children in TA) and deliberately drops the B&B
-breakdown — the same smallest-coherent-slice discipline already applied to
-Module 30 (which drops the Section 21 subset) and Module 29 (which drops
-demographic breakdowns). The B&B figures are a plausible follow-up, not
-built here.
+A1's two. v1 read only the top-level totals (households in TA, households
+with children, children in TA). BETA-064 adds the bed-and-breakfast "of
+which" block into `temporary_accommodation_breakdowns` — a narrow table
+(one row per authority/quarter/measure) because the B&B sub-columns are not
+stable across the series: the older multi-row-header era splits households
+and households-with-children, the flat-header era publishes only the
+households total. `_BB_MEASURES` is a closed set; a B&B column matching none
+of them is a `temporary_accommodation_breakdown_unknown_column` review item,
+never a guessed measure. The block is optional — a quarter with no
+recognisable B&B column writes no breakdown rows and is not an error.
 """
 from __future__ import annotations
 
@@ -73,6 +77,27 @@ _REQUIRED_FIELDS = {
     "total_households_ta", "households_ta_with_children", "children_in_ta",
 }
 
+# The bed-and-breakfast "of which" block (BETA-064). A B&B column is one
+# whose concatenated header text names bed-and-breakfast accommodation; the
+# newer flat-header era has one such column, the older multi-row era has a
+# merged group header followed by "of which" sub-columns whose own text does
+# NOT repeat "bed and breakfast" -- so the block is bounded from its first
+# B&B-anchored column up to the next snapshot column, and every column in
+# that span is classified by its own sub-header.
+_BB_BLOCK_RE = re.compile(r"b\s*&\s*b|bed[\s-]*and[\s-]*breakfast", re.IGNORECASE)
+_BB_WITH_CHILDREN_RE = re.compile(
+    r"with (children|dependent|pregnan)|pregnan", re.IGNORECASE)
+
+# code -> the classifier applied to a column's header signature. Order is the
+# claim order: the more specific measure first, so the plain households
+# total cannot swallow the with-children column. Each code is claimed at
+# most once; a second column that would match an already-claimed code is
+# reported as unknown rather than overwriting it.
+_BB_MEASURES = (
+    ("bb_households_with_children", _BB_WITH_CHILDREN_RE),
+    ("bb_households", re.compile(r"household|total", re.IGNORECASE)),
+)
+
 
 def locate_ta1_columns(rows: list[list[str]], anchor: int) -> dict[str, int]:
     """Resolve Table TA1's field columns by keyword. See
@@ -109,6 +134,68 @@ def locate_ta1_columns(rows: list[list[str]], anchor: int) -> dict[str, int]:
         raise StatutoryHomelessnessParseError(
             f"could not locate required TA1 columns: {sorted(missing)}")
     return claimed
+
+
+_BB_SUBHEADER_RE = re.compile(r"^\s*(total|of which|number)\b", re.IGNORECASE)
+
+
+def locate_ta1_breakdown_columns(
+    rows: list[list[str]], anchor: int, snapshot_columns: dict[str, int]
+) -> tuple[dict[str, int], list[str]]:
+    """Resolve the bed-and-breakfast "of which" columns (BETA-064).
+
+    Returns `(measures, unknown)` — `measures` maps a `_BB_MEASURES` code to
+    its column, `unknown` is the header text of every B&B-block column that
+    matched no measure (or a measure already claimed). Both may be empty:
+    a quarter with no B&B column is not an error, it just writes no
+    breakdown rows.
+
+    The block runs from the first column whose header names bed-and-breakfast
+    accommodation up to the next snapshot column. A trailing column joins the
+    block only when its own header reads as an "of which" sub-header
+    (`Total with children`, `Total number of households`) — so a separate
+    non-B&B group that happens to sit to the right is not pulled in.
+    """
+    header_rows = [r for r in rows[:anchor] if sum(1 for c in r if c) >= 2]
+    width = max([len(r) for r in header_rows]
+                + [len(rows[anchor]) if anchor < len(rows) else 0])
+
+    def signature(column: int) -> str:
+        return " ".join(r[column] for r in header_rows
+                        if column < len(r) and r[column])
+
+    anchored = [c for c in range(width) if _BB_BLOCK_RE.search(signature(c))]
+    if not anchored:
+        return {}, []
+
+    snapshot_cols = set(snapshot_columns.values())
+    start = min(anchored)
+    block = [start]
+    for column in range(start + 1, width):
+        if column in snapshot_cols:
+            break
+        sig = signature(column)
+        if column in anchored or (sig and _BB_SUBHEADER_RE.match(sig)):
+            block.append(column)
+        elif sig:
+            break
+
+    measures: dict[str, int] = {}
+    unknown: list[str] = []
+    for column in block:
+        sig = signature(column)
+        if not sig:
+            continue
+        for code, pattern in _BB_MEASURES:
+            if pattern.search(sig):
+                if code in measures:
+                    unknown.append(sig)
+                else:
+                    measures[code] = column
+                break
+        else:
+            unknown.append(sig)
+    return measures, unknown
 
 
 def extract_ta1_rows(rows: list[list[str]], anchor: int,
@@ -148,6 +235,7 @@ def run(ctx: ModuleContext) -> None:
     unmatched_logged: set[str] = set()
 
     written = 0
+    breakdown_written = 0
     quarters_processed = 0
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
@@ -220,6 +308,25 @@ def run(ctx: ModuleContext) -> None:
                 "payload_sha256": file_result.payload_sha256,
             }
 
+            # BETA-064: the bed-and-breakfast "of which" block. Optional per
+            # vintage; a B&B column that matches no known measure is a review
+            # item for this quarter, not a guessed row.
+            bb_columns, bb_unknown = locate_ta1_breakdown_columns(
+                rows, anchor, columns)
+            if bb_unknown:
+                db.record_review_item(
+                    conn, module_name,
+                    "temporary_accommodation_breakdown_unknown_column",
+                    attachment["url"], json.dumps({
+                        "quarter": pub["quarter_label"],
+                        "columns": sorted(set(bb_unknown)),
+                        "note": "a bed-and-breakfast column in TA1 matched no "
+                                "code in _BB_MEASURES; add it there or confirm "
+                                "it is genuinely a new measure",
+                    }))
+            bb_by_code = {e["ons_code"]: e
+                          for e in extract_ta1_rows(rows, anchor, bb_columns)}
+
             for entry in extract_ta1_rows(rows, anchor, columns):
                 ons_code = entry["ons_code"]
                 if ons_code not in known_authorities:
@@ -253,9 +360,25 @@ def run(ctx: ModuleContext) -> None:
                           natural_key=["ons_code", "quarter_start"])
                 written += 1
 
+                bb_entry = bb_by_code.get(ons_code)
+                for measure, _column in bb_columns.items():
+                    raw = (bb_entry or {}).get(measure, "")
+                    db.upsert(conn, "temporary_accommodation_breakdowns", {
+                        "ons_code": ons_code,
+                        "quarter_start": pub["quarter_start"],
+                        "quarter_label": pub["quarter_label"],
+                        "measure": measure,
+                        "unit": "households",
+                        "households": to_int(raw),
+                        "households_text": raw or None,
+                        **provenance,
+                    }, natural_key=["ons_code", "quarter_start", "measure"])
+                    breakdown_written += 1
+
             quarters_processed += 1
             if not ctx.dry_run:
                 conn.commit()
 
     log.info("temporary_accommodation.run_complete",
-              quarters=quarters_processed, rows=written)
+              quarters=quarters_processed, rows=written,
+              breakdown_rows=breakdown_written)
