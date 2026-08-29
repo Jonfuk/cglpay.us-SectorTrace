@@ -284,6 +284,16 @@ CAVEATS = {
         "figures and may share an axis with each other, and with nothing else "
         "on this page."
     ),
+    "provider_compare": (
+        "Each layer below is one kind of evidence about one thing — an "
+        "accreditation status, a gender pay gap filing, a figure a provider "
+        "published on its own site, an advertised salary range. They are "
+        "placed side by side, not combined: this comparison produces no "
+        "ranking, score, difference or ratio, and a provider missing from a "
+        "layer has not been shown to be worse or better on it. Read each "
+        "layer with its own caveat before drawing anything from the "
+        "arrangement."
+    ),
     "statutory_pay_rates": (
         "Statutory rates are published hourly floors. They are shown as the "
         "government published them: this portal does not annualise them or "
@@ -2815,6 +2825,135 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
         "providers": provider_rows,
         "series": series,
         "caveats": {"cross_layer": CAVEATS["compare_layers"]},
+    }
+
+
+# The pay-evidence layers a provider comparison keeps strictly separate. Each
+# is one source, with its own unit and its own caveat; the response places
+# them side by side and never derives a rank, score, difference or ratio
+# across them or within them. Larger selections stay well-defined: the API
+# accepts 2-4 keys and returns the same shape whatever the count.
+_PROVIDER_COMPARE_MIN = 2
+_PROVIDER_COMPARE_MAX = 4
+
+
+def providers_compare(conn: sqlite3.Connection, provider_keys) -> dict:
+    """Two to four providers across four separate pay-evidence layers.
+
+    Unlike `compare` (which plots authority *and* provider time series on
+    shared axes), this is provider-only and deliberately non-temporal: it
+    lays out Living Wage accreditation, the latest gender pay gap filing,
+    provider-published pay and recent NHS Jobs adverts as four independent
+    blocks. No layer is combined with another, and nothing here ranks,
+    scores, differences or ratios the providers — `tests/test_web_provider_compare.py`
+    pins the absence.
+    """
+    _public(["providers", "living_wage_accreditations", "gender_pay_gap_reports",
+              "provider_pay_mentions", "nhs_job_adverts"])
+
+    keys = list(dict.fromkeys(k for k in provider_keys if k))
+    if not _PROVIDER_COMPARE_MIN <= len(keys) <= _PROVIDER_COMPARE_MAX:
+        raise QueryError(
+            f"providers/compare needs between {_PROVIDER_COMPARE_MIN} and "
+            f"{_PROVIDER_COMPARE_MAX} distinct `provider_key` values.")
+
+    placeholders = ", ".join(f":p{n}" for n in range(len(keys)))
+    params = {f"p{n}": v for n, v in enumerate(keys)}
+    known = {row["provider_key"]: row["canonical_name"] for row in _rows(
+        conn, f"SELECT provider_key, canonical_name FROM providers "
+              f"WHERE provider_key IN ({placeholders})", params)}
+    missing = [k for k in keys if k not in known]
+    if missing:
+        raise QueryError(f"No provider {missing[0]!r}.")
+
+    providers_list = [
+        {"provider_key": k, "canonical_name": known[k]} for k in keys]
+
+    def _by_provider(rows: list[dict]) -> dict:
+        out: dict[str, list[dict]] = {k: [] for k in keys}
+        for row in rows:
+            out.setdefault(row["provider_key"], []).append(row)
+        return out
+
+    living_wage = _by_provider(_rows(conn, f"""
+        SELECT l.provider_key, l.accredited, l.employer_name, l.match_basis,
+               l.searched_variant, l.pages_checked, l.source_url, l.retrieved_at
+        FROM living_wage_accreditations l
+        WHERE l.provider_key IN ({placeholders})
+        ORDER BY l.provider_key, l.retrieved_at DESC""", params))
+
+    # The latest reporting year only — an older filing is a different figure,
+    # not a trend point, and this view is not a time series.
+    gender_pay_gap = _by_provider(_rows(conn, f"""
+        SELECT g.provider_key, g.reporting_year, g.reporting_year_label,
+               g.employer_name, g.diff_mean_hourly_percent,
+               g.diff_median_hourly_percent, g.employer_size,
+               g.written_statement_url, g.source_url, g.retrieved_at
+        FROM gender_pay_gap_reports g
+        WHERE g.provider_key IN ({placeholders})
+          AND g.reporting_year = (
+            SELECT MAX(g2.reporting_year) FROM gender_pay_gap_reports g2
+            WHERE g2.provider_key = g.provider_key)
+        ORDER BY g.provider_key, g.employer_name""", params))
+
+    provider_pay = _by_provider(_rows(conn, f"""
+        SELECT m.provider_key, m.page_url, m.section, m.mention_text,
+               m.salary_raw, m.salary_min, m.salary_max, m.salary_period,
+               m.salary_basis, m.match_basis, m.source_url, m.retrieved_at
+        FROM provider_pay_mentions m
+        WHERE m.provider_key IN ({placeholders})
+        ORDER BY m.provider_key, m.page_url, m.mention_index""", params))
+
+    # Recent adverts only — bounded per provider so one prolific employer
+    # cannot dominate the block, and never summed into a count that would
+    # read as sector demand. The cap is a portable correlated count (top-N
+    # per group without a window function), the same shape both backends run.
+    nhs_jobs = _by_provider(_rows(conn, f"""
+        SELECT n.provider_key, n.job_title, n.salary_raw, n.salary_min,
+               n.salary_max, n.salary_period, n.salary_basis, n.contract_type,
+               n.working_pattern, n.posted_date, n.closing_date, n.advert_url,
+               n.provider_match_basis, n.source_url, n.retrieved_at
+        FROM nhs_job_adverts n
+        WHERE n.provider_key IN ({placeholders})
+          AND (SELECT COUNT(*) FROM nhs_job_adverts n2
+               WHERE n2.provider_key = n.provider_key
+                 AND (n2.posted_date > n.posted_date
+                      OR (n2.posted_date = n.posted_date
+                          AND n2.job_reference < n.job_reference))) < 10
+        ORDER BY n.provider_key, n.posted_date DESC, n.job_reference""", params))
+
+    return {
+        "providers": providers_list,
+        "layers": {
+            "living_wage": {
+                "unit": "accreditation status on the date checked (yes / no)",
+                "temporal": False,
+                "by_provider": living_wage,
+                "caveat": CAVEATS["living_wage_accreditations"],
+            },
+            "gender_pay_gap": {
+                "unit": "percentage gap in hourly pay, women vs men, from the "
+                        "employer's own latest filing",
+                "temporal": False,
+                "by_provider": gender_pay_gap,
+                "caveat": CAVEATS["gender_pay_gap"],
+            },
+            "provider_pay": {
+                "unit": "pay text as published on the provider's own website; "
+                        "mixed periods and bases, shown as found",
+                "temporal": False,
+                "by_provider": provider_pay,
+                "caveat": CAVEATS["provider_published_pay"],
+            },
+            "nhs_jobs": {
+                "unit": "advertised salary range per NHS Jobs advert; the "
+                        "10 most recent per provider, matched employer only",
+                "temporal": False,
+                "by_provider": nhs_jobs,
+                "caveat": CAVEATS["nhs_jobs_floor"],
+            },
+        },
+        "caveat": CAVEATS["provider_compare"],
     }
 
 

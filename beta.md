@@ -32,8 +32,8 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-044. Current work: BETA-045. Next:
-  BETA-046.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **Last completed queue item: BETA-045. Current work: BETA-046. Next:
+  BETA-047.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -271,31 +271,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-045 | Provider comparison enhancements
-  - promoted_from: NEXT on 2026-08-29 after BETA-044 completed
+- [IN_PROGRESS] BETA-046 | Admin semantic-search workbench
+  - promoted_from: NEXT on 2026-08-29 after BETA-045 completed
   - started: 2026-08-29
   - priority: P2
   - impact: 4
-  - effort: 4
-  - confidence: 4
-  - risk: 4
-  - area: api/providers/ui
-  - depends_on: BETA-039, BETA-043
-  - objective: Let readers compare two to four providers across clearly
-    separated Living Wage, latest gender pay gap, provider-pay and recent NHS
-    advert layers, while keeping the API well-defined for larger selections.
-  - rationale: Side-by-side evidence can reveal where follow-up is warranted,
-    but unlike measures must not be collapsed into a score, rank or synthetic
-    difference.
-  - suggested_first_action: Specify a structured JSON response/export that
-    preserves layer-specific units, dates and caveats; refuse flat CSV and add
-    tests prohibiting rankings, conversions, ratios and composite scores.
-  - next_action: Add `GET /api/v1/providers/compare?provider_key=…` (2–4
-    keys) returning a per-layer block (living_wage, gender_pay_gap,
-    provider_pay, nhs_jobs) with each layer's own units/dates/caveats and no
-    cross-layer arithmetic; a `compare.js`/providers view rendering the
-    layers side by side; tests forbidding rank/ratio/score/flat-CSV; wire
-    `api.html`, the `<noscript>` list and `test_portal_isolation.py`.
+  - effort: 3
+  - confidence: 5
+  - risk: 2
+  - area: admin/nlp/ui
+  - depends_on: BETA-039, BETA-034 (implemented search foundation only)
+  - objective: Surface the existing keyword, semantic and hybrid search modes
+    in an admin-only workbench with filters, score components, facets, excerpts,
+    sources, model identity and fallback state.
+  - rationale: The search backend exists but cannot be evaluated efficiently by
+    reviewers. An explicit diagnostic UI makes model behaviour inspectable
+    without exposing experimental semantics to the public portal.
+  - suggested_first_action: Browser-verify the existing admin API contract,
+    then build a keyboard-accessible view that labels relevance and fallback
+    behaviour without presenting either as evidence confidence.
+  - next_action: Confirm the existing `/api/admin/search?mode=` contract
+    (`pipeline/web/semantic.py`), then add an admin page (`/admin/js/*`) with
+    a mode switch (keyword/semantic/hybrid), source/date filters, and result
+    cards showing score components, the model identity and the
+    keyword-only fallback banner; admin-only assets/routes, `test_portal_isolation.py`
+    stays green.
 
 ### BLOCKED
 
@@ -479,28 +479,8 @@ DONE
 
 ### NEXT
 
-- [NEXT] BETA-046 | Admin semantic-search workbench
-  - promoted_from: READY on 2026-08-29 after BETA-044 completed
-  - priority: P2
-  - impact: 4
-  - effort: 3
-  - confidence: 5
-  - risk: 2
-  - area: admin/nlp/ui
-  - depends_on: BETA-039, BETA-034 (implemented search foundation only)
-  - objective: Surface the existing keyword, semantic and hybrid search modes
-    in an admin-only workbench with filters, score components, facets, excerpts,
-    sources, model identity and fallback state.
-  - rationale: The search backend exists but cannot be evaluated efficiently by
-    reviewers. An explicit diagnostic UI makes model behaviour inspectable
-    without exposing experimental semantics to the public portal.
-  - suggested_first_action: Browser-verify the existing admin API contract,
-    then build a keyboard-accessible view that labels relevance and fallback
-    behaviour without presenting either as evidence confidence.
-
-### READY
-
-- [READY] BETA-047 | Semantic claim review and gate dashboard
+- [NEXT] BETA-047 | Semantic claim review and gate dashboard
+  - promoted_from: READY on 2026-08-29 after BETA-045 completed
   - priority: P2
   - impact: 5
   - effort: 4
@@ -517,6 +497,8 @@ DONE
     authenticated admin routes; permit only individual decisions into
     `claim_candidate_decisions`, with no bulk approval, `graph_claims` write,
     SetFit training or public AI output.
+
+### READY
 
 - [READY] BETA-048 | OpenAPI 3.1 specification
   - priority: P2
@@ -594,6 +576,70 @@ DONE
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-045 | Provider comparison enhancements
+  - completed: 2026-08-29
+  - priority: P2
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: api/providers/ui
+  - depends_on: BETA-039, BETA-043
+  - objective: Let readers compare two to four providers across clearly
+    separated Living Wage, latest gender pay gap, provider-pay and recent NHS
+    advert layers, while keeping the API well-defined for larger selections.
+  - result: New public route `GET /api/v1/provider_compare?provider_key=…`
+    (`public_queries.providers_compare`) — a **flat** route name like
+    `document_search`/`council_spend`, deliberately not `providers/compare`,
+    so it stays inside the frozen-surface machinery (which assumes a route is
+    either a plain `[a-z_]+` name or a `{param}` pattern) with no test-infra
+    change. Takes 2–4 distinct `provider_key` values (fewer/more, or an
+    unknown key, is a 400 with a clear message — "well-defined for larger
+    selections" is a clean refusal, not a silent truncation). Returns
+    `providers` (in the order asked) and `layers`: `living_wage`,
+    `gender_pay_gap` (latest reporting year only — an older filing is a
+    different figure, not a trend point), `provider_pay`
+    (`provider_pay_mentions`), `nhs_jobs` (10 most recent adverts per
+    provider, capped with a portable correlated-count top-N, never a
+    window function). Each layer carries its own `unit`, `temporal: false`,
+    a `by_provider` map (every asked key present, `[]` where a provider has
+    no rows — "not evidence of a better or worse position"), and its own
+    caveat; a top-level `CAVEATS["provider_compare"]` states the whole view
+    produces no rank, score, difference or ratio.
+  - no-csv: `provider_compare` is deliberately absent from
+    `public_export.EXPORTABLE` / `WINDOWED` — the structured JSON is the
+    export, and a flat CSV would imply the four layers are one measure.
+  - ui: `compare.js` — when the selection is providers-only (2–4), a new
+    "Pay evidence side by side" section fetches `provider_compare` and lays
+    out the four layers as **tables**, not charts (a chart of unlike
+    measures is the collapse the caveat forbids): per layer a pinned
+    caveat, the unit, and a panel per provider with up to eight rows +
+    "…and N more". More than four selected shows the first four with a note.
+  - fix (pre-existing, found here): `app.js` `fetchJSON` passed an array
+    param value straight to `URLSearchParams.set`, which comma-joins it —
+    so `fetchJSON('compare', {provider_key: [a, b]})` sent
+    `provider_key=a%2Cb` and the server saw one bogus key. `compare.js`'s
+    own multi-authority / multi-provider comparison was hitting this too.
+    `fetchJSON` now `append`s each array element as a repeated param, the
+    shape the server's repeatable parameters expect. Verified in the
+    browser: `/api/v1/compare?provider_key=a&provider_key=b` now 200 where
+    the comma form 400s.
+  - api-doc: `api.html` gains the `provider_compare` article; the
+    `<noscript>` list gains its line; `PUBLIC_API_ROUTES` in
+    `test_portal_isolation.py` updated.
+  - validation: New `tests/test_web_provider_compare.py` (8 tests) — four
+    separate layers each with unit + caveat + `temporal: false`, the
+    latest-year-only gender pay gap pin, absent-provider = `[]`, a
+    scan of the raw payload for `rank`/`score`/`ratio`/`difference`/
+    `delta`/`composite`/`index`/`percentile` (none present), the 2–4
+    bound (incl. duplicate collapse), the unknown-key 400, no
+    `EXPORTABLE`/`WINDOWED` entry, and the frozen-surface pin. Full offline
+    suite green — **2705 passed, 109 skipped, 34 deselected, 0 failed**.
+    `ruff check pipeline tests` clean. Browser-verified against a seeded
+    scratch SQLite warehouse: the side-by-side section renders all four
+    layers with caveats/units/rows and the empty-state text, and the
+    `fetchJSON` fix restored the existing compare page's multi-select.
 
 - [DONE] BETA-044 | Commissioning-relationship detail and timeline
   - completed: 2026-08-29
@@ -2523,9 +2569,9 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P1 | Document evidence-context view | 5 | 3 | 4 | NEXT (BETA-042) |
 | P1 | Public dataset catalogue | 5 | 4 | 4 | DONE (BETA-043) |
 | P2 | Commissioning-relationship detail and timeline | 4 | 3 | 5 | DONE (BETA-044) |
-| P2 | Provider comparison enhancements | 4 | 4 | 4 | IN_PROGRESS (BETA-045) |
-| P2 | Admin semantic-search workbench | 4 | 3 | 5 | NEXT (BETA-046) |
-| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | READY (BETA-047) |
+| P2 | Provider comparison enhancements | 4 | 4 | 4 | DONE (BETA-045) |
+| P2 | Admin semantic-search workbench | 4 | 3 | 5 | IN_PROGRESS (BETA-046) |
+| P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | NEXT (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | READY (BETA-048) |
 | P1 | Accessibility and performance guardrails | 5 | 4 | 4 | READY (BETA-049) |
 | P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |

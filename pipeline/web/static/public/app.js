@@ -182,7 +182,17 @@ const cache = new Map();
 export async function fetchJSON(endpoint, params = {}, { fresh = false } = {}) {
   const url = new URL(`/api/v1/${endpoint}`, location.origin);
   for (const [key, value] of Object.entries(params)) {
-    if (value !== null && value !== undefined && value !== '') {
+    if (value === null || value === undefined || value === '') continue;
+    // An array becomes repeated params (`?k=a&k=b`), the shape the server's
+    // repeatable parameters (`ons_code`, `provider_key`) expect — not the
+    // comma-joined single value `set()` would produce.
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== null && item !== undefined && item !== '') {
+          url.searchParams.append(key, item);
+        }
+      }
+    } else {
       url.searchParams.set(key, value);
     }
   }

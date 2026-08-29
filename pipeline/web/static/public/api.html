@@ -267,6 +267,38 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-provider-compare" data-route="provider_compare">
+    <h3><code>/api/v1/provider_compare</code></h3>
+    <p>
+      Two to four providers laid out across four separate pay-evidence
+      layers: Living Wage accreditation, the latest gender pay gap filing,
+      pay a provider published on its own website, and its ten most recent
+      NHS Jobs adverts. The layers are placed side by side, never combined —
+      the response has no ranking, score, difference or ratio, and a
+      provider absent from a layer has not been shown to be worse or better
+      on it. Non-temporal by design: this is not <code>/api/v1/compare</code>'s
+      time series.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Required, repeatable. Between two and four distinct providers from <code>/api/v1/providers</code>; fewer or more is a 400, as is an unknown key.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>providers</code> (key and name, in the order asked) and
+      <code>layers</code> — <code>living_wage</code>, <code>gender_pay_gap</code>,
+      <code>provider_pay</code>, <code>nhs_jobs</code> — each with its own
+      <code>unit</code>, a <code>by_provider</code> map of rows keyed by
+      provider, and its own <code>caveat</code>, plus a top-level
+      <code>caveat</code>. There is no CSV form: unlike measures must not be
+      flattened into one table.
+    </p>
+    <p>
+      <code>/api/v1/provider_compare?provider_key=change_grow_live&amp;provider_key=turning_point</code>
+    </p>
+  </article>
+
   <article class="apiroute" id="route-relationships" data-route="relationships">
     <h3><code>/api/v1/relationships</code></h3>
     <p>

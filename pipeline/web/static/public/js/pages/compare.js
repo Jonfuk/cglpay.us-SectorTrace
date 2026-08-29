@@ -15,7 +15,8 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, typeaheadKeyboard } from '/app.js';
+import { el, replace, fetchJSON, num, gbp, isoDate, sourceLink,
+          typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, symbolFor, escapeHtml,
           shareButton, findingBlock, tableCard } from '/js/components.js';
@@ -152,7 +153,81 @@ export async function render(main, { params = null } = {}) {
       });
   }
 
+  // BETA-045: when the selection is providers only (2-4), the pay-evidence
+  // layers that have no authority counterpart and no shared time axis are
+  // laid out side by side — as tables, because "unlike measures must not be
+  // collapsed" and a chart would invite exactly that.
+  if (state.providers.length >= 2 && !state.ons.length) {
+    await renderProviderPayLayers(contentHolder, state.providers);
+  }
+
   return () => disposeCharts(charts);
+}
+
+async function renderProviderPayLayers(container, providerKeys) {
+  const keys = providerKeys.slice(0, 4);
+  const truncated = providerKeys.length > 4;
+  let data;
+  try {
+    data = await fetchJSON('provider_compare', { provider_key: keys });
+  } catch (error) {
+    container.append(section('Pay evidence side by side', null,
+      errorCard(error.message, () => {})));
+    return;
+  }
+  const order = data.providers.map((p) => p.provider_key);
+  const name = new Map(data.providers.map((p) => [p.provider_key, p.canonical_name]));
+
+  const layerBlock = (title, layer, rowsFor) => {
+    const parts = [pinnedCaveat(layer.caveat, `${title} — read before comparing`),
+      el('p', { class: 'small muted', text: `Unit: ${layer.unit}` })];
+    for (const key of order) {
+      const rows = (layer.by_provider && layer.by_provider[key]) || [];
+      parts.push(el('div', { class: 'panel' },
+        el('h4', { text: name.get(key) || key }),
+        rows.length
+          ? el('ul', { class: 'small' }, ...rows.slice(0, 8).map(rowsFor))
+          : el('p', { class: 'small muted', text: 'No rows in this layer for this provider — not evidence of a better or worse position.' }),
+        rows.length > 8
+          ? el('p', { class: 'small muted', text: `…and ${num(rows.length - 8)} more` })
+          : null));
+    }
+    return section(title, null, ...parts);
+  };
+
+  container.append(el('div', { class: 'section' },
+    el('h2', { text: 'Pay evidence side by side' }),
+    pinnedCaveat(data.caveat, 'What this side-by-side may and may not do'),
+    truncated
+      ? el('p', { class: 'small muted', text: `Showing the first four providers you picked; the endpoint accepts at most four.` })
+      : null));
+
+  container.append(layerBlock('Living Wage accreditation', data.layers.living_wage,
+    (r) => el('li', { text: `${r.accredited ? 'Accredited' : 'Not accredited'}`
+      + `${r.employer_name ? ` — matched to "${r.employer_name}" (${r.match_basis || 'match'})` : ''}`
+      + `${r.retrieved_at ? `, checked ${isoDate(r.retrieved_at)}` : ''}` })));
+
+  container.append(layerBlock('Latest gender pay gap filing', data.layers.gender_pay_gap,
+    (r) => el('li', {}, `${r.reporting_year_label || r.reporting_year}: `
+      + `mean hourly gap ${fmtPct(r.diff_mean_hourly_percent)}, `
+      + `median ${fmtPct(r.diff_median_hourly_percent)}`
+      + `${r.employer_size ? ` (${r.employer_size})` : ''} `,
+      r.written_statement_url ? sourceLink(r.written_statement_url, 'statement') : null)));
+
+  container.append(layerBlock('Pay published on the provider’s own site', data.layers.provider_pay,
+    (r) => el('li', {}, `${(r.mention_text || r.salary_raw || '').trim()}`
+      + `${r.salary_period ? ` — per ${r.salary_period}` : ''}`
+      + `${r.salary_basis ? `, ${r.salary_basis}` : ''} `,
+      r.source_url ? sourceLink(r.source_url, 'page') : null)));
+
+  container.append(layerBlock('Recent NHS Jobs adverts', data.layers.nhs_jobs,
+    (r) => el('li', {}, `${r.job_title || 'role'}: ${r.salary_raw || '—'}`
+      + `${r.posted_date ? ` (posted ${isoDate(r.posted_date)})` : ''} `,
+      r.advert_url ? sourceLink(r.advert_url, 'advert') : null)));
+}
+
+function fmtPct(value) {
+  return value === null || value === undefined ? '—' : `${value}%`;
 }
 
 /* The pickers and the selection chips. The URL is the state: every add and

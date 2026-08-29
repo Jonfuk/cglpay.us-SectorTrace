@@ -1364,6 +1364,14 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             return public_queries.relationship_detail(conn, match.group(1))
 
+        if route == "provider_compare":
+            # 2-4 providers across four separate pay-evidence layers (BETA-045).
+            # A flat name like `document_search` / `council_spend`, not
+            # `providers/compare`: it keeps this out of the `providers/...`
+            # pattern space and inside the frozen-surface machinery unchanged.
+            return public_queries.providers_compare(
+                conn, params.get("provider_key", []))
+
         match = re.fullmatch(r"providers/([a-z0-9_]+)/timeline", route)
         if match:
             return public_queries.provider_timeline(conn, match.group(1))
