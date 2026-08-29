@@ -297,25 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-082 | Pipeline mission control
-  - priority: P1
-  - impact: 5
-  - effort: 5
+- [IN_PROGRESS] BETA-083 | Schema-aware data explorer
+  - priority: P2
+  - impact: 4
+  - effort: 4
   - confidence: 4
-  - risk: 4
-  - area: admin/operations
-  - depends_on: BETA-058, BETA-063, BETA-080, BETA-085
-  - objective: Present dependency waves, active/queued/completed states,
-    progress, durable history, failure summaries, freshness consequences and
-    a focused log viewer while retaining the existing run safeguards and
-    polling.
-  - next_action: Define one read model over module registry, active job and
-    run ledger; do not add cancellation, SSE, WebSockets or new write
-    semantics.
+  - risk: 3
+  - area: admin/data
+  - depends_on: BETA-048, BETA-080, BETA-085
+  - objective: Add schema search, table descriptions, column metadata,
+    foreign-key navigation, saved read-only queries, pinned columns, JSON
+    inspection and links between related records to Database and SQL.
+  - next_action: Generate a read-only schema graph from existing metadata
+    routes; retain restricted-table confirmation, timeout and row caps.
 
 _(Implementation of the approved BETA-068–107 programme was explicitly started
-on 2026-08-29. BETA-068–081 are complete, see DONE. Wave 4 (BETA-082–087)
-follows. The remaining items are being delivered in the approved wave order.)_
+on 2026-08-29. BETA-068–082 are complete, see DONE. Wave 4 (BETA-082–087) is
+in progress. The remaining items are being delivered in the approved wave
+order.)_
 
 ### BLOCKED
 
@@ -550,6 +549,52 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-082 | Pipeline mission control
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 5
+  - confidence: 4
+  - risk: 4
+  - area: admin/operations
+  - depends_on: BETA-058, BETA-063, BETA-080, BETA-085
+  - objective: Present dependency waves, active/queued/completed states,
+    progress, durable history, failure summaries, freshness consequences and
+    a focused log viewer while retaining the existing run safeguards and
+    polling.
+  - result: New `pipeline/web/mission_control.py` — `overview(conn, settings,
+    jobs)`, a **read-only** aggregate joining the three sources the operator
+    otherwise reconciles across tabs: `admin.modules(conn)` (registry, waves,
+    dependencies, review and parse-failure counts, cursor freshness), the
+    jobs registry (`running()` / `all()`), and `run_ledger.recent(conn, 10)`.
+    It returns dependency `waves` (each module with its `depends_on`,
+    `missing_dependencies`, `pending_review`, `parse_failures`,
+    `cursor_updated_at` and its `last_run` — status / rows / failures /
+    elapsed / run_id / origin / finished_at, taken from the most recent
+    ledger row that touched it), the `active` job head, `queued` (empty —
+    the runner refuses concurrent jobs by design), `history` (the ledger
+    rows), `last_run`, a `failure_summary` (modules with parse failures or a
+    failed last run, worst first), `never_run`, and a `note` stating the
+    read-only boundary. New route `GET /api/admin/mission-control`
+    (preflighted for `run_ledger`); no write route, no cancellation, no SSE.
+    The admin Pipeline tab gains a "Mission control" panel (`pipeline.js`
+    `loadMissionControl`, polled on `tabshown` and every `HISTORY_MS` while
+    the tab is active) — a wave grid with a per-module status badge
+    (ok / failed / never / idle) and deps / fail / review badges, an
+    active-run line, and a "Needs attention" table. The existing job-log
+    pane is the focused log viewer (unchanged).
+  - api/ui: new read-only route `GET /api/admin/mission-control` (admin
+    boundary; no params). New admin CSS `.mc-*`. No change to the run route
+    or its safeguards.
+  - validation: New `tests/test_web_mission_control.py` (4 — the read model
+    joins the three sources with the right per-module fields and is empty on
+    a fresh warehouse; a failed last run reaches the failure summary and the
+    module's `last_run`; the route is GET-only and adds no write path; the
+    note states the read-only boundary). `test_web_admin` / `test_job_history`
+    green. `ruff` clean. Browser-verified: the Pipeline tab shows the
+    "Mission control" panel with 4 wave blocks, all 34 modules with a "never"
+    status (nothing run in the smoke warehouse), and "no active run".
 
 - [DONE] BETA-081 | Document reading room
   - completed: 2026-08-29
@@ -4367,8 +4412,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Safety and legal evidence hub | 5 | 4 | 4 | DONE (BETA-079) |
 | P1 | Shared responsive design system | 4 | 4 | 5 | DONE (BETA-080) |
 | P1 | Document reading room | 5 | 5 | 4 | DONE (BETA-081) |
-| P1 | Pipeline mission control | 5 | 5 | 4 | IN_PROGRESS (BETA-082) |
-| P2 | Schema-aware data explorer | 4 | 4 | 4 | APPROVED, not queued (BETA-083) |
+| P1 | Pipeline mission control | 5 | 5 | 4 | DONE (BETA-082) |
+| P2 | Schema-aware data explorer | 4 | 4 | 4 | IN_PROGRESS (BETA-083) |
 | P1 | Page-level evidence health strip | 5 | 3 | 5 | APPROVED, not queued (BETA-084) |
 | P1 | Responsive admin navigation | 5 | 4 | 5 | APPROVED, not queued (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | APPROVED, not queued (BETA-086) |

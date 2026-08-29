@@ -343,6 +343,67 @@ async function loadHistory() {
   loadRunLedger();
 }
 
+/* BETA-082: mission control — one read model over the module registry, the
+ * active job and the run ledger. Dependency waves, each module's last-run
+ * status, and a failure summary. Read-only; polled like the rest. */
+async function loadMissionControl() {
+  const holder = $('mission-control');
+  if (!holder) return;
+  let data;
+  try { data = await api('/api/admin/mission-control'); }
+  catch (e) { return; }
+
+  const dot = (module) => {
+    const status = module.last_run?.status
+      || (module.name && data.never_run.includes(module.name) ? 'never' : 'idle');
+    const cls = status === 'ok' ? 'approved'
+      : status === 'failed' ? 'rejected'
+      : status === 'never' ? 'muted' : 'pending';
+    return el('span', { class: `badge ${cls}`, title: status, text: status });
+  };
+
+  const waveBlocks = (data.waves || []).map((wave) => el('div', { class: 'mc-wave' },
+    el('h3', { class: 'small', text: `Wave ${wave.wave || '—'}` }),
+    el('ul', { class: 'mc-modules' },
+      ...wave.modules.map((module) => el('li', {},
+        dot(module),
+        el('span', { class: 'mono small', text: ` ${module.name}` }),
+        module.missing_dependencies?.length
+          ? el('span', { class: 'badge rejected', title: 'missing dependencies', text: 'deps' })
+          : null,
+        module.parse_failures
+          ? el('span', { class: 'badge pending', title: 'parse failures', text: `${module.parse_failures} fail` })
+          : null,
+        module.pending_review
+          ? el('span', { class: 'badge type', title: 'pending review', text: `${module.pending_review} review` })
+          : null)))));
+
+  const failRows = (data.failure_summary || []).map((f) => el('tr', {},
+    el('td', { class: 'mono small', text: f.module }),
+    el('td', { class: 'small', text: String(f.parse_failures || 0) }),
+    el('td', { class: 'small', text: String(f.pending_review || 0) }),
+    el('td', { class: 'small', text: f.last_status || '—' })));
+
+  const active = data.active;
+  holder.replaceChildren(
+    el('p', { class: 'muted small', text: data.note }),
+    el('div', { class: 'mc-status' },
+      el('span', { class: `badge ${active ? 'pending' : 'muted'}`,
+        text: active ? `running: ${active.label || active.kind}` : 'no active run' }),
+      data.last_run
+        ? el('span', { class: 'muted small',
+            text: `last run ${data.last_run.origin} · ${data.last_run.status}` })
+        : null),
+    el('div', { class: 'mc-waves' }, ...waveBlocks),
+    failRows.length
+      ? el('div', {}, el('h3', { class: 'small', text: 'Needs attention' }),
+          el('table', {}, el('thead', {}, el('tr', {},
+            el('th', { text: 'module' }), el('th', { text: 'parse fails' }),
+            el('th', { text: 'review' }), el('th', { text: 'last status' }))),
+            el('tbody', {}, ...failRows)))
+      : el('p', { class: 'muted small', text: 'No modules need attention.' }));
+}
+
 /* BETA-058: the durable run ledger — every module-run, whatever started it. */
 async function loadRunLedger() {
   const holder = $('run-ledger');
@@ -396,13 +457,14 @@ export function initPipeline() {
     if (event.detail.tab !== 'pipeline') return;
     loadModules();
     loadHistory();
+    loadMissionControl();
   });
 
   // app.js is a classic script and has already routed the opening hash by the
   // time this module -- deferred, like every module -- runs, so the first
   // 'tabshown' for the tab we are on has been and gone. Opening straight to
   // #pipeline has to work.
-  if ($('tab-pipeline').classList.contains('active')) loadModules();
+  if ($('tab-pipeline').classList.contains('active')) { loadModules(); loadMissionControl(); }
 
   // Once at load, whatever tab is showing: a run may already be going, and the
   // pill in the tab strip is how you find out without looking for it.
@@ -410,6 +472,7 @@ export function initPipeline() {
   state.historyTimer = setInterval(() => {
     if (state.busy || document.getElementById('tab-pipeline').classList.contains('active')) {
       loadHistory();
+      if (document.getElementById('tab-pipeline').classList.contains('active')) loadMissionControl();
     }
   }, HISTORY_MS);
 }

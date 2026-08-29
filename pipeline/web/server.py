@@ -1352,6 +1352,13 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline import run_ledger
             return {"runs": run_ledger.recent(conn, _int(params, "limit", 20))}
 
+        if path == "/api/admin/mission-control":
+            # BETA-082: one read model over the module registry, the active
+            # job and the run ledger. Read-only; the run route is untouched.
+            degrade.preflight(conn, "run_ledger")
+            from pipeline.web import mission_control
+            return mission_control.overview(conn, self.settings, self.jobs)
+
         if path == "/api/admin/jobs":
             running = self.jobs.running()
             return {"jobs": [job.head() for job in self.jobs.all()],
