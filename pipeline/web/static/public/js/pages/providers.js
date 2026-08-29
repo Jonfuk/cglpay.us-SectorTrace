@@ -17,6 +17,7 @@ import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           statCard, exportButton, registerLink, registerLinks, shareButton,
           findingBlock, evidenceMeta, evidenceHealthStrip, workbenchNav } from '/js/components.js';
 import { pushRecent } from '/js/recent.js';
+import { notebookButton } from '/js/notebook.js';
 import { chartLabelColor } from '/js/theme.js';
 
 export async function render(main, { path }) {
@@ -302,7 +303,9 @@ async function renderOne(main, key) {
           title: `SectorTrace — ${provider.canonical_name || key}`,
           text: 'Explore the published provider evidence in SectorTrace.',
           label: 'Share this provider',
-        }))),
+        }),
+        notebookButton({ kind: 'provider', ref: key,
+          label: provider.canonical_name || key }))),
     (() => {
       const meta = evidenceMeta(data);
       return findingBlock({

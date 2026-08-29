@@ -297,25 +297,24 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-088 | Evidence notebook
+- [IN_PROGRESS] BETA-089 | Saved searches and change alerts
   - priority: P1
   - impact: 5
   - effort: 4
   - confidence: 4
-  - risk: 2
-  - area: public/research workspace
-  - depends_on: BETA-072, BETA-077, BETA-080
-  - objective: Let readers pin records, passages, charts, providers and
-    authorities into named, reorderable local collections with private notes
-    and lossless JSON import/export.
-  - next_action: Define a versioned, size-bounded local collection schema in
-    localStorage, with only public identifiers stored and every read/write
-    try/catch-guarded for private mode.
+  - risk: 3
+  - area: public/search and monitoring
+  - depends_on: BETA-072, BETA-090
+  - objective: Save complete searches locally, show new-match counts after a
+    later release and provide stable Atom feeds for external subscription.
+  - next_action: Store the full filter state per saved search in localStorage
+    (guarded), and compare its result count against the last-seen count using
+    the change feed / release identity from BETA-090.
 
 _(The first refinement programme BETA-068–087 is complete. Wave 1 of the
 second programme — BETA-090, BETA-091, BETA-101, BETA-102, BETA-104 — is
 complete, see DONE. Wave 2 is BETA-088, BETA-089, BETA-092, BETA-093,
-BETA-097.)_
+BETA-097; BETA-088 is complete.)_
 
 ### BLOCKED
 
@@ -550,6 +549,66 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-088 | Evidence notebook
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: public/research workspace
+  - depends_on: BETA-072, BETA-077, BETA-080
+  - objective: Let readers pin records, passages, charts, providers and
+    authorities into named, reorderable local collections with private notes
+    and lossless JSON import/export.
+  - result: New portal module `pipeline/web/static/public/js/notebook.js` —
+    a single-browser research workspace, no account and no server call. One
+    versioned key `sectortrace.notebook` (`SCHEMA_VERSION = 1`) holds
+    `{v, collections:[{id,name,created_at,updated_at,items:[{id,kind,ref,label,note,added_at}]}]}`.
+    Bounds are enforced, not hoped for: `MAX_BYTES` 200 KB (a write that
+    would cross it is refused, not truncated — so it cannot corrupt
+    `my_area` / `recent`), `MAX_COLLECTIONS` 25, `MAX_ITEMS` 250/collection,
+    `MAX_NOTE` 2000 chars. Every `localStorage` read and write is
+    try/catch-guarded; `read()` returns a fresh empty notebook on corruption
+    or private mode, `write()` returns `{ok:false, reason}` rather than
+    throwing. Only public identifiers or hash routes are stored (`ref`), plus
+    the label the portal already shows and the reader's own note. `addItem`
+    is idempotent on `(kind, ref)`. Reorder is one-step up/down for both
+    collections and items (the offline-safe equivalent of drag). Lossless
+    JSON: `exportJSON()` is the whole cleaned notebook; `importJSON()`
+    rejects anything not a `v1` notebook rather than merging partial data
+    (merge mode appends collections). `notebookButton({kind,ref,label})` is a
+    self-repainting toggle that pins into a default "My evidence" collection
+    or removes it, listening on a `notebookchange` event so every instance on
+    the page stays in sync.
+  - api/ui: no API — entirely local. New `/notebook` route ("Evidence
+    notebook"), a management page with per-collection rename / reorder /
+    delete, per-item note editing / reorder / remove, an "Add collection"
+    field, and Export / Import JSON (import via a hidden file input). Module
+    registered in `server.py`'s portal-module loop and
+    `test_portal_isolation` `PUBLIC_STATIC_PATHS`; linked from the footer
+    nav. `notebookButton` wired into the provider hero, the authority hero
+    (beside "My area"), and the document reading room (pinning the exact
+    passage route as a `passage` kind). `styles.css` gained a `.nb-*` block
+    using the portal's real tokens.
+  - validation: New `tests/test_portal_notebook.py` (7 — the schema is
+    versioned and every bound is present with a refuse-not-truncate write;
+    every `localStorage` access is inside a `catch`; import rejects a
+    non-`v1` object and export is the whole notebook; writes dispatch
+    `notebookchange` and the button listens; only the five public kinds can
+    be pinned and `addItem` refuses an unknown kind; the pin button is
+    imported and used on providers/authority/documents; the route and module
+    are registered). `test_portal_isolation` / `test_portal_navigation` /
+    `test_portal_design_system` green (fixed a first pass that used
+    `var(--muted)` / `var(--border)` — not portal tokens — to
+    `--text-muted` / `--border-subtle`). `ruff` clean. Browser-verified: the
+    model round-trips (create / addItem idempotent / setNote / export /
+    reject bad import / good import); the `#/notebook` page renders
+    collections, items with kind labels and editable note textareas (fixed
+    `el()` setting `value` as an attribute, which a `<textarea>` ignores —
+    note now passed as a text child); the provider hero "+ Notebook" button
+    toggles to "In notebook ✓" and the pin is found in storage.
 
 - [DONE] BETA-104 | Validation-rule explorer
   - completed: 2026-08-29
@@ -4903,8 +4962,8 @@ operator finding aid only; it does not relax any of those boundaries.
 | P1 | Responsive admin navigation | 5 | 4 | 5 | DONE (BETA-085) |
 | P1 | Operator action cockpit | 5 | 4 | 4 | DONE (BETA-086) |
 | P1 | Split-pane review workspace | 5 | 5 | 4 | DONE (BETA-087) |
-| P1 | Evidence notebook | 5 | 4 | 4 | IN_PROGRESS (BETA-088) |
-| P1 | Saved searches and change alerts | 5 | 4 | 4 | APPROVED, not queued (BETA-089) |
+| P1 | Evidence notebook | 5 | 4 | 4 | DONE (BETA-088) |
+| P1 | Saved searches and change alerts | 5 | 4 | 4 | IN_PROGRESS (BETA-089) |
 | P1 | “What changed?” evidence feed | 5 | 5 | 4 | DONE (BETA-090) |
 | P2 | Source publication calendar | 4 | 3 | 4 | DONE (BETA-091) |
 | P1 | Record revision comparison | 5 | 5 | 4 | APPROVED, not queued (BETA-092) |

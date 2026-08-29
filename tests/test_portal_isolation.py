@@ -44,6 +44,7 @@ PUBLIC_STATIC_PATHS = {
     "/js/filterstate.js",
     "/js/myarea.js",
     "/js/recent.js",
+    "/js/notebook.js",
     "/js/pages/overview.js",
     "/js/pages/pay.js",
     "/js/pages/contracts.js",

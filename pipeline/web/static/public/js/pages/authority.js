@@ -19,6 +19,7 @@
 
 import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
 import { myAreaToggle } from '/js/myarea.js';
+import { notebookButton } from '/js/notebook.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, tableCard, escapeHtml, shareButton,
           findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
@@ -88,7 +89,9 @@ async function renderOne(main, code) {
           label: 'Share this authority',
         }),
         // BETA-073: keep this authority as the reader's local starting point.
-        myAreaToggle(authority.ons_code || code, authority.name))),
+        myAreaToggle(authority.ons_code || code, authority.name),
+        notebookButton({ kind: 'authority', ref: authority.ons_code || code,
+          label: authority.name || code }))),
     el('details', { class: 'read-first' },
       el('summary', { text: 'How to read this authority workbench' }),
       el('p', { text: 'Grant allocation, budgeted spend, treatment estimates and contracts come from different sources. They are shown side by side, never combined into a score.' })),

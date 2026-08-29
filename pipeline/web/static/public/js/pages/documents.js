@@ -19,6 +19,7 @@
 import { el, replace, fetchJSON, isoDate, sourceLink, num } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, truncate,
          shareButton } from '/js/components.js';
+import { notebookButton } from '/js/notebook.js';
 
 /* Matches the server's own ceiling for one response; larger result sets are
  * reached through "show more", which asks for the next window by offset. */
@@ -400,6 +401,14 @@ async function renderReadingRoom(holder, docId, elId, query) {
         class: 'btn ghost tiny', type: 'button',
         onclick: () => setDocParams({ doc: '', el: '' }),
       }, '← Back to results'),
+      // BETA-088: pin this exact passage (the full hash route) into the
+      // reader's notebook — a "passage" kind, stored as the route only.
+      notebookButton({
+        kind: 'passage',
+        ref: `#/documents?${new URLSearchParams(location.hash.split('?')[1] || '').toString()}`,
+        label: `Passage — ${data.title || docId}`,
+        className: 'btn tiny',
+      }),
       pinnedCaveat(data.caveat, 'Read this with the passage'));
 
     const elements = data.elements || [];

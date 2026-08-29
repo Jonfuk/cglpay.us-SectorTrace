@@ -1277,6 +1277,24 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .chart-empty { display: block; border: 1px dashed #888; }
 }
 
+/* BETA-088: evidence notebook. Named local collections of pinned items with
+ * private notes; everything is in localStorage and never leaves the browser. */
+.nb-hidden-input { display: none; }
+.nb-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-bottom: var(--space-4); }
+.nb-new { display: flex; gap: var(--space-2); }
+.nb-new-name, .nb-name { padding: var(--space-1) var(--space-2); }
+.nb-collections { display: flex; flex-direction: column; gap: var(--space-4); }
+.nb-collection { border: 1px solid var(--border-accent); border-radius: var(--radius-md); padding: var(--space-3); }
+.nb-collection-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.nb-name { font: 600 15px/1.2 var(--display, inherit); background: transparent; border: 1px solid transparent; color: inherit; }
+.nb-name:hover, .nb-name:focus { border-color: var(--border-subtle); }
+.nb-count { color: var(--text-muted); font-size: 13px; }
+.nb-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.nb-item { border-top: 1px solid var(--border-subtle); padding-top: var(--space-2); }
+.nb-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.nb-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-amber); }
+.nb-note { width: 100%; margin-top: var(--space-1); font: inherit; padding: var(--space-1) var(--space-2); }
+
 /* BETA-091: source publication calendar. The stated and observed cadences ride
  * in their own table columns; the row tint only flags where the projected
  * next-release date has passed, and carries no meaning on its own — the Status
