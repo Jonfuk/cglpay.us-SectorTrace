@@ -32,9 +32,9 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   immediately before it include the completed map and overview work
   (`6d1be0e`), PostgreSQL extension/trigram/PostGIS/pgvector acceleration,
   public-route caching, and a web-renderer fix; see Recent Commits.
-- **Last completed queue item: BETA-048. Current work: BETA-049 (the final
-  item of the BETA-038–049 round). Next: BETA-050 once BETA-049 is DONE.**
-  BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
+- **BETA-038–049 is complete. Last completed queue item: BETA-049. Current
+  work: BETA-050 (first item of the approved successor round). Next: BETA-051,
+  BETA-052, BETA-058.** BETA-028 and BETA-029 are DONE at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
   BETA-033 supplied and settled the homepage treatment. BETA-034 is BLOCKED
   pending a successful human-reviewed `pipeline nlp gate-034g` corpus. The
@@ -272,33 +272,31 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-049 | Accessibility and performance guardrails
-  - promoted_from: NEXT on 2026-08-29 after BETA-048 completed
+- [IN_PROGRESS] BETA-050 | Procurement lifecycle and performance view
+  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
   - started: 2026-08-29
   - priority: P1
   - impact: 5
-  - effort: 4
+  - effort: 5
   - confidence: 4
-  - risk: 2
-  - area: web/quality/ci
-  - depends_on: BETA-040, BETA-041, BETA-042, BETA-043, BETA-044, BETA-045, BETA-046, BETA-047
-  - objective: Add repeatable mobile/desktop, light/dark, keyboard, reduced-
-    motion, accessibility and performance checks for the round's public and
-    admin surfaces.
-  - rationale: Search and comparison features are not complete if they regress
-    focus, live-region announcements, readable labels, payload bounds or query
-    plans. Guardrails make these constraints part of delivery, not cleanup.
-  - suggested_first_action: Establish representative journeys and budgets,
-    require focus/live-region/text-node rules, route limits/pagination, local
-    assets, PostgreSQL plan checks and cache assertions, then fix all critical
-    or serious findings before completion.
-  - next_action: Add offline guardrail tests over the BETA-038–048 surfaces —
-    new public pages (`#/catalogue`, provider compare) and admin tabs
-    (Search, Claim review) declare an `aria-live` status region and reach
-    the DOM as text nodes; every new `/api/v1/*` route bounds its result set
-    (`limit` cap or a documented complete-export); the new admin JS carries
-    no external asset reference; the frozen public static surface has no new
-    remote URL. Fix any finding before marking DONE.
+  - risk: 4
+  - area: procurement
+  - depends_on: BETA-040, BETA-044
+  - objective: Group notices sharing an OCID into explicit planning, tender,
+    award, contract, amendment, termination and performance stages; add
+    `GET /api/v1/contracts/process/{ocid}` and a public lifecycle view.
+  - rationale: A defensible procurement history must connect official related
+    notices without turning missing stages into inferred completion, renewal,
+    KPI achievement or supplier performance.
+  - suggested_first_action: Define archived OCDS lifecycle fixtures, then extend
+    m01 for explicit stages, milestones, amendments, performance fields and
+    linked documents.
+  - next_action: Confirm what `contracts` already stores per row about the
+    OCDS release (`ocid`, `notice_id`, tags/stage, amendment fields); add
+    `GET /api/v1/contracts/process/{ocid}` returning the notices that share
+    an OCID grouped into their published stages (never an inferred one),
+    with a "missing stage is not a finding" caveat; a portal lifecycle view;
+    tests + `api.html` + `test_portal_isolation.py`.
 
 ### BLOCKED
 
@@ -482,13 +480,63 @@ DONE
 
 ### NEXT
 
-_(empty — BETA-049 is the final item of the BETA-038–049 round. When it is
-DONE, promote BETA-050 to IN_PROGRESS and BETA-051, BETA-052 and BETA-058 to
-NEXT, per the delivery sequence in the Approved successor round subsection.)_
+- [NEXT] BETA-051 | HSE enforcement-notice evidence
+  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
+  - priority: P1
+  - impact: 4
+  - effort: 4
+  - confidence: 4
+  - risk: 4
+  - area: safety/legal
+  - depends_on: BETA-043, BETA-049
+  - objective: Add module `m33` for organisation-level HSE improvement and
+    prohibition notices, publishing exact tracked-organisation matches through
+    `/api/v1/safety` while excluding individuals.
+  - rationale: Official enforcement notices add attributable safety evidence,
+    but ambiguous names and register limitations require the same human-review
+    and caveat discipline as the rest of the project.
+  - suggested_first_action: Capture offline HSE search/detail fixtures and encode
+    coverage, appeal and withdrawal caveats before defining storage or routes.
+
+- [NEXT] BETA-052 | Structured review-item context
+  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
+  - priority: P1
+  - impact: 5
+  - effort: 2
+  - confidence: 5
+  - risk: 1
+  - area: admin/review
+  - depends_on: none
+  - objective: Render source, entity, reason, evidence and navigation as typed
+    sections while retaining the complete raw JSON under disclosure.
+  - rationale: Reviewers should not have to decode implementation-shaped JSON to
+    make a careful decision, but the lossless underlying context must remain
+    available for audit.
+  - suggested_first_action: Build typed presenters for every current review-item
+    type and validate all derived internal and source links.
+
+- [NEXT] BETA-058 | Unified durable run ledger
+  - promoted_from: Approved successor backlog on 2026-08-29 after BETA-049 completed
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: operations
+  - depends_on: BETA-039
+  - objective: Record CLI, admin and scheduled executions through one durable
+    model with origin, revision, environment, parent run, timestamps and
+    per-module results; keep full logs in their current storage.
+  - rationale: Browser-started job history alone cannot explain every collection
+    path or support reliable operational handoff.
+  - suggested_first_action: Add a backward-compatible migration and instrument
+    the shared module runner used by every entry point.
 
 ### READY
 
-_(empty — see NEXT.)_
+_(empty — Wave 2 of the successor round, BETA-053/054/055/059/060, is promoted
+here as the NEXT items are completed, per the delivery sequence in the
+Approved successor round subsection.)_
 
 ### DEFERRED
 
@@ -531,6 +579,66 @@ _(empty — see NEXT.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-049 | Accessibility and performance guardrails
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 2
+  - area: web/quality/ci
+  - depends_on: BETA-040–048
+  - objective: Add repeatable mobile/desktop, light/dark, keyboard, reduced-
+    motion, accessibility and performance checks for the round's public and
+    admin surfaces.
+  - result: New `tests/test_round_guardrails.py` — offline, repeatable checks
+    over exactly the BETA-038–049 round's new surfaces
+    (`js/pages/catalogue.js`, the provider layers in `compare.js`,
+    `js/search.js`, `js/claimreview.js`; `/api/v1/catalogue`,
+    `/catalogue/{id}`, `/provider_compare`, `/relationships/{id}`,
+    `/api/openapi.json`; the claim-review admin routes):
+      * **accessibility** — `#search-status` and `#claimreview-status` are
+        `aria-live` regions (a search or a decision changes a count and a
+        screen reader has to hear it); no `innerHTML`/`outerHTML` in any new
+        JS (settled decision 9); every `<input>`/`<select>` in the new admin
+        tabs has a label or `aria-label`.
+      * **local assets** — no new script makes an off-origin `fetch`/`src`/
+        `href`/`import`, and none carries a literal `http(s)://` at all (every
+        outbound link is built from an API-returned `source_url`); the frozen
+        public static surface gained no remote URL.
+      * **performance** — `provider_compare` 400s past four providers;
+        `catalogue` is a fixed ≤60-row set; `/api/v1/catalogue` and
+        `/api/openapi.json` advertise the public `max-age`; the OpenAPI doc
+        itself shows `limit`/`offset` on the paged routes.
+  - fix: `public_queries.relationship_detail` (BETA-044) streamed every
+    `AWARDED_TO` edge between a pair with no bound — a drawer is not a place
+    to stream a five-figure set. Now `LIMIT 500` with a `truncated` flag in
+    the payload and a "see the contracts page for the rest" note in
+    `relationships.js`; `api.html` updated.
+  - live pass: mobile (375px), desktop and dark emulation against a seeded
+    scratch warehouse. The round's own new content does **not** scroll
+    horizontally at 375px (`#main` clean on `#/catalogue`); the global
+    `:focus-visible` outline (styles.css line 87) covers the new buttons;
+    the new pages add no CSS and reuse only already-themed components, so
+    dark mode is inherited.
+  - flagged, not fixed (pre-existing, portal-wide, out of this round's
+    scope): at ≤375px the topbar's find-council input and mobile menu
+    toggle overflow the viewport by ~93px — reproduces **identically** on
+    `#/` (overview, unchanged this session) and `#/documents`, so it is not
+    a round regression. BETA-018 already worked the mobile topbar; a fix
+    belongs in its own item. Recorded under Deferred Ideas.
+  - not done here: live PostgreSQL `EXPLAIN` plan checks — `psycopg` is not
+    installed in this environment (same constraint BETA-036 recorded); the
+    SQLite plan assertions in `tests/test_web_performance.py` stand, and a
+    disposable-PG matrix stays on the register.
+  - validation: New guardrail module (11 tests) green; `test_web_relationships.py`
+    still green with the `truncated` field. Full offline suite green —
+    **2737 passed, 109 skipped, 34 deselected, 0 failed**. `ruff check
+    pipeline tests` clean.
+  - round close: **BETA-038–049 is complete.** The approved successor round
+    BETA-050–067 is now promoted per its delivery sequence — BETA-050
+    IN_PROGRESS, BETA-051 / BETA-052 / BETA-058 NEXT.
 
 - [DONE] BETA-048 | OpenAPI 3.1 specification
   - completed: 2026-08-29
@@ -2677,16 +2785,16 @@ write `graph_claims`, bulk-approve candidates or publish semantic claims.
 | P2 | Admin semantic-search workbench | 4 | 3 | 5 | DONE (BETA-046) |
 | P2 | Semantic claim review and gate dashboard | 5 | 4 | 4 | DONE (BETA-047) |
 | P2 | OpenAPI 3.1 specification | 4 | 3 | 5 | DONE (BETA-048) |
-| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | IN_PROGRESS (BETA-049) |
-| P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | Approved successor backlog (BETA-050) |
-| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | Approved successor backlog (BETA-051) |
-| P1 | Structured review-item context | 5 | 2 | 5 | Approved successor backlog (BETA-052) |
+| P1 | Accessibility and performance guardrails | 5 | 4 | 4 | DONE (BETA-049) |
+| P1 | Procurement lifecycle and performance view | 5 | 5 | 4 | IN_PROGRESS (BETA-050) |
+| P1 | HSE enforcement-notice evidence | 4 | 4 | 4 | NEXT (BETA-051) |
+| P1 | Structured review-item context | 5 | 2 | 5 | NEXT (BETA-052) |
 | P2 | Review clusters and informational grouping | 4 | 3 | 4 | Approved successor backlog (BETA-053) |
 | P1 | Evidence sidecars and candidate suggestions | 5 | 4 | 4 | Approved successor backlog (BETA-054) |
 | P2 | Review-session workflow polish | 4 | 2 | 5 | Approved successor backlog (BETA-055) |
 | P1 | Human alias-resolution workflow | 5 | 4 | 3 | Approved successor backlog (BETA-056) |
 | P2 | Candidate URL overlap signals | 3 | 3 | 4 | Approved successor backlog (BETA-057) |
-| P1 | Unified durable run ledger | 5 | 4 | 4 | Approved successor backlog (BETA-058) |
+| P1 | Unified durable run ledger | 5 | 4 | 4 | NEXT (BETA-058) |
 | P1 | Coverage completion action board | 5 | 4 | 4 | Approved successor backlog (BETA-059) |
 | P2 | Raw-archive inventory and integrity trends | 4 | 3 | 4 | Approved successor backlog (BETA-060) |
 | P1 | Candidate-promotion campaign workspace | 5 | 4 | 4 | Approved successor backlog (BETA-061) |
@@ -3548,6 +3656,11 @@ trust / bind address), which is unchanged and out of scope here.
 
 ## Deferred Ideas
 
+- **Topbar overflow at ≤375px** (found by BETA-049's live pass, pre-existing
+  and portal-wide): the find-council input and the mobile menu toggle
+  overflow the viewport by ~93px, identically on `#/`, `#/documents` and
+  every other route. BETA-018 already worked the mobile topbar and this is a
+  separate layout fix — its own item, not folded into a guardrails pass.
 - Building out a genuine beta staging deployment (Ansible role or Railway
   environment) — deferred until the project owner confirms they want one;
   see Architecture Decisions.

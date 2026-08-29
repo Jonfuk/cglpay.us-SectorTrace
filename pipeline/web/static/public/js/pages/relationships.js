@@ -279,6 +279,9 @@ function timelineExpander(pair) {
     }
     body.replaceChildren(
       pinnedCaveat(data.caveat, 'Read before citing this timeline'),
+      data.truncated
+        ? el('p', { class: 'small muted', text: 'Showing the first 500 notices for this pair — see the contracts page, filtered to the provider, for the rest.' })
+        : null,
       el('ol', { class: 'rel-events' },
         ...(data.timeline || []).map((event) => renderEvent(event))));
   });

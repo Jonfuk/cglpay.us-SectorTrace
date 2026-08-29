@@ -3151,6 +3151,10 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
     # Every AWARDED_TO edge between this exact pair, with the notice each was
     # written from. LEFT JOIN so an edge whose notice is no longer in
     # `contracts` still appears (dates come from the edge in that case).
+    # Bounded (BETA-049): a drawer showing one relationship's history is not a
+    # place to stream a five-figure result set. `truncated` says when the cap
+    # bit; the full set is the contracts page, filtered to the pair.
+    TIMELINE_CAP = 500
     timeline = _rows(conn, """
         SELECT r.relationship_id, r.valid_from, r.valid_to, r.confidence,
                ev.source_url AS evidence_source_url,
@@ -3170,7 +3174,11 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
           AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
         ORDER BY COALESCE(r.valid_from, c.date_published) DESC NULLS LAST,
                  r.relationship_id
-        """, {"subj": edge["subject_entity_id"], "obj": edge["object_entity_id"]})
+        LIMIT :cap
+        """, {"subj": edge["subject_entity_id"], "obj": edge["object_entity_id"],
+              "cap": TIMELINE_CAP + 1})
+    truncated = len(timeline) > TIMELINE_CAP
+    timeline = timeline[:TIMELINE_CAP]
 
     events = []
     for row in timeline:
@@ -3212,6 +3220,7 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
         },
         "timeline": events,
         "edge_count": len(events),
+        "truncated": truncated,
         "caveat": CAVEATS["commissioning_relationship_timeline"],
     }
 
