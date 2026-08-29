@@ -180,6 +180,28 @@ docs = [
     "mkdocs-git-revision-date-localized-plugin>=1.2",
 ]
 
+# BETA-107: a natural-language operator layer for the *local analysis host*
+# only. It is an extra, not a dependency, and everything about it is off by
+# default: `Settings.assistant_enabled` is False, `pipeline/assistant/` is
+# importable with none of this installed, and the Railway image does not
+# install `[assistant]` (Procfile / railway.toml pin the base install). The
+# offline test suite never touches a model, an Ollama socket, or a Needle
+# endpoint.
+#
+# Two adapters, both OpenAI-chat-compatible over HTTP so neither needs a
+# native runtime in-process:
+#   * Needle 2 — a bounded retrieval router, reached at a local URL;
+#   * `LiquidAI/LFM2.5-1.2B-Instruct` (Q4_K_M) served by a local Ollama at
+#     its `/v1` endpoint, for 32K-context synthesis over what the warehouse
+#     already holds.
+# `openai` is the only pin — the client library for both `/v1` endpoints.
+# The model weights and the Ollama runtime are installed out of band on the
+# analysis host, never by pip; `pipeline/assistant/runtime.py` reports what
+# is present without connecting.
+assistant = [
+    "openai>=1.40,<2",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script

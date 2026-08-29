@@ -5,6 +5,11 @@ WORKDIR /app
 # Keep the dependency layer cacheable. Railway supplies DATABASE_URL at run
 # time; PostgreSQL is therefore a deployment dependency even though SQLite is
 # still the default for a local checkout.
+#
+# The extra list is deliberate and closed: `nlp`, `docs`, `ocr`, `sheets`
+# and `assistant` (BETA-107) are NOT installed here. `assistant` is the
+# local-analysis-host operator layer — it pulls `openai` and expects an
+# Ollama runtime and model weights that this image neither has nor should.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra postgres --extra storage --extra graph
 

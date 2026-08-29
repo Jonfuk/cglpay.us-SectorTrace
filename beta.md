@@ -297,24 +297,9 @@ DONE
 
 ### IN_PROGRESS
 
-- [IN_PROGRESS] BETA-107 | Optional Needle 2 and LFM assistant runtimes
-  - priority: P1
-  - impact: 5
-  - effort: 4
-  - confidence: 4
-  - risk: 3
-  - area: nlp/assistant/runtime
-  - depends_on: BETA-034, BETA-046
-  - objective: Add an `assistant` optional dependency/runtime boundary with a
-    pinned Needle 2 adapter and an OpenAI-compatible local Ollama adapter for
-    pinned `LiquidAI/LFM2.5-1.2B-Instruct` Q4_K_M; both disabled by default,
-    excluded from Railway and loaded lazily on the local analysis host.
-  - next_action: Define the `assistant` extra and a runtime-boundary module
-    that stays importable with nothing installed; a checkout without the
-    extra / model / Ollama must pass the offline suite unchanged.
-
-_(The first and second refinement programmes (BETA-068–106) are complete.
-BETA-107 is the local analyst-assistant programme.)_
+_(Empty. The first and second front-end refinement programmes
+(BETA-068–106) and the local analyst-assistant programme (BETA-107) are all
+complete — see DONE. Nothing is queued.)_
 
 ### BLOCKED
 
@@ -549,6 +534,60 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-107 | Optional Needle 2 and LFM assistant runtimes
+  - completed: 2026-08-29
+  - priority: P1
+  - impact: 5
+  - effort: 4
+  - confidence: 4
+  - risk: 3
+  - area: nlp/assistant/runtime
+  - depends_on: BETA-034, BETA-046
+  - objective: Add an `assistant` optional dependency/runtime boundary with a
+    pinned Needle 2 adapter and an OpenAI-compatible local Ollama adapter for
+    pinned `LiquidAI/LFM2.5-1.2B-Instruct` Q4_K_M; both disabled by default,
+    excluded from Railway and loaded lazily on the local analysis host.
+  - result: New `[project.optional-dependencies] assistant = ["openai>=1.40,<2"]`
+    in `pyproject.toml` (locked; `uv.lock` updated) — the only pin, the
+    client for both `/v1` endpoints. New `pipeline/assistant/` package that
+    **imports with none of it installed**: `runtime.py` holds the pinned
+    `LFM_MODEL` / `LFM_QUANT` constants, `AssistantUnavailable` (the one
+    exception the package raises — never a bare `ImportError` or socket
+    error), `openai_client_installed()` (via `find_spec`, so the check never
+    imports it), `is_enabled()`, `require_enabled()` and
+    `runtime_status(settings)` which reports enabled / installed / endpoints
+    / model **without contacting anything**. `adapters.py` has
+    `_OpenAICompatAdapter` (chat-completions over an OpenAI-compatible base
+    URL; the `openai` import and the client build are lazy, inside
+    `generate()`), `LFMOllamaAdapter` (local Ollama serving the LFM at
+    `assistant_ollama_url`), `NeedleAdapter` (Needle 2 at
+    `assistant_needle_url`), and `get_adapter(name, settings)` which
+    `require_enabled()`s first. A refused connection or an un-pulled model
+    surfaces as `AssistantUnavailable`, not a crash. New `Settings` fields:
+    `assistant_enabled = False`, `assistant_ollama_url`,
+    `assistant_needle_url`. The `Dockerfile` comment now states the extra
+    list is closed and `assistant` is deliberately not installed there; a
+    test pins `--extra assistant` out of the image. New read-only admin
+    route `/api/admin/assistant` returning `runtime_status`.
+  - api/ui: additive `/api/admin/assistant` (GET, no side effects). No UI
+    panel — this is a runtime boundary, not an operator feature; the status
+    endpoint is the observable surface.
+  - validation: New `tests/test_assistant_boundary.py` (8, 1 skipped without
+    the extra — the package imports with nothing installed; `runtime_status`
+    is off by default, names the pinned model + quant, and its note says no
+    endpoint was contacted; `get_adapter` raises `AssistantUnavailable` while
+    the layer is disabled and, when enabled without the extra, still raises
+    `AssistantUnavailable` not `ImportError`; a dead endpoint surfaces as
+    `AssistantUnavailable` (skipped unless `openai` is present); an unknown
+    adapter name is rejected; the extra is declared with `openai` and kept
+    out of the Docker image; the admin route reports the status).
+    `test_config` / `test_docs_coverage` / `test_web_admin` /
+    `test_portal_isolation` green; `ruff` clean; the offline suite is
+    unchanged with `openai` absent (as it is in CI). Browser/curl-verified:
+    `/api/admin/assistant` returns `{enabled:false, ready:false, model:{id:
+    "LiquidAI/LFM2.5-1.2B-Instruct", quant:"Q4_K_M"}, adapters:{lfm-ollama,
+    needle-2}}` with the "no endpoint was contacted" note.
 
 - [DONE] BETA-106 | Quality-control sampling workspace
   - completed: 2026-08-29
@@ -5601,7 +5640,7 @@ operator finding aid only; it does not relax any of those boundaries.
 | P2 | Validation-rule explorer | 4 | 4 | 4 | DONE (BETA-104) |
 | P2 | Review-outcome analytics | 4 | 4 | 4 | DONE (BETA-105) |
 | P1 | Quality-control sampling workspace | 5 | 5 | 3 | DONE (BETA-106) |
-| P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | IN_PROGRESS (BETA-107) |
+| P1 | Optional Needle 2 and LFM assistant runtimes | 5 | 4 | 4 | DONE (BETA-107) |
 | P1 | Assistant provenance and run ledger | 5 | 3 | 5 | APPROVED, not queued (BETA-108) |
 | P1 | Public-safe read-only analyst tool catalogue | 5 | 3 | 5 | APPROVED, not queued (BETA-109) |
 | P1 | Needle routing and confidence gate | 5 | 4 | 4 | APPROVED, not queued (BETA-110) |

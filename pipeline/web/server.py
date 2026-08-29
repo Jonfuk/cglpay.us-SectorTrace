@@ -1421,6 +1421,13 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline.web import validation
             return validation.rules(conn, today=_str(params, "today") or None)
 
+        if path == "/api/admin/assistant":
+            # BETA-107: what the optional local assistant layer is —
+            # enabled, extra installed, endpoints and pinned model. No
+            # endpoint is contacted; safe with none of it installed.
+            from pipeline.assistant import runtime_status
+            return runtime_status(self.settings)
+
         if path == "/api/admin/qc-samples":
             # BETA-106: the recent quality-control sample manifests.
             from pipeline.web import qc_sampling

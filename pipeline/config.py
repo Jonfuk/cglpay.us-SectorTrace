@@ -284,6 +284,20 @@ class Settings(BaseSettings):
     nlp_chunk_batch_size: int = 200
     nlp_embed_batch_size: int = 256
 
+    # BETA-107: the optional natural-language operator layer for the *local
+    # analysis host*. Off by default and never on Railway — the Docker image
+    # installs neither the `[assistant]` extra nor the model, and
+    # `railway-start.sh` runs the base install. `pipeline/assistant/` imports
+    # with none of it present; `runtime_status()` reports what is installed
+    # and configured without connecting. Two OpenAI-chat-compatible HTTP
+    # endpoints: a local Ollama serving `LiquidAI/LFM2.5-1.2B-Instruct`
+    # (Q4_K_M) for 32K-context synthesis, and the Needle 2 bounded retrieval
+    # router. The model id and quant are pinned in
+    # `pipeline/assistant/adapters.py`, not here.
+    assistant_enabled: bool = False
+    assistant_ollama_url: str = "http://127.0.0.1:11434/v1"
+    assistant_needle_url: str = "http://127.0.0.1:8422/v1"
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
     # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
