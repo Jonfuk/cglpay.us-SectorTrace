@@ -345,16 +345,23 @@ assistant_app_enabled: false
 # name the code sends is the name Ollama has, and the run ledger records
 # what actually answered.
 #
-# Default: `LiquidAI/LFM2.5-350M-GGUF` at Q4_K_M, pulled from Hugging Face
-# via Ollama's `hf.co/` syntax (0.4B params, 219 MB). Small on purpose:
-# routing has an 8-second timeout (pipeline/assistant/routing.py) and a
-# CPU-only box cannot meet it with a multi-billion-parameter model. On a
-# fast many-core box or one with a GPU, `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
-# (3B, 1.59 GB) is the better answer quality. The pinned constant in
-# pipeline/assistant/runtime.py is the 1.2B-Instruct; serving a different
-# LFM2.5 size is what assistant_lfm_model below is for. NOT
+# Default: `ollama.com/LiquidAI/lfm2.5-1.2b-instruct` at Q4_K_M (1.17B
+# params, 731 MB) — the model pinned in pipeline/assistant/runtime.py. The
+# 350M-GGUF is fast but too weak to emit the routing JSON (~0.01 precision
+# in the eval); the 2.6B-GGUF answers well but overruns the routing timeout
+# on CPU. The 1.2B is the middle, and the deploy relaxes the timeouts below
+# so it fits. On a GPU or fast many-core box,
+# `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` is the quality choice; on a very
+# small box, `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M`. NOT
 # `ollama.com/library/lfm2`, a 24B model at 14 GB.
-assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M"
+assistant_lfm_ollama_ref: "LiquidAI/lfm2.5-1.2b-instruct:q4_k_m"
+
+# Routing and whole-turn ceilings, seconds. The code defaults (8 / 30)
+# assume a capable host; CPU inference of a 1B+ model does not meet them, so
+# the deploy relaxes them and interactive latency rises to match. Set 0 to
+# fall back to the code defaults.
+assistant_router_timeout: 20
+assistant_overall_timeout: 60
 
 # What the adapters put in the `model` field and the ledger records
 # (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). Default to the

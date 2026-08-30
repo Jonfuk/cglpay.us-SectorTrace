@@ -26,7 +26,7 @@ networks:
     external: true
 
 volumes:
-  # Model weights (the 350M default GGUF is ~220 MB; the 2.6B option ~1.6 GB)
+  # Model weights (the 1.2B default is ~730 MB; 350M ~220 MB, 2.6B ~1.6 GB)
   # plus Ollama's manifests. A named volume, not state_dir/data: not
   # warehouse content, must outlive a sync, safe to delete (the playbook
   # re-pulls).

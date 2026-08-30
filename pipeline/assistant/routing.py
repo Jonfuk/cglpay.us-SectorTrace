@@ -37,7 +37,16 @@ from pipeline.assistant.tools import TOOL_NAMES, ToolError, tool_schemas, valida
 FROZEN_ROUTING_THRESHOLD = 0.60
 
 # A short ceiling for the router leg specifically (BETA-112 asks for one).
+# The default a capable local host is expected to meet; a slower box relaxes
+# it via `Settings.assistant_router_timeout_seconds` (see `router_timeout`).
 ROUTER_TIMEOUT_SECONDS = 8.0
+
+
+def router_timeout(settings: Any) -> float:
+    """The router-leg ceiling: the `assistant_router_timeout_seconds` setting
+    when set to a positive value, else `ROUTER_TIMEOUT_SECONDS`."""
+    v = getattr(settings, "assistant_router_timeout_seconds", 0.0) or 0.0
+    return float(v) if v > 0 else ROUTER_TIMEOUT_SECONDS
 
 _MAX_QUESTION_LEN = 600
 
@@ -119,14 +128,18 @@ def _parse(raw: str) -> dict | None:
 
 def route(question: str, *, settings: Any, adapter: Any = None,
           threshold: float = FROZEN_ROUTING_THRESHOLD,
-          timeout: float | None = ROUTER_TIMEOUT_SECONDS) -> RoutingDecision:
+          timeout: float | None = None) -> RoutingDecision:
     """Route `question` to one tool, or return a clarification.
 
     `adapter` is any object with a `generate(prompt, *, system, timeout)` ->
     str method (a `NeedleAdapter` in production, a fake in tests). When omitted
     a `NeedleAdapter` is built, which itself raises `AssistantUnavailable` if
     the layer is disabled or the extra is missing.
+
+    `timeout` defaults to `router_timeout(settings)` — the setting, or 8 s.
     """
+    if timeout is None:
+        timeout = router_timeout(settings)
     question = (question or "").strip()
     if not question:
         return _clarify("empty", "Ask a question first.")

@@ -310,6 +310,16 @@ class Settings(BaseSettings):
     assistant_lfm_quant: str = ""
     assistant_needle_model: str = ""
 
+    # The routing leg and the whole-turn ceilings, in seconds. 0 means the
+    # code defaults (`ROUTER_TIMEOUT_SECONDS` = 8, `OVERALL_TIMEOUT_SECONDS`
+    # = 30) — the values a capable local host is expected to meet. A slower
+    # box (CPU-only inference of a 1B+ model) legitimately needs them
+    # relaxed; the Ansible deploy sets them, and interactive latency goes up
+    # to match. The frozen confidence threshold is NOT here — that stays a
+    # deliberate edit in `pipeline/assistant/routing.py`.
+    assistant_router_timeout_seconds: float = 0.0
+    assistant_overall_timeout_seconds: float = 0.0
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
     # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is

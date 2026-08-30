@@ -31,6 +31,35 @@ class FakeNeedle:
         return self._reply if isinstance(self._reply, str) else json.dumps(self._reply)
 
 
+def test_router_timeout_defaults_to_8s_and_is_overridable(settings, monkeypatch):
+    from pipeline.assistant.service import _overall_timeout
+
+    assert routing.router_timeout(settings) == routing.ROUTER_TIMEOUT_SECONDS
+    assert _overall_timeout(settings) == 30.0
+
+    monkeypatch.setattr(settings, "assistant_router_timeout_seconds", 20.0,
+                        raising=False)
+    monkeypatch.setattr(settings, "assistant_overall_timeout_seconds", 60.0,
+                        raising=False)
+    assert routing.router_timeout(settings) == 20.0
+    assert _overall_timeout(settings) == 60.0
+
+    # A scripted route still executes with the relaxed budget, and the
+    # adapter is handed the resolved timeout.
+    fake = FakeNeedle({"tool": "inspect_freshness", "arguments": {},
+                        "confidence": 0.9})
+    seen = {}
+    orig = fake.generate
+
+    def _capture(prompt, *, system=None, timeout=None, **kw):
+        seen["timeout"] = timeout
+        return orig(prompt, system=system, timeout=timeout, **kw)
+
+    fake.generate = _capture
+    routing.route("how fresh is contracts?", settings=settings, adapter=fake)
+    assert seen["timeout"] == 20.0
+
+
 def test_a_confident_valid_route_executes(settings):
     fake = FakeNeedle({"tool": "inspect_freshness",
                         "arguments": {"table": "contracts"}, "confidence": 0.9})

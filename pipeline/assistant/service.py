@@ -31,7 +31,14 @@ from pipeline.assistant.runtime import (
 
 log = structlog.get_logger()
 
+# The whole-turn ceiling a capable local host is expected to meet; a slower
+# box relaxes it via `Settings.assistant_overall_timeout_seconds`.
 OVERALL_TIMEOUT_SECONDS = 30.0
+
+
+def _overall_timeout(settings) -> float:
+    v = getattr(settings, "assistant_overall_timeout_seconds", 0.0) or 0.0
+    return float(v) if v > 0 else OVERALL_TIMEOUT_SECONDS
 
 CAVEAT = (
     "Experimental local finding aid. This answer is produced by a small local "
@@ -176,7 +183,7 @@ def ask(conn, settings, question: str, *, source_system: str | None = None,
     timings["tool_ms"] = round((time.perf_counter() - tool_started) * 1000)
 
     # --- overall ceiling before the (slowest) answer leg -----------------
-    remaining = OVERALL_TIMEOUT_SECONDS - (time.perf_counter() - started)
+    remaining = _overall_timeout(settings) - (time.perf_counter() - started)
     if remaining <= 1.0:
         timings["total_ms"] = _elapsed_ms()
         run_id = _record("timeout", decision=decision, envelope=envelope)
