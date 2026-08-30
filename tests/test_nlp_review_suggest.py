@@ -152,6 +152,22 @@ def test_ensemble_writes_only_on_agreement(conn):
     assert "m/a=reject" in split["suggested_reason"] and "m/b=keep" in split["suggested_reason"]
 
 
+def test_a_dead_model_does_not_manufacture_a_split(conn):
+    # one model errors on every call, the other works: the working model's
+    # verdict stands as a single-model suggestion, not an ensemble:split.
+    def _ask_fn(row, *, model, **kw):
+        if model == "m/dead":
+            return "keep", "api error: HTTP 404 unavailable", ""
+        return "reject", "garbled", ""
+
+    rows = [_row(candidate_id="cc-1")]
+    out = review_suggest.suggest(conn, rows, models=["m/dead", "m/live"],
+                                 api_key="k", rate=0, ask=_ask_fn)
+    assert rows[0]["suggested_decision"] == "rejected"
+    assert rows[0]["suggested_by"] == "model:m/live"      # not ensemble:split
+    assert out["split"] == 0 and out["rejected"] == 1
+
+
 def test_ensemble_correct_needs_the_same_predicate(conn):
     same, diff = _row(candidate_id="same"), _row(candidate_id="diff")
     review_suggest.suggest(conn, [same], models=["m/a", "m/b"], api_key="k", rate=0,

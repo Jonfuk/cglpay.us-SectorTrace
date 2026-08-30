@@ -157,22 +157,33 @@ def _ask(row: dict, *, model: str, api_key: str,
     return _parse(content)
 
 
+def _errored(reason: str) -> bool:
+    return reason.startswith(("api error", "unreadable response"))
+
+
 def _consensus(votes: list[tuple[str, str, str, str]], valid: frozenset[str]):
     """votes = [(model, verdict, reason, predicate)]. Returns
-    (verdict, reason, predicate, by) if every model agrees -- same verdict, and
-    for `correct` the same *valid* predicate -- else (None, split_note, '', by).
+    (verdict, reason, predicate, by) if the models that actually answered agree
+    -- same verdict, and for `correct` the same *valid* predicate -- else
+    (None, split_note, '', by). A vote that errored is ignored, not counted as
+    a `keep`, so one dead model does not manufacture a split; if every vote
+    errored the row is left untouched (returns 'keep').
     """
-    verdicts = {v for _, v, _, _ in votes}
-    models = "+".join(f"model:{m}" for m, *_ in votes)
+    good = [(m, v, r, p) for m, v, r, p in votes if not _errored(r)]
+    if not good:
+        return "keep", "all models errored", "", ""
+    models = "+".join(f"model:{m}" for m, *_ in good)
+
+    verdicts = {v for _, v, _, _ in good}
     if len(verdicts) != 1:
-        note = ", ".join(f"{m}={v}" for m, v, _, _ in votes)
+        note = ", ".join(f"{m}={v}" for m, v, _, _ in good)
         return None, f"split: {note}", "", "ensemble:split"
     verdict = verdicts.pop()
-    reason = next((r for _, v, r, _ in votes if r), "")
+    reason = next((r for _, _, r, _ in good if r), "")
     if verdict == "correct":
-        predicates = {p for _, _, _, p in votes}
+        predicates = {p for _, _, _, p in good}
         if len(predicates) != 1 or predicates <= {""} or not (predicates <= valid):
-            note = ", ".join(f"{m}={p or '?'}" for m, _, _, p in votes)
+            note = ", ".join(f"{m}={p or '?'}" for m, _, _, p in good)
             return None, f"correct, predicate split: {note}", "", "ensemble:split"
         return verdict, reason, predicates.pop(), models
     return verdict, reason, "", models
