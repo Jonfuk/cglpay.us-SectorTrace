@@ -489,7 +489,26 @@ complete — see DONE. Nothing is queued.)_
     **distinct local authorities** (`MIN_AUTHORITIES = 3`), not source
     systems, since the whole NLP corpus is two source systems.
     `MIN_DOUBLE_REVIEWED = 10` at 0.8 agreement is unchanged and still needs
-    a second named reviewer — a process gap, not a code one. Only then is the SetFit
+    a second named reviewer — a process gap, not a code one.
+    **Then the review pass itself found the real blocker (roadmap D-08,
+    2026-08-30).** Model-assisted triage — `nlp suggest-decisions` with an
+    ensemble of `deepseek/deepseek-chat` + `openai/gpt-4o-mini`, both models
+    required to agree — over the whole template-deduplicated queue for each
+    of the six gate categories returned agreed *positives* of: vacancy 0,
+    waiting_time 0, agency_reliance 3, cost_pressure 3, tupe_transfer 6. The
+    floor is 65. The per-predicate `AFFIRMED` counts (405 / 418 / 773) are
+    almost all non-claims: `relations.py`'s `CONCEPT_PREDICATE` fires on a
+    concept phrase co-occurring with a subject anaphor, not on an affirming
+    predication, so questions, scrutiny-proposal titles, "we are reducing
+    agency use" statements and budget lines all came through AFFIRMED. **No
+    review pass — human or model-assisted — can reach 65 positives out of
+    pools that hold 0–6.** 034G is blocked on 034D/F precision now, not on
+    reviewer labour; quorum tuning cannot reach around 0-of-6. The fix is a
+    relation-pattern pass (an affirming verb in a non-negated, non-hypothetical,
+    non-interrogative clause with the subject in it), run on the **source**
+    deployment, re-synced here, and re-checked with the same ensemble triage.
+    Only after that, and only if the rebuilt candidates yield a trainable
+    positive count, is the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
     column; a min-precision gate before any prediction is written) worth
@@ -503,9 +522,10 @@ complete — see DONE. Nothing is queued.)_
     from the live warehouse; decide on medSpaCy; admin-UI surfaces for
     search / topics / mentions / the claim-candidate worklist.
   - validation_remaining: The later PostgreSQL/search series recorded the full
-    offline suite green up to 2615 passed. Still outstanding: build and review
-    the live representative corpus until `gate-034g` succeeds; browser-verify
-    admin semantic search; expand the evaluation fixtures from live data; and
+    offline suite green up to 2615 passed. Still outstanding: the 034D/F
+    relation-precision pass (D-08) — until then `gate-034g` cannot succeed and
+    building the review corpus for it is premature; browser-verify admin
+    semantic search; expand the evaluation fixtures from live data; and
     exercise the extension paths against a disposable PostgreSQL instance.
 
 ### NEXT
