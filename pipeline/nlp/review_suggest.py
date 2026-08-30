@@ -230,8 +230,7 @@ def suggest(conn, rows: list[dict], *, models: list[str], api_key: str | None = 
             summary["skipped_decided"] += 1
             continue
         if (str(row.get("suggested_decision") or "").strip()
-                or str(row.get("suggested_by") or "").strip()
-                or row.get("screen_reason")):
+                or str(row.get("suggested_by") or "").strip()):
             summary["skipped_suggested"] += 1
             continue
 

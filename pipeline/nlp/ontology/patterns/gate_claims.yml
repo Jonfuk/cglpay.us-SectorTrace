@@ -1,0 +1,106 @@
+# Affirming-predication patterns for the 034G gate predicates (BETA-047, D-08).
+#
+# Why this file exists: `relations.CONCEPT_PREDICATE` used to map five gate
+# concepts to their predicate on any alias match. The aliases for those
+# concepts are labelling aliases -- "agency staff", "waiting list", "rising
+# costs", "vacancy" -- so a sentence *about* the topic (a question, a
+# scrutiny-proposal title, "we are reducing our agency use", a budget line)
+# came through as an AFFIRMED claim. Ensemble model triage over the whole
+# queue found 0-6 real positives per category against a floor of 65.
+#
+# 034F now fires those five only on a construction that ASSERTS the thing --
+# a reliance / pressure / transfer verb with its subject in the same clause.
+# 034E assertion status still handles negation, hypothetical and historical
+# framings of a match; these patterns keep the non-assertive framings from
+# ever matching. Conservative on purpose: a pattern set that over-fires
+# reburies the queue, and the gate favours precision over recall.
+#
+# The concepts keep their broad aliases -- 034C labelling still wants them.
+
+schema_version: "1"
+
+patterns:
+  # --- workforce.relies_on_agency ---------------------------------------
+  - id: gate.agency.reliance_on
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\b(rel(y|ies|ied|iance|iant)|depend(s|ed|ent|ence|ency)?)\b[^.?!]{0,25}\b(on|upon)\b[^.?!]{0,25}\b(agency|locum)\b'
+    notes: "growing reliance on agency staff; the service is reliant on locums"
+  - id: gate.agency.staff_were_relied_on
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\b(agency|locum)\b[^.?!]{0,20}\b(staff|workers?|cover)\b[^.?!]{0,25}\b(are|were|have been|being|remain\w*|continu\w+)\b[^.?!]{0,20}\b(relied|depended|used|deployed|brought in|needed)\b'
+    notes: "agency staff were relied upon to fill rota gaps"
+  - id: gate.agency.fill_gaps_with
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\bfill\w*\b[^.?!]{0,25}\b(gap|gaps|vacanc\w+|shift\w*|rota\w*|post\w*)\b[^.?!]{0,20}\b(with|using|through|via)\b[^.?!]{0,15}\b(agency|locum)\b'
+    notes: "filling rota gaps with agency workers"
+
+  # --- workforce.has_vacancy_pressure ---------------------------------
+  - id: gate.vacancy.high_level
+    kind: predicate
+    predicate: workforce.has_vacancy_pressure
+    regex: '(\b(high|significant|rising|increasing|increased|large|persistent|considerable|substantial)\b|\d[\d.]*\s?%)[^.?!]{0,25}\b(vacanc\w+|vacancy rate|unfilled posts?|staffing gaps?)\b'
+    notes: "a high vacancy rate; significant vacancies; a 22% vacancy rate"
+  - id: gate.vacancy.posts_unfilled
+    kind: predicate
+    predicate: workforce.has_vacancy_pressure
+    regex: '\b(vacanc\w+|posts?|roles?|positions?)\b[^.?!]{0,30}\b(remain|are|were|being|stay\w*)\b[^.?!]{0,15}\b(unfilled|vacant|hard to fill|difficult to fill|open)\b'
+    notes: "posts remain unfilled; vacancies were hard to fill"
+
+  # --- workforce.undergoes_tupe -------------------------------------
+  - id: gate.tupe.staff_transfer_under
+    kind: predicate
+    predicate: workforce.undergoes_tupe
+    regex: '\b(staff|employees|workforce|the team|these posts?)\b[^.?!]{0,35}\b(will|are|were|being|to be|shall)\b[^.?!]{0,20}\b(transferr?\w*|tuped?)\b[^.?!]{0,25}\b(under|via|through|by)\b[^.?!]{0,20}\b(tupe|transfer of undertakings)\b'
+    notes: "staff will transfer under TUPE"
+  - id: gate.tupe.applies_to_staff
+    kind: predicate
+    predicate: workforce.undergoes_tupe
+    regex: '\b(tupe|transfer of undertakings)\b[^.?!]{0,25}\b(will apply|applies|applied|will|would)\b[^.?!]{0,25}\b(staff|employees|the team|these|to)\b'
+    notes: "TUPE will apply to the affected staff"
+  - id: gate.tupe.tuped_across
+    kind: predicate
+    predicate: workforce.undergoes_tupe
+    regex: '\b(staff|employees|the team)\b[^.?!]{0,20}\b(tuped? (across|over)|transferr?\w* (across|over|to the (new|incoming) (provider|contractor)))\b'
+    notes: "staff tuped across to the new provider"
+
+  # --- finance.has_cost_pressure -----------------------------------
+  - id: gate.cost.facing_pressure
+    kind: predicate
+    predicate: finance.has_cost_pressure
+    regex: '\b(facing|faces|faced|experienc\w+|under|subject to|absorb\w+)\b[^.?!]{0,30}\b(cost|financial|inflationary|budget(ary)?|pay[- ]award)\b[^.?!]{0,10}\bpressure'
+    notes: "the service is facing significant cost pressures"
+  - id: gate.cost.pressure_of_amount
+    kind: predicate
+    predicate: finance.has_cost_pressure
+    regex: '\b(cost|financial|inflationary|budget(ary)?)\b[^.?!]{0,10}\bpressure\w*\b[^.?!]{0,25}\b(of|amounting to|estimated at|totall\w+|worth)\b[^.?!]{0,15}(£\s?\d|\d[\d.]*\s?%)'
+    notes: "a cost pressure of £1.2m"
+  - id: gate.cost.unfunded_pay_award
+    kind: predicate
+    predicate: finance.has_cost_pressure
+    regex: '\b(unfunded|un-funded|un funded)\b[^.?!]{0,15}\bpay award\b'
+    notes: "an unfunded pay award"
+
+  # --- service.reports_waiting_time ------------------------------
+  - id: gate.wait.time_is_n_weeks
+    kind: predicate
+    predicate: service.reports_waiting_time
+    regex: '\b(wait\w*|waiting (time|list))\b[^.?!]{0,25}\b(of|is|was|are|were|stands at|reached|averag\w+|now)\b[^.?!]{0,15}\b\d[\d.,]*\s?(week|day|month|working day)s?\b'
+    notes: "the waiting time is now 6 weeks"
+  - id: gate.wait.n_week_wait
+    kind: predicate
+    predicate: service.reports_waiting_time
+    regex: '\b\d[\d.,]*[- ]?(week|day|month)s?\b[^.?!]{0,10}\b(wait|waiting (time|list|period))\b'
+    notes: "a 6-week wait for treatment"
+  - id: gate.wait.people_waiting_n
+    kind: predicate
+    predicate: service.reports_waiting_time
+    regex: '\b(clients?|patients?|people|service users?|individuals?|referrals?)\b[^.?!]{0,20}\b(wait\w*|are waiting|were waiting|on the waiting list)\b[^.?!]{0,25}\b\d[\d.,]*\s?(week|day|month)s?\b'
+    notes: "clients were waiting up to 12 weeks"
+  - id: gate.wait.list_of_n
+    kind: predicate
+    predicate: service.reports_waiting_time
+    regex: '\bwaiting list of\b[^.?!]{0,10}\b\d[\d,]{1,}\b'
+    notes: "a waiting list of 340"

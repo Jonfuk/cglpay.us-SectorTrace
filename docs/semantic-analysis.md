@@ -282,9 +282,15 @@ uv run pipeline nlp eval-context
 (subject, predicate, object) triples from 034D spans and 034E assertion
 status into `document_claim_candidates` (migration `0068`, high-volume by
 design). **Two triggers, and only these:** a controlled concept→predicate
-mapping (`CONCEPT_PREDICATE`, fired only when that concept's phrase is
-actually in the sentence) or a predicate pattern from
-`ontology/patterns/*.yml`. Two spans sharing a sentence is not a claim.
+mapping (`CONCEPT_PREDICATE`, fired when that concept's phrase is in the
+sentence) or a predicate pattern from `ontology/patterns/*.yml`. Two spans
+sharing a sentence is not a claim. **`CONCEPT_PREDICATE` is only for concepts
+whose aliases are themselves assertive** — after roadmap D-08 the five gate
+concepts whose aliases are labelling phrases ("agency staff", "vacancy",
+"waiting list") were removed from it and now fire only on affirming-
+construction patterns in `ontology/patterns/gate_claims.yml`; a sentence
+merely *about* a topic (a question, a proposal title, "we are reducing our
+agency use") no longer becomes an AFFIRMED candidate.
 
 The subject must be a span of the kind the predicate's `subject` allows
 (`workforce.*` claims take the **organisation**, not the ROLE span), with

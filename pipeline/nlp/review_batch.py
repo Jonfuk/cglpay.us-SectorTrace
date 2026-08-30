@@ -80,7 +80,11 @@ GROUP_BY = ("none", "exact", "template")
 SAMPLE_BAND_SCORE = 0.80   # a candidate at/above this is in its confidence band
 SAMPLE_TAIL_RATE = 10      # 1-in-N of everything outside the two bands
 SCREEN_MIN_SPAN = 25       # chars; shorter is a broken extraction
-SCREEN_MAX_SPAN = 800      # chars; a whole slide dumped as one "sentence"
+SCREEN_MAX_SPAN = 1200     # chars; longer is a section, not a sentence
+# Only these pre-fill `suggested_decision='rejected'`. `span_too_long` is
+# noted but left for review -- a long run-on can still carry a real claim
+# (D-08: at 800 it flagged 54-68% of some categories, most of them fine).
+_SCREEN_AUTO_REJECT = frozenset({"span_too_short", "object_is_bare_number"})
 
 _WS = re.compile(r"\s+")
 _NUMBERISH = re.compile(
@@ -264,9 +268,9 @@ def sheet_rows(conn, *, predicate: str, status: str = "queued",
             "evidence_span": (r["evidence_span"] or "").strip(),
             **{f: "" for f in SUGGESTION_FIELDS},
             **{f: "" for f in DECISION_FIELDS},
-            "suggested_decision": "rejected" if screen else "",
-            "suggested_reason": screen or "",
-            "suggested_by": f"screen:{screen}" if screen else "",
+            "suggested_decision": "rejected" if screen in _SCREEN_AUTO_REJECT else "",
+            "suggested_reason": screen if screen in _SCREEN_AUTO_REJECT else "",
+            "suggested_by": f"screen:{screen}" if screen in _SCREEN_AUTO_REJECT else "",
         }
         row["stratum"] = _stratum(row)
         rows.append(row)

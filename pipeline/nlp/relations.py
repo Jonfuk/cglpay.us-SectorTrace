@@ -30,26 +30,33 @@ from pipeline.nlp.context import CueTagger, split_sentences
 STAGE = "relations"
 EXTRACTOR = "nlp-rule"
 
-# The ontology's controlled situation-concept -> predicate map. Editing this is
-# a deliberate widening of what the layer will propose, the same weight as
-# adding a predicate to relations.yml.
+# The ontology's controlled situation-concept -> predicate map. A concept here
+# yields a candidate on ANY alias match in a sentence -- appropriate only where
+# the concept's aliases are themselves assertive ("recruitment crisis", "low
+# morale", "high caseloads").
+#
+# Five gate concepts were removed after roadmap D-08: their aliases are
+# labelling aliases ("agency staff", "vacancy", "waiting list", "rising
+# costs", "staff transfer"), so a sentence merely *about* the topic -- a
+# question, a proposal title, "we are reducing our agency use", a budget line
+# -- came through as an AFFIRMED claim. Ensemble model triage over the whole
+# queue found 0-6 real positives per category against a floor of 65. Those
+# five now fire only on an affirming-construction pattern in
+# `ontology/patterns/gate_claims.yml`. finance.funding_reduction stays here:
+# its aliases ("budget cut", "grant reduction") are assertive, and it was not
+# among the measured-broken set.
 CONCEPT_PREDICATE: dict[str, str] = {
     "workforce.recruitment_difficulty": "workforce.has_recruitment_pressure",
     "workforce.retention_difficulty": "workforce.has_retention_pressure",
-    "workforce.vacancy": "workforce.has_vacancy_pressure",
     "workforce.turnover": "workforce.has_turnover",
     "workforce.caseload": "workforce.has_high_caseload",
-    "workforce.agency_reliance": "workforce.relies_on_agency",
     "workforce.pay_concern": "workforce.has_pay_concern",
     "workforce.morale": "workforce.has_low_morale",
     "workforce.sickness_absence": "workforce.has_sickness_absence",
-    "workforce.tupe": "workforce.undergoes_tupe",
     "finance.funding_reduction": "finance.has_funding_reduction",
-    "finance.cost_pressure": "finance.has_cost_pressure",
     "finance.savings_target": "finance.has_savings_target",
     "commissioning.recommissioning": "commissioning.is_recommissioning",
     "commissioning.contract_extension": "commissioning.extended_contract",
-    "outcome.waiting_time": "service.reports_waiting_time",
     "outcome.unmet_need": "outcome.has_unmet_need",
     "outcome.drug_related_death": "outcome.reports_drug_related_deaths",
 }

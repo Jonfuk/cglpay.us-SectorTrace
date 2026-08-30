@@ -147,7 +147,7 @@ def test_collapsed_sheet_refuses_csv(conn, settings, tmp_path):
 def test_screen_reason_flags_broken_extractions():
     sr = review_batch.screen_reason
     assert sr("too short", None, None) == "span_too_short"
-    assert sr("x" * 900, None, None) == "span_too_long"
+    assert sr("x" * 1300, None, None) == "span_too_long"
     assert sr("a" * 60, "15", None) == "object_is_bare_number"
     assert sr("a" * 60, "15", "concept:money") is None      # resolved -> fine
     assert sr("A clean sentence of a reasonable length about staffing.", None, None) is None
@@ -158,31 +158,31 @@ def test_screen_reason_flags_broken_extractions():
 # up front and enough trailing clause to run past SCREEN_MAX_SPAN.
 _LONG = ("Change Grow Live is struggling to recruit recovery workers and "
          + "also faces sustained pressure across teams and rotas and cover "
-           "arrangements and vacancies carried month after month " * 10)
+           "arrangements and vacancies carried month after month " * 15)
 
 
-def test_screened_row_is_exported_with_a_rejected_suggestion(conn, settings):
+def test_span_too_long_is_flagged_but_not_auto_rejected(conn, settings):
     _seed(conn, settings, [_LONG])
     (row,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
-    assert row["screen_reason"] == "span_too_long"
-    assert row["suggested_decision"] == "rejected"
-    assert row["suggested_by"] == "screen:span_too_long"
-    assert row["decision"] == ""                            # still not a decision
+    assert row["screen_reason"] == "span_too_long"          # visible to the reviewer
+    assert row["suggested_decision"] == ""                  # but not a reject suggestion
+    assert row["suggested_by"] == ""
 
 
 def test_accept_suggested_rejected_lifts_only_blank_rows_and_notes_the_source(conn, settings):
-    _seed(conn, settings, [_LONG, _SENTENCE])
-    rows = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
-    screened = next(r for r in rows if r["screen_reason"])
-    clean = next(r for r in rows if not r["screen_reason"])
-    clean["decision"] = "approved"                          # a real call stands
-    out = review_batch.apply_sheet(conn, [screened, clean], decided_by="Jon Firth",
+    _seed(conn, settings, [_SENTENCE, _SENTENCE])
+    a, b = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    a["suggested_decision"] = "rejected"                    # as a screen / model would
+    a["suggested_reason"] = "object_is_bare_number"
+    a["suggested_by"] = "screen:object_is_bare_number"
+    b["decision"] = "approved"                              # a real call stands
+    out = review_batch.apply_sheet(conn, [a, b], decided_by="Jon Firth",
                                    accept_suggested="rejected")
     assert out["applied"] == 2 and out["from_suggestion"] == 1
     row = conn.execute(
         "SELECT decision, reason_code, note FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ?", (screened["candidate_id"],)).fetchone()
-    assert tuple(row) == ("rejected", "span_too_long", "via screen:span_too_long")
+        "WHERE claim_candidate_id = ?", (a["candidate_id"],)).fetchone()
+    assert tuple(row) == ("rejected", "object_is_bare_number", "via screen:object_is_bare_number")
 
 
 def test_accept_suggested_rejects_anything_other_than_rejected(conn, settings):

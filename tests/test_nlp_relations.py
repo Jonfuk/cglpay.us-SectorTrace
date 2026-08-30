@@ -87,6 +87,41 @@ def test_anaphor_stands_in_for_a_missing_subject_span():
                for t in assemble(onto, s, []))
 
 
+def _preds(s):
+    onto = ontology_mod.default()
+    return {t.predicate for t in assemble(onto, s, [])}
+
+
+def test_gate_predicates_fire_only_on_an_affirming_construction():
+    # D-08: the five removed from CONCEPT_PREDICATE now need a real predication.
+    # Sentences carry an anaphor ("the service" / "staff") so assemble() finds
+    # a subject.
+    assert "workforce.relies_on_agency" in _preds(
+        "The service is heavily reliant on locum staff to cover shifts.")
+    assert "workforce.relies_on_agency" in _preds(
+        "Agency staff were relied upon by the team to fill rota gaps overnight.")
+    assert "workforce.has_vacancy_pressure" in _preds(
+        "The service has a high vacancy rate across the establishment.")
+    assert "workforce.undergoes_tupe" in _preds(
+        "Staff will transfer under TUPE to the new provider.")
+    assert "finance.has_cost_pressure" in _preds(
+        "The service is facing significant cost pressures this year.")
+    assert "service.reports_waiting_time" in _preds(
+        "The service reports that the waiting time is now 8 weeks for treatment.")
+
+
+def test_gate_predicates_do_not_fire_on_topic_mentions():
+    for s in (
+        "There was no plan in place to reduce the number of agency staff.",
+        "Progress was being made to reduce the level of agency staff.",
+        "The committee noted a statement from UNISON regarding agency staff.",
+        "Scrutiny proposal: a review of the council's spend on temporary and agency staff.",
+        "How would agency staff performance and value for money be evaluated?",
+        "The data included a three-year profile around agency staff and vacancy rates.",
+    ):
+        assert _preds(s) == set() or "workforce.relies_on_agency" not in _preds(s), s
+
+
 # --- run(): end to end -----------------------------------------------
 
 _ELEMENTS = [
