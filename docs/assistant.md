@@ -102,21 +102,21 @@ and pulling it too.
 
 **The reference and the timeouts.** `assistant_lfm_ollama_ref` must name a
 model Ollama can pull. The deploy default is
-`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` (731 MB) — the model the code pins.
-Observed on the eval suite on a CPU-only VPS:
+`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` (1.59 GB). Observed on the eval
+suite on a CPU-only VPS (Ollama 0.33.2, timeouts relaxed to 30 / 90):
 
-| model | routing | notes |
-|---|---|---|
-| `LFM2.5-350M-GGUF` | ~0.01 precision | fast (~1.3 s) but cannot emit the routing JSON |
-| `lfm2.5-1.2b-instruct` | usable with relaxed timeouts | the deploy default |
-| `LFM2.5-2.6B-GGUF` | `APITimeoutError` | best answers, overruns the 8 s router leg on CPU |
+| model | routing precision | wrong executions | verdict |
+|---|---|---|---|
+| `LFM2.5-350M-GGUF` | 0.014 | 1 | cannot emit the routing JSON at all |
+| `lfm2.5-1.2b-instruct` | 0.057 | 13 (incl. injection/forbidden) | emits JSON, parrots `confidence: 0.95`, routes adversarial prompts |
+| `LFM2.5-2.6B-GGUF` | *the smallest with a real shot at the bars* | | needs the relaxed timeouts to fit CPU |
 
 `ROUTER_TIMEOUT_SECONDS` (8) and `OVERALL_TIMEOUT_SECONDS` (30) are the
 values a capable host meets. `assistant_router_timeout_seconds` /
 `assistant_overall_timeout_seconds` (0 → the defaults) relax them; the
-Ansible roles set 20 / 60 because CPU inference of a 1B model does not
-route in 8 s, and interactive latency rises to match. On a GPU or fast
-many-core box, keep the defaults and use the 2.6B. NOT
+Ansible roles set 30 / 90 because CPU inference of the 2.6B does not route
+in 8 s, and interactive latency rises to ~10–20 s per question. On a GPU
+or fast many-core box, keep the code defaults. NOT
 `ollama.com/library/lfm2`, which is a 24B model at 14 GB. A missing
 reference fails the provisioning task with `ollama pull`'s own error in the
 message.

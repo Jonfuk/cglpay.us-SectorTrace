@@ -470,13 +470,13 @@ docker compose exec app python -m pipeline graph rebuild --clear
 `assistant_runtime_enabled: false` by default. Set it true and the deploy
 adds one more container from `docker-compose.assistant.yml` — an Ollama
 that `ollama pull`s `assistant_lfm_ollama_ref`
-(`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` by default, 731 MB — the model the
-code pins; the 350M can't emit the routing JSON, the 2.6B overruns the
-router timeout on CPU). The roles also relax the routing/turn timeouts
-(`assistant_router_timeout` / `assistant_overall_timeout`, 20/60 s) since
-CPU inference of a 1B model does not route in the code's 8 s. On a GPU or
-fast many-core host, keep the code defaults and use
-`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`. Both
+(`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` by default, 1.59 GB — the eval
+ruled out the smaller LFM2.5 sizes: 350M can't emit the routing JSON, 1.2B
+routes adversarial prompts to tools). The roles also relax the
+routing/turn timeouts (`assistant_router_timeout` / `_overall_timeout`,
+30/90 s) since CPU inference of the 2.6B does not route in the code's 8 s;
+interactive latency rises to ~10–20 s per question. On a GPU or fast
+many-core host, keep the code defaults. Both
 `ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` in `.env` point at
 `http://ollama:11434`, `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` are
 set to that same pulled reference (no alias — the code sends the name

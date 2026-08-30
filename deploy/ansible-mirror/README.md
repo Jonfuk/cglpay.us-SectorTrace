@@ -532,11 +532,11 @@ Set the list back to empty and re-run to tear all of it down again.
 
 `assistant_runtime_enabled: false` by default, the same switch and the same
 `docker-compose.assistant.yml` as the self-host build — an Ollama that
-pulls `assistant_lfm_ollama_ref` (`LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` by
-default — the model the code pins; 350M can't emit the routing JSON, 2.6B
-overruns the router timeout on CPU) and relaxes the routing/turn timeouts
-to 20/60 s (`assistant_router_timeout` / `assistant_overall_timeout`),
-with
+pulls `assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
+by default — the eval ruled out the smaller sizes: 350M can't emit the
+routing JSON, 1.2B routes adversarial prompts to tools) and relaxes the
+routing/turn timeouts to 30/90 s (`assistant_router_timeout` /
+`assistant_overall_timeout`), with
 `ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it,
 `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` set to that same reference
 (no alias), and both the `app` and documents-worker images rebuilt with
