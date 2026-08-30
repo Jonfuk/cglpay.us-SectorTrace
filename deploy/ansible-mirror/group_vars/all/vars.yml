@@ -570,10 +570,18 @@ assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
 
 # Routing and whole-turn ceilings, seconds. The code defaults (8 / 30)
 # assume a capable host; CPU inference of the 2.6B does not meet them, so
-# the deploy relaxes them and interactive latency rises to match (expect
-# ~10-20 s per question). Set 0 to fall back to the code defaults.
-assistant_router_timeout: 30
-assistant_overall_timeout: 90
+# the deploy relaxes them hard and interactive latency rises to match
+# (tens of seconds per question — a finding aid, not a chat). Set 0 to fall
+# back to the code defaults.
+assistant_router_timeout: 60
+assistant_overall_timeout: 120
+
+# Ollama's context window. The code is designed around 32K synthesis, but a
+# 32K KV cache for a multi-billion-parameter model is ~2-3 GB on top of the
+# weights — enough to push this box into swap. 8192 fits the router prompt
+# and ~5 retrieved passages while keeping the cache small. Raise it toward
+# 32768 on a host with the RAM (and the speed) for it.
+assistant_ollama_context_length: 8192
 
 # What the adapters put in the `model` field and the ledger records
 # (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). Default to the

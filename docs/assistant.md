@@ -114,12 +114,13 @@ suite on a CPU-only VPS (Ollama 0.33.2, timeouts relaxed to 30 / 90):
 `ROUTER_TIMEOUT_SECONDS` (8) and `OVERALL_TIMEOUT_SECONDS` (30) are the
 values a capable host meets. `assistant_router_timeout_seconds` /
 `assistant_overall_timeout_seconds` (0 → the defaults) relax them; the
-Ansible roles set 30 / 90 because CPU inference of the 2.6B does not route
-in 8 s, and interactive latency rises to ~10–20 s per question. On a GPU
-or fast many-core box, keep the code defaults. NOT
-`ollama.com/library/lfm2`, which is a 24B model at 14 GB. A missing
-reference fails the provisioning task with `ollama pull`'s own error in the
-message.
+Ansible roles set 60 / 120 because CPU inference of the 2.6B does not route
+in 8 s, and `assistant_ollama_context_length` drops from the design's 32K
+to 8192 so the KV cache does not push a small box into swap. Interactive
+latency is then tens of seconds per question. On a GPU or fast many-core
+box, keep the code defaults and 32K. NOT `ollama.com/library/lfm2`, which
+is a 24B model at 14 GB. A missing reference fails the provisioning task
+with `ollama pull`'s own error in the message.
 
 **Ollama version.** `assistant_ollama_image` must be a 2026 build (default
 `ollama/ollama:0.33.2`). LFM2.5 is hybrid — `attention.head_count_kv` is a

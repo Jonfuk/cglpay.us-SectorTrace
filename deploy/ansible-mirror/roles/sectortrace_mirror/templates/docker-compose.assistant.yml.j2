@@ -41,10 +41,10 @@ services:
       # can reach it; the app container resolves `ollama` by service name.
       OLLAMA_HOST: "0.0.0.0:11434"
       # Ollama's default is 2048, which truncates the grounding step's
-      # retrieved passages long before the model's own limit. The assistant
-      # is designed around 32K-context synthesis (pipeline/assistant/
-      # adapters.py); LFM2.5-1.2B handles ~125K.
-      OLLAMA_CONTEXT_LENGTH: "32768"
+      # retrieved passages. assistant_ollama_context_length sizes it — the
+      # design wants 32K, but the KV cache for that on a multi-B model can
+      # push a small box into swap, so the deploy default is smaller.
+      OLLAMA_CONTEXT_LENGTH: "{{ assistant_ollama_context_length }}"
       # Keep the model resident an hour after the last call. The assistant is
       # interactive and bursty, `nlp assistant-eval` fires ~160 calls in
       # sequence, and on a CPU box the cold reload is the slow part — this
