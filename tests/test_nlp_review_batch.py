@@ -73,13 +73,42 @@ def test_identical_sentences_from_two_documents_share_a_group(conn, settings):
     assert rows[0]["group_size"] == 2
 
 
-def test_groups_only_collapses_to_one_row_with_members(conn, settings):
+def test_group_by_exact_collapses_to_one_row_with_members(conn, settings):
     _seed(conn, settings, [_SENTENCE, _SENTENCE])
     grouped = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new",
-                                      groups_only=True)
+                                      group_by="exact")
     assert len(grouped) == 1
     assert sorted(grouped[0]["group_members"]) == sorted(
         r["candidate_id"] for r in _rows(conn))
+
+
+def test_template_id_blanks_numbers_money_subject_and_object():
+    t = review_batch.template_id
+    # numbers / money differ, shape is the same
+    assert (t("p.x", "AFFIRMED", "a budget reduction of £1.2 million", None, None)
+            == t("p.x", "AFFIRMED", "a budget reduction of £900,000", None, None))
+    # the blanked subject / object literal differ, shape is the same
+    assert (t("p.x", "AFFIRMED", "Kent County Council had no agency staff",
+              "Kent County Council", None)
+            == t("p.x", "AFFIRMED", "Hull City Council had no agency staff",
+                 "Hull City Council", None))
+    # predicate and assertion status still split the key
+    assert (t("p.x", "AFFIRMED", "a reduction of £5", None, None)
+            != t("p.x", "NEGATED", "a reduction of £9", None, None))
+
+
+def test_group_by_template_collapses_variants(conn, settings):
+    a = "Change Grow Live is struggling to recruit recovery workers, a £12,000 gap."
+    b = "Change Grow Live is struggling to recruit recovery workers, a £30,000 gap."
+    _seed(conn, settings, [a, b])
+    rows = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    assert len(rows) == 2
+    assert rows[0]["group_id"] != rows[1]["group_id"]        # exact: distinct
+    assert rows[0]["template_id"] == rows[1]["template_id"]  # template: same
+    (grouped,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new",
+                                         group_by="template")
+    assert sorted(grouped["group_variants"]) == sorted([a, b])
+    assert len(grouped["group_members"]) == 2
 
 
 # --- export shape ----------------------------------------------------------
@@ -105,12 +134,86 @@ def test_write_sheet_roundtrips_jsonl_and_csv(conn, settings, tmp_path):
         assert [r["candidate_id"] for r in back] == [r["candidate_id"] for r in rows]
 
 
-def test_groups_only_sheet_refuses_csv(conn, settings, tmp_path):
+def test_collapsed_sheet_refuses_csv(conn, settings, tmp_path):
     _seed(conn, settings, [_SENTENCE])
     grouped = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new",
-                                      groups_only=True)
+                                      group_by="exact")
     with pytest.raises(review_batch.SheetError):
         review_batch.write_sheet(grouped, tmp_path / "g.csv")
+
+
+# --- screen + suggestions ------------------------------------------------
+
+def test_screen_reason_flags_broken_extractions():
+    sr = review_batch.screen_reason
+    assert sr("too short", None, None) == "span_too_short"
+    assert sr("x" * 900, None, None) == "span_too_long"
+    assert sr("a" * 60, "15", None) == "object_is_bare_number"
+    assert sr("a" * 60, "15", "concept:money") is None      # resolved -> fine
+    assert sr("A clean sentence of a reasonable length about staffing.", None, None) is None
+
+
+# a genuine candidate: one run-on sentence (no internal full stop, so the
+# sentence splitter keeps it whole) with the "struggling to recruit" trigger
+# up front and enough trailing clause to run past SCREEN_MAX_SPAN.
+_LONG = ("Change Grow Live is struggling to recruit recovery workers and "
+         + "also faces sustained pressure across teams and rotas and cover "
+           "arrangements and vacancies carried month after month " * 10)
+
+
+def test_screened_row_is_exported_with_a_rejected_suggestion(conn, settings):
+    _seed(conn, settings, [_LONG])
+    (row,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    assert row["screen_reason"] == "span_too_long"
+    assert row["suggested_decision"] == "rejected"
+    assert row["suggested_by"] == "screen:span_too_long"
+    assert row["decision"] == ""                            # still not a decision
+
+
+def test_accept_suggested_rejected_lifts_only_blank_rows_and_notes_the_source(conn, settings):
+    _seed(conn, settings, [_LONG, _SENTENCE])
+    rows = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    screened = next(r for r in rows if r["screen_reason"])
+    clean = next(r for r in rows if not r["screen_reason"])
+    clean["decision"] = "approved"                          # a real call stands
+    out = review_batch.apply_sheet(conn, [screened, clean], decided_by="Jon Firth",
+                                   accept_suggested="rejected")
+    assert out["applied"] == 2 and out["from_suggestion"] == 1
+    row = conn.execute(
+        "SELECT decision, reason_code, note FROM claim_candidate_decisions "
+        "WHERE claim_candidate_id = ?", (screened["candidate_id"],)).fetchone()
+    assert tuple(row) == ("rejected", "span_too_long", "via screen:span_too_long")
+
+
+def test_accept_suggested_rejects_anything_other_than_rejected(conn, settings):
+    _seed(conn, settings, [_SENTENCE])
+    (row,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    with pytest.raises(review_batch.SheetError):
+        review_batch.apply_sheet(conn, [row], decided_by="Jon Firth",
+                                 accept_suggested="approved")
+
+
+def test_accept_suggested_ignores_an_approved_suggestion(conn, settings):
+    _seed(conn, settings, [_SENTENCE])
+    (row,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    row["suggested_decision"] = "approved"                  # a model's guess
+    row["suggested_by"] = "model:test"
+    out = review_batch.apply_sheet(conn, [row], decided_by="Jon Firth",
+                                   accept_suggested="rejected")
+    assert out["applied"] == 0 and out["skipped_blank"] == 1
+
+
+# --- sampling ----------------------------------------------------------
+
+def test_sample_keeps_the_bands_and_a_deterministic_tail(conn, settings):
+    _seed(conn, settings, [_SENTENCE, _SENTENCE, _SENTENCE])
+    full = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    for row in full:
+        assert row["stratum"] in ("positive_band", "negative_band", "tail")
+    once = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new", sample=True)
+    twice = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new", sample=True)
+    assert [r["candidate_id"] for r in once] == [r["candidate_id"] for r in twice]
+    assert len(once) <= len(full)
 
 
 # --- apply ---------------------------------------------------------------
@@ -181,10 +284,10 @@ def test_apply_aborts_on_an_invalid_row_and_names_it(conn, settings):
         (out["run_id"],)).fetchone()[0] == "failed"
 
 
-def test_groups_only_decision_fans_out_to_every_member(conn, settings):
+def test_collapsed_decision_fans_out_to_every_member(conn, settings):
     _seed(conn, settings, [_SENTENCE, _SENTENCE])
     (grouped,) = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new",
-                                         groups_only=True)
+                                         group_by="exact")
     grouped["decision"] = "approved"
     out = review_batch.apply_sheet(conn, [grouped], decided_by="Jon Firth")
     assert out["applied"] == 2

@@ -1013,3 +1013,44 @@ If it is ever enabled, treat its output as a **reading aid, not evidence**:
   citations, timings and outcome. That row is an audit record, not evidence.
 
 Operator documentation: [`docs/assistant.md`](assistant.md).
+
+## Model-assisted review triage (opt-in, off by default)
+
+`pipeline/nlp/review_batch.py` exports a decision sheet for the 034F claim
+queue. A `screen_reason` column flags structurally broken extractions by
+deterministic rule and pre-fills `suggested_decision='rejected'`. By explicit
+owner decision (BETA-047), a language model — a small or free model via
+OpenRouter — may fill that `suggested_decision` column instead, so a reviewer
+starts from a triaged sheet rather than a raw one.
+
+This is a deliberate, fenced exception to "nothing without a person"
+(`CLAUDE.md` settled decision 4) and to 034H's gating of LLM steps. The bounds
+that keep it defensible, all enforced in code:
+
+- **A suggestion is never a decision.** The model writes `suggested_decision` /
+  `suggested_reason` / `suggested_by` only. `apply_sheet` records what is in
+  the `decision` column, which a person fills. Nothing the model writes
+  reaches `claim_candidate_decisions` on its own.
+- **Reject only, in bulk.** `--accept-suggested` takes exactly one value,
+  `rejected`. A wrong reject costs recall; a wrong approve would poison the
+  precision the 034G gate is built to favour. The model never proposes
+  `approved` or `corrected` into a bulk path, and never fills `corrected_*`.
+- **Every lifted row is marked.** A decision taken from a suggestion records
+  `note='via model:<name>'` (or `via screen:<rule>`), so "how was this
+  labelled?" is answerable per row: a person confirmed a model's triage, not a
+  person deciding cold.
+- **The model is not reviewer 2.** The gate's inter-reviewer-agreement
+  condition (`MIN_DOUBLE_REVIEWED`, `pipeline/nlp/gate.py`) counts distinct
+  human `decided_by` values only.
+- **Agreement is watched.** Report human-vs-suggestion agreement per category
+  after each batch; near-total agreement is the signal that the review has
+  gone through the motions, and that batch is redone with suggestions hidden.
+- **Off by default and fenced.** A separate extra, never in CI, never on the
+  offline path. Evidence spans are public-domain committee text, so sending
+  them to a third party is not a disclosure of anything restricted — but it is
+  an external dependency the rest of the pipeline does not have.
+
+If you train an 034G classifier on a corpus built this way, the provenance of
+the labels is "a model triaged, a person confirmed the rejects" — weaker than
+"a person read every sentence", and the caveat travels with any figure the
+classifier later supports.

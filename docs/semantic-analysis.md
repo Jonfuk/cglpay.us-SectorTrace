@@ -325,15 +325,26 @@ candidate moves to `accepted` (approved / corrected) or `dismissed`
 `pipeline/nlp/review_batch.py` + `pipeline nlp review-sheet` /
 `decide-claims-batch` is the same review at volume — it removes the *typing*,
 not the deciding. `review-sheet` exports one predicate's queued candidates
-(sentence, triple, source, a stable `group_id` for word-for-word-identical
-sentences) with blank `decision` / `reason_code` / `corrected_*` columns; a
-person fills it in offline; `decide-claims-batch` reads it back and calls
-`decisions.decide` once per row under the given name, same validation as
-`decide-claim`. A blank decision is skipped, a `--groups-only` ruling fans out
-to every member, a candidate the reviewer already decided is skipped so a
-re-run is safe, and the first row `decide` refuses stops the run and names it.
-There is still no "decide everything matching a filter" path — the sheet is
-the artifact, filled in by a person reading each row.
+(sentence, triple, source) with blank `decision` / `reason_code` /
+`corrected_*` columns, plus the machinery that shrinks how many rows a person
+reads: `group_id` (word-for-word-identical sentences), `template_id`
+(`--group-by template`: identical once numbers and the subject/object are
+blanked — the "no agency staff at ‹council›" family), a deterministic
+`screen_reason` for structurally broken extractions (exported with
+`suggested_decision=rejected`), and `--sample` (keep both high-confidence
+bands, deterministic 1-in-10 of the rest, so a category reaches the 034G floor
+without the whole queue). `decide-claims-batch` reads the filled sheet back and
+calls `decisions.decide` once per row under the given name, same validation as
+`decide-claim`: no decision → skipped, a collapsed ruling fans out to every
+member, an already-decided candidate is skipped so a re-run is safe, the first
+row `decide` refuses stops the run and names it. `--accept-suggested rejected`
+lifts the screened rows into real `rejected` decisions in one move (each keeps
+`note='via <suggester>'`); only `rejected` — a wrong reject costs recall, a
+wrong approve poisons the precision the gate favours. There is still no
+"decide everything matching a filter" path — the sheet is the artifact, filled
+in by a person reading each row. A model may fill `suggested_decision` in
+place of the deterministic screen; see `docs/CAVEATS.md`, "Model-assisted
+review triage".
 
 **Held:** the approved-candidate → `graph_claims` draft write. `graph_claims`
 has no writer anywhere in the codebase (a dormant schema from migration
@@ -352,10 +363,13 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
 
 # or the same review in bulk, one predicate at a time:
 uv run pipeline nlp review-sheet --predicate workforce.relies_on_agency \
-    --groups-only --out agency.jsonl
-#   ... a person fills the `decision` column in agency.jsonl ...
-uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" --dry-run
-uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer"
+    --group-by template --sample --out agency.jsonl
+#   ... a person fills the `decision` column in agency.jsonl, and can take the
+#       screened `suggested_decision=rejected` rows in one move ...
+uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
+    --accept-suggested rejected --dry-run
+uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
+    --accept-suggested rejected
 ```
 
 ## Getting from 034F to 034G

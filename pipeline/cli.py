@@ -526,32 +526,48 @@ def nlp_review_sheet(
     out: Path = typer.Option(..., help="File to write — .jsonl (default) or .csv"),
     status: str = typer.Option("queued", help="Candidate status to export"),
     source_system: str = typer.Option(None, help="Only candidates on chunks from this source_system"),
-    groups_only: bool = typer.Option(
-        False, "--groups-only",
-        help="One row per word-for-word-identical sentence group (JSONL only); a "
-        "decision on it applies to every member"),
-    limit: int = typer.Option(None, min=1, help="Cap the rows exported"),
+    group_by: str = typer.Option(
+        "none", "--group-by",
+        help="none | exact (word-for-word-identical sentences) | template "
+        "(same shape once numbers and the subject/object are blanked). exact "
+        "and template collapse to one row per group (JSONL only); a decision "
+        "fans out to every member"),
+    sample: bool = typer.Option(
+        False, "--sample",
+        help="Keep the high-confidence positive and negative bands (capped at "
+        "--sample-target each) plus a deterministic 1-in-10 of the rest"),
+    sample_target: int = typer.Option(130, min=1, help="Per-band cap when --sample is set"),
+    limit: int = typer.Option(None, min=1, help="Cap the rows read from the warehouse"),
     fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto (by extension)"),
 ) -> None:
     """Export one predicate's queued claim candidates as a decision sheet: the
-    sentence, the triple, the source, a stable group id for duplicate
-    sentences, and blank decision / reason_code / corrected_* columns for a
-    reviewer to fill in offline. Writes nothing to the warehouse.
+    sentence, the triple, the source, exact- and template-group ids, a
+    deterministic `screen_reason` for broken extractions (exported with a
+    `suggested_decision` of 'rejected'), a `stratum` label, and blank decision
+    / reason_code / corrected_* columns for a reviewer to fill in offline.
+    Writes nothing to the warehouse.
     """
     from pipeline.nlp import review_batch
 
     conn, _ = _document_connection()
     try:
-        rows = review_batch.sheet_rows(
-            conn, predicate=predicate, status=status, source_system=source_system,
-            groups_only=groups_only, limit=limit)
         try:
-            n_groups = review_batch.write_sheet(rows, out, fmt=fmt)
+            rows = review_batch.sheet_rows(
+                conn, predicate=predicate, status=status, source_system=source_system,
+                group_by=group_by, sample=sample, sample_target=sample_target,
+                limit=limit)
+            written = review_batch.write_sheet(rows, out, fmt=fmt)
         except review_batch.SheetError as exc:
             raise typer.BadParameter(str(exc)) from None
+        strata: dict = {}
+        screened = 0
+        for row in rows:
+            strata[row.get("stratum", "?")] = strata.get(row.get("stratum", "?"), 0) + 1
+            screened += 1 if row.get("screen_reason") else 0
         typer.echo(__import__("json").dumps(
-            {"out": str(out), "rows": len(rows), "groups": n_groups,
-             "predicate": predicate, "status": status, "groups_only": groups_only},
+            {"out": str(out), "rows": written, "predicate": predicate,
+             "status": status, "group_by": group_by, "sample": sample,
+             "screened": screened, "strata": strata},
             indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -566,10 +582,15 @@ def nlp_decide_claims_batch(
         False, "--allow-redecide",
         help="Record a second decision on a candidate this reviewer already "
         "decided (default: skip it, so a re-run is safe)"),
+    accept_suggested: str = typer.Option(
+        None, "--accept-suggested",
+        help="Lift a screened / model-suggested decision into a real one on "
+        "rows left blank. Only 'rejected' is allowed. Each row records "
+        "note='via <suggester>'."),
     fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto"),
 ) -> None:
     """Record one reviewer's decisions from a filled-in review sheet — one
-    `decide-claim` call per row, same validation, in a loop. Rows with a blank
+    `decide-claim` call per row, same validation, in a loop. Rows with no
     decision are skipped. On the first row a decision is refused it stops and
     names it; rows already recorded stay. Exits non-zero if any row errored.
     """
@@ -581,7 +602,8 @@ def nlp_decide_claims_batch(
             rows = review_batch.read_sheet(file, fmt=fmt)
             result = review_batch.apply_sheet(
                 conn, rows, decided_by=by, dry_run=dry_run,
-                allow_redecide=allow_redecide, source_label=str(file))
+                allow_redecide=allow_redecide, accept_suggested=accept_suggested,
+                source_label=str(file))
         except review_batch.SheetError as exc:
             raise typer.BadParameter(str(exc)) from None
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
