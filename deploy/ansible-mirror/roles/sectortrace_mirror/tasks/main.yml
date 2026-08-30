@@ -386,11 +386,22 @@
     # ASSISTANT_NEEDLE_MODEL to assistant_lfm_ollama_ref, so the string the
     # app sends is the exact name Ollama pulled — nothing to rename, and the
     # ledger records the model that actually answered.
-    - name: Confirm Ollama now has the model
+    #
+    # `run` it, not `show`: pull and show both succeed on a GGUF this Ollama
+    # cannot actually load (an old build panics parsing an LFM2.5 hybrid
+    # metadata array only when a request forces a load), and the failure
+    # would otherwise surface for the first time at `nlp assistant-eval`.
+    - name: Smoke-test that the model loads and generates
       ansible.builtin.command:
-        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama show {{ assistant_lfm_ollama_ref }}
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama run {{ assistant_lfm_ollama_ref }} "reply with the single word ok"
         chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_smoke
       changed_when: false
+      timeout: 300
+      failed_when: >-
+        sectortrace_mirror_ollama_smoke.rc != 0
+        or 'Error:' in (sectortrace_mirror_ollama_smoke.stdout + sectortrace_mirror_ollama_smoke.stderr)
+        or (sectortrace_mirror_ollama_smoke.stdout | trim | length) == 0
   rescue:
     - name: Collect Ollama logs
       ansible.builtin.command:
@@ -407,6 +418,9 @@
               'Pull (' ~ assistant_lfm_ollama_ref ~ '):']
              + (sectortrace_mirror_ollama_pull.stdout_lines | default(['(pull task did not run)']))
              + (sectortrace_mirror_ollama_pull.stderr_lines | default([]))
+             + ['', 'Load smoke-test:']
+             + (sectortrace_mirror_ollama_smoke.stdout_lines | default(['(smoke-test did not run)']))
+             + (sectortrace_mirror_ollama_smoke.stderr_lines | default([]))
              + ['', 'Ollama container logs:']
              + (sectortrace_mirror_ollama_failure_logs.stdout_lines | default(['(no logs available)'])) }}
 

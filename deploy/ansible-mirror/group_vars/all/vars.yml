@@ -572,9 +572,12 @@ assistant_lfm_quant: "Q4_K_M"
 assistant_needle_model: "{{ assistant_lfm_ollama_ref }}"
 
 # Pinned like every other image here (neo4j:5-community, caddy:2-alpine).
-# Bump deliberately; LFM2.5 needs a build recent enough to know the
-# architecture. A wrong tag fails cleanly at `docker compose pull`.
-assistant_ollama_image: "ollama/ollama:0.6.0"
+# Bump deliberately — but not below a 2026 build: LFM2.5 is a hybrid
+# architecture whose `attention.head_count_kv` is a per-layer array, and
+# Ollama < ~0.9 panics parsing that GGUF (`interface conversion: *ggml.array,
+# not uint32`) on model load, not on pull, so it looks healthy until the
+# first request. A wrong tag fails cleanly at `docker compose pull`.
+assistant_ollama_image: "ollama/ollama:0.33.2"
 
 # A ceiling, not a reservation — the same blast-radius reasoning as
 # documents_mem_limit_mb. A 2.6B Q4 model plus a 32K KV cache sits inside

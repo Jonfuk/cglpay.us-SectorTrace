@@ -109,6 +109,14 @@ small-box option; the 1.2B pinned in the code sits between them. NOT
 reference fails the provisioning task with `ollama pull`'s own error in the
 message.
 
+**Ollama version.** `assistant_ollama_image` must be a 2026 build (default
+`ollama/ollama:0.33.2`). LFM2.5 is hybrid — `attention.head_count_kv` is a
+per-layer array — and Ollama below ~0.9 panics parsing it (`interface
+conversion: *ggml.array, not uint32`). The panic is on *load*, not pull, so
+an old build passes `ollama pull` and `ollama show` and only fails on the
+first request; the provisioning task's `ollama run` smoke-test is there to
+catch it at deploy time.
+
 ## Using it
 
 CLI:
