@@ -322,6 +322,19 @@ reads. The reviewer's name is recorded as given, never defaulted. The
 candidate moves to `accepted` (approved / corrected) or `dismissed`
 (rejected); `accepted` does **not** mean a graph draft exists.
 
+`pipeline/nlp/review_batch.py` + `pipeline nlp review-sheet` /
+`decide-claims-batch` is the same review at volume — it removes the *typing*,
+not the deciding. `review-sheet` exports one predicate's queued candidates
+(sentence, triple, source, a stable `group_id` for word-for-word-identical
+sentences) with blank `decision` / `reason_code` / `corrected_*` columns; a
+person fills it in offline; `decide-claims-batch` reads it back and calls
+`decisions.decide` once per row under the given name, same validation as
+`decide-claim`. A blank decision is skipped, a `--groups-only` ruling fans out
+to every member, a candidate the reviewer already decided is skipped so a
+re-run is safe, and the first row `decide` refuses stops the run and names it.
+There is still no "decide everything matching a filter" path — the sheet is
+the artifact, filled in by a person reading each row.
+
 **Held:** the approved-candidate → `graph_claims` draft write. `graph_claims`
 has no writer anywhere in the codebase (a dormant schema from migration
 `0050` with a provenance reader and a Neo4j projector, no draft →
@@ -336,6 +349,13 @@ uv run pipeline nlp relations    --source-system committee_paper_promotion --lim
 uv run pipeline nlp queue-claims --source-system committee_paper_promotion
 uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
     --by "A. Reviewer" --corrected-predicate workforce.has_retention_pressure
+
+# or the same review in bulk, one predicate at a time:
+uv run pipeline nlp review-sheet --predicate workforce.relies_on_agency \
+    --groups-only --out agency.jsonl
+#   ... a person fills the `decision` column in agency.jsonl ...
+uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" --dry-run
+uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer"
 ```
 
 ## Getting from 034F to 034G

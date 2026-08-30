@@ -413,12 +413,13 @@ def create(conn: sqlite3.Connection, claim_text: str, created_by: str,
                          "maximum).")
 
     now = _now()
-    cursor = conn.execute(
+    # RETURNING, not cursor.lastrowid -- the latter is a sqlite3-ism and is
+    # absent on the psycopg cursor the PostgreSQL wrapper hands back.
+    claim_id = int(conn.execute(
         "INSERT INTO claims (claim_text, status, caveats, created_by, "
-        "created_at, note) VALUES (?, 'draft', ?, ?, ?, ?)",
-        (claim_text, caveats, created_by.strip(), now, note))
+        "created_at, note) VALUES (?, 'draft', ?, ?, ?, ?) RETURNING id",
+        (claim_text, caveats, created_by.strip(), now, note)).fetchone()[0])
     conn.commit()
-    claim_id = int(cursor.lastrowid)
     log.info("claims.created", claim_id=claim_id, by=created_by.strip())
     return get(conn, claim_id)
 

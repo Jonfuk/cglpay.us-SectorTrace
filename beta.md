@@ -463,10 +463,14 @@ complete — see DONE. Nothing is queued.)_
     `pipeline nlp gate-034g` now reports exactly how far off it is. Closing
     the gate is reviewer labour: (a) `uv sync --extra nlp` and run the chain
     on the live warehouse with a real embedder + `--extractor gliner`;
-    (b) work the `semantic_claim_candidate` queue with `decide-claim`,
-    favouring `corrected` over bare `reject`, until `gate-034g` exits 0
-    (~50 pos + ~50 neg + a held-out margin per category, source/subject/year
-    spread, ≥10 double-reviewed at ≥0.8 agreement).
+    (b) work the `semantic_claim_candidate` queue -- one predicate at a time
+    via `nlp review-sheet` (fill the `decision` column offline) +
+    `nlp decide-claims-batch --by "<name>"`, or one at a time with
+    `decide-claim` -- favouring `corrected` over bare `reject`, until
+    `gate-034g` exits 0 (~50 pos + ~50 neg + a held-out margin per category,
+    authority/subject/year spread, ≥10 double-reviewed at ≥0.8 agreement --
+    the last needs a second named reviewer, `decide-claims-batch` run again
+    under their name on a shared sample).
     Two corpus blockers were cleared first (BETA-047): migration `0080`
     backfills `document_records.published_at` from `committee_papers.
     meeting_date` / `cdp_documents.published_date` (was 100% NULL, which

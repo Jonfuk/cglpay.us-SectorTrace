@@ -47,7 +47,7 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
            corrected_object_literal: str | None = None,
            corrected_subject_mention_id: str | None = None,
            review_queue_id: int | None = None,
-           note: str | None = None) -> dict:
+           note: str | None = None, commit: bool = True) -> dict:
     """Record one decision on `claim_candidate_id`. Returns the decision row's
     id and the candidate's new status.
 
@@ -57,6 +57,11 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
       * ``corrected`` -- the triple is about something real but the machine
         got the predicate / object / subject wrong; at least one
         ``corrected_*`` field must be supplied.
+
+    `commit` defaults to True -- one decision, one transaction, as the CLI and
+    web callers want. `review_batch.apply_sheet` passes ``commit=False`` for a
+    ``--dry-run``, running every row's validation and writes in one transaction
+    it then rolls back.
     """
     decided_by = (decided_by or "").strip()
     if not decided_by:
@@ -96,20 +101,23 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
             f"corrected_subject_mention_id {corrected_subject_mention_id!r} does not exist.")
 
     now = utcnow()
-    cursor = conn.execute(
+    # RETURNING, not cursor.lastrowid -- the latter is a sqlite3-ism and is
+    # absent on the psycopg cursor the PostgreSQL wrapper hands back.
+    decision_id = conn.execute(
         "INSERT INTO claim_candidate_decisions (claim_candidate_id, review_queue_id, decision, "
         "decided_by, reason_code, corrected_subject_mention_id, corrected_predicate, "
         "corrected_object_concept_id, corrected_object_literal, graph_claim_id, note, decided_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) RETURNING id",
         (claim_candidate_id, review_queue_id, decision, decided_by, reason_code,
          corrected_subject_mention_id, corrected_predicate, corrected_object_concept_id,
-         corrected_object_literal, note, now))
+         corrected_object_literal, note, now)).fetchone()[0]
     new_status = _STATUS_AFTER[decision]
     conn.execute(
         "UPDATE document_claim_candidates SET status = ? WHERE claim_candidate_id = ?",
         (new_status, claim_candidate_id))
-    conn.commit()
-    return {"decision_id": cursor.lastrowid, "claim_candidate_id": claim_candidate_id,
+    if commit:
+        conn.commit()
+    return {"decision_id": decision_id, "claim_candidate_id": claim_candidate_id,
             "decision": decision, "status": new_status, "decided_at": now}
 
 

@@ -520,6 +520,77 @@ def nlp_decide_claim(
         conn.close()
 
 
+@nlp_app.command("review-sheet")
+def nlp_review_sheet(
+    predicate: str = typer.Option(..., help="relations.yml predicate id to export"),
+    out: Path = typer.Option(..., help="File to write — .jsonl (default) or .csv"),
+    status: str = typer.Option("queued", help="Candidate status to export"),
+    source_system: str = typer.Option(None, help="Only candidates on chunks from this source_system"),
+    groups_only: bool = typer.Option(
+        False, "--groups-only",
+        help="One row per word-for-word-identical sentence group (JSONL only); a "
+        "decision on it applies to every member"),
+    limit: int = typer.Option(None, min=1, help="Cap the rows exported"),
+    fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto (by extension)"),
+) -> None:
+    """Export one predicate's queued claim candidates as a decision sheet: the
+    sentence, the triple, the source, a stable group id for duplicate
+    sentences, and blank decision / reason_code / corrected_* columns for a
+    reviewer to fill in offline. Writes nothing to the warehouse.
+    """
+    from pipeline.nlp import review_batch
+
+    conn, _ = _document_connection()
+    try:
+        rows = review_batch.sheet_rows(
+            conn, predicate=predicate, status=status, source_system=source_system,
+            groups_only=groups_only, limit=limit)
+        try:
+            n_groups = review_batch.write_sheet(rows, out, fmt=fmt)
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        typer.echo(__import__("json").dumps(
+            {"out": str(out), "rows": len(rows), "groups": n_groups,
+             "predicate": predicate, "status": status, "groups_only": groups_only},
+            indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("decide-claims-batch")
+def nlp_decide_claims_batch(
+    file: Path = typer.Option(..., exists=True, help="A review sheet with the decision column filled in"),
+    by: str = typer.Option(..., help="Reviewer name — recorded on every row, never defaulted"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate every row and roll back, writing no decisions"),
+    allow_redecide: bool = typer.Option(
+        False, "--allow-redecide",
+        help="Record a second decision on a candidate this reviewer already "
+        "decided (default: skip it, so a re-run is safe)"),
+    fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto"),
+) -> None:
+    """Record one reviewer's decisions from a filled-in review sheet — one
+    `decide-claim` call per row, same validation, in a loop. Rows with a blank
+    decision are skipped. On the first row a decision is refused it stops and
+    names it; rows already recorded stay. Exits non-zero if any row errored.
+    """
+    from pipeline.nlp import review_batch
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            rows = review_batch.read_sheet(file, fmt=fmt)
+            result = review_batch.apply_sheet(
+                conn, rows, decided_by=by, dry_run=dry_run,
+                allow_redecide=allow_redecide, source_label=str(file))
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if result["errors"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
 @nlp_app.command("context")
 def nlp_context(
     detector: str = typer.Option(
