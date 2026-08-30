@@ -141,10 +141,11 @@ services:
       context: "{{ repo_root }}"
       dockerfile: Dockerfile
       args:
-        # `openai` (the [assistant] extra) only when this box provisions the
-        # assistant runtime. Railway builds the same Dockerfile with no
-        # args, so its image never gets it — see Dockerfile.
-        INSTALL_ASSISTANT: "{{ assistant_runtime_enabled | lower }}"
+        # `openai` (the [assistant] extra) only when this box runs the
+        # assistant — against OpenRouter (assistant_app_enabled) or a
+        # self-hosted Ollama (assistant_runtime_enabled). Railway builds the
+        # same Dockerfile with no args, so its image never gets it.
+        INSTALL_ASSISTANT: "{{ (assistant_runtime_enabled or assistant_app_enabled) | lower }}"
     restart: unless-stopped
     env_file:
       - "{{ state_dir }}/.env"

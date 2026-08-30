@@ -528,22 +528,21 @@ Set the list back to empty and re-run to tear all of it down again.
   here, for the same reason (the `nlp` extra is in this image, not the
   always-on app).
 
-## The local analyst assistant (optional, off)
+## The analyst assistant (optional, off)
 
-`assistant_runtime_enabled: false` by default, the same switch and the same
-`docker-compose.assistant.yml` as the self-host build — an Ollama that
-pulls `assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
-by default — the eval ruled out the smaller sizes: 350M can't emit the
-routing JSON, 1.2B routes adversarial prompts to tools) and relaxes the
-routing/turn timeouts to 30/90 s (`assistant_router_timeout` /
-`assistant_overall_timeout`), with
-`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it,
-`ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` set to that same reference
-(no alias), and both the `app` and documents-worker images rebuilt with
-`openai`. `sectortrace-mirror nlp assistant` and `nlp assistant-eval` run
-in the documents worker (where the `nlp` extra and the eval fixtures are);
-the `app` container carries `openai` for the HTTP admin endpoint only. It
-reads only warehouse content, so a mirror is a legitimate host for it.
+Off by default. Since BETA-114 both inference legs run on **OpenRouter**
+([`docs/assistant.md`](../../docs/assistant.md)). Set
+`assistant_app_enabled: true` and the roles build `openai` into the `app`
+and documents-worker images and write `ASSISTANT_OLLAMA_URL` /
+`ASSISTANT_NEEDLE_URL` = `https://openrouter.ai/api/v1`, `ASSISTANT_API_KEY`
+(from `vault_assistant_api_key`, or put it in `.env.merge`), and the router /
+answerer slugs `ASSISTANT_NEEDLE_MODEL` / `ASSISTANT_LFM_MODEL` (set
+`assistant_needle_model` / `assistant_lfm_model` in group_vars — no pinned
+default; an unset slug fails closed). `sectortrace-mirror nlp assistant` and
+`nlp assistant-eval` run in the documents worker (where the `nlp` extra and
+the eval fixtures are); the `app` container carries `openai` for the HTTP
+admin endpoint only. It reads only warehouse content, so a mirror is a
+legitimate host for it.
 
 Two mirror-specific things:
 
@@ -552,16 +551,19 @@ Two mirror-specific things:
   every sync. On a `beta` box set `mirror_nlp_rebuild: true` (and a real
   `mirror_nlp_embed_model`), or run `sectortrace-mirror nlp embed` after
   each deliberate reseed, or that tool has nothing to work with.
-- **Enabling stays gated and manual.** `assistant_runtime_enabled` only
-  provisions Ollama and the images. Leave `ASSISTANT_ENABLED` unset until
+- **Enabling stays gated and manual.** Building the images does not turn the
+  feature on. Leave `ASSISTANT_ENABLED` unset until
   `sectortrace-mirror nlp assistant-eval` reports `gate.may_enable: true`
-  ([`docs/assistant.md`](../../docs/assistant.md)); then put
-  `ASSISTANT_ENABLED=true` in `.env.merge` and re-run the playbook (the
-  merge is folded into `.env` at render time) so it survives the beta
-  checkout reset.
+  (re-score `FROZEN_ROUTING_THRESHOLD` against your router model first); then
+  put `ASSISTANT_ENABLED=true` in `.env.merge` and re-run the playbook so it
+  survives the beta checkout reset.
 
-The Ollama weights volume sits outside the warehouse, so it is untouched by
-a sync and by a `beta` reseed — provisioning is a one-off.
+**Self-host escape hatch.** `assistant_runtime_enabled: true` instead adds
+the Ollama container from `docker-compose.assistant.yml` that pulls
+`assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`),
+swings the two URLs to it and relaxes the timeouts; set the model vars to
+the pulled reference on that path. Its weights volume sits outside the
+warehouse, untouched by a sync or a `beta` reseed.
 
 ## Everything else
 

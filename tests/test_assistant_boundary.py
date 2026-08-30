@@ -1,10 +1,11 @@
-"""The optional assistant runtime boundary (BETA-107).
+"""The optional assistant runtime boundary (BETA-107; OpenRouter since
+BETA-114).
 
 The `pipeline.assistant` package must import and report its status with none
-of its optional runtime present — no `openai` client, no Ollama, no model
-weights, no Needle endpoint — and the offline suite must pass unchanged
-whether or not any of that is installed. An adapter asked to run without a
-backend raises `AssistantUnavailable`, never a bare import or socket error.
+of its optional runtime present — no `openai` client, no configured key or
+model slug — and the offline suite must pass unchanged whether or not any of
+that is installed. An adapter asked to run without a backend, a key or a model
+slug raises `AssistantUnavailable`, never a bare import or socket error.
 """
 from __future__ import annotations
 
@@ -29,20 +30,22 @@ def test_the_package_imports_with_nothing_installed() -> None:
     assert issubclass(assistant.AssistantUnavailable, RuntimeError)
 
 
-def test_runtime_status_is_off_by_default_and_contacts_nothing(settings) -> None:
+def test_runtime_status_is_off_by_default_and_contacts_nothing(settings, monkeypatch) -> None:
     from pipeline.assistant import runtime_status
 
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     status = runtime_status(settings)
     assert status["enabled"] is False
     assert status["ready"] is False
     assert status["openai_client_installed"] == _HAS_OPENAI
-    assert status["model"] == {"id": "LiquidAI/LFM2.5-1.2B-Instruct",
-                                "quant": "Q4_K_M"}
+    # No pinned model since BETA-114 — a deployment names the slugs.
+    assert status["model"] == {"id": "", "quant": ""}
+    assert status["api_key_configured"] is False
     assert set(status["adapters"]) == {"lfm-ollama", "needle-2"}
     assert "no endpoint was contacted" in status["note"].lower()
 
 
-def test_model_identity_is_overridable_and_defaults_to_the_pin(settings, monkeypatch) -> None:
+def test_model_identity_is_overridable_and_defaults_to_unset(settings, monkeypatch) -> None:
     from pipeline.assistant import runtime_status
     from pipeline.assistant.runtime import (
         resolved_lfm_model,
@@ -50,20 +53,48 @@ def test_model_identity_is_overridable_and_defaults_to_the_pin(settings, monkeyp
         resolved_needle_model,
     )
 
-    # Empty settings -> the pinned constants, unchanged.
-    assert resolved_lfm_model(settings) == "LiquidAI/LFM2.5-1.2B-Instruct"
-    assert resolved_lfm_quant(settings) == "Q4_K_M"
-    assert resolved_needle_model(settings) == "needle-2"
+    # Empty settings -> empty slugs (BETA-114: no pinned default; the adapter
+    # fails closed rather than send a stale model to OpenRouter).
+    assert resolved_lfm_model(settings) == ""
+    assert resolved_lfm_quant(settings) == ""
+    assert resolved_needle_model(settings) == ""
 
-    # A deployment serving a different size sets them; status reflects it.
-    monkeypatch.setattr(settings, "assistant_lfm_model",
-                        "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M", raising=False)
+    # A deployment names router and answerer independently; status reflects it.
     monkeypatch.setattr(settings, "assistant_needle_model",
-                        "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M", raising=False)
+                        "openrouter/router-slug", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_model",
+                        "openrouter/answerer-slug", raising=False)
     status = runtime_status(settings)
-    assert status["model"]["id"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
-    assert status["adapters"]["lfm-ollama"]["model"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
-    assert status["adapters"]["needle-2"]["model"] == "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+    assert status["model"]["id"] == "openrouter/answerer-slug"
+    assert status["adapters"]["lfm-ollama"]["model"] == "openrouter/answerer-slug"
+    assert status["adapters"]["needle-2"]["model"] == "openrouter/router-slug"
+
+
+def test_api_key_comes_from_settings_or_the_openrouter_env_var(settings, monkeypatch) -> None:
+    from pipeline.assistant.runtime import resolved_api_key
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert resolved_api_key(settings) == ""
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-from-env")
+    assert resolved_api_key(settings) == "sk-or-from-env"
+
+    # The dedicated setting wins over the shared env var.
+    monkeypatch.setattr(settings, "assistant_api_key", "sk-or-from-settings",
+                        raising=False)
+    assert resolved_api_key(settings) == "sk-or-from-settings"
+
+
+@pytest.mark.skipif(not _HAS_OPENAI, reason="needs the assistant extra")
+def test_an_unconfigured_model_slug_is_assistant_unavailable(settings, monkeypatch) -> None:
+    from pipeline.assistant import AssistantUnavailable
+    from pipeline.assistant.adapters import NeedleAdapter
+
+    # Endpoint set, key set, but no ASSISTANT_NEEDLE_MODEL — fail closed
+    # before any network call rather than 404 against OpenRouter.
+    monkeypatch.setattr(settings, "assistant_api_key", "sk-or-x", raising=False)
+    with pytest.raises(AssistantUnavailable, match="no model configured"):
+        NeedleAdapter(settings).generate("hello")
 
 
 def test_get_adapter_refuses_while_the_layer_is_disabled(settings) -> None:
@@ -92,6 +123,8 @@ def test_a_dead_endpoint_surfaces_as_assistant_unavailable(settings, monkeypatch
 
     monkeypatch.setattr(settings, "assistant_ollama_url",
                         "http://127.0.0.1:9/v1", raising=False)  # nothing listens on :9
+    monkeypatch.setattr(settings, "assistant_lfm_model", "x/y", raising=False)
+    monkeypatch.setattr(settings, "assistant_api_key", "sk-or-x", raising=False)
     with pytest.raises(AssistantUnavailable):
         LFMOllamaAdapter(settings).generate("hello")
 
@@ -127,9 +160,10 @@ def test_the_extra_is_declared_and_kept_out_of_the_default_docker_image() -> Non
     assert "INSTALL_ASSISTANT" not in railway
 
 
-def test_the_admin_route_reports_the_status(settings) -> None:
+def test_the_admin_route_reports_the_status(settings, monkeypatch) -> None:
     from pipeline import db
 
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     conn = db.get_connection(settings)
     db.apply_migrations(conn, settings.migrations_dir)
     server = build_server(settings, host="127.0.0.1", port=0)
@@ -141,7 +175,8 @@ def test_the_admin_route_reports_the_status(settings) -> None:
                            timeout=10.0) as http:
             out = http.get("/api/admin/assistant").json()
             assert out["enabled"] is False
-            assert out["model"]["quant"] == "Q4_K_M"
+            assert out["model"] == {"id": "", "quant": ""}
+            assert out["api_key_configured"] is False
     finally:
         server.shutdown()
         server.server_close()

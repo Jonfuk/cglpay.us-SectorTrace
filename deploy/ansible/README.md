@@ -465,43 +465,44 @@ docker compose exec app python -m pipeline graph backfill   # once, after your f
 docker compose exec app python -m pipeline graph rebuild --clear
 ```
 
-## The local analyst assistant (optional, off)
+## The analyst assistant (optional, off)
 
-`assistant_runtime_enabled: false` by default. Set it true and the deploy
-adds one more container from `docker-compose.assistant.yml` — an Ollama
-that `ollama pull`s `assistant_lfm_ollama_ref`
-(`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` by default, 1.59 GB — the eval
-ruled out the smaller LFM2.5 sizes: 350M can't emit the routing JSON, 1.2B
-routes adversarial prompts to tools). The roles also relax the
-routing/turn timeouts (`assistant_router_timeout` / `_overall_timeout`,
-30/90 s) since CPU inference of the 2.6B does not route in the code's 8 s;
-interactive latency rises to ~10–20 s per question. On a GPU or fast
-many-core host, keep the code defaults. Both
-`ASSISTANT_OLLAMA_URL` and `ASSISTANT_NEEDLE_URL` in `.env` point at
-`http://ollama:11434`, `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` are
-set to that same pulled reference (no alias — the code sends the name
-Ollama has), and both the `app` and the documents-worker images are
-rebuilt with the `assistant` extra (`openai`). Weights live in the
-`sectortrace-assistant_ollama-models` volume, not in `state_dir/data`.
+Off by default. Since BETA-114 both inference legs run on **OpenRouter** (a
+CPU-only VPS could not meet the routing bars locally — see
+[`docs/assistant.md`](../../docs/assistant.md)).
+
+Set `assistant_app_enabled: true` and the roles build the `assistant` extra
+(`openai`) into the `app` and documents-worker images and write, into `.env`:
+`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` = `https://openrouter.ai/api/v1`,
+`ASSISTANT_API_KEY` (from `vault_assistant_api_key`), and
+`ASSISTANT_NEEDLE_MODEL` / `ASSISTANT_LFM_MODEL` — the router and answerer
+slugs, which you must set (`assistant_needle_model` / `assistant_lfm_model`
+in group_vars; there is no pinned default and an unset slug fails closed).
 
 The CLI and the release gate run in the **documents worker** (it has the
 `nlp` extra the retrieval tool needs and the frozen eval fixtures); the
-`app` container gets `openai` for the `POST /api/admin/assistant` HTTP
-path only. That provisions the runtime; it does **not** turn the feature
-on. `ASSISTANT_ENABLED` stays false until you run
+`app` container gets `openai` for the `POST /api/admin/assistant` HTTP path
+only. Building the images does **not** turn the feature on.
+`ASSISTANT_ENABLED` stays false until you run
 
 ```bash
 sectortrace nlp assistant-eval
 ```
 
-and it reports `gate.may_enable: true` (see [`docs/assistant.md`](../../docs/assistant.md)).
-Then set `assistant_app_enabled: true` and re-run the playbook.
+and it reports `gate.may_enable: true`. Re-score `FROZEN_ROUTING_THRESHOLD`
+against your router model first if its confidence calibration differs from
+the retired Needle 2's.
 
-The Ollama container's `mem_limit` is **not** in the preflight RAM budget —
-leave headroom yourself on a box that also runs a document worker. A model
-call that 400s with an unknown-model error means `assistant_lfm_model` and
-the actually-pulled `assistant_lfm_ollama_ref` have drifted apart; they
-default to the same value, so this only happens if you set one by hand.
+**Self-host escape hatch.** `assistant_runtime_enabled: true` instead adds an
+Ollama container from `docker-compose.assistant.yml` that `ollama pull`s
+`assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`,
+1.59 GB), swings the two URLs to `http://ollama:11434`, and relaxes the
+timeouts (`assistant_router_timeout` / `_overall_timeout`) since CPU
+inference does not route in 8 s. On this path set `assistant_lfm_model` /
+`assistant_needle_model` to the pulled reference. Weights live in the
+`sectortrace-assistant_ollama-models` volume; its `mem_limit` is **not** in
+the preflight RAM budget, so leave headroom on a box that also runs a
+document worker.
 
 ## What ufw doesn't cover
 

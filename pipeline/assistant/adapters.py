@@ -1,18 +1,24 @@
-"""Assistant adapters (BETA-107): two OpenAI-chat-compatible HTTP backends.
+"""Assistant adapters (BETA-107; retargeted to OpenRouter in BETA-114): two
+OpenAI-chat-compatible HTTP backends.
 
-  * `LFMOllamaAdapter` — a local Ollama serving `LiquidAI/LFM2.5-1.2B-Instruct`
-    (Q4_K_M) by default at its `/v1` endpoint, for 32K-context synthesis over
-    what the warehouse already holds. The model name is `resolved_lfm_model`,
-    so a deployment can serve a different LFM2.5 size.
-  * `NeedleAdapter` — the Needle 2 bounded retrieval router at its own local
-    `/v1` endpoint (model name `resolved_needle_model`).
+  * `LFMOllamaAdapter` — the answerer leg. Historically a local Ollama; since
+    BETA-114 it reaches OpenRouter (`assistant_ollama_url`, defaulting to
+    `https://openrouter.ai/api/v1`) with the slug `resolved_lfm_model`.
+  * `NeedleAdapter` — the router leg. Historically the Needle 2 endpoint; since
+    BETA-114 it reaches OpenRouter (`assistant_needle_url`) with the slug
+    `resolved_needle_model`. The two legs are configured independently so a
+    cheap model can route and a stronger one can ground.
+
+The class and adapter-registry names are kept as role labels rather than
+renamed, to avoid a migration of the `assistant_runs` columns that record
+them; see `docs/assistant.md`.
 
 Both talk HTTP through the `openai` client (the only `[assistant]` pin), so
 neither needs a native model runtime *in this process*. Every path that
 could touch the network is lazy: the client is built, and the extra is
-imported, only inside `generate()`. A missing extra, a disabled layer, a
-refused connection or an un-pulled model all surface as
-`AssistantUnavailable` — never a raw import or socket error.
+imported, only inside `generate()`. A missing extra, a disabled layer, an
+unconfigured model slug, a refused connection or an unknown model all
+surface as `AssistantUnavailable` — never a raw import or socket error.
 """
 from __future__ import annotations
 
@@ -21,27 +27,34 @@ from typing import Any
 from pipeline.assistant.runtime import (
     AssistantUnavailable,
     require_enabled,
+    resolved_api_key,
     resolved_lfm_model,
     resolved_needle_model,
 )
 
 _DEFAULT_MAX_TOKENS = 1024
 
+# What the `openai` client is handed when no key is configured. A self-hosted
+# OpenAI-compatible endpoint ignores it; OpenRouter rejects the call, which
+# `generate()` maps to `AssistantUnavailable` like any other refusal.
+_PLACEHOLDER_KEY = "no-key-configured"
+
 
 class _OpenAICompatAdapter:
     """Shared chat-completions call over an OpenAI-compatible `/v1` base URL.
 
-    `api_key` is a placeholder: a local Ollama and a local Needle both ignore
-    it, but the `openai` client requires the parameter to be set.
+    `api_key` is the OpenRouter bearer token (`resolved_api_key`). It may be
+    empty for a self-hosted endpoint that ignores it; a placeholder is sent in
+    that case because the `openai` client requires the parameter to be set.
     """
 
     name = "openai-compat"
 
     def __init__(self, *, base_url: str, model: str,
-                 api_key: str = "local-no-key") -> None:
+                 api_key: str = "") -> None:
         self.base_url = base_url
         self.model = model
-        self._api_key = api_key
+        self._api_key = api_key or _PLACEHOLDER_KEY
 
     def _client(self):
         try:
@@ -52,6 +65,11 @@ class _OpenAICompatAdapter:
                 "(`uv sync --extra assistant`)") from exc
         if not self.base_url:
             raise AssistantUnavailable(f"no endpoint configured for {self.name}")
+        if not self.model:
+            raise AssistantUnavailable(
+                f"no model configured for {self.name} — set "
+                "ASSISTANT_NEEDLE_MODEL (router) / ASSISTANT_LFM_MODEL "
+                "(answerer) to OpenRouter slugs")
         return OpenAI(base_url=self.base_url, api_key=self._api_key)
 
     def generate(self, prompt: str, *, system: str | None = None,
@@ -90,7 +108,8 @@ class LFMOllamaAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_ollama_url", ""),
-            model=resolved_lfm_model(settings))
+            model=resolved_lfm_model(settings),
+            api_key=resolved_api_key(settings))
 
 
 class NeedleAdapter(_OpenAICompatAdapter):
@@ -99,7 +118,8 @@ class NeedleAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_needle_url", ""),
-            model=resolved_needle_model(settings))
+            model=resolved_needle_model(settings),
+            api_key=resolved_api_key(settings))
 
 
 _ADAPTERS = {

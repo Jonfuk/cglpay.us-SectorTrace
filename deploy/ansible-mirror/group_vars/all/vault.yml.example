@@ -85,3 +85,8 @@ vault_mirror_source_pg_password: ""
 # provider offers one. Percent-encode reserved characters in the username or
 # password before putting them in the URL (notably @, :, /, # and ?).
 vault_mirror_source_pg_url: ""
+
+# --- Analyst assistant (BETA-114) -------------------------------------------
+# OpenRouter bearer token. Blank unless assistant_app_enabled; may instead
+# go in .env.merge. The same key nlp suggest-decisions uses.
+vault_assistant_api_key: ""

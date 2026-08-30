@@ -38,7 +38,10 @@ not a defect — see BETA-002's DONE entry for the reasoning.
   programme, BETA-088–106, neither yet promoted into the execution queue. The
   seven-item local analyst-assistant programme BETA-107–113 was reprioritised
   ahead of that tail and is DONE (2026-08-29), delivered code-complete but
-  left disabled behind its release gate.** BETA-028 and
+  left disabled behind its release gate. BETA-114 (2026-08-30) then moved its
+  two inference legs from the local Needle 2 / LFM runtime to OpenRouter,
+  amending the "no cloud fallback" clause of the BETA-107–113 contract; the
+  feature is still disabled behind the same gate.** BETA-028 and
   BETA-029 are DONE
   at `6d1be0e`. BETA-030 was not
   selected for this round and is DEFERRED; BETA-031 is DEFERRED because
@@ -555,6 +558,67 @@ when the programme is started.)_
     problem that BETA-033 did not solve.
 
 ### DONE
+
+- [DONE] BETA-114 | Assistant inference moved to OpenRouter
+  - completed: 2026-08-30
+  - priority: P1
+  - impact: 3
+  - effort: 2
+  - confidence: 4
+  - risk: 3
+  - area: nlp/assistant/runtime
+  - depends_on: BETA-107–113
+  - trigger: The project owner asked to switch the assistant's two inference
+    legs to OpenRouter, which the project already uses for `nlp
+    suggest-decisions`, because the local Needle 2 / LFM runtime could not
+    meet the routing bars on the CPU-only VPS (see the eval table in
+    `docs/assistant.md`).
+  - decision: This **amends the BETA-107–113 "Data, deployment and licence
+    contract"** — the clause "Processing remains local; Needle telemetry is
+    disabled and no cloud fallback is permitted" is lifted for this feature.
+    The rest of the contract stands: only already-public committee text and
+    non-sensitive aggregates may enter either model; the router still never
+    sees retrieved document text; the assistant still produces no evidence,
+    no claims and no review decisions; `gate-034g` and SetFit stay blocked.
+    Sending public-domain committee spans to a third party is the same
+    exposure already accepted for `nlp suggest-decisions` (`docs/CAVEATS.md`,
+    "Model-assisted review triage").
+  - result: `_OpenAICompatAdapter` now takes the OpenRouter bearer token;
+    `NeedleAdapter` / `LFMOllamaAdapter` pass `resolved_api_key(settings)`
+    (new — `ASSISTANT_API_KEY`, falling back to the `OPENROUTER_API_KEY` the
+    triage path already reads). New `Settings.assistant_api_key`;
+    `assistant_ollama_url` / `assistant_needle_url` now default to
+    `https://openrouter.ai/api/v1`. The pinned model constants
+    (`LFM_MODEL` / `LFM_QUANT` / `NEEDLE_MODEL`) are now empty: OpenRouter has
+    no single right default and a stale one would 404, so an unset slug fails
+    closed in the adapter (`AssistantUnavailable`, "no model configured") and
+    a deployment must set `ASSISTANT_NEEDLE_MODEL` (router) and
+    `ASSISTANT_LFM_MODEL` (answerer) itself. `runtime_status` gains
+    `api_key_configured`. The class / adapter-registry / `assistant_runs`
+    column names (`needle_*`, `lfm-ollama`) are kept as role labels rather
+    than migrated. `FROZEN_ROUTING_THRESHOLD` is unchanged in value but its
+    calibration is now only as good as the chosen model's self-reported
+    confidence — the docstring and `docs/assistant.md` say it MUST be
+    re-scored with `pipeline nlp assistant-eval` against the deployment's
+    router model before `assistant_enabled` is set. Docs updated:
+    `docs/assistant.md` (enabling steps, Ansible section, licence note),
+    `docs/CAVEATS.md`, `pipeline/config.py`, `pyproject.toml`,
+    `deploy/ansible*/` env templates and vars.
+  - api/ui: no interface change. `POST /api/admin/assistant` and `pipeline
+    nlp assistant` are unchanged; the model identities in the payload and the
+    ledger now carry OpenRouter slugs and the OpenRouter base URL (no
+    credentials).
+  - still gated: `assistant_enabled` stays `False` and
+    `pipeline nlp assistant-eval` still reports `may_enable = false` until it
+    is run with a key and both slugs on a host that can reach OpenRouter.
+    This change makes the switch possible; it does not enable the feature.
+  - validation: `tests/test_assistant_boundary.py` updated (no pinned model;
+    `api_key_configured`; key resolution from setting vs `OPENROUTER_API_KEY`;
+    an unconfigured slug is `AssistantUnavailable` before any call).
+    `test_assistant_ledger` test data updated. `test_assistant_routing` /
+    `test_assistant_service` / `test_assistant_evaluation` unchanged (they
+    use fakes and are transport-agnostic). `test_config` / `test_beta_queue` /
+    `test_docs_coverage` green; `ruff` clean.
 
 - [DONE] BETA-113 | Assistant evaluation and release gate
   - completed: 2026-08-29
@@ -7198,12 +7262,17 @@ tool, model identities, timings, caveat and run ID. All additions are optional
 and backward compatible.
 
 **Data, deployment and licence contract:** Only already-public document text
-and non-sensitive aggregates may enter either model. Processing remains local;
-Needle telemetry is disabled and no cloud fallback is permitted. Model weights
-and Ollama are not installed in the Railway image. Pin artifacts and retain
-required notices. Liquid's LFM Open License permits free commercial use only
-while annual revenue remains below USD 10 million; crossing that threshold
-requires a commercial licence. Recheck the licence before each model upgrade.
+and non-sensitive aggregates may enter either model. ~~Processing remains
+local; Needle telemetry is disabled and no cloud fallback is permitted.~~
+**Amended by BETA-114 (2026-08-30):** both inference legs now run on
+OpenRouter — the local Needle 2 / LFM runtime could not meet the routing bars
+on the CPU-only VPS. The public-text-and-aggregates-only rule, the
+router-never-sees-document-text rule and the no-evidence/no-claims/no-review
+rules all still stand; this is the same third-party exposure already accepted
+for `nlp suggest-decisions`. `openai` and the key are still not installed in
+the Railway image. The LFM Open License no longer applies (no LFM weights are
+served); OpenRouter usage is metered and billed per token — the deployment
+picks the router and answerer model slugs and owns that cost.
 
 **Deferred by design:** LFM embedding and ColBERT models do not replace the
 current 384-dimensional pgvector path in this programme; they require a
@@ -7214,13 +7283,16 @@ access are also out of scope and require separate named decisions and gates.
 **Delivery sequence:** DONE (2026-08-29). BETA-107 through BETA-113 were
 delivered in order — BETA-107, then BETA-108/109, then BETA-110, BETA-111,
 BETA-112, BETA-113 — after the owner reprioritised the programme ahead of the
-BETA-068–106 tail. The code is complete and the offline suite is green with
-none of the optional runtime present. **The feature remains disabled:**
-`assistant_enabled` is `False`, the `[assistant]` extra is not installed, and
-`pipeline nlp assistant-eval` reports `gate.may_enable = false` (the dynamic
-routing/grounding suites need the local Needle 2 and LFM runtimes, which are
-not present in CI or on a fresh checkout). Enabling it is a separate act,
-gated on that report passing on the target local host.
+BETA-068–106 tail. BETA-114 (2026-08-30) then moved both inference legs to
+OpenRouter. The code is complete and the offline suite is green with none of
+the optional runtime present. **The feature remains disabled:**
+`assistant_enabled` is `False`, the `[assistant]` extra is not installed, no
+key or model slug is configured, and `pipeline nlp assistant-eval` reports
+`gate.may_enable = false`. Enabling it is a separate act: set
+`ASSISTANT_API_KEY` and both model slugs, then re-run the eval on a host that
+can reach OpenRouter and confirm `may_enable` — including re-freezing
+`FROZEN_ROUTING_THRESHOLD` against the chosen router model if its confidence
+calibration sits differently from Needle 2's.
 
 ## Features Under Investigation
 

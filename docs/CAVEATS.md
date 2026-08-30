@@ -985,19 +985,29 @@ Two things this required beyond the obvious:
 Coroners' own names are public: they are public officials named on the face of
 a published report.
 
-## The local analyst assistant (experimental, off by default)
+## The analyst assistant (experimental, off by default)
 
 `pipeline/assistant/` (BETA-107–113) is an optional natural-language finding
-aid for the **local analysis host only**. It is disabled by default, never
-installed on Railway, and gated behind `pipeline nlp assistant-eval` —
-`gate.may_enable` is the only thing that authorises turning it on, and it
-stays closed until every check passes on the target host.
+aid for the operator. It is disabled by default, never installed on Railway,
+and gated behind `pipeline nlp assistant-eval` — `gate.may_enable` is the only
+thing that authorises turning it on, and it stays closed until every check
+passes.
+
+**Inference runs on OpenRouter (BETA-114).** BETA-107–113 required both model
+legs to run locally and forbade any cloud fallback; a CPU-only VPS could not
+meet the routing bars, so BETA-114 moved routing and grounding to OpenRouter —
+the same third party `nlp suggest-decisions` already uses. What is sent is
+only already-public committee text and non-sensitive aggregates: the router
+gets the question plus the tool catalogue, the answerer gets one validated
+tool result. No `restricted_` data, no cross-layer figures. It is a
+terms/cost dependency (metered per token; check the routed model's training
+terms), not a disclosure of anything the portal does not already publish.
 
 If it is ever enabled, treat its output as a **reading aid, not evidence**:
 
-- An assistant answer is one small local model's summary of **one** read-only
-  query. It is not a figure, not a claim, and not a review decision. Nothing
-  it says has been through the review queue.
+- An assistant answer is one model's summary of **one** read-only query. It is
+  not a figure, not a claim, and not a review decision. Nothing it says has
+  been through the review queue.
 - Every displayed sentence carries a `[[identifier]]` citation that resolves
   to stored provenance (a chunk with a source URL and an archived-payload
   hash, or a named aggregate). Open the citation. An answer with an
@@ -1009,8 +1019,9 @@ If it is ever enabled, treat its output as a **reading aid, not evidence**:
 - It never sees `restricted_` data, and the router never sees document text,
   so a prompt injected into a collected document cannot change what it does.
 - Every run is recorded immutably in `assistant_runs` (migration 0079):
-  question, model identities, prompt-template hashes, retrieved chunk ids,
-  citations, timings and outcome. That row is an audit record, not evidence.
+  question, model identities (OpenRouter slugs), the OpenRouter base URL with
+  no credentials, prompt-template hashes, retrieved chunk ids, citations,
+  timings and outcome. That row is an audit record, not evidence.
 
 Operator documentation: [`docs/assistant.md`](assistant.md).
 

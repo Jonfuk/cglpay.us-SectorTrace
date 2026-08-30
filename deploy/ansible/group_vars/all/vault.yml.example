@@ -52,3 +52,7 @@ vault_companies_house_api_key: ""
 vault_cqc_subscription_key: ""
 vault_kaggle_username: ""
 vault_kaggle_key: ""
+
+# OpenRouter bearer token for the analyst assistant (BETA-114). Blank unless
+# assistant_app_enabled; the same key nlp suggest-decisions uses.
+vault_assistant_api_key: ""

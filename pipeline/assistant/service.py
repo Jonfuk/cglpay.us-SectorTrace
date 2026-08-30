@@ -41,8 +41,8 @@ def _overall_timeout(settings) -> float:
     return float(v) if v > 0 else OVERALL_TIMEOUT_SECONDS
 
 CAVEAT = (
-    "Experimental local finding aid. This answer is produced by a small local "
-    "model summarising ONE read-only query of the warehouse; it is not "
+    "Experimental finding aid. This answer is produced by a model (via "
+    "OpenRouter) summarising ONE read-only query of the warehouse; it is not "
     "evidence, not a review decision and not a published figure. Every "
     "citation links to stored provenance — open it before relying on anything."
 )

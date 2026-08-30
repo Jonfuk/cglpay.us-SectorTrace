@@ -49,7 +49,7 @@ evidence base supports.
 | [Deployment](docs/DEPLOYMENT.md) | The PostgreSQL backend, the cutover checklist, and dual maintenance |
 | [Backups](docs/BACKUP.md) | Snapshotting and restoring the warehouse on either backend |
 | [AI promotion policy](docs/AI_PROMOTION_POLICY.md) | Where machine assistance is and is not allowed near evidence |
-| [Local analyst assistant](docs/assistant.md) | The optional, off-by-default natural-language finding aid — how it is bounded and how to enable it |
+| [Analyst assistant](docs/assistant.md) | The optional, off-by-default natural-language finding aid (inference on OpenRouter) — how it is bounded and how to enable it |
 
 The site also carries generated API reference for every module in `pipeline/`.
 [`CLAUDE.md`](CLAUDE.md) records the settled decisions the codebase is built

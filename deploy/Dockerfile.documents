@@ -33,8 +33,10 @@ WORKDIR /app
 # `nlp assistant-eval` route to this worker (sectortrace[-mirror] wrapper),
 # and the retrieval tool they lean on needs the `nlp` extra that only this
 # image carries. Off unless the deploy asks for it — the Ansible roles pass
-# --build-arg INSTALL_ASSISTANT=true, keyed on assistant_runtime_enabled;
-# Railway builds neither this file nor that arg. See docs/assistant.md.
+# --build-arg INSTALL_ASSISTANT=true, keyed on assistant_app_enabled (the
+# OpenRouter path, BETA-114) or assistant_runtime_enabled (self-hosted
+# Ollama); Railway builds neither this file nor that arg. See
+# docs/assistant.md.
 ARG INSTALL_ASSISTANT=false
 
 COPY pyproject.toml uv.lock ./

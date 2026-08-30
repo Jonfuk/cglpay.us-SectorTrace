@@ -1,20 +1,20 @@
-"""Optional natural-language operator layer (BETA-107).
+"""Optional natural-language operator layer (BETA-107; inference on OpenRouter
+since BETA-114).
 
-A DOWNSTREAM, non-collecting convenience for the **local analysis host**.
-Everything about it is off by default:
+A DOWNSTREAM, non-collecting operator convenience. Everything about it is off
+by default:
 
   * `Settings.assistant_enabled` is `False`;
-  * this package imports with none of its dependencies, model weights or
-    runtimes present — `runtime_status()` reports what is missing rather
-    than raising;
-  * the Railway image installs neither the `[assistant]` extra nor the
-    model (see `Dockerfile` — the `uv sync` there pins the base extras);
+  * this package imports with none of its dependencies or configuration
+    present — `runtime_status()` reports what is missing rather than raising;
+  * the Railway image installs neither the `[assistant]` extra nor a key
+    (see `Dockerfile` — the `uv sync` there pins the base extras);
   * an adapter raises `AssistantUnavailable` (never a bare `ImportError` or
-    a socket error) when asked to run without its backend.
+    a socket error) when asked to run without its backend or a model slug.
 
 Never imported by a collector, the web server's request path, or CI. The
-offline test suite must pass unchanged whether or not `openai`, Ollama, the
-LFM weights or a Needle endpoint are present.
+offline test suite must pass unchanged whether or not `openai` or an
+OpenRouter key is present.
 """
 from pipeline.assistant.adapters import (
     LFMOllamaAdapter,
@@ -29,6 +29,7 @@ from pipeline.assistant.runtime import (
     is_enabled,
     openai_client_installed,
     require_enabled,
+    resolved_api_key,
     resolved_lfm_model,
     resolved_lfm_quant,
     resolved_needle_model,
@@ -46,6 +47,7 @@ __all__ = [
     "is_enabled",
     "openai_client_installed",
     "require_enabled",
+    "resolved_api_key",
     "resolved_lfm_model",
     "resolved_lfm_quant",
     "resolved_needle_model",

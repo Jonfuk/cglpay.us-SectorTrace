@@ -284,39 +284,49 @@ class Settings(BaseSettings):
     nlp_chunk_batch_size: int = 200
     nlp_embed_batch_size: int = 256
 
-    # BETA-107: the optional natural-language operator layer for the *local
-    # analysis host*. Off by default and never on Railway — the Docker image
-    # installs neither the `[assistant]` extra nor the model, and
+    # BETA-107, retargeted to OpenRouter by BETA-114: the optional
+    # natural-language operator layer. Off by default and never on Railway —
+    # the Docker image installs neither the `[assistant]` extra nor a key, and
     # `railway-start.sh` runs the base install. `pipeline/assistant/` imports
     # with none of it present; `runtime_status()` reports what is installed
-    # and configured without connecting. Two OpenAI-chat-compatible HTTP
-    # endpoints: a local Ollama serving `LiquidAI/LFM2.5-1.2B-Instruct`
-    # (Q4_K_M) for 32K-context synthesis, and the Needle 2 bounded retrieval
-    # router. The default model id and quant are pinned in
-    # `pipeline/assistant/runtime.py`, not here.
+    # and configured without connecting.
+    #
+    # Two OpenAI-chat-compatible HTTP endpoints, configured independently: the
+    # answerer leg (`assistant_ollama_url` — the name is historical) and the
+    # router leg (`assistant_needle_url`). Both default to OpenRouter. BETA-107
+    # served both from a local Ollama/Needle runtime; a CPU-only VPS could not
+    # meet the routing bars (see `docs/assistant.md`), so BETA-114 lifted the
+    # "processing remains local; no cloud fallback" clause of the BETA-107–113
+    # contract for this feature. Point these back at a self-hosted endpoint to
+    # return to local inference.
     assistant_enabled: bool = False
-    assistant_ollama_url: str = "http://127.0.0.1:11434/v1"
-    assistant_needle_url: str = "http://127.0.0.1:8422/v1"
+    assistant_ollama_url: str = "https://openrouter.ai/api/v1"
+    assistant_needle_url: str = "https://openrouter.ai/api/v1"
 
-    # What the adapters put in the `model` field of each request, and what
-    # `assistant_runs` records as the model that answered. Empty means the
-    # pinned defaults (`LFM_MODEL` / `LFM_QUANT` / `NEEDLE_MODEL` in
-    # `pipeline/assistant/runtime.py`) — CI and a fresh checkout leave them
-    # empty and nothing changes. A deployment serving a different LFM2.5
-    # size, or an Ollama that knows the weights by a `hf.co/...` name, sets
-    # these so the wire call matches the served model and the ledger records
-    # what actually ran rather than the pin.
+    # The OpenRouter bearer token. `resolved_api_key` falls back to the
+    # `OPENROUTER_API_KEY` env var (the same one `nlp suggest-decisions`
+    # reads), so a host that already set that needs no second entry. Never
+    # logged; not redacted anywhere because it is never put in a log line.
+    # Empty is allowed for a self-hosted endpoint that ignores it.
+    assistant_api_key: str | None = None
+
+    # The model slug each leg sends, and what `assistant_runs` records as the
+    # model that answered. There is no pinned default (BETA-114): OpenRouter
+    # has no single right choice and a stale default would 404 on the wire, so
+    # an unset slug fails closed in the adapter. A deployment names both — a
+    # cheap/fast model for `assistant_needle_model` (routing), a stronger one
+    # for `assistant_lfm_model` (grounding). `assistant_lfm_quant` is only a
+    # ledger annotation now (OpenRouter serves its own quantisation).
     assistant_lfm_model: str = ""
     assistant_lfm_quant: str = ""
     assistant_needle_model: str = ""
 
     # The routing leg and the whole-turn ceilings, in seconds. 0 means the
     # code defaults (`ROUTER_TIMEOUT_SECONDS` = 8, `OVERALL_TIMEOUT_SECONDS`
-    # = 30) — the values a capable local host is expected to meet. A slower
-    # box (CPU-only inference of a 1B+ model) legitimately needs them
-    # relaxed; the Ansible deploy sets them, and interactive latency goes up
-    # to match. The frozen confidence threshold is NOT here — that stays a
-    # deliberate edit in `pipeline/assistant/routing.py`.
+    # = 30). OpenRouter's first-token latency on a cold or busy model can
+    # exceed 8 s; a deployment that sees router timeouts relaxes these. The
+    # frozen confidence threshold is NOT here — that stays a deliberate edit
+    # in `pipeline/assistant/routing.py`.
     assistant_router_timeout_seconds: float = 0.0
     assistant_overall_timeout_seconds: float = 0.0
 

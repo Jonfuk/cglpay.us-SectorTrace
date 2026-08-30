@@ -14,8 +14,9 @@ from pipeline.assistant import ledger
 def test_record_writes_one_row_and_returns_its_id(conn):
     run_id = ledger.record(
         conn, question="how stale is contracts?", filters={"limit": 5},
-        outcome="ok", needle_model="needle-2", lfm_model="LiquidAI/LFM2.5-1.2B-Instruct",
-        lfm_quant="Q4_K_M", selected_tool="inspect_freshness",
+        outcome="ok", needle_model="openrouter/router-slug",
+        lfm_model="openrouter/answerer-slug",
+        lfm_quant="", selected_tool="inspect_freshness",
         routing_confidence=0.81, tool_args={"table": "contracts"},
         retrieved_chunk_ids=["contracts"], answer="Contracts last fetched 2026-01-01 [[contracts]].",
         citation_ids=["contracts"], timings={"total_ms": 42})

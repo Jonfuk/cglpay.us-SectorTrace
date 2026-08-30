@@ -323,21 +323,31 @@ backup_s3_region: ""
 backup_s3_access_key: ""
 backup_s3_secret: ""
 
-# --- Local analyst assistant (BETA-107) ---------------------------------------
+# --- Analyst assistant (BETA-107; OpenRouter since BETA-114) -----------------
 # The optional natural-language operator finding aid, off by default and
-# never on Railway (docs/assistant.md). Two switches, because provisioning
-# the model runtime and authorising the feature are different decisions:
+# never on Railway (docs/assistant.md). Two switches, because configuring
+# inference and authorising the feature are different decisions:
 #
-#   assistant_runtime_enabled  stands up a single Ollama (its own compose
-#                              file), builds the `openai` extra into the app
-#                              image, and points ASSISTANT_OLLAMA_URL /
-#                              ASSISTANT_NEEDLE_URL at it.
-#   assistant_app_enabled      writes ASSISTANT_ENABLED=true. Do NOT set this
+#   assistant_app_enabled      builds the `openai` extra into the images,
+#                              writes the OpenRouter key + model slugs, and
+#                              sets ASSISTANT_ENABLED=true. Do NOT set this
 #                              until `pipeline nlp assistant-eval` reports
-#                              gate.may_enable: true — a provisioned runtime
-#                              is not an enabled feature.
+#                              gate.may_enable: true — a configured key is
+#                              not an enabled feature.
+#   assistant_runtime_enabled  the self-host escape hatch: stands up a single
+#                              Ollama (its own compose file) and swings
+#                              ASSISTANT_OLLAMA_URL / ASSISTANT_NEEDLE_URL to
+#                              it instead of OpenRouter. All the Ollama /
+#                              GGUF / CPU-timeout notes below apply only on
+#                              this path.
 assistant_runtime_enabled: false
 assistant_app_enabled: false
+
+# OpenRouter (BETA-114). The base URL both legs use unless the self-host
+# hatch is on, and the bearer token. Put the real key in the vault, not
+# here. Blank key is valid only for a self-hosted endpoint that ignores it.
+assistant_api_base: "{{ 'http://ollama:11434/v1' if assistant_runtime_enabled else 'https://openrouter.ai/api/v1' }}"
+assistant_api_key: "{{ vault_assistant_api_key | default('') }}"
 
 # One Ollama serves both roles the assistant calls (synthesis and the
 # router). It `ollama pull`s this reference once, and the app is told to
@@ -373,13 +383,15 @@ assistant_overall_timeout: 120
 # 32768 on a host with the RAM (and the speed) for it.
 assistant_ollama_context_length: 8192
 
-# What the adapters put in the `model` field and the ledger records
-# (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). Default to the
-# pulled reference so the wire call matches; override independently only to
-# run a genuinely separate router model on the same Ollama.
-assistant_lfm_model: "{{ assistant_lfm_ollama_ref }}"
-assistant_lfm_quant: "Q4_K_M"
-assistant_needle_model: "{{ assistant_lfm_ollama_ref }}"
+# The model slugs the adapters send and the ledger records
+# (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). No pinned default
+# (BETA-114): name an OpenRouter slug for each leg — a cheap/fast model for
+# the router, a stronger one for the answerer. An unset slug fails closed.
+# On the self-host path set both to `assistant_lfm_ollama_ref`.
+# `assistant_lfm_quant` is a free-text ledger annotation only.
+assistant_lfm_model: ""
+assistant_lfm_quant: ""
+assistant_needle_model: ""
 
 # Pinned like every other image here (neo4j:5-community, caddy:2-alpine).
 # Bump deliberately — but not below a 2026 build: LFM2.5 is a hybrid

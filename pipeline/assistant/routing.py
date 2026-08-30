@@ -1,25 +1,30 @@
-"""Needle routing and the confidence gate (BETA-110).
+"""Router routing and the confidence gate (BETA-110; router moved to OpenRouter
+in BETA-114).
 
-One analyst question in, at most one allowlisted tool call out. Needle 2 is a
-small local router with built-in tool retrieval and a calibrated confidence
-head; it is a better bounded dispatcher than spending LFM context on the whole
-catalogue. But its output is never trusted directly:
+One analyst question in, at most one allowlisted tool call out. The router is
+a general instruction-following model on OpenRouter (`NeedleAdapter`,
+`assistant_needle_model`), prompted to pick one tool and report a calibrated
+confidence. BETA-110 used the local Needle 2 model with a trained confidence
+head; BETA-114 replaced it, so the confidence a general model returns is only
+as calibrated as its own self-report. Its output is never trusted directly:
 
   * the returned tool name is checked against the closed catalogue
     (`pipeline.assistant.tools.TOOL_NAMES`);
   * the returned arguments are re-validated by `tools.validate_args`, the same
     function the executor uses — the router does not get to widen a bound;
-  * the confidence must clear a threshold frozen on the BETA-113 development
-    routing set before anything is executed.
+  * the confidence must clear `FROZEN_ROUTING_THRESHOLD` before anything is
+    executed.
 
 Anything below the threshold, ambiguous, out of scope or invalid returns a
 *clarification* and executes no tool. A router timeout or a dead endpoint
-raises `AssistantUnavailable` (fail closed — no tool runs). Needle sees only
-the question and the catalogue, never retrieved document text, so a prompt
-injected into a document cannot change the selected action.
+raises `AssistantUnavailable` (fail closed — no tool runs). The router sees
+only the question and the catalogue, never retrieved document text, so a
+prompt injected into a document cannot change the selected action — and
+OpenRouter receives only that non-sensitive pair.
 
-Needle telemetry is off: the adapter talks to a local endpoint only and no
-usage is reported anywhere.
+Because the router model is now chosen per deployment, the frozen threshold
+below MUST be re-validated with `pipeline nlp assistant-eval` against that
+model before `assistant_enabled` is set, and re-frozen here if it moves.
 """
 from __future__ import annotations
 
@@ -33,12 +38,17 @@ from pipeline.assistant.tools import TOOL_NAMES, ToolError, tool_schemas, valida
 
 # Frozen on the development routing set (see docs/assistant.md and
 # `pipeline nlp assistant-eval`). Not a runtime setting: changing it is a
-# deliberate edit here, re-scored against the held-out BETA-113 suite.
+# deliberate edit here, re-scored against the held-out BETA-113 suite. The
+# 0.60 was frozen against the local Needle 2 confidence head (BETA-110); after
+# BETA-114 it must be re-scored against whatever OpenRouter model a deployment
+# routes with, and moved here if that model's self-reported confidence sits
+# differently. The eval gate blocks enabling until that has been done.
 FROZEN_ROUTING_THRESHOLD = 0.60
 
 # A short ceiling for the router leg specifically (BETA-112 asks for one).
-# The default a capable local host is expected to meet; a slower box relaxes
-# it via `Settings.assistant_router_timeout_seconds` (see `router_timeout`).
+# The code default; a deployment that sees OpenRouter first-token latency
+# exceed it relaxes it via `Settings.assistant_router_timeout_seconds` (see
+# `router_timeout`).
 ROUTER_TIMEOUT_SECONDS = 8.0
 
 

@@ -2,8 +2,10 @@
 
 One immutable row per single-turn assistant run, in `assistant_runs`
 (migration 0079). It records what an analyst needs to reconstruct an answer —
-the question and filters, the Needle/LFM identities and quant, each frozen
-prompt template's SHA-256, the routing confidence and validated arguments,
+the question and filters, the router and answerer model identities and their
+endpoint URLs (the `needle_*` / `lfm_*` columns keep their BETA-108 names;
+since BETA-114 the endpoint is OpenRouter's base URL, still credential-free),
+each frozen prompt template's SHA-256, the routing confidence and arguments,
 the retrieved chunk ids, the answer and its result-local citation ids,
 timings, outcome and error class — and nothing an analyst does not: no
 secrets, no API keys, no model file paths, no raw model logs.

@@ -1,25 +1,34 @@
-# The local analyst assistant (BETA-107–113)
+# The analyst assistant (BETA-107–113; inference on OpenRouter since BETA-114)
 
 An **optional, experimental, off-by-default** natural-language finding aid for
-the local analysis host. It answers one question by routing it to one
-read-only tool and summarising that tool's result with a small local model.
-It produces no evidence, no claims and no review decisions.
+the operator. It answers one question by routing it to one read-only tool and
+summarising that tool's result with a model. It produces no evidence, no
+claims and no review decisions.
 
 This is the named decision BETA-034 required before any RAG/LLM work — and
 only for an operator finding aid. It does **not** authorise model-generated
 claims, automated review decisions, writes to `graph_claims`, public answers,
-collection-time model calls, or any paid/cloud AI dependency. SetFit and
-claim publication remain blocked by `pipeline nlp gate-034g`.
+or collection-time model calls. SetFit and claim publication remain blocked by
+`pipeline nlp gate-034g`.
+
+**BETA-114 note.** BETA-107–113 ran both inference legs on a local Needle 2 /
+LFM runtime and forbade any cloud fallback. A CPU-only VPS could not meet the
+routing bars (see the table under "Deploying" below), so BETA-114 moved both
+legs to [OpenRouter](https://openrouter.ai) — the same third party the review
+pipeline already uses for `nlp suggest-decisions`. Only already-public
+committee text and non-sensitive aggregates are sent; the router still never
+sees retrieved document text. OpenRouter usage is billed per token and the
+deployment owns that cost.
 
 ## What it is made of
 
 | Piece | Module | What it does |
 |---|---|---|
-| Runtime boundary | `pipeline/assistant/runtime.py`, `adapters.py` | The `[assistant]` extra (just `openai`), two OpenAI-chat-compatible local endpoints, `AssistantUnavailable` instead of import/socket errors. Imports with nothing installed. |
+| Runtime boundary | `pipeline/assistant/runtime.py`, `adapters.py` | The `[assistant]` extra (just `openai`), two OpenAI-chat-compatible endpoints (OpenRouter by default; independently configured), `AssistantUnavailable` instead of import/socket errors. Imports with nothing installed. |
 | Run ledger | `pipeline/assistant/ledger.py` + migration `0079` | One immutable `assistant_runs` row per turn: question, filters, model identities, prompt-template hashes, routing confidence, validated args, retrieved chunk ids, answer, citation ids, timings, outcome, error class. Append-only. No secrets or model paths. |
 | Tool catalogue | `pipeline/assistant/tools.py` | Exactly five typed, side-effect-free tools wrapping existing query code. No argument is a table name, URL, path or SQL. |
-| Router | `pipeline/assistant/routing.py` | Needle 2 picks at most one tool. Its name and arguments are re-validated independently; confidence must clear a frozen threshold; anything else is a clarification with no execution. Needle never sees document text. |
-| Grounding | `pipeline/assistant/grounding.py` | LFM gets only the validated tool result (retrieved text delimited as untrusted data) and no executable tools. Every `[[id]]` in the answer is checked against the result's own identifiers; an unresolved citation or a missing citation suppresses the answer and returns an abstention. |
+| Router | `pipeline/assistant/routing.py` | The router model (`assistant_needle_model`) picks at most one tool. Its name and arguments are re-validated independently; confidence must clear a frozen threshold; anything else is a clarification with no execution. The router is sent only the question and the tool catalogue — never document text. |
+| Grounding | `pipeline/assistant/grounding.py` | The answerer model (`assistant_lfm_model`) gets only the validated tool result (retrieved text delimited as untrusted data) and no executable tools. Every `[[id]]` in the answer is checked against the result's own identifiers; an unresolved citation or a missing citation suppresses the answer and returns an abstention. |
 | Service | `pipeline/assistant/service.py` | One orchestration function shared by HTTP and CLI. One tool call per turn, short router timeout, 30 s overall ceiling, explicit `ok`/`abstained`/`clarified`/`timeout`/`unavailable`/`failed` outcome. |
 | Evaluation & gate | `pipeline/assistant/evaluation.py` + `tests/fixtures/assistant/` | Frozen routing and grounding suites; a machine-readable gate whose `may_enable` field is the only thing that authorises enabling the feature. |
 
@@ -36,13 +45,24 @@ claim publication remain blocked by `pipeline nlp gate-034g`.
 All five are read-only. Bad arguments raise `ToolError`, which the service
 turns into a clarification, never a crash and never an execution.
 
-## Enabling it (local host only)
+## Enabling it
 
-1. `uv sync --extra assistant` — installs `openai` only. The model weights and
-   Ollama are **not** pip-installed and **not** in the Railway image.
-2. Serve `LiquidAI/LFM2.5-1.2B-Instruct` (Q4_K_M) on a local Ollama at
-   `assistant_ollama_url` and a Needle 2 endpoint at `assistant_needle_url`.
-   Needle telemetry must be disabled; no cloud fallback is permitted.
+1. `uv sync --extra assistant` — installs `openai` only. It is not in the
+   Railway image.
+2. Set the OpenRouter key and both model slugs:
+
+   ```bash
+   ASSISTANT_API_KEY=sk-or-...        # or reuse OPENROUTER_API_KEY
+   ASSISTANT_NEEDLE_MODEL=<slug>      # the router leg — a cheap/fast model
+   ASSISTANT_LFM_MODEL=<slug>         # the answerer leg — a stronger model
+   ```
+
+   `assistant_ollama_url` / `assistant_needle_url` already default to
+   `https://openrouter.ai/api/v1`; point them at a self-hosted
+   OpenAI-compatible endpoint to run inference locally instead (the key may
+   then be blank). An unset slug fails closed — the adapter raises
+   `AssistantUnavailable`, "no model configured", rather than sending a stale
+   default to OpenRouter.
 3. Run the gate:
 
    ```bash
@@ -51,31 +71,31 @@ turns into a clarification, never a crash and never an execution.
 
    It prints the routing/grounding scores and the gate. **Do not set
    `assistant_enabled = True` until `gate.may_enable` is `true`.** A
-   code-complete feature is not an enabled one.
-4. Only then set `assistant_enabled = True` in local settings.
+   code-complete feature is not an enabled one. In particular,
+   `FROZEN_ROUTING_THRESHOLD` (0.60 in `pipeline/assistant/routing.py`) was
+   calibrated against the retired Needle 2 confidence head; re-score it
+   against your chosen router model and move it in code if that model's
+   self-reported confidence sits differently.
+4. Only then set `assistant_enabled = True`.
 
-## Deploying the runtime via Ansible
+## Deploying via Ansible
 
-Both `deploy/ansible/` (self-host) and `deploy/ansible-mirror/` can stand
-the model runtime up as a managed container, the same way they manage
-Postgres:
+Both `deploy/ansible/` (self-host) and `deploy/ansible-mirror/` build the
+`[assistant]` extra into the app and documents-worker images on an explicit
+opt-in and write the OpenRouter configuration:
 
-* `assistant_runtime_enabled: true` renders `docker-compose.assistant.yml`
-  (one Ollama service on the stack's Docker network), builds **both** the
-  `app` and the documents-worker images with `--build-arg
-  INSTALL_ASSISTANT=true` so `openai` is present, brings Ollama up, and
-  `ollama pull`s `assistant_lfm_ollama_ref`. Both `ASSISTANT_OLLAMA_URL`
-  and `ASSISTANT_NEEDLE_URL` become `http://ollama:11434/v1`, and
-  `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` are set to that same
-  pulled reference — so the string the code sends is the name Ollama has,
-  with no `ollama cp` alias, and `assistant_runs` records the model that
-  actually answered. Ollama's context window is raised to 32K
-  (`OLLAMA_CONTEXT_LENGTH`); the 2048 default would truncate the grounding
-  step's passages.
-* `assistant_app_enabled: true` writes `ASSISTANT_ENABLED=true`. Keep it
-  false until step 3's gate passes. On a `beta` mirror, set
-  `ASSISTANT_ENABLED=true` in `.env.merge` instead so it survives the
-  checkout reset.
+* `assistant_app_enabled: true` builds **both** images with `--build-arg
+  INSTALL_ASSISTANT=true` so `openai` is present, and writes
+  `ASSISTANT_API_KEY`, `ASSISTANT_NEEDLE_MODEL`, `ASSISTANT_LFM_MODEL` and
+  `ASSISTANT_ENABLED=true`. Keep `assistant_enabled` behind step 3's gate —
+  on a `beta` mirror set `ASSISTANT_ENABLED=true` in `.env.merge` so it
+  survives the checkout reset.
+* `assistant_runtime_enabled: true` is the self-host escape hatch: it renders
+  `docker-compose.assistant.yml` (one Ollama service on the stack's Docker
+  network), `ollama pull`s `assistant_lfm_ollama_ref`, and points
+  `ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` at `http://ollama:11434/v1`
+  instead of OpenRouter. Everything in `vars.yml` about Ollama versions, GGUF
+  quirks, context length and the CPU timeouts applies only on this path.
 
 **Which container runs it.** The CLI (`nlp assistant`, `nlp
 assistant-eval`) routes to the **documents worker** — that image carries
@@ -87,48 +107,34 @@ extra in the app image — the same limit as `/admin` semantic search).
 
 Railway is unaffected: it builds `Dockerfile` with no build args and does
 not build `Dockerfile.documents` at all, so `INSTALL_ASSISTANT` stays
-`false` and neither image it produces gets `openai`.
+`false` and neither image it produces gets `openai` or a key.
 
-**Model identity is configurable.** `LFM_MODEL` / `LFM_QUANT` /
-`NEEDLE_MODEL` in `pipeline/assistant/runtime.py` are defaults. The
-`assistant_lfm_model` / `assistant_lfm_quant` / `assistant_needle_model`
-settings (empty on a checkout and in CI — nothing changes) override what
-the adapters send and what `assistant_runs` records. The Ansible roles set
-them to the pulled reference, so serving a different LFM2.5 size does not
-leave the ledger claiming the pin. One Ollama still serves both roles;
-`needle_model` recording the same string as `lfm_model` is the truth on
-that layout — run a distinct router by setting `assistant_needle_model`
-and pulling it too.
+**Model identity.** There is no pinned default (BETA-114): `LFM_MODEL` /
+`LFM_QUANT` / `NEEDLE_MODEL` in `pipeline/assistant/runtime.py` are now empty
+constants. `assistant_lfm_model` / `assistant_needle_model` are the OpenRouter
+slugs the adapters send and `assistant_runs` records; `assistant_lfm_quant`
+is a free-text ledger annotation only (OpenRouter serves its own
+quantisation).
 
-**The reference and the timeouts.** `assistant_lfm_ollama_ref` must name a
-model Ollama can pull. The deploy default is
-`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` (1.59 GB). Observed on the eval
-suite on a CPU-only VPS (Ollama 0.33.2, timeouts relaxed to 30 / 90):
+**The timeouts.** `ROUTER_TIMEOUT_SECONDS` (8) and `OVERALL_TIMEOUT_SECONDS`
+(30) are the code defaults. OpenRouter's first-token latency on a cold or
+busy model can exceed 8 s; if `assistant-eval` shows a router timeout rate,
+relax `assistant_router_timeout_seconds` / `assistant_overall_timeout_seconds`
+(0 → the defaults).
+
+**Why the switch (historical).** BETA-107–113 served both legs from a local
+Needle 2 / LFM runtime. On the eval suite on a CPU-only VPS (Ollama 0.33.2,
+timeouts relaxed to 30 / 90) no model that fit the box passed the routing
+bars:
 
 | model | routing precision | wrong executions | verdict |
 |---|---|---|---|
 | `LFM2.5-350M-GGUF` | 0.014 | 1 | cannot emit the routing JSON at all |
 | `lfm2.5-1.2b-instruct` | 0.057 | 13 (incl. injection/forbidden) | emits JSON, parrots `confidence: 0.95`, routes adversarial prompts |
-| `LFM2.5-2.6B-GGUF` | *the smallest with a real shot at the bars* | | needs the relaxed timeouts to fit CPU |
+| `LFM2.5-2.6B-GGUF` | *the smallest with a real shot at the bars* | | still needed the relaxed timeouts to fit CPU |
 
-`ROUTER_TIMEOUT_SECONDS` (8) and `OVERALL_TIMEOUT_SECONDS` (30) are the
-values a capable host meets. `assistant_router_timeout_seconds` /
-`assistant_overall_timeout_seconds` (0 → the defaults) relax them; the
-Ansible roles set 60 / 120 because CPU inference of the 2.6B does not route
-in 8 s, and `assistant_ollama_context_length` drops from the design's 32K
-to 8192 so the KV cache does not push a small box into swap. Interactive
-latency is then tens of seconds per question. On a GPU or fast many-core
-box, keep the code defaults and 32K. NOT `ollama.com/library/lfm2`, which
-is a 24B model at 14 GB. A missing reference fails the provisioning task
-with `ollama pull`'s own error in the message.
-
-**Ollama version.** `assistant_ollama_image` must be a 2026 build (default
-`ollama/ollama:0.33.2`). LFM2.5 is hybrid — `attention.head_count_kv` is a
-per-layer array — and Ollama below ~0.9 panics parsing it (`interface
-conversion: *ggml.array, not uint32`). The panic is on *load*, not pull, so
-an old build passes `ollama pull` and `ollama show` and only fails on the
-first request; the provisioning task's `ollama run` smoke-test is there to
-catch it at deploy time.
+BETA-114 moved both legs to OpenRouter so the model is no longer bounded by
+the deployment host.
 
 ## Using it
 
@@ -150,14 +156,19 @@ curl -s http://127.0.0.1:8000/api/admin/assistant \
 `GET /api/admin/assistant` still returns the BETA-107 runtime status and
 contacts nothing.
 
-## Licence
+## Cost and terms
 
-Liquid's LFM Open License permits free commercial use only while annual
-revenue is below USD 10 million; crossing that threshold requires a
-commercial licence. Recheck the licence before each model upgrade.
+OpenRouter meters and bills per token; the deployment picks the router and
+answerer slugs and owns that cost. Check the terms of the specific models you
+route to — some providers on OpenRouter train on prompts unless a paid or
+zero-retention tier is used. Only already-public committee text and
+non-sensitive aggregates are ever sent (see `docs/CAVEATS.md`), so this is a
+terms/cost question, not a disclosure one. The retired local path used
+Liquid's LFM Open License; that no longer applies while no LFM weights are
+served.
 
 ## Out of scope (separate named decisions and gates required)
 
 LFM embedding/ColBERT replacing the 384-dimensional pgvector path;
-LFM/Needle extraction or classification; multi-turn memory; autonomous
+model-driven extraction or classification; multi-turn memory; autonomous
 multi-tool loops; any public assistant access.
