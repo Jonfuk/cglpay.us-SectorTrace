@@ -51,9 +51,11 @@ import re
 from pathlib import Path
 
 from pipeline.nlp import decisions, runs
+from pipeline.nlp import gate as gate_mod
 from pipeline.nlp import ontology as ontology_mod
 
 STAGE = "review_batch"
+_GATE_CHECK_EVERY = 10   # rows, when --until-gate is on
 
 # Filled by the export; the reviewer completes the decision half.
 CONTEXT_FIELDS = (
@@ -64,8 +66,9 @@ CONTEXT_FIELDS = (
 )
 # A suggester (the deterministic screen, or a model) may fill these. They are
 # never a decision; `apply_sheet` reads `decision`, and only lifts a
-# `suggested_decision` of 'rejected' into one, and only when asked.
-SUGGESTION_FIELDS = ("suggested_decision", "suggested_reason", "suggested_by")
+# `suggested_decision` of 'rejected' into one in bulk, and only when asked.
+SUGGESTION_FIELDS = ("suggested_decision", "suggested_reason", "suggested_by",
+                     "suggested_corrected_predicate")
 DECISION_FIELDS = (
     "decision", "reason_code", "corrected_predicate",
     "corrected_object_concept_id", "corrected_object_literal",
@@ -259,10 +262,11 @@ def sheet_rows(conn, *, predicate: str, status: str = "queued",
             "source_url": r["source_url"],
             "screen_reason": screen or "",
             "evidence_span": (r["evidence_span"] or "").strip(),
+            **{f: "" for f in SUGGESTION_FIELDS},
+            **{f: "" for f in DECISION_FIELDS},
             "suggested_decision": "rejected" if screen else "",
             "suggested_reason": screen or "",
             "suggested_by": f"screen:{screen}" if screen else "",
-            **{f: "" for f in DECISION_FIELDS},
         }
         row["stratum"] = _stratum(row)
         rows.append(row)
@@ -374,22 +378,36 @@ def _already_decided_by(conn, candidate_id: str, decided_by: str) -> bool:
         (candidate_id, decided_by)).fetchone() is not None
 
 
-def _resolve_decision(row: dict, accept_suggested: str | None) -> tuple[str, dict]:
-    """The decision to record for a row, and any fields it carries with it. A
-    filled-in `decision` always wins. Otherwise, if `accept_suggested` is set
-    and this row's `suggested_decision` matches, lift the suggestion -- with
-    its `suggested_reason` as the reason_code and a `note` naming the
-    suggester, so the record says the call was reached from a suggestion.
+def _resolve_decision(row: dict, accept_suggested: str | None,
+                      take_suggested_corrections: bool = False) -> tuple[str, dict]:
+    """The decision to record for a row, and the fields it carries. A filled-in
+    `decision` always wins. Otherwise, if `accept_suggested` is set and this
+    row's `suggested_decision` matches, lift the suggestion -- with a `note`
+    naming the suggester, so the record says the call came from one.
+
+    `take_suggested_corrections`: when the reviewer *has* typed
+    `decision=corrected` but left `corrected_predicate` blank, fill it from
+    `suggested_corrected_predicate` (and note it). The reviewer still chose
+    `corrected`; this only saves re-typing the id `decisions.decide` will
+    ontology-check anyway.
     """
     decision = str(row.get("decision") or "").strip()
     if decision:
+        corrected_predicate = _blank_none(row.get("corrected_predicate"))
+        note = _blank_none(row.get("note"))
+        suggested_predicate = _blank_none(row.get("suggested_corrected_predicate"))
+        if (decision == "corrected" and not corrected_predicate
+                and take_suggested_corrections and suggested_predicate):
+            corrected_predicate = suggested_predicate
+            by = str(row.get("suggested_by") or "suggestion").strip()
+            note = f"corrected predicate via {by}" + (f"; {note}" if note else "")
         return decision, {
             "reason_code": _blank_none(row.get("reason_code")),
-            "corrected_predicate": _blank_none(row.get("corrected_predicate")),
+            "corrected_predicate": corrected_predicate,
             "corrected_object_concept_id": _blank_none(row.get("corrected_object_concept_id")),
             "corrected_object_literal": _blank_none(row.get("corrected_object_literal")),
             "corrected_subject_mention_id": _blank_none(row.get("corrected_subject_mention_id")),
-            "note": _blank_none(row.get("note")),
+            "note": note,
         }
     suggested = str(row.get("suggested_decision") or "").strip()
     if accept_suggested and suggested == accept_suggested:
@@ -402,9 +420,16 @@ def _resolve_decision(row: dict, accept_suggested: str | None) -> tuple[str, dic
     return "", {}
 
 
+def _gate_categories_for(predicates: set[str]) -> set[str]:
+    inv = {pred: name for name, pred in gate_mod.GATE_CATEGORIES.items()}
+    return {inv[p] for p in predicates if p in inv}
+
+
 def apply_sheet(conn, rows: list[dict], *, decided_by: str,
                 dry_run: bool = False, allow_redecide: bool = False,
                 accept_suggested: str | None = None,
+                take_suggested_corrections: bool = False,
+                until_gate: bool = False,
                 source_label: str | None = None) -> dict:
     """Record one reviewer's decisions from a filled-in sheet -- one
     `decisions.decide` call per (candidate, row), same validation as
@@ -418,6 +443,12 @@ def apply_sheet(conn, rows: list[dict], *, decided_by: str,
     explicit move over a batch the reviewer has looked at. Never `approved` or
     `corrected`: a wrong reject costs recall, a wrong approve poisons the
     precision the gate favours.
+
+    `take_suggested_corrections` fills a blank `corrected_predicate` from
+    `suggested_corrected_predicate` on rows the reviewer marked `corrected`.
+
+    `until_gate` (real runs only) stops once every 034G category the sheet's
+    predicates map to is `ready` -- so you do not review past the finish line.
     """
     decided_by = (decided_by or "").strip()
     if not decided_by:
@@ -427,7 +458,11 @@ def apply_sheet(conn, rows: list[dict], *, decided_by: str,
 
     cfg = {"decided_by": decided_by, "rows": len(rows), "dry_run": dry_run,
            "allow_redecide": allow_redecide,
-           "accept_suggested": accept_suggested or "", "source": source_label or ""}
+           "accept_suggested": accept_suggested or "",
+           "take_suggested_corrections": take_suggested_corrections,
+           "until_gate": until_gate, "source": source_label or ""}
+    gate_targets = _gate_categories_for(
+        {str(r.get("predicate") or "") for r in rows}) if until_gate and not dry_run else set()
     real = not dry_run
     # On the real path the run row is committed up front, so a crash mid-batch
     # leaves a `running` record next to the decisions `decide` has already
@@ -445,8 +480,10 @@ def apply_sheet(conn, rows: list[dict], *, decided_by: str,
     }
     processed = 0
     aborted = False
+    stopped_at_gate = False
     for i, row in enumerate(rows, 1):
-        decision, fields = _resolve_decision(row, accept_suggested)
+        decision, fields = _resolve_decision(row, accept_suggested,
+                                             take_suggested_corrections)
         if not decision:
             summary["skipped_blank"] += 1
             continue
@@ -474,6 +511,19 @@ def apply_sheet(conn, rows: list[dict], *, decided_by: str,
         if aborted:
             break
         processed += 1
+        if gate_targets and summary["applied"] % _GATE_CHECK_EVERY == 0:
+            report = gate_mod.check(conn)
+            if all(report["categories"].get(name, {}).get("ready")
+                   for name in gate_targets):
+                stopped_at_gate = True
+                break
+
+    if gate_targets:
+        report = gate_mod.check(conn)
+        summary["gate_categories"] = {
+            name: report["categories"].get(name, {}).get("ready", False)
+            for name in sorted(gate_targets)}
+        summary["stopped_at_gate"] = stopped_at_gate
 
     # CAVEATS "Model-assisted review triage": watch how often the reviewer's
     # call just matched the suggestion. Near-total agreement over a real number

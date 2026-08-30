@@ -1019,29 +1019,40 @@ Operator documentation: [`docs/assistant.md`](assistant.md).
 `pipeline/nlp/review_batch.py` exports a decision sheet for the 034F claim
 queue. A `screen_reason` column flags structurally broken extractions by
 deterministic rule and pre-fills `suggested_decision='rejected'`. By explicit
-owner decision (BETA-047), a language model — a small or free model via
-OpenRouter — may fill that `suggested_decision` column instead, so a reviewer
-starts from a triaged sheet rather than a raw one.
+owner decision (BETA-047), a language model — small or free models via
+OpenRouter — may fill the `suggested_*` columns instead
+(`pipeline/nlp/review_suggest.py`), so a reviewer starts from a triaged sheet
+rather than a raw one.
 
 This is a deliberate, fenced exception to "nothing without a person"
 (`CLAUDE.md` settled decision 4) and to 034H's gating of LLM steps. The bounds
 that keep it defensible, all enforced in code:
 
-- **A suggestion is never a decision.** The model writes `suggested_decision` /
-  `suggested_reason` / `suggested_by` only. `apply_sheet` records what is in
-  the `decision` column, which a person fills. Nothing the model writes
-  reaches `claim_candidate_decisions` on its own.
-- **The model triages, it does not label.** It answers reject / approve / keep
-  for one row. It never drafts a `corrected` predicate — picking the right
-  ontology id is the label the 034G classifier is being trained to produce,
-  and feeding a model's guess back in is circular. A row that needs correcting
-  is a `keep`; the reviewer corrects it.
+- **A suggestion is never a decision.** The model writes the `suggested_*`
+  columns only. `apply_sheet` records what is in the `decision` column, which
+  a person fills. Nothing the model writes reaches `claim_candidate_decisions`
+  on its own.
+- **It triages into reject / approve / correct / keep.** A `correct` verdict
+  also names a replacement predicate, which is checked against `relations.yml`
+  and dropped to `keep` if it is not a real id — the model proposes, it does
+  not get to invent an ontology term. The proposed id lands in
+  `suggested_corrected_predicate`, never in `corrected_predicate`.
+- **With more than one `--model`, verdicts must agree** (same verdict, and for
+  `correct` the same predicate) before anything is written. A split writes no
+  suggestion, only `suggested_by='ensemble:split'` and a note of who said
+  what, so the reviewer sees the row is contested.
 - **Reject only, in bulk.** `--accept-suggested` takes exactly one value,
   `rejected`. A wrong bulk reject costs recall; a wrong bulk approve would
-  poison the precision the 034G gate is built to favour. An `approved`
-  suggestion is a reading aid the reviewer confirms row by row, by filling
-  `decision` — there is no bulk path for it, and `--accept-suggested approved`
-  is refused in code.
+  poison the precision the 034G gate is built to favour. `approved` and
+  `corrected` suggestions are reading aids the reviewer confirms row by row,
+  by filling `decision` — there is no bulk path for either, and
+  `--accept-suggested approved` is refused in code.
+- **Taking a suggested correction is opt-in and still the reviewer's.**
+  `--take-suggested-corrections` fills a *blank* `corrected_predicate` from
+  `suggested_corrected_predicate` only on rows where the reviewer has already
+  typed `decision=corrected`. The id is still ontology-checked by
+  `decisions.decide`, and the row records
+  `note='corrected predicate via model:<id>'`.
 - **Every lifted row is marked.** A decision taken from a suggestion records
   `note='via model:<name>'` (or `via screen:<rule>`), so "how was this
   labelled?" is answerable per row: a person confirmed a model's triage, not a

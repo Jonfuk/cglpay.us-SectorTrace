@@ -344,20 +344,26 @@ wrong approve poisons the precision the gate favours. There is still no
 "decide everything matching a filter" path — the sheet is the artifact, filled
 in by a person reading each row.
 
-`pipeline nlp suggest-decisions --file sheet.jsonl --model <id>`
-(`pipeline/nlp/review_suggest.py`) is the opt-in model step, governed by
-`docs/CAVEATS.md`, "Model-assisted review triage". For each row a person has
-not decided and no suggestion already covers, it asks an OpenRouter model to
-triage it **reject / approve / keep** and fills `suggested_decision` +
-`suggested_by='model:<id>'` for the first two. It never drafts a corrected
-predicate (a row that needs correcting is a `keep`); anything unexpected from
-the API fails safe to `keep`; it needs `OPENROUTER_API_KEY` and is never
-called automatically; a re-run skips rows already suggested, so it costs
-nothing for a row already seen. `decide-claims-batch --accept-suggested
-rejected` lifts the rejects in bulk; an `approved` suggestion is confirmed row
-by row. `decide-claims-batch` reports reviewer-vs-suggestion agreement per
-batch — near-total agreement over a real number of rows is the signal to redo
-that batch with suggestions hidden.
+`pipeline nlp suggest-decisions --file sheet.jsonl --model <id>` (repeatable
+`--model`) (`pipeline/nlp/review_suggest.py`) is the opt-in model step,
+governed by `docs/CAVEATS.md`, "Model-assisted review triage". For each row a
+person has not decided and no suggestion already covers, it asks each model to
+triage it **reject / approve / correct / keep** and, on agreement, fills the
+`suggested_*` columns. A `correct` verdict names a replacement predicate,
+checked against `relations.yml` and dropped to `keep` if invalid — it lands in
+`suggested_corrected_predicate`, never `corrected_predicate`. With two or more
+models the verdicts must match; a split writes `suggested_by='ensemble:split'`
+and a note, so the reviewer sees the row is contested and a re-run does not
+pay to ask again. Anything unexpected from the API fails safe to `keep`; it
+needs `OPENROUTER_API_KEY` and is never called automatically.
+
+`decide-claims-batch` then: `--accept-suggested rejected` lifts the rejects in
+bulk; `--take-suggested-corrections` fills a blank `corrected_predicate` from
+the suggestion on rows the reviewer marked `corrected`; `--until-gate` stops
+once the sheet's 034G categories are `ready`, so you do not review past the
+finish line. It reports reviewer-vs-suggestion agreement per batch —
+near-total agreement over a real number of rows is the signal to redo that
+batch with suggestions hidden.
 
 **Held:** the approved-candidate → `graph_claims` draft write. `graph_claims`
 has no writer anywhere in the codebase (a dormant schema from migration
@@ -377,16 +383,16 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
 # or the same review in bulk, one predicate at a time:
 uv run pipeline nlp review-sheet --predicate workforce.relies_on_agency \
     --group-by template --sample --out agency.jsonl
-# optional, opt-in: a model triages the rest (docs/CAVEATS.md) -- reject only,
-# writes suggested_decision, never decision:
+# optional, opt-in: an ensemble triages the rest (docs/CAVEATS.md); writes
+# suggested_* only, never decision:
 OPENROUTER_API_KEY=… uv run pipeline nlp suggest-decisions --file agency.jsonl \
-    --model meta-llama/llama-3.1-8b-instruct:free
-#   ... a person fills the `decision` column in agency.jsonl, and can take the
-#       screened / suggested `rejected` rows in one move ...
+    --model meta-llama/llama-3.1-8b-instruct:free \
+    --model mistralai/mistral-7b-instruct:free
+#   ... a person fills the `decision` column in agency.jsonl ...
 uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
-    --accept-suggested rejected --dry-run
+    --accept-suggested rejected --take-suggested-corrections --until-gate --dry-run
 uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
-    --accept-suggested rejected
+    --accept-suggested rejected --take-suggested-corrections --until-gate
 ```
 
 ## Getting from 034F to 034G

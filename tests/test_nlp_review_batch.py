@@ -309,3 +309,62 @@ def test_collapsed_decision_fans_out_to_every_member(conn, settings):
     assert out["applied"] == 2
     for cid in grouped["group_members"]:
         assert _decided(conn, cid) == [("approved", "Jon Firth")]
+
+
+# --- take-suggested-corrections + until-gate --------------------------
+
+def test_gate_categories_for_maps_predicates_to_names():
+    got = review_batch._gate_categories_for(
+        {"workforce.relies_on_agency", "finance.has_cost_pressure", "not.a.gate.pred"})
+    assert got == {"agency_reliance", "cost_pressure"}
+
+
+def test_take_suggested_corrections_fills_a_blank_corrected_predicate(conn, settings):
+    _seed(conn, settings, [_SENTENCE])
+    (row,) = _rows(conn)
+    row["decision"] = "corrected"                     # the reviewer's own choice
+    row["suggested_corrected_predicate"] = "workforce.has_retention_pressure"
+    row["suggested_by"] = "model:m/x"
+    out = review_batch.apply_sheet(conn, [row], decided_by="Jon Firth",
+                                   take_suggested_corrections=True)
+    assert out["applied"] == 1
+    got = conn.execute(
+        "SELECT decision, corrected_predicate, note FROM claim_candidate_decisions "
+        "WHERE claim_candidate_id = ?", (row["candidate_id"],)).fetchone()
+    assert got[0] == "corrected"
+    assert got[1] == "workforce.has_retention_pressure"
+    assert "via model:m/x" in got[2]
+
+
+def test_take_suggested_corrections_leaves_a_typed_predicate_alone(conn, settings):
+    _seed(conn, settings, [_SENTENCE])
+    (row,) = _rows(conn)
+    row["decision"] = "corrected"
+    row["corrected_predicate"] = "workforce.has_turnover"      # the reviewer typed this
+    row["suggested_corrected_predicate"] = "workforce.has_retention_pressure"
+    review_batch.apply_sheet(conn, [row], decided_by="Jon Firth",
+                             take_suggested_corrections=True)
+    got = conn.execute(
+        "SELECT corrected_predicate FROM claim_candidate_decisions "
+        "WHERE claim_candidate_id = ?", (row["candidate_id"],)).fetchone()
+    assert got[0] == "workforce.has_turnover"
+
+
+def test_until_gate_stops_once_the_category_is_ready(conn, settings, monkeypatch):
+    _seed(conn, settings, [_SENTENCE] * 25)
+    rows = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    for row in rows:
+        row["decision"] = "approved"
+    # recruitment_pressure is not in GATE_CATEGORIES, so map it in for the test
+    monkeypatch.setitem(review_batch.gate_mod.GATE_CATEGORIES, "rp", _PREDICATE)
+    calls = {"n": 0}
+
+    def _fake_check(_conn, **kw):
+        calls["n"] += 1
+        return {"categories": {"rp": {"ready": calls["n"] >= 2}}}
+
+    monkeypatch.setattr(review_batch.gate_mod, "check", _fake_check)
+    out = review_batch.apply_sheet(conn, rows, decided_by="Jon Firth", until_gate=True)
+    assert out["stopped_at_gate"] is True
+    assert out["applied"] < len(rows)                 # stopped before the end
+    assert out["gate_categories"] == {"rp": True}
