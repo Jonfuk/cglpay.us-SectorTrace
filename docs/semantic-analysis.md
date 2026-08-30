@@ -384,10 +384,10 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
 uv run pipeline nlp review-sheet --predicate workforce.relies_on_agency \
     --group-by template --sample --out agency.jsonl
 # optional, opt-in: an ensemble triages the rest (docs/CAVEATS.md); writes
-# suggested_* only, never decision:
+# suggested_* only, never decision. `openrouter/free` routes over free models;
+# free tier rate-limits hard, so --rate is low:
 OPENROUTER_API_KEY=… uv run pipeline nlp suggest-decisions --file agency.jsonl \
-    --model meta-llama/llama-3.1-8b-instruct:free \
-    --model mistralai/mistral-7b-instruct:free
+    --model openrouter/free --model openrouter/free --rate 0.3
 #   ... a person fills the `decision` column in agency.jsonl ...
 uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
     --accept-suggested rejected --take-suggested-corrections --until-gate --dry-run

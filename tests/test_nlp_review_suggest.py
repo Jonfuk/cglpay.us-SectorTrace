@@ -103,6 +103,26 @@ def test_suggest_fails_safe_to_keep_on_api_error(conn):
                                  ask=_ask("keep", "api error: URLError"))
     assert out["errors"] == 1 and out["rejected"] == 0
     assert rows[0]["suggested_decision"] == ""
+    assert out["error_sample"] == ["api error: URLError"]
+
+
+def test_suggest_drops_a_model_that_keeps_failing(conn):
+    calls = {"m/dead": 0, "m/ok": 0}
+
+    def _ask_fn(row, *, model, **kw):
+        calls[model] += 1
+        if model == "m/dead":
+            return "keep", "api error: HTTP 404 unavailable for free", ""
+        return "reject", "x", ""
+
+    rows = [_row(candidate_id=f"cc-{i}") for i in range(8)]
+    out = review_suggest.suggest(conn, rows, models=["m/dead", "m/ok"],
+                                 api_key="k", rate=0, ask=_ask_fn)
+    assert calls["m/dead"] == 3                       # stopped after 3 straight fails
+    assert calls["m/ok"] == 8                         # the good one ran on every row
+    assert any("m/dead" in d for d in out["dropped_models"])
+    # once m/dead is gone it degrades to the single surviving model
+    assert out["rejected"] >= 1
 
 
 def test_suggest_honours_limit_and_records_a_run(conn):

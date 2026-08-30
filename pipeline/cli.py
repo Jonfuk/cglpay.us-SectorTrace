@@ -627,11 +627,15 @@ def nlp_decide_claims_batch(
 def nlp_suggest_decisions(
     file: Path = typer.Option(..., exists=True, help="A review sheet (JSONL) to annotate in place"),
     model: list[str] = typer.Option(
-        ..., "--model", help="OpenRouter model id. Repeat --model for an "
-        "ensemble: verdicts must agree before anything is written, splits are "
-        "flagged for the reviewer."),
+        ..., "--model", help="OpenRouter model id (e.g. 'openrouter/free', a "
+        "router over free models). Repeat --model for an ensemble: verdicts "
+        "must agree before anything is written, splits are flagged. A model "
+        "that fails 3 calls in a row (dead slug, bad key, hard rate limit) is "
+        "dropped for the rest of the run."),
     out: Path = typer.Option(None, help="Write here instead of overwriting --file"),
-    rate: float = typer.Option(2.0, help="Requests per second per model"),
+    rate: float = typer.Option(
+        1.0, help="Requests per second per model. Free models rate-limit hard "
+        "(~20/min, and a per-day cap on a $0 account) — try 0.3."),
     limit: int = typer.Option(None, min=1, help="Only ask about the first N eligible rows"),
 ) -> None:
     """Pre-annotate a review sheet with model triage: for each row a person has

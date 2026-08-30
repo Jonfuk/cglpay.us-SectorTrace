@@ -141,8 +141,17 @@ def _ask(row: dict, *, model: str, api_key: str,
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
         content = payload["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as exc:
+        # OpenRouter puts the useful part (bad key, unknown model, policy not
+        # accepted, rate limit) in the response body, not the status line.
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:200]
+        except OSError:
+            detail = exc.reason or ""
+        return "keep", f"api error: HTTP {exc.code} {detail}".strip(), ""
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return "keep", f"api error: {type(exc).__name__}", ""
+        reason = getattr(exc, "reason", exc)
+        return "keep", f"api error: {type(exc).__name__}: {reason}", ""
     except (KeyError, IndexError, ValueError) as exc:
         return "keep", f"unreadable response: {type(exc).__name__}", ""
     return _parse(content)
@@ -193,10 +202,13 @@ def suggest(conn, rows: list[dict], *, models: list[str], api_key: str | None = 
 
     summary = {"run_id": run_id, "rows": len(rows), "models": models, "asked": 0,
                "rejected": 0, "approved": 0, "corrected": 0, "kept": 0,
-               "split": 0, "skipped_suggested": 0, "skipped_decided": 0, "errors": 0}
+               "split": 0, "skipped_suggested": 0, "skipped_decided": 0,
+               "errors": 0, "error_sample": [], "dropped_models": []}
     interval = 1.0 / rate if rate and rate > 0 else 0.0
+    live = list(models)                 # models still worth calling
+    fails: dict[str, int] = {}          # consecutive failures, until a success
     for row in rows:
-        if summary["asked"] == (limit or -1):
+        if summary["asked"] == (limit or -1) or not live:
             break
         if str(row.get("decision") or "").strip():
             summary["skipped_decided"] += 1
@@ -208,11 +220,22 @@ def suggest(conn, rows: list[dict], *, models: list[str], api_key: str | None = 
             continue
 
         votes = []
-        for model in models:
+        for model in list(live):
             verdict, reason, predicate = ask(row, model=model, api_key=api_key,
                                              base_url=base_url)
-            if reason.startswith(("api error", "unreadable response")):
+            errored = reason.startswith(("api error", "unreadable response"))
+            if errored:
                 summary["errors"] += 1
+                if reason not in summary["error_sample"] and len(summary["error_sample"]) < 5:
+                    summary["error_sample"].append(reason)
+                fails[model] = fails.get(model, 0) + 1
+                # A dead slug (404), a bad key (401) or a hard rate limit is
+                # not per-row: stop hammering it after 3 straight failures.
+                if fails[model] >= 3:
+                    live.remove(model)
+                    summary["dropped_models"].append(f"{model} ({reason[:80]})")
+            else:
+                fails[model] = 0
             votes.append((model, verdict, reason, predicate))
             if interval:
                 time.sleep(interval)
