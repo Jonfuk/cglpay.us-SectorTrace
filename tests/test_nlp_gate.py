@@ -85,11 +85,14 @@ def test_counts_positives_negatives_and_diversity(conn, settings):
                      reason_code="not-this-provider")
 
     report = gate.check(conn, min_per_class=1, heldout_per_class=0,
-                        min_source_systems=1, min_subjects=1, min_years=1,
+                        min_authorities=1, min_subjects=1, min_years=1,
                         min_double_reviewed=1)
     rec = report["categories"]["funding_reduction"]
     assert rec["positive"] == 2 and rec["negative"] == 1
+    # source_systems stays in the report (informational); the blocking spread
+    # check is now distinct authorities.
     assert set(rec["source_systems"]) == {"committee_paper_promotion", "cdp_document_promotion"}
+    assert "distinct_authorities" in rec
     assert rec["distinct_subjects"] == 2
     assert set(rec["years"]) == {"2021", "2022", "2023"}
     # still not ready: the other five categories have no examples, and no
@@ -118,6 +121,37 @@ def test_corrected_decision_moves_the_example_between_categories(conn, settings)
     # savings_target is not one of the gate categories, so it does not
     # appear — the correction still counts as a funding_reduction negative.
     assert "savings_target" not in report["categories"]
+
+
+def test_quorum_lets_ready_categories_through_with_laggards_advisory(conn, settings):
+    _seed_entity(conn, "provider:change_grow_live", "Change Grow Live")
+    _seed_entity(conn, "provider:turning_point", "Turning Point")
+    for eid, sysname, prov, yr in [
+        ("qa", "committee_paper_promotion", "Change Grow Live", 2021),
+        ("qb", "cdp_document_promotion", "Turning Point", 2022),
+    ]:
+        _doc(conn, settings, eid, sysname, prov, yr)
+    nlp_chunk.run(conn)
+    spans.run(conn, extractor="stub")
+    nlp_context.run(conn)
+    resolve.run(conn)
+    relations.run(conn)
+    pos = _funding_candidate(conn, "qa")["claim_candidate_id"]
+    neg = _funding_candidate(conn, "qb")["claim_candidate_id"]
+    decisions.decide(conn, pos, "approved", "Reviewer A")
+    decisions.decide(conn, pos, "approved", "Reviewer B")   # double-reviewed, agree
+    decisions.decide(conn, neg, "rejected", "Reviewer A", reason_code="wrong-provider")
+
+    report = gate.check(conn, min_per_class=1, heldout_per_class=0,
+                        min_authorities=1, min_subjects=1, min_years=1,
+                        min_double_reviewed=1, min_categories_ready=1)
+    assert report["categories"]["funding_reduction"]["ready"] is True
+    assert report["categories_ready"] == 1
+    assert report["ready"] is True                 # quorum of 1 met, reviewers agree
+    # the five empty categories are corpus-limited, not blocking
+    assert report["blocking"] == []
+    assert any("cost_pressure" in a for a in report["advisory"])
+    assert any("1/6 categories ready" in a for a in report["advisory"])
 
 
 def test_inter_reviewer_agreement_is_reported(conn, settings):

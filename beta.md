@@ -475,13 +475,14 @@ complete — see DONE. Nothing is queued.)_
     `gate_coverage` slice that queues the six gate predicates without the
     resolved-entity requirement, since committee papers name subjects
     generically and five of six categories could not otherwise reach the
-    per-class floor. Residual, for the gate re-scope discussion (Option C):
-    `funding_reduction` is pool-limited (~54 AFFIRMED candidates total,
-    below the 65 need-to-train+heldout); the whole NLP corpus is only two
-    source systems, so `MIN_SOURCE_SYSTEMS = 2` will still fail for thin
-    categories (counting distinct authorities instead is the likely fix);
-    and `MIN_DOUBLE_REVIEWED = 10` at 0.8 agreement needs a second reviewer,
-    which no code change removes. Only then is the SetFit
+    per-class floor. The gate was then re-scoped (Option C): it takes a
+    **quorum** (`MIN_CATEGORIES_READY = 5` of 6), so the corpus-limited
+    `funding_reduction` (~54 AFFIRMED candidates, below the floor) is
+    reported in `advisory` and no longer blocks; and the spread check counts
+    **distinct local authorities** (`MIN_AUTHORITIES = 3`), not source
+    systems, since the whole NLP corpus is two source systems.
+    `MIN_DOUBLE_REVIEWED = 10` at 0.8 agreement is unchanged and still needs
+    a second named reviewer — a process gap, not a code one. Only then is the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
     column; a min-precision gate before any prediction is written) worth

@@ -1,15 +1,28 @@
 """The 034G readiness gate, as a report.
 
 034G (SetFit few-shot classifiers) is gated -- not on a bare count, on a set
-of conditions that must all hold before training a model is worth doing:
+of conditions before training a model is worth doing. Per category:
 
   * >= `min_per_class` decided POSITIVE and >= `min_per_class` decided
-    NEGATIVE examples per category;
-  * source-system, provider and time spread across those examples (not 90
-    from one council in one year);
-  * enough double-reviewed items to say inter-reviewer agreement is
-    acceptable;
+    NEGATIVE examples;
+  * authority and time spread across those examples (not 40 from one council
+    in one year) -- authority, not source_system: the whole NLP corpus is two
+    source systems, but every committee paper carries an authority_ons_code,
+    and the council is the unit that must vary. `source_systems` stays in the
+    report for the record;
   * room to carve a held-out eval set off before training.
+
+And across the set:
+
+  * `min_categories_ready` of the categories clearing the per-category bar --
+    a quorum, not all of them. SetFit builds one binary head per category, so
+    a category the corpus cannot yet feed (`funding_reduction` today: ~54
+    AFFIRMED candidates exist, below the floor) should not hold back training
+    the heads that are ready. Laggards are reported by name in `advisory`,
+    not `blocking`;
+  * enough double-reviewed items to say inter-reviewer agreement is
+    acceptable. This one has no quorum and no code route around it -- it needs
+    a second named reviewer.
 
 This module answers "are we there yet, and if not, what is missing?" from
 `claim_candidate_decisions` (034F, second cut). It is read-only and offline;
@@ -58,18 +71,26 @@ GATE_CATEGORIES: dict[str, str] = {
 
 MIN_PER_CLASS = 50
 HELDOUT_PER_CLASS = 15
-MIN_SOURCE_SYSTEMS = 2
+MIN_AUTHORITIES = 3        # distinct local authorities behind a category's
+                          # examples. Replaces a source-system count: the whole
+                          # NLP corpus is two source systems, but every
+                          # committee paper carries an authority_ons_code, and
+                          # "not 40 rows from one council" is the collapse this
+                          # actually guards against.
 MIN_PROVIDERS = 5
 MIN_YEARS = 3
 AGREEMENT_FLOOR = 0.80
 MIN_DOUBLE_REVIEWED = 10
+MIN_CATEGORIES_READY = 5   # of len(GATE_CATEGORIES). A category the corpus
+                          # cannot yet feed does not block training the heads
+                          # that are ready; it stays named in `advisory`.
 
 _NEGATIVE_STATUSES = frozenset({"NEGATED", "HISTORICAL", "THIRD_PARTY", "UNKNOWN"})
 
 _DECIDED_SQL = """
 SELECT d.claim_candidate_id, d.decision, d.decided_by, d.corrected_predicate,
        c.predicate, c.assertion_status, c.subject_hint,
-       e.source_system,
+       e.source_system, dr.source_key,
        substr(COALESCE(dr.published_at, e.retrieved_at, ''), 1, 4) AS year,
        dem.entity_id AS subject_entity_id
 FROM claim_candidate_decisions d
@@ -103,8 +124,19 @@ def _label_for(row, predicate: str) -> str | None:
     return None
 
 
+def _authority_key(row) -> str:
+    """The local authority behind a decided example. `source_key` for
+    committee_papers / cdp_documents is "<authority_ons_code>|<url>"; a key with
+    no pipe (any other document source) is used whole."""
+    key = row["source_key"] or ""
+    return key.split("|", 1)[0] or "unknown"
+
+
 def _provider_key(row) -> str:
-    return row["subject_entity_id"] or (row["subject_hint"] or "").strip().lower() or "unknown"
+    # a resolved entity is the true subject; without one, the authority is a
+    # better distinctness signal than the generic anaphor ("the service",
+    # "staff") the gate_coverage slice (promote.py) produces in bulk.
+    return row["subject_entity_id"] or _authority_key(row)
 
 
 def _inter_reviewer(rows: list, min_double_reviewed: int) -> dict:
@@ -124,22 +156,23 @@ def _inter_reviewer(rows: list, min_double_reviewed: int) -> dict:
 
 def check(conn, *, min_per_class: int = MIN_PER_CLASS,
           heldout_per_class: int = HELDOUT_PER_CLASS,
-          min_source_systems: int = MIN_SOURCE_SYSTEMS,
+          min_authorities: int = MIN_AUTHORITIES,
           min_subjects: int = MIN_PROVIDERS,
           min_years: int = MIN_YEARS,
           min_double_reviewed: int = MIN_DOUBLE_REVIEWED,
+          min_categories_ready: int = MIN_CATEGORIES_READY,
           agreement_floor: float = AGREEMENT_FLOOR) -> dict:
     rows = conn.execute(_DECIDED_SQL).fetchall()
     inter = _inter_reviewer(rows, min_double_reviewed)
 
     categories: dict[str, dict] = {}
-    blocking: list[str] = []
     for name, predicate in GATE_CATEGORIES.items():
         pos = [r for r in rows if _label_for(r, predicate) == "positive"]
         neg = [r for r in rows if _label_for(r, predicate) == "negative"]
         examples = pos + neg
 
         source_systems = sorted({r["source_system"] for r in examples})
+        authorities = {_authority_key(r) for r in examples}
         providers = {_provider_key(r) for r in examples}
         years = sorted({r["year"] for r in examples if r["year"]})
 
@@ -150,26 +183,43 @@ def check(conn, *, min_per_class: int = MIN_PER_CLASS,
                               f"+ {heldout_per_class} held out)")
         if len(neg) < need:
             shortfalls.append(f"negatives {len(neg)} < {need}")
-        if len(source_systems) < min_source_systems:
-            shortfalls.append(f"source systems {len(source_systems)} < {min_source_systems}")
+        if len(authorities) < min_authorities:
+            shortfalls.append(f"distinct authorities {len(authorities)} < {min_authorities}")
         if len(providers) < min_subjects:
             shortfalls.append(f"distinct subjects {len(providers)} < {min_subjects}")
         if len(years) < min_years:
             shortfalls.append(f"distinct years {len(years)} < {min_years}")
 
-        ready = not shortfalls
         categories[name] = {
             "predicate": predicate,
             "positive": len(pos),
             "negative": len(neg),
             "source_systems": source_systems,
+            "distinct_authorities": len(authorities),
             "distinct_subjects": len(providers),
             "years": years,
             "heldout_feasible": len(pos) >= need and len(neg) >= need,
             "shortfalls": shortfalls,
-            "ready": ready,
+            "ready": not shortfalls,
         }
-        blocking.extend(f"{name}: {s}" for s in shortfalls)
+
+    ready_names = [n for n, c in categories.items() if c["ready"]]
+    laggards = [n for n, c in categories.items() if not c["ready"]]
+    quorum_ok = len(ready_names) >= min_categories_ready
+
+    blocking: list[str] = []
+    advisory: list[str] = []
+    # a laggard's detail blocks only while the quorum is unmet; once it is met
+    # the same lines are advisory -- the head is corpus-limited, not the gate.
+    for name in laggards:
+        (advisory if quorum_ok else blocking).extend(
+            f"{name}: {s}" for s in categories[name]["shortfalls"])
+    if not quorum_ok:
+        blocking.append(f"only {len(ready_names)}/{len(categories)} categories ready "
+                        f"(need {min_categories_ready})")
+    elif laggards:
+        advisory.append(f"{len(ready_names)}/{len(categories)} categories ready; "
+                        f"corpus-limited, not blocking: {', '.join(sorted(laggards))}")
 
     reviewer_ok = bool(inter["assessed"]) and (inter["agreement"] or 0.0) >= agreement_floor
     if not inter["assessed"]:
@@ -181,12 +231,15 @@ def check(conn, *, min_per_class: int = MIN_PER_CLASS,
     return {
         "min_per_class": min_per_class,
         "heldout_per_class": heldout_per_class,
-        "thresholds": {"source_systems": min_source_systems, "distinct_subjects": min_subjects,
-                       "years": min_years, "agreement": agreement_floor},
+        "thresholds": {"distinct_authorities": min_authorities, "distinct_subjects": min_subjects,
+                       "years": min_years, "agreement": agreement_floor,
+                       "categories_ready": min_categories_ready},
         "n_decisions": len(rows),
         "n_decided_candidates": len({r["claim_candidate_id"] for r in rows}),
         "inter_reviewer": inter,
         "categories": categories,
-        "ready": all(c["ready"] for c in categories.values()) and reviewer_ok,
+        "categories_ready": len(ready_names),
+        "ready": quorum_ok and reviewer_ok,
         "blocking": blocking,
+        "advisory": advisory,
     }

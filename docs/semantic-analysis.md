@@ -346,12 +346,22 @@ classifier category (`vacancy_pressure`, `agency_reliance`, `tupe_transfer`,
 `funding_reduction`, `cost_pressure`, `waiting_time` — redrawn after the first
 full cycle around the predicates the corpus actually produced in volume; see
 the comment on `GATE_CATEGORIES`): decided positive / negative counts,
-source-system / distinct-subject / year spread, inter-reviewer agreement on
-double-reviewed items, and a `blocking` list of exactly what is short. It
-exits non-zero until every condition holds. A *positive* is an `approved`
+distinct-authority / distinct-subject / year spread, inter-reviewer agreement
+on double-reviewed items, a `blocking` list of what is short, and an
+`advisory` list of what is not blocking. A *positive* is an `approved`
 + `AFFIRMED` candidate for that predicate, or one `corrected` to it; a
 *negative* is a `rejected` one, a `corrected`-away one, or an `approved` but
 `NEGATED` / `HISTORICAL` / `THIRD_PARTY` one.
+
+The overall gate is a **quorum**: `MIN_CATEGORIES_READY` (5 of 6) categories
+clearing the per-category bar, plus the inter-reviewer check — not all six.
+SetFit builds one binary head per category, so a category the corpus cannot
+yet feed (`funding_reduction`: ~54 AFFIRMED candidates exist, below the
+floor) is reported in `advisory` and does not hold back training the heads
+that are ready. The spread check counts **distinct local authorities**, not
+source systems: the whole NLP corpus is two source systems, but the council
+is the unit that must vary. The inter-reviewer condition has no quorum and no
+code route around it — it needs a second named reviewer.
 
 ```bash
 uv run pipeline nlp gate-034g          # exits 1 with a blocking list until ready
@@ -371,10 +381,10 @@ And the `gate_coverage` slice above was added to `promote.py` because
 committee papers name their subject generically ("the service", "staff") far
 more often than they name a registered provider — without it, five of the six
 categories cannot reach the per-class floor no matter how the review goes.
-Known residual, for a future `GATE_CATEGORIES` / threshold revision:
-`funding_reduction` is pool-limited below the floor; the corpus is only two
-source systems so `MIN_SOURCE_SYSTEMS` stays a hard edge for thin categories;
-and `MIN_DOUBLE_REVIEWED` needs a second named reviewer.
+The gate itself was then re-scoped (see the quorum / distinct-authorities
+paragraph above): `funding_reduction` stays corpus-limited but no longer
+blocks; `MIN_DOUBLE_REVIEWED` still needs a second named reviewer, which is a
+process gap, not a code one.
 
 ## The tranches (BETA-034)
 
