@@ -1031,10 +1031,17 @@ that keep it defensible, all enforced in code:
   `suggested_reason` / `suggested_by` only. `apply_sheet` records what is in
   the `decision` column, which a person fills. Nothing the model writes
   reaches `claim_candidate_decisions` on its own.
+- **The model triages, it does not label.** It answers reject / approve / keep
+  for one row. It never drafts a `corrected` predicate — picking the right
+  ontology id is the label the 034G classifier is being trained to produce,
+  and feeding a model's guess back in is circular. A row that needs correcting
+  is a `keep`; the reviewer corrects it.
 - **Reject only, in bulk.** `--accept-suggested` takes exactly one value,
-  `rejected`. A wrong reject costs recall; a wrong approve would poison the
-  precision the 034G gate is built to favour. The model never proposes
-  `approved` or `corrected` into a bulk path, and never fills `corrected_*`.
+  `rejected`. A wrong bulk reject costs recall; a wrong bulk approve would
+  poison the precision the 034G gate is built to favour. An `approved`
+  suggestion is a reading aid the reviewer confirms row by row, by filling
+  `decision` — there is no bulk path for it, and `--accept-suggested approved`
+  is refused in code.
 - **Every lifted row is marked.** A decision taken from a suggestion records
   `note='via model:<name>'` (or `via screen:<rule>`), so "how was this
   labelled?" is answerable per row: a person confirmed a model's triage, not a
@@ -1045,12 +1052,17 @@ that keep it defensible, all enforced in code:
 - **Agreement is watched.** Report human-vs-suggestion agreement per category
   after each batch; near-total agreement is the signal that the review has
   gone through the motions, and that batch is redone with suggestions hidden.
-- **Off by default and fenced.** A separate extra, never in CI, never on the
-  offline path. Evidence spans are public-domain committee text, so sending
-  them to a third party is not a disclosure of anything restricted — but it is
-  an external dependency the rest of the pipeline does not have.
+- **Off by default and fenced.** One explicit command
+  (`nlp suggest-decisions`), gated on `OPENROUTER_API_KEY` being set; never
+  called by anything automatically, never in CI, never on the offline path.
+  Evidence spans are public-domain committee text, so sending them to a third
+  party is not a disclosure of anything restricted — but it is an external
+  dependency the rest of the pipeline does not have. Anything unexpected from
+  the API fails safe to `keep`, so a network problem never auto-rejects a row.
 
 If you train an 034G classifier on a corpus built this way, the provenance of
-the labels is "a model triaged, a person confirmed the rejects" — weaker than
-"a person read every sentence", and the caveat travels with any figure the
-classifier later supports.
+the labels is "a model triaged, a person confirmed each one" — weaker than "a
+person read every sentence cold", and the caveat travels with any figure the
+classifier later supports. Watch the per-batch agreement number
+(`decide-claims-batch` reports it): if the reviewer's calls almost never
+diverge from the model's, the confirmation has stopped being a review.

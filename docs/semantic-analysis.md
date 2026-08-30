@@ -342,9 +342,22 @@ lifts the screened rows into real `rejected` decisions in one move (each keeps
 `note='via <suggester>'`); only `rejected` — a wrong reject costs recall, a
 wrong approve poisons the precision the gate favours. There is still no
 "decide everything matching a filter" path — the sheet is the artifact, filled
-in by a person reading each row. A model may fill `suggested_decision` in
-place of the deterministic screen; see `docs/CAVEATS.md`, "Model-assisted
-review triage".
+in by a person reading each row.
+
+`pipeline nlp suggest-decisions --file sheet.jsonl --model <id>`
+(`pipeline/nlp/review_suggest.py`) is the opt-in model step, governed by
+`docs/CAVEATS.md`, "Model-assisted review triage". For each row a person has
+not decided and no suggestion already covers, it asks an OpenRouter model to
+triage it **reject / approve / keep** and fills `suggested_decision` +
+`suggested_by='model:<id>'` for the first two. It never drafts a corrected
+predicate (a row that needs correcting is a `keep`); anything unexpected from
+the API fails safe to `keep`; it needs `OPENROUTER_API_KEY` and is never
+called automatically; a re-run skips rows already suggested, so it costs
+nothing for a row already seen. `decide-claims-batch --accept-suggested
+rejected` lifts the rejects in bulk; an `approved` suggestion is confirmed row
+by row. `decide-claims-batch` reports reviewer-vs-suggestion agreement per
+batch — near-total agreement over a real number of rows is the signal to redo
+that batch with suggestions hidden.
 
 **Held:** the approved-candidate → `graph_claims` draft write. `graph_claims`
 has no writer anywhere in the codebase (a dormant schema from migration
@@ -364,8 +377,12 @@ uv run pipeline nlp decide-claim --candidate cc-… --decision corrected \
 # or the same review in bulk, one predicate at a time:
 uv run pipeline nlp review-sheet --predicate workforce.relies_on_agency \
     --group-by template --sample --out agency.jsonl
+# optional, opt-in: a model triages the rest (docs/CAVEATS.md) -- reject only,
+# writes suggested_decision, never decision:
+OPENROUTER_API_KEY=… uv run pipeline nlp suggest-decisions --file agency.jsonl \
+    --model meta-llama/llama-3.1-8b-instruct:free
 #   ... a person fills the `decision` column in agency.jsonl, and can take the
-#       screened `suggested_decision=rejected` rows in one move ...
+#       screened / suggested `rejected` rows in one move ...
 uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \
     --accept-suggested rejected --dry-run
 uv run pipeline nlp decide-claims-batch --file agency.jsonl --by "A. Reviewer" \

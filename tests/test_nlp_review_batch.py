@@ -203,6 +203,22 @@ def test_accept_suggested_ignores_an_approved_suggestion(conn, settings):
     assert out["applied"] == 0 and out["skipped_blank"] == 1
 
 
+def test_apply_reports_reviewer_vs_suggestion_agreement(conn, settings):
+    _seed(conn, settings, [_SENTENCE, _LONG, _SENTENCE])
+    rows = review_batch.sheet_rows(conn, predicate=_PREDICATE, status="new")
+    # three rows, all suggested 'rejected'; the reviewer agrees on two.
+    for row in rows:
+        row["suggested_decision"] = "rejected"
+        row["suggested_by"] = "model:test"
+    rows[0]["decision"] = "rejected"
+    rows[1]["decision"] = "rejected"
+    rows[2]["decision"] = "approved"
+    out = review_batch.apply_sheet(conn, rows, decided_by="Jon Firth")
+    assert out["suggestion_agreement"]["n"] == 3
+    assert out["suggestion_agreement"]["agree"] == round(2 / 3, 3)
+    assert out["suggestion_agreement"]["flag"] is False
+
+
 # --- sampling ----------------------------------------------------------
 
 def test_sample_keeps_the_bands_and_a_deterministic_tail(conn, settings):

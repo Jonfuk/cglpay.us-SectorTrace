@@ -613,6 +613,42 @@ def nlp_decide_claims_batch(
         conn.close()
 
 
+@nlp_app.command("suggest-decisions")
+def nlp_suggest_decisions(
+    file: Path = typer.Option(..., exists=True, help="A review sheet (JSONL) to annotate in place"),
+    model: str = typer.Option(..., help="OpenRouter model id, e.g. 'meta-llama/llama-3.1-8b-instruct:free'"),
+    out: Path = typer.Option(None, help="Write here instead of overwriting --file"),
+    rate: float = typer.Option(2.0, help="Requests per second"),
+    limit: int = typer.Option(None, min=1, help="Only ask about the first N eligible rows"),
+) -> None:
+    """Pre-annotate a review sheet with a model's triage: for each row a person
+    has not decided and no suggestion already covers, ask the model to triage
+    it reject / approve / keep, and fill `suggested_decision` for the first
+    two. It never drafts a corrected predicate. Needs OPENROUTER_API_KEY. See
+    docs/CAVEATS.md, 'Model-assisted review triage' — the reviewer still fills
+    `decision`; `decide-claims-batch --accept-suggested rejected` lifts the
+    rejects in bulk, approves are confirmed row by row.
+    """
+    from pipeline.nlp import review_batch, review_suggest
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            rows = review_batch.read_sheet(file, fmt="jsonl")
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        try:
+            result = review_suggest.suggest(
+                conn, rows, model=model, rate=rate, limit=limit, source_label=str(file))
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        review_batch.write_sheet(rows, out or file, fmt="jsonl")
+        result["out"] = str(out or file)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("context")
 def nlp_context(
     detector: str = typer.Option(

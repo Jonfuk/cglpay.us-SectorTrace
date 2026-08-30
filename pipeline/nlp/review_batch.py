@@ -475,6 +475,18 @@ def apply_sheet(conn, rows: list[dict], *, decided_by: str,
             break
         processed += 1
 
+    # CAVEATS "Model-assisted review triage": watch how often the reviewer's
+    # call just matched the suggestion. Near-total agreement over a real number
+    # of rows is the signal the review has gone through the motions.
+    paired = [(str(r.get("suggested_decision") or "").strip(),
+               str(r.get("decision") or "").strip()) for r in rows]
+    paired = [(s, d) for s, d in paired if s and d]
+    if paired:
+        agree = sum(1 for s, d in paired if s == d) / len(paired)
+        summary["suggestion_agreement"] = {
+            "n": len(paired), "agree": round(agree, 3),
+            "flag": len(paired) >= 20 and agree >= 0.98}
+
     if dry_run:
         conn.rollback()
         run_id = runs.start_run(conn, STAGE, config=cfg)
