@@ -26,12 +26,12 @@
 {"id": "r022", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Where is the reduction in detox bed numbers discussed?"}
 {"id": "r023", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Any documents about a recruitment and retention premium for hard to fill posts?"}
 {"id": "r024", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find passages on the drug partnership's staffing risk register entries."}
-{"id": "r025", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many machine-extracted claim candidates mention recruitment pressure?"}
+{"id": "r025", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Count claim candidates that mention recruitment pressure."}
 {"id": "r026", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Give me a breakdown of claim candidates by predicate and assertion status."}
 {"id": "r027", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many candidate claims are still 'new' versus already queued for review?"}
 {"id": "r028", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Count the affirmed pay-concern claim candidates from committee papers."}
 {"id": "r029", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "What predicates do the extracted claim candidates cover, and how often?"}
-{"id": "r030", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many negated claim candidates are there for high caseload?"}
+{"id": "r030", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many claim candidates about high caseload have a negated assertion status?"}
 {"id": "r031", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Show the count of funding-reduction candidate claims by lifecycle stage."}
 {"id": "r032", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many claim candidates came from the cdp source system?"}
 {"id": "r033", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Tally the historical vs current assertion statuses across all candidates."}
@@ -68,7 +68,7 @@
 {"id": "r064", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "Has anything been collected into the foi_requests table in the last month?"}
 {"id": "r065", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "What is the freshest table in the warehouse?"}
 {"id": "r066", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "Show retrieval recency per table so I know what needs re-running."}
-{"id": "r067", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "When were the CQC locations last refreshed?"}
+{"id": "r067", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "When was the cqc_locations table last refreshed?"}
 {"id": "r068", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "Is the workforce_census_metrics data more than a year old?"}
 {"id": "r069", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "Report the row count and retrieval span for the cdp_documents table."}
 {"id": "r070", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "Which tables have not had a fresh fetch recently?"}

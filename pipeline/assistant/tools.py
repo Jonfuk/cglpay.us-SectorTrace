@@ -10,7 +10,8 @@ question and the warehouse's existing read-only query code:
   * ``inspect_claim_gate``        — the 034G readiness report
     (`pipeline.nlp.gate`);
   * ``inspect_source_coverage``   — the evidence-by-authority coverage summary
-    (`pipeline.web.health.coverage`), reduced to per-column totals;
+    (`pipeline.web.health.coverage`), reduced to per-column covered/total
+    counts plus a per-region authority count;
   * ``inspect_freshness``         — newest/oldest ``retrieved_at`` per table
     (`pipeline.web.health.freshness`).
 
@@ -126,23 +127,47 @@ def tool_schemas() -> dict:
     return out
 
 
+# These strings go into the router prompt verbatim on every call, so they are
+# the router's only guide to which tool fits. BETA-115 rewrote them after the
+# first live eval: several route prompts were missed because the description
+# did not advertise a capability the wrapper actually has (per-region authority
+# counts in `inspect_source_coverage`; "decided examples per category" in
+# `inspect_claim_gate`) or led with a caveat ("No per-authority detail") that
+# read as "cannot answer 'how many authorities …'". Keep each one a plain
+# statement of what the tool answers, with example phrasings.
 _DESCRIPTIONS = {
     "search_document_passages":
-        "Find paragraph-level passages of parsed committee papers and drug "
-        "partnership documents that match a question by wording, embedding "
-        "similarity, or both. Optional source_system / date filters.",
+        "Retrieve paragraph-level passages of parsed committee papers and drug "
+        "partnership documents, matched by wording, embedding similarity, or "
+        "both. Use for any question answered by quoting document text: what "
+        "papers say about a topic, where something is discussed, the reported "
+        "impact or effect of something, 'find/show text on X'. Optional "
+        "source_system / date filters.",
     "inspect_claim_candidates":
-        "Aggregate counts of machine-extracted claim candidates by predicate, "
-        "assertion status and lifecycle stage. No sentence text; counts only.",
+        "Counts of machine-extracted claim candidates, grouped by predicate, "
+        "assertion status (AFFIRMED / NEGATED / HISTORICAL / THIRD_PARTY / "
+        "UNKNOWN) and lifecycle stage, optionally filtered by source_system. "
+        "Use for 'how many / count / break down' questions about candidate "
+        "claims, including by topic or predicate. Counts only, no sentence "
+        "text.",
     "inspect_claim_gate":
-        "The 034G readiness report: whether there are enough human-reviewed "
-        "examples, and spread, to train claim classifiers, and what is missing.",
+        "The 034G / SetFit training-readiness report: per category, how many "
+        "human-decided positive and negative review examples exist, whether "
+        "there is enough spread and inter-reviewer agreement, whether a "
+        "held-out set can be carved, and what is still missing before claim "
+        "classifiers can be trained.",
     "inspect_source_coverage":
-        "How much evidence of each kind exists for the responsible authorities, "
-        "as per-column covered/total counts. No per-authority detail.",
+        "Evidence coverage across the responsible (public-health) authorities: "
+        "for each evidence kind (contracts, FOI, committee papers, CQC, public "
+        "health grant, …) how many authorities have at least one row out of the "
+        "total, plus a count of authorities per region. Use for 'how many "
+        "authorities have / are missing X evidence' and 'which region has the "
+        "fewest / most authorities'. Aggregate counts, not a named-authority "
+        "list.",
     "inspect_freshness":
-        "The newest and oldest retrieved_at per evidence table, and the row "
-        "count — the honest 'how stale is this' signal.",
+        "The newest and oldest retrieved_at, and the row count, per evidence "
+        "table — the honest 'how stale is this' signal. Optionally for one "
+        "named table (e.g. contracts, cqc_locations, committee_papers).",
 }
 
 

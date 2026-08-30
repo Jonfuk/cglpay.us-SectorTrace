@@ -39,7 +39,7 @@ deployment owns that cost.
 | `search_document_passages` | `pipeline.nlp.semantic_search` | `document_chunk_id` |
 | `inspect_claim_candidates` | bounded aggregate over `document_claim_candidates` | predicate names |
 | `inspect_claim_gate` | `pipeline.nlp.gate` | gate category names |
-| `inspect_source_coverage` | `pipeline.web.health.coverage` (reduced to per-column totals) | column labels |
+| `inspect_source_coverage` | `pipeline.web.health.coverage` (per-column covered/total + per-region authority counts) | column labels |
 | `inspect_freshness` | `pipeline.web.health.freshness` | table names |
 
 All five are read-only. Bad arguments raise `ToolError`, which the service
