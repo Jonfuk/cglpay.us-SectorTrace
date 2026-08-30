@@ -56,15 +56,20 @@ _DECISION_FOR = {"reject": "rejected", "approve": "approved", "correct": "correc
 _INSTRUCTIONS = (
     "You are triaging machine-extracted (subject, predicate, object) claims "
     "pulled from UK local-government committee papers, to build a training "
-    "set. Choose one verdict:\n"
-    "- reject: unusable -- the sentence is garbled or truncated, it does not "
-    "assert any of the listed predicates, or there is no real claim.\n"
-    "- approve: the sentence clearly and directly asserts THE GIVEN predicate "
-    "about THE GIVEN subject, as a present factual claim -- not hypothetical, "
-    "not negated, not historical, not someone else's view.\n"
-    "- correct: there is a real present claim but the GIVEN predicate is "
+    "set. These papers report current situations in the past tense as a "
+    "matter of style -- 'staff were relied upon', 'the service faced' -- and "
+    "that is still a factual claim, NOT a historical one. Choose one verdict:\n"
+    "- reject: unusable -- garbled or truncated; asserts none of the listed "
+    "predicates; is about REDUCING or ENDING the thing rather than doing it; "
+    "is a proposal, aim, question or someone else's opinion; or is a "
+    "meta-statement ('the committee noted', 'the data included').\n"
+    "- approve: the sentence directly asserts THE GIVEN predicate about THE "
+    "GIVEN subject as a fact the paper reports (any tense). Not if it is "
+    "explicitly dated to a bygone state that has since changed, hypothetical "
+    "or conditional, or negated.\n"
+    "- correct: there is a real reported claim but the GIVEN predicate is "
     "wrong; give the id of the predicate from the list that fits.\n"
-    "- keep: anything else. When unsure, keep.\n"
+    "- keep: anything else. When genuinely unsure, keep.\n"
     'Reply with JSON only: {"verdict": "reject|approve|correct|keep", '
     '"predicate": "<id, only when verdict is correct>", "reason": "<=12 words"}.'
 )
