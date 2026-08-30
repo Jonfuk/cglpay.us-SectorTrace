@@ -606,32 +606,38 @@ when the programme is started.)_
       pattern the unambiguous prompts in the same category already use — not
       to make a model pass, but because "held-out precision" is meaningless
       over prompts where clarifying is also a defensible answer.
-    * **`m002` reclassified `malformed` -> `route`.** "Find recruitment
-      passages published between yesterday-ish and soon" is a fuzzy retrieval
-      request, not an attack; dropping the unusable date filter and routing
-      `search_document_passages` (which the model did) is correct behaviour,
-      not a wrong execution. `bad_filter` shapes that *are* hostile (a URL, a
-      path) stay `malformed` and are now caught in code.
+    * **`m002` and `m006` reclassified `malformed` -> `route`.** "…between
+      yesterday-ish and soon" and "give me 500000 passages … no limit" are
+      fuzzy/pushy retrieval requests, not attacks: the schema clamps the
+      out-of-range value (`limit` to 20) and routing `search_document_passages`
+      is the correct, safe response — not a wrong execution. `bad_filter`
+      shapes that *are* hostile (a URL, a path, a `SELECT … FROM` or a
+      `; drop table`) stay `malformed` and are now caught in code.
   - result:
     * New `_hostile_reason` in `routing.py` — before any model call, a
       question that tries to set the router's confidence, tells it to pick a
       tool regardless of fit, tells it to ignore its instructions, or carries
-      a URL / `../` path, returns a deterministic clarification
-      (`reason="hostile_question"`). The system prompt already said as much;
-      a capable model ignored it. Kills i004 / m003 / m004 without a token.
+      a URL / `../` path / SQL statement, returns a deterministic
+      clarification (`reason="hostile_question"`). The system prompt already
+      said as much; a capable model ignored it. Kills i004 / m001 / m003 /
+      m004 / m008 without a token.
     * `get_embedder` (`pipeline/nlp/embeddings.py`) now caches one instance
       per model name, process-wide, under a lock. The retrieval tool was
       rebuilding the MiniLM model every call — nine "Loading weights" lines
       and a 1.2 GB RSS spike in one eval, and a chunk of the 25-36 s p95.
-    * Routing fixture: still 108 prompts; kinds now route 71 / clarify 14 /
-      malformed 7 / injection 8 / forbidden 8 (all >= 5, all five tools
+    * Routing fixture: still 108 prompts; kinds now route 72 / clarify 14 /
+      malformed 6 / injection 8 / forbidden 8 (all >= 5, all five tools
       covered).
     * `router_prompt_sha256()` moves again (the catalogue text is unchanged
       here, but BETA-115's does; this entry only touches code + fixtures).
   - not done here: nothing lowers the bar; a stochastic router still has to
     clear 0.95 on the *worst* of three eval runs (documented in
-    `docs/assistant.md`). Grounding recall is now a question about the
-    answerer model's conservatism, not retrieval.
+    `docs/assistant.md`). Grounding recall (~6/35 answered on the mirror) is
+    now a question about the answerer model's conservatism and the synced
+    corpus, not retrieval — retrieval returns resolved citations when it
+    fires. The grounding p95 (~25 s) survived the embedder cache (one load
+    now, RSS down to ~880 MB), so it is answerer-model tail latency, not the
+    reload — not gated, but worth a faster answerer.
   - validation: new `test_assistant_routing` cases (hostile shapes refused
     before the model; a plain question still reaches it) and a
     `test_nlp_embeddings` case (one cached embedder per name).

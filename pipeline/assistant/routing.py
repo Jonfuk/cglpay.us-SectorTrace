@@ -85,6 +85,10 @@ _HOSTILE_QUESTION = (
      "tells the router to ignore its instructions"),
     (re.compile(r"[a-z][a-z0-9+.\-]*://", re.I), "contains a URL"),
     (re.compile(r"\.\./|\.\.\\|/etc/", re.I), "contains a file path"),
+    (re.compile(r"\bselect\s+(?:\*|[a-z_][\w.]*(?:\s*,\s*[a-z_][\w.]*)*)\s+from\s+[a-z_]"
+                r"|\b(?:drop|truncate|delete\s+from|alter\s+table|insert\s+into|union\s+select)\b",
+                re.I),
+     "contains a SQL statement"),
 )
 
 
