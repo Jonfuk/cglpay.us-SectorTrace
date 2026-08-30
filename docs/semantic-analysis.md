@@ -299,8 +299,16 @@ between the high-volume table and `review_queue`: a **primary** slice
 (campaign predicate, score floor, `AFFIRMED`, subject resolves to a
 registered entity), a **contradiction** slice (same subject+predicate
 asserted both ways across documents), a **novel** slice (a
-(subject, predicate) pair the Evidence Graph has never held), and a small
-deterministic **validation** sample. It writes `review_queue` items
+(subject, predicate) pair the Evidence Graph has never held), a small
+deterministic **validation** sample, and a bounded **gate_coverage** slice
+(the six `gate.GATE_CATEGORIES` predicates only, `AFFIRMED` over the primary
+floor, capped per predicate, **without** the resolved-entity requirement,
+plus a smaller cap of non-`AFFIRMED` ones for the negative class). The last
+slice exists because committee papers name their subject generically far more
+often than they name a registered provider, so five of the six 034G
+categories otherwise never reach the gate's per-class floor; a `gate_coverage`
+item trains a classifier, is never written to `graph_claims`, and is
+human-reviewed before it counts. It writes `review_queue` items
 (`item_type='semantic_claim_candidate'`) with the sentence, chunk id,
 offsets, source URL and payload SHA-256 in `context_json`, and marks the
 candidate `queued`.
@@ -353,6 +361,20 @@ The path to a green gate is reviewer labour, not code: run the chain on the
 real warehouse with a real embedder, work the `semantic_claim_candidate`
 queue with `decide-claim` (favouring `corrected` over bare `reject`), and
 re-check the gate.
+
+Two corpus preconditions were cleared before the review pass could count for
+anything (BETA-047). `document_records.published_at` was 100% NULL — see
+D-07 in the upgrade roadmap — so migration `0080` backfills it from the
+promoted source rows' own `meeting_date` / `published_date`; without it every
+decided example dated to its fetch week and `MIN_YEARS` could never be met.
+And the `gate_coverage` slice above was added to `promote.py` because
+committee papers name their subject generically ("the service", "staff") far
+more often than they name a registered provider — without it, five of the six
+categories cannot reach the per-class floor no matter how the review goes.
+Known residual, for a future `GATE_CATEGORIES` / threshold revision:
+`funding_reduction` is pool-limited below the floor; the corpus is only two
+source systems so `MIN_SOURCE_SYSTEMS` stays a hard edge for thin categories;
+and `MIN_DOUBLE_REVIEWED` needs a second named reviewer.
 
 ## The tranches (BETA-034)
 

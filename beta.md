@@ -466,7 +466,22 @@ complete — see DONE. Nothing is queued.)_
     (b) work the `semantic_claim_candidate` queue with `decide-claim`,
     favouring `corrected` over bare `reject`, until `gate-034g` exits 0
     (~50 pos + ~50 neg + a held-out margin per category, source/subject/year
-    spread, ≥10 double-reviewed at ≥0.8 agreement). Only then is the SetFit
+    spread, ≥10 double-reviewed at ≥0.8 agreement).
+    Two corpus blockers were cleared first (BETA-047): migration `0080`
+    backfills `document_records.published_at` from `committee_papers.
+    meeting_date` / `cdp_documents.published_date` (was 100% NULL, which
+    pinned every decided example to its fetch week and made the gate's
+    year-spread condition unmeetable); and `promote.py` gained a bounded
+    `gate_coverage` slice that queues the six gate predicates without the
+    resolved-entity requirement, since committee papers name subjects
+    generically and five of six categories could not otherwise reach the
+    per-class floor. Residual, for the gate re-scope discussion (Option C):
+    `funding_reduction` is pool-limited (~54 AFFIRMED candidates total,
+    below the 65 need-to-train+heldout); the whole NLP corpus is only two
+    source systems, so `MIN_SOURCE_SYSTEMS = 2` will still fail for thin
+    categories (counting distinct authorities instead is the likely fix);
+    and `MIN_DOUBLE_REVIEWED = 10` at 0.8 agreement needs a second reviewer,
+    which no code change removes. Only then is the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
     column; a min-precision gate before any prediction is written) worth

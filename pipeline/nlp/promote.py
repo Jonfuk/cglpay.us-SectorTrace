@@ -14,7 +14,19 @@ deliberately narrow:
   * a **novel** slice -- a (subject entity, predicate) pair the Evidence
     Graph has never carried, at a slightly lower floor;
   * a small deterministic **validation** sample, so the precision of the
-    unselected majority stays measurable.
+    unselected majority stays measurable;
+  * a bounded **gate_coverage** slice -- for the six predicates the 034G
+    readiness gate classifies (`pipeline/nlp/gate.py`), a capped number of
+    `AFFIRMED` candidates over the `primary` score floor *without* the
+    resolved-entity requirement, plus a smaller cap of non-`AFFIRMED` ones so
+    the negative class is not starved. The resolved-entity bar exists so an
+    Evidence Graph *claim* has a real subject; a `gate_coverage` item trains a
+    *classifier*, is never written to `graph_claims`, and is human-reviewed
+    before it counts. The narrowness is relaxed only for this bounded labelled
+    quota, only for those six categories. Committee papers name their subject
+    generically ("the service", "staff") far more often than they name a
+    registered provider, so without this slice five of the six categories can
+    never reach the gate's per-class floor no matter how the review goes.
 
 It writes `review_queue` items (`item_type='semantic_claim_candidate'`) with
 the sentence, chunk id, offsets, source URL and payload SHA-256 in
@@ -27,6 +39,7 @@ from __future__ import annotations
 import json
 
 from pipeline import db
+from pipeline.nlp import gate as gate_mod
 from pipeline.nlp import ontology as ontology_mod
 from pipeline.nlp import runs
 
@@ -37,6 +50,20 @@ ITEM_TYPE = "semantic_claim_candidate"
 SCORE_FLOOR = 0.55
 NOVEL_FLOOR = 0.44
 VALIDATION_RATE = 40   # 1 in N candidates, by a stable hash
+
+# The six predicates 034G classifies. The gate needs ~65 decided positive and
+# ~65 decided negative per category; these caps queue enough that the expected
+# survivors of review clear that floor without flooding the queue. Positives
+# are AFFIRMED over SCORE_FLOOR (the `primary` quality bar); negatives are the
+# other assertion statuses over the same floor -- a reviewer confirms them as
+# "about this category but not affirming it now", which `gate._label_for`
+# counts as a negative. Ordered by relation_score, so the cap keeps the
+# highest-confidence candidates.
+GATE_COVERAGE_PREDICATES = frozenset(gate_mod.GATE_CATEGORIES.values())
+GATE_COVERAGE_POS_CAP = 150      # AFFIRMED, per predicate, per run
+GATE_COVERAGE_NEG_CAP = 90       # non-AFFIRMED, per predicate, per run
+_GATE_NEGATIVE_ASSERTIONS = frozenset(
+    {"NEGATED", "HISTORICAL", "HYPOTHETICAL", "THIRD_PARTY", "CONDITIONAL"})
 
 
 def campaign_predicates(onto: ontology_mod.Ontology) -> frozenset[str]:
@@ -107,6 +134,31 @@ def select(conn, candidates: list, *, campaign: frozenset[str]) -> list[dict]:
 
         if reason:
             selected.append({"row": row, "reason": reason, "subject_entity_id": entity_id})
+
+    # gate_coverage: a second, bounded pass for the 034G categories only. It
+    # deliberately does not require entity_id -- see the module docstring.
+    # `candidates` arrives ordered by relation_score DESC, so first-past-the-cap
+    # keeps the highest-confidence sentences for each predicate.
+    already = {pick["row"]["claim_candidate_id"] for pick in selected}
+    pos_seen: dict[str, int] = {}
+    neg_seen: dict[str, int] = {}
+    for row in candidates:
+        cid = row["claim_candidate_id"]
+        predicate = row["predicate"]
+        if cid in already or predicate not in GATE_COVERAGE_PREDICATES:
+            continue
+        if (row["relation_score"] or 0.0) < SCORE_FLOOR:
+            continue
+        status = row["assertion_status"]
+        if status == "AFFIRMED" and pos_seen.get(predicate, 0) < GATE_COVERAGE_POS_CAP:
+            pos_seen[predicate] = pos_seen.get(predicate, 0) + 1
+        elif status in _GATE_NEGATIVE_ASSERTIONS and neg_seen.get(predicate, 0) < GATE_COVERAGE_NEG_CAP:
+            neg_seen[predicate] = neg_seen.get(predicate, 0) + 1
+        else:
+            continue
+        selected.append({"row": row, "reason": "gate_coverage",
+                         "subject_entity_id": subject_entities[cid]})
+
     return selected
 
 

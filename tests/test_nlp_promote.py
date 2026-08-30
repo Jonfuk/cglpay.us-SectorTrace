@@ -118,6 +118,63 @@ def test_run_is_idempotent(conn, settings):
     assert n1 == n2
 
 
+def _cand(cid, predicate, status="AFFIRMED", score=0.80, mention_id=None,
+          hint="the service"):
+    # the shape promote.select() reads; a bare dict is enough
+    return {"claim_candidate_id": cid, "predicate": predicate,
+            "assertion_status": status, "relation_score": score,
+            "subject_mention_id": mention_id, "subject_hint": hint}
+
+
+_GATE_PRED = "workforce.relies_on_agency"       # one of gate.GATE_CATEGORIES
+_NON_GATE_PRED = "workforce.has_low_morale"     # campaign, but not a gate category
+
+
+def test_gate_coverage_queues_an_unresolved_subject(conn):
+    # an AFFIRMED gate-category candidate over the floor whose subject never
+    # resolves: not 'primary' (no entity), but taken as 'gate_coverage'.
+    picks = promote.select(
+        conn, [_cand("cc-00000001", _GATE_PRED)], campaign=frozenset({_GATE_PRED}))
+    assert [p["reason"] for p in picks] == ["gate_coverage"]
+    assert picks[0]["subject_entity_id"] is None
+
+
+def test_gate_coverage_is_only_the_six_gate_predicates(conn):
+    picks = promote.select(
+        conn, [_cand("cc-00000002", _NON_GATE_PRED)],
+        campaign=frozenset({_NON_GATE_PRED}))
+    assert picks == []
+
+
+def test_gate_coverage_respects_the_score_floor(conn):
+    picks = promote.select(
+        conn, [_cand("cc-00000003", _GATE_PRED, score=promote.SCORE_FLOOR - 0.01)],
+        campaign=frozenset({_GATE_PRED}))
+    assert picks == []
+
+
+def test_gate_coverage_caps_the_positive_class(conn):
+    over = promote.GATE_COVERAGE_POS_CAP + 25
+    # hex ids: promote._validation_pick parses the last 8 chars as base 16
+    rows = [_cand(f"cc-{i:012x}", _GATE_PRED) for i in range(1, over + 1)]
+    picks = [p for p in promote.select(conn, rows, campaign=frozenset({_GATE_PRED}))
+             if p["reason"] == "gate_coverage"]
+    assert len(picks) == promote.GATE_COVERAGE_POS_CAP
+
+
+def test_gate_coverage_does_not_double_count_a_primary_pick(conn, settings):
+    # the resolved-subject candidate from the standard fixture is 'primary';
+    # it must not also appear as 'gate_coverage'.
+    _run_to_candidates(conn, settings)
+    result = promote.run(conn, source_system="committee_paper_promotion")
+    by_candidate = conn.execute(
+        "SELECT raw_value, COUNT(*) c FROM review_queue "
+        "WHERE item_type='semantic_claim_candidate' GROUP BY raw_value HAVING c > 1"
+    ).fetchall()
+    assert by_candidate == []
+    assert result["by_reason"].get("primary", 0) >= 1
+
+
 def test_dry_run_writes_nothing(conn, settings):
     _run_to_candidates(conn, settings)
     result = promote.run(conn, dry_run=True)
