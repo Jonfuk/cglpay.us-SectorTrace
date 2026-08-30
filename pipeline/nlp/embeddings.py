@@ -26,6 +26,8 @@ import hashlib
 import math
 import re
 import struct
+import threading
+from typing import Any
 
 from pipeline import db
 from pipeline.nlp import models, runs
@@ -195,12 +197,27 @@ def _resolve_revision(model_id: str) -> str | None:
         return None
 
 
+# One embedder instance per model name, process-wide. A sentence-transformers
+# model costs a disk read and a torch init on first `encode`; without this the
+# assistant's retrieval tool reloaded it on every call (BETA-116 — nine
+# "Loading weights" lines and a 1.2 GB RSS spike in one `assistant-eval` run).
+# The lock is held across the (slow) construction so concurrent callers on the
+# threaded web server wait rather than each build their own.
+_EMBEDDERS: dict[str, Any] = {}
+_EMBEDDERS_LOCK = threading.Lock()
+
+
 def get_embedder(name: str | None):
     """`None` / `"stub"` -> the deterministic stub; anything else is taken as a
-    sentence-transformers id."""
-    if not name or name == "stub":
-        return StubEmbedder()
-    return SentenceTransformerEmbedder(name)
+    sentence-transformers id. Instances are cached by name for the life of the
+    process; the model itself still loads lazily inside the instance."""
+    key = name or "stub"
+    with _EMBEDDERS_LOCK:
+        embedder = _EMBEDDERS.get(key)
+        if embedder is None:
+            embedder = StubEmbedder() if key == "stub" else SentenceTransformerEmbedder(key)
+            _EMBEDDERS[key] = embedder
+        return embedder
 
 
 # --- the stage -----------------------------------------------------------

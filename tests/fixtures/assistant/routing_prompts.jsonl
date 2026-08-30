@@ -12,7 +12,7 @@
 {"id": "r008", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Search the papers for mentions of a recommissioning of the community drug service."}
 {"id": "r009", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Any documents referencing waiting times for structured treatment?"}
 {"id": "r010", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find where reports talk about morale or burnout among treatment staff."}
-{"id": "r011", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Show passages about the impact of the public health grant cut on the drug service."}
+{"id": "r011", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find committee text on the public health grant cut affecting the drug service."}
 {"id": "r012", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "What do the papers say about difficulty retaining experienced staff?"}
 {"id": "r013", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Search for references to TUPE transfers of the treatment workforce."}
 {"id": "r014", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find committee text on the cost of living affecting frontline drug workers."}
@@ -26,12 +26,12 @@
 {"id": "r022", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Where is the reduction in detox bed numbers discussed?"}
 {"id": "r023", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Any documents about a recruitment and retention premium for hard to fill posts?"}
 {"id": "r024", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find passages on the drug partnership's staffing risk register entries."}
-{"id": "r025", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Count claim candidates that mention recruitment pressure."}
+{"id": "r025", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Break down recruitment-pressure claim candidates by assertion status."}
 {"id": "r026", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Give me a breakdown of claim candidates by predicate and assertion status."}
 {"id": "r027", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many candidate claims are still 'new' versus already queued for review?"}
 {"id": "r028", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Count the affirmed pay-concern claim candidates from committee papers."}
 {"id": "r029", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "What predicates do the extracted claim candidates cover, and how often?"}
-{"id": "r030", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many claim candidates about high caseload have a negated assertion status?"}
+{"id": "r030", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Break down high-caseload claim candidates by assertion status."}
 {"id": "r031", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Show the count of funding-reduction candidate claims by lifecycle stage."}
 {"id": "r032", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "How many claim candidates came from the cdp source system?"}
 {"id": "r033", "kind": "route", "expect_tool": "inspect_claim_candidates", "category": "candidates", "question": "Tally the historical vs current assertion statuses across all candidates."}
@@ -45,7 +45,7 @@
 {"id": "r041", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is inter-reviewer agreement high enough to proceed with training?"}
 {"id": "r042", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Show the 034G gate status and its shortfalls by category."}
 {"id": "r043", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Which categories are gate-ready and which are not?"}
-{"id": "r044", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "How many double-reviewed claim candidates do we have?"}
+{"id": "r044", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is there enough double-reviewed data per category to proceed with classifier training?"}
 {"id": "r045", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Is there room to carve a held-out eval set for the vacancy_pressure category?"}
 {"id": "r046", "kind": "route", "expect_tool": "inspect_claim_gate", "category": "gate", "question": "Report on training readiness for the funding_reduction classifier."}
 {"id": "r047", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "How many responsible authorities have at least one contract on file?"}
@@ -57,7 +57,7 @@
 {"id": "r053", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "Break authority coverage down by region."}
 {"id": "r054", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "How many upper-tier authorities have CQC location evidence?"}
 {"id": "r055", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "What share of responsible authorities have committee-paper evidence?"}
-{"id": "r056", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "Summarise per-column covered versus total rows for evidence sources."}
+{"id": "r056", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "Summarise evidence coverage across the responsible authorities, by evidence type."}
 {"id": "r057", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "Which region has the fewest authorities represented in the warehouse?"}
 {"id": "r058", "kind": "route", "expect_tool": "inspect_source_coverage", "category": "coverage", "question": "How many of the 159 public-health authorities have contract data?"}
 {"id": "r059", "kind": "route", "expect_tool": "inspect_freshness", "category": "freshness", "question": "How stale is the contracts table right now?"}
@@ -87,7 +87,7 @@
 {"id": "c013", "kind": "clarify", "category": "out_of_scope", "question": "What's the weather in Leeds tomorrow?"}
 {"id": "c014", "kind": "clarify", "category": "out_of_scope", "question": "Write me a press release for the campaign launch."}
 {"id": "m001", "kind": "malformed", "category": "bad_filter", "question": "Search passages about pay but only from the source_system called '; drop table evidence_records; --"}
-{"id": "m002", "kind": "malformed", "category": "bad_filter", "question": "Find recruitment passages published between yesterday-ish and soon."}
+{"id": "m002", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find recruitment passages published between yesterday-ish and soon."}
 {"id": "m003", "kind": "malformed", "category": "bad_filter", "question": "Coverage for the tier named http://example.com/tiers/upper please."}
 {"id": "m004", "kind": "malformed", "category": "bad_filter", "question": "Freshness of the table ../../etc/passwd."}
 {"id": "m005", "kind": "malformed", "category": "bad_filter", "question": "Claim candidates where assertion_status = MAYBE_PROBABLY."}

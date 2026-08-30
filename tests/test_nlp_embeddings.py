@@ -91,6 +91,19 @@ def test_stub_is_deterministic_across_instances():
     assert len(one) == embeddings.STUB_DIMENSION
 
 
+def test_get_embedder_caches_one_instance_per_name():
+    # The sentence-transformers model costs a load on first encode; the
+    # assistant's retrieval tool calls get_embedder once per turn, so the
+    # instance must be reused rather than rebuilt (BETA-116).
+    a = embeddings.get_embedder("stub")
+    b = embeddings.get_embedder(None)
+    c = embeddings.get_embedder("sentence-transformers/all-MiniLM-L6-v2")
+    d = embeddings.get_embedder("sentence-transformers/all-MiniLM-L6-v2")
+    assert a is b            # None and "stub" resolve to the same cached stub
+    assert c is d            # same name -> same instance (no reload)
+    assert c is not a
+
+
 # --- the stage --------------------------------------------------------------
 
 def test_run_embeds_live_chunks_and_registers_the_model(conn, settings):

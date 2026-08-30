@@ -27,7 +27,7 @@ deployment owns that cost.
 | Runtime boundary | `pipeline/assistant/runtime.py`, `adapters.py` | The `[assistant]` extra (just `openai`), two OpenAI-chat-compatible endpoints (OpenRouter by default; independently configured), `AssistantUnavailable` instead of import/socket errors. Imports with nothing installed. |
 | Run ledger | `pipeline/assistant/ledger.py` + migration `0079` | One immutable `assistant_runs` row per turn: question, filters, model identities, prompt-template hashes, routing confidence, validated args, retrieved chunk ids, answer, citation ids, timings, outcome, error class. Append-only. No secrets or model paths. |
 | Tool catalogue | `pipeline/assistant/tools.py` | Exactly five typed, side-effect-free tools wrapping existing query code. No argument is a table name, URL, path or SQL. |
-| Router | `pipeline/assistant/routing.py` | The router model (`assistant_needle_model`) picks at most one tool. Its name and arguments are re-validated independently; confidence must clear a frozen threshold; anything else is a clarification with no execution. The router is sent only the question and the tool catalogue — never document text. |
+| Router | `pipeline/assistant/routing.py` | The router model (`assistant_needle_model`) picks at most one tool. Its name and arguments are re-validated independently; confidence must clear a frozen threshold; anything else is a clarification with no execution. A question that tries to steer the router (set its confidence, "pick any tool regardless of fit", a URL / file path) is rejected in code before the model call. The router is sent only the question and the tool catalogue — never document text. |
 | Grounding | `pipeline/assistant/grounding.py` | The answerer model (`assistant_lfm_model`) gets only the validated tool result (retrieved text delimited as untrusted data) and no executable tools. Every `[[id]]` in the answer is checked against the result's own identifiers; an unresolved citation or a missing citation suppresses the answer and returns an abstention. |
 | Service | `pipeline/assistant/service.py` | One orchestration function shared by HTTP and CLI. One tool call per turn, short router timeout, 30 s overall ceiling, explicit `ok`/`abstained`/`clarified`/`timeout`/`unavailable`/`failed` outcome. |
 | Evaluation & gate | `pipeline/assistant/evaluation.py` + `tests/fixtures/assistant/` | Frozen routing and grounding suites; a machine-readable gate whose `may_enable` field is the only thing that authorises enabling the feature. |
@@ -71,11 +71,23 @@ turns into a clarification, never a crash and never an execution.
 
    It prints the routing/grounding scores and the gate. **Do not set
    `assistant_enabled = True` until `gate.may_enable` is `true`.** A
-   code-complete feature is not an enabled one. In particular,
-   `FROZEN_ROUTING_THRESHOLD` (0.60 in `pipeline/assistant/routing.py`) was
-   calibrated against the retired Needle 2 confidence head; re-score it
-   against your chosen router model and move it in code if that model's
-   self-reported confidence sits differently.
+   code-complete feature is not an enabled one.
+
+   Two things to know about this step:
+   - **The router is stochastic.** A hosted model on OpenRouter is not
+     deterministic even at temperature 0 (provider load-balancing), so
+     routing precision wobbles ±2 prompts between runs. Run `assistant-eval`
+     three times; treat the *worst* run as the result. A single sub-0.95 run
+     is a prompt to investigate which prompts flipped, not proof of failure —
+     but a run that clears the bar once and fails twice has not passed.
+   - **The bars themselves are fixed.** `HELD_OUT_PRECISION_FLOOR` (0.95, in
+     `evaluation.py`) and `FROZEN_ROUTING_THRESHOLD` (0.60, in `routing.py`)
+     are not knobs to turn down to get a green. If a capable router cannot
+     clear them, the fix is a better router or a cleaner fixture, not a lower
+     bar. `FROZEN_ROUTING_THRESHOLD` was calibrated against the retired
+     Needle 2 confidence head; you *may* re-freeze it against your router
+     model if its self-reported confidence sits systematically differently —
+     that is a re-calibration, recorded, not a pass-to-fit tweak.
 4. Only then set `assistant_enabled = True`.
 
 ## Deploying via Ansible
