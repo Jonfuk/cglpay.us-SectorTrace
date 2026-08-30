@@ -632,6 +632,14 @@ when the programme is started.)_
     `pipeline nlp assistant-eval` still reports `may_enable = false` until it
     is run with a key and both slugs on a host that can reach OpenRouter.
     This change makes the switch possible; it does not enable the feature.
+  - follow-up (2026-08-30): first real eval run on the beta mirror
+    (`openai/gpt-4o-mini` as router) showed the router dropping the
+    `confidence` field often enough to miss the 0.95 precision floor. The
+    router adapter now sends `response_format={"type":"json_object"}`, gated
+    on the new `assistant_router_json_mode` setting (default on, off for a
+    router model that 400s on it). Answerer leg unchanged. Threshold tuning
+    is not the lever here — every routed prompt cleared 0.60; the failure was
+    schema non-compliance.
   - validation: `tests/test_assistant_boundary.py` updated (no pinned model;
     `api_key_configured`; key resolution from setting vs `OPENROUTER_API_KEY`;
     an unconfigured slug is `AssistantUnavailable` before any call).

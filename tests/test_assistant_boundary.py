@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import threading
+import types
 from pathlib import Path
 
 import httpx
@@ -20,6 +21,28 @@ from pipeline.web.server import build_server
 
 ROOT = Path(__file__).resolve().parent.parent
 _HAS_OPENAI = importlib.util.find_spec("openai") is not None
+
+
+class _RecordingClient:
+    """Stands in for the `openai` client: records the kwargs of the one
+    `chat.completions.create` call and returns a minimal valid response, so a
+    test can assert what `generate()` sent without the extra or a network."""
+
+    def __init__(self) -> None:
+        self.create_kwargs: dict | None = None
+
+    def with_options(self, **_kw):
+        return self
+
+    @property
+    def chat(self):
+        return types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.create_kwargs = kwargs
+        msg = types.SimpleNamespace(content='{"tool": null, "confidence": 0.0}')
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=msg)])
 
 
 def test_the_package_imports_with_nothing_installed() -> None:
@@ -95,6 +118,30 @@ def test_an_unconfigured_model_slug_is_assistant_unavailable(settings, monkeypat
     monkeypatch.setattr(settings, "assistant_api_key", "sk-or-x", raising=False)
     with pytest.raises(AssistantUnavailable, match="no model configured"):
         NeedleAdapter(settings).generate("hello")
+
+
+def test_only_the_router_leg_asks_for_json_object_mode(settings, monkeypatch) -> None:
+    from pipeline.assistant.adapters import LFMOllamaAdapter, NeedleAdapter
+
+    monkeypatch.setattr(settings, "assistant_needle_model", "x/router", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_model", "x/answerer", raising=False)
+
+    router, rc = NeedleAdapter(settings), _RecordingClient()
+    monkeypatch.setattr(router, "_client", lambda: rc)
+    router.generate("q", system="s")
+    assert rc.create_kwargs["response_format"] == {"type": "json_object"}
+
+    answerer, ac = LFMOllamaAdapter(settings), _RecordingClient()
+    monkeypatch.setattr(answerer, "_client", lambda: ac)
+    answerer.generate("q", system="s")
+    assert "response_format" not in ac.create_kwargs
+
+    # A deployment whose router model 400s on response_format can turn it off.
+    monkeypatch.setattr(settings, "assistant_router_json_mode", False, raising=False)
+    off, oc = NeedleAdapter(settings), _RecordingClient()
+    monkeypatch.setattr(off, "_client", lambda: oc)
+    off.generate("q", system="s")
+    assert "response_format" not in oc.create_kwargs
 
 
 def test_get_adapter_refuses_while_the_layer_is_disabled(settings) -> None:

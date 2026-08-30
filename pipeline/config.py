@@ -321,6 +321,15 @@ class Settings(BaseSettings):
     assistant_lfm_quant: str = ""
     assistant_needle_model: str = ""
 
+    # Send `response_format={"type":"json_object"}` on the router call. The
+    # router prompt already demands a bare JSON object, but a small model
+    # (observed: gpt-4o-mini) still drops the `confidence` field often enough
+    # to fail the gate; JSON mode fixes that. Only the router leg — the
+    # answerer writes prose. On by default because most chat models on
+    # OpenRouter honour it; set false if the chosen router model 400s on an
+    # unsupported `response_format`.
+    assistant_router_json_mode: bool = True
+
     # The routing leg and the whole-turn ceilings, in seconds. 0 means the
     # code defaults (`ROUTER_TIMEOUT_SECONDS` = 8, `OVERALL_TIMEOUT_SECONDS`
     # = 30). OpenRouter's first-token latency on a cold or busy model can

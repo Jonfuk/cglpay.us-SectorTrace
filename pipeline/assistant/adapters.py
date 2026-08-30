@@ -7,7 +7,10 @@ OpenAI-chat-compatible HTTP backends.
   * `NeedleAdapter` — the router leg. Historically the Needle 2 endpoint; since
     BETA-114 it reaches OpenRouter (`assistant_needle_url`) with the slug
     `resolved_needle_model`. The two legs are configured independently so a
-    cheap model can route and a stronger one can ground.
+    cheap model can route and a stronger one can ground. The router leg also
+    sets `response_format=json_object` (`assistant_router_json_mode`, on by
+    default) — its prompt demands a bare JSON object and a small model drops
+    fields without the constraint.
 
 The class and adapter-registry names are kept as role labels rather than
 renamed, to avoid a migration of the `assistant_runs` columns that record
@@ -51,10 +54,15 @@ class _OpenAICompatAdapter:
     name = "openai-compat"
 
     def __init__(self, *, base_url: str, model: str,
-                 api_key: str = "") -> None:
+                 api_key: str = "", json_response: bool = False) -> None:
         self.base_url = base_url
         self.model = model
         self._api_key = api_key or _PLACEHOLDER_KEY
+        # Ask the API to constrain the reply to a JSON object. Only the router
+        # leg sets this (BETA-114 follow-up): its prompt demands bare JSON and
+        # a small model still drops the `confidence` field without the
+        # constraint. The answerer writes prose and must never get it.
+        self._json_response = json_response
 
     def _client(self):
         try:
@@ -85,10 +93,13 @@ class _OpenAICompatAdapter:
             # OpenAI client raises on expiry, which `generate` maps to
             # `AssistantUnavailable` below — i.e. the caller fails closed.
             client = client.with_options(timeout=timeout)
+        kwargs: dict[str, Any] = {
+            "model": self.model, "messages": messages,
+            "max_tokens": max_tokens, "temperature": temperature}
+        if self._json_response:
+            kwargs["response_format"] = {"type": "json_object"}
         try:
-            resp = client.chat.completions.create(
-                model=self.model, messages=messages,
-                max_tokens=max_tokens, temperature=temperature)
+            resp = client.chat.completions.create(**kwargs)
         except AssistantUnavailable:
             raise
         except Exception as exc:  # connection refused / model not pulled / timeout
@@ -119,7 +130,8 @@ class NeedleAdapter(_OpenAICompatAdapter):
         super().__init__(
             base_url=getattr(settings, "assistant_needle_url", ""),
             model=resolved_needle_model(settings),
-            api_key=resolved_api_key(settings))
+            api_key=resolved_api_key(settings),
+            json_response=getattr(settings, "assistant_router_json_mode", True))
 
 
 _ADAPTERS = {
