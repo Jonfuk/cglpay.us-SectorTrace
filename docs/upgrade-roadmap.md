@@ -226,6 +226,13 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Evidence: `pipeline/backup.py` exists and works (Phase 3), and on the day the override table was emptied the only backup on disk had been taken *after* the loss. An earlier one taken the same afternoon was no longer there.
 - A backup you have to remember is a backup you take too late. Worth a scheduled or pre-destructive-operation hook, and a retention rule so that clearing the directory of test debris cannot take the real snapshots with it.
 
+**D-07 · `document_records.published_at` was never written · S — backfill closed 2026-08-30 (`0080`); fix-forward open**
+- Evidence **[live]**: `published_at` has existed since `0053` and is half of `idx_document_records_type`, but `repository.upsert_document()` omits the column entirely. Every parsed committee paper and CDP document had `published_at IS NULL` — 11,394 committee rows carried a real `meeting_date` upstream that never reached the canonical table.
+- Costs today: it surfaced through 034G. `pipeline/nlp/gate.py` dates each decided example by `COALESCE(published_at, retrieved_at)`; with `published_at` empty, every example fell in the week it was fetched, so the gate's `MIN_YEARS = 3` per-category condition could never be met regardless of review effort.
+- **Fix (backfill):** migration `0080_document_published_at_backfill.sql` (both dialects), idempotent, joins `document_records.source_key` back to `committee_papers` / `cdp_documents` and copies `meeting_date` / `published_date`. Not inference — both are publication dates captured with provenance at collection. Rows whose source has no date stay NULL (1,431 committee, all 424 CDP). Post-backfill the queued-candidate corpus spans 2001–2026.
+- **Still open (fix-forward):** new registrations still will not set `published_at`. The bridge writes only `evidence_records` (no date column) and `document_records` is created later at parse time from `evidence_records` alone, so the fix needs either an `evidence_records.source_published_at` column carried by the bridge, or a source-table re-join in `upsert_document`. Until then the backfill migration must be re-run after each promotion batch.
+- Verified by: `test_migration_equivalence.py` (count + object-inventory parity); the backfill's `published_at IS NULL` guard makes re-runs safe to assert.
+
 ### C. Pipeline performance
 
 **P-01 · Every commit is an fsync · S to try, MEASURE FIRST — measured in Phase 7, and declined**

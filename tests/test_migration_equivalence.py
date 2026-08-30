@@ -169,7 +169,12 @@ class TestTheTreesMatch:
         # hashes, routing confidence, validated args, retrieved chunk ids,
         # answer, citation ids, timings, outcome, error class. Plus one index.
         # TEXT/REAL -> text/double precision only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 79
+        # 80 backfills document_records.published_at from committee_papers.
+        # meeting_date / cdp_documents.published_date (BETA-047). Data only, no
+        # schema object: the SQLite file uses a correlated-subquery UPDATE, the
+        # PostgreSQL file the equivalent UPDATE ... FROM. The join key is
+        # unambiguous so the two produce the same rows.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 80
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):
