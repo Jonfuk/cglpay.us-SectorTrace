@@ -22,10 +22,10 @@ networks:
     external: true
 
 volumes:
-  # Model weights (the 2.6B default GGUF is ~1.6 GB) plus Ollama's
-  # manifests. A named volume, not state_dir/data: it is not warehouse
-  # content, must outlive a `pipeline restore`, and is safe to delete — the
-  # playbook re-pulls. `docker volume inspect
+  # Model weights (the 350M default GGUF is ~220 MB; the 2.6B option ~1.6 GB)
+  # plus Ollama's manifests. A named volume, not state_dir/data: it is not
+  # warehouse content, must outlive a `pipeline restore`, and is safe to
+  # delete — the playbook re-pulls. `docker volume inspect
   # sectortrace-assistant_ollama-models` says where it lives.
   ollama-models:
 
@@ -42,10 +42,11 @@ services:
       # is designed around 32K-context synthesis (pipeline/assistant/
       # adapters.py); LFM2.5-1.2B handles ~125K.
       OLLAMA_CONTEXT_LENGTH: "32768"
-      # Unload the model this long after the last call. The assistant is
-      # interactive and bursty; keeping 1.2B of weights resident between
-      # questions is cheap and saves the reload latency.
-      OLLAMA_KEEP_ALIVE: "10m"
+      # Keep the model resident an hour after the last call. The assistant is
+      # interactive and bursty, `nlp assistant-eval` fires ~160 calls in
+      # sequence, and on a CPU box the cold reload is the slow part — this
+      # container exists only to serve this model, so hold it.
+      OLLAMA_KEEP_ALIVE: "60m"
     # A ceiling, not a reservation — a runaway hits this and is killed
     # alone rather than the kernel's OOM killer choosing PostgreSQL. See
     # assistant_ollama_mem_limit_mb in vars.yml for why it is not in the

@@ -101,10 +101,14 @@ that layout — run a distinct router by setting `assistant_needle_model`
 and pulling it too.
 
 **The reference.** `assistant_lfm_ollama_ref` must name a model Ollama can
-pull. The default is `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` — LiquidAI's
-GGUF repo on Hugging Face, via Ollama's `hf.co/` syntax (3B params,
-1.59 GB). `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` (0.4B, 219 MB) is the
-small-box option; the 1.2B pinned in the code sits between them. NOT
+pull. The default is `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` — LiquidAI's
+GGUF repo on Hugging Face, via Ollama's `hf.co/` syntax (0.4B params,
+219 MB). It is small on purpose: routing has an 8-second timeout
+(`ROUTER_TIMEOUT_SECONDS`) and a CPU-only box cannot meet it with a
+multi-billion-parameter model — an `APITimeoutError` on every routing call
+is what "too big for this host" looks like. On a fast many-core box or one
+with a GPU, `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` (3B, 1.59 GB) answers
+better; the 1.2B pinned in the code sits between them. NOT
 `ollama.com/library/lfm2`, which is a 24B model at 14 GB. A missing
 reference fails the provisioning task with `ollama pull`'s own error in the
 message.

@@ -532,8 +532,9 @@ Set the list back to empty and re-run to tear all of it down again.
 
 `assistant_runtime_enabled: false` by default, the same switch and the same
 `docker-compose.assistant.yml` as the self-host build — an Ollama that
-pulls `assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
-by default; `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` for a small box), with
+pulls `assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M`
+by default — small enough for CPU routing inside the 8 s timeout;
+`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M` on a GPU/fast host), with
 `ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` pointed at it,
 `ASSISTANT_LFM_MODEL` / `ASSISTANT_NEEDLE_MODEL` set to that same reference
 (no alias), and both the `app` and documents-worker images rebuilt with

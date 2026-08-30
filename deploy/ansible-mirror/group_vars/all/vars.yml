@@ -555,13 +555,16 @@ assistant_app_enabled: false
 # name the code sends is the name Ollama has, and the run ledger records
 # what actually answered.
 #
-# Default: `LiquidAI/LFM2.5-2.6B-GGUF` at Q4_K_M, pulled from Hugging Face
-# via Ollama's `hf.co/` syntax (3B params, 1.59 GB). The pinned constant in
+# Default: `LiquidAI/LFM2.5-350M-GGUF` at Q4_K_M, pulled from Hugging Face
+# via Ollama's `hf.co/` syntax (0.4B params, 219 MB). Small on purpose:
+# routing has an 8-second timeout (pipeline/assistant/routing.py) and a
+# CPU-only box cannot meet it with a multi-billion-parameter model. On a
+# fast many-core box or one with a GPU, `hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
+# (3B, 1.59 GB) is the better answer quality. The pinned constant in
 # pipeline/assistant/runtime.py is the 1.2B-Instruct; serving a different
-# LFM2.5 size is what assistant_lfm_model below is for. For a small box,
-# `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` (0.4B, 219 MB) — faster, less
-# likely to clear the eval gate. NOT `ollama.com/library/lfm2`, a 24B model.
-assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+# LFM2.5 size is what assistant_lfm_model below is for. NOT
+# `ollama.com/library/lfm2`, a 24B model.
+assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M"
 
 # What the adapters put in the `model` field and the ledger records
 # (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). Default to the
