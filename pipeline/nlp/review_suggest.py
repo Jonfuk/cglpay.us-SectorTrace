@@ -132,7 +132,13 @@ def _ask(row: dict, *, model: str, api_key: str,
     body = json.dumps({
         "model": model,
         "temperature": 0,
-        "max_tokens": 200,
+        # room for a reasoning model to think and still emit the JSON; a
+        # non-reasoner just uses ~30 of these. `reasoning.effort: low` is
+        # honoured by reasoning models (gpt-oss, the DeepSeek "flash" line)
+        # and ignored by the rest -- this is a one-line yes/no, not a task
+        # that benefits from a long chain of thought.
+        "max_tokens": 600,
+        "reasoning": {"effort": "low"},
         "messages": [
             {"role": "system", "content": system_prompt()},
             {"role": "user", "content": _render(row)},

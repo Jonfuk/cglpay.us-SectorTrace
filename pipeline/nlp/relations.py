@@ -259,6 +259,17 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
         "DELETE FROM document_claim_candidates WHERE document_chunk_id = ? "
         "AND relation_extractor = ? AND relation_extractor_version = ?",
         (chunk_row["document_chunk_id"], EXTRACTOR, version))
+    # A version bump (a new pattern file changes the ontology hash, which
+    # changes `version`) would otherwise leave this chunk's prior-version
+    # candidates in the queue beside the new set. Supersede them -- but never
+    # one a person has already decided.
+    conn.execute(
+        "UPDATE document_claim_candidates SET superseded = 1 "
+        "WHERE document_chunk_id = ? AND relation_extractor = ? "
+        "AND relation_extractor_version <> ? AND superseded = 0 "
+        "AND claim_candidate_id NOT IN "
+        "  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
+        (chunk_row["document_chunk_id"], EXTRACTOR, version))
     text = chunk_row["text"] or ""
     now = runs.utcnow()
     written = 0

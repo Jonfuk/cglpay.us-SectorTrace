@@ -169,3 +169,28 @@ def test_dry_run_writes_nothing(conn, settings):
     assert result["dry_run"] is True
     assert conn.execute("SELECT COUNT(*) FROM document_claim_candidates").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='relations'").fetchone()[0] == 0
+
+
+def test_a_version_bump_supersedes_prior_candidates_but_not_decided_ones(conn, settings):
+    _pipeline(conn, settings, _ELEMENTS)
+    chunk_id = conn.execute("SELECT document_chunk_id FROM document_chunks LIMIT 1").fetchone()[0]
+    for cid, decided in (("cc-old-plain", False), ("cc-old-decided", True)):
+        conn.execute(
+            "INSERT INTO document_claim_candidates (claim_candidate_id, document_chunk_id, "
+            "predicate, assertion_status, relation_extractor, relation_extractor_version, "
+            "relation_score, evidence_span, char_start, char_end, status, superseded, created_at) "
+            "VALUES (?, ?, 'workforce.relies_on_agency', 'AFFIRMED', 'nlp-rule', "
+            "'nlp-rule-1@OLDHASH', 0.5, 'x', 0, 1, 'new', 0, '2026-01-01')", (cid, chunk_id))
+        if decided:
+            conn.execute(
+                "INSERT INTO claim_candidate_decisions (claim_candidate_id, decision, "
+                "decided_by, decided_at) VALUES (?, 'approved', 'A. Reviewer', '2026-01-02')", (cid,))
+    conn.commit()
+
+    relations.run(conn)
+
+    sup = dict(conn.execute(
+        "SELECT claim_candidate_id, superseded FROM document_claim_candidates "
+        "WHERE claim_candidate_id IN ('cc-old-plain', 'cc-old-decided')").fetchall())
+    assert sup["cc-old-plain"] == 1        # prior version, no decision -> superseded
+    assert sup["cc-old-decided"] == 0      # a person judged it -> left alone

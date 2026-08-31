@@ -34,8 +34,23 @@ patterns:
   - id: gate.agency.fill_gaps_with
     kind: predicate
     predicate: workforce.relies_on_agency
-    regex: '\bfill\w*\b[^.?!]{0,25}\b(gap|gaps|vacanc\w+|shift\w*|rota\w*|post\w*)\b[^.?!]{0,20}\b(with|using|through|via)\b[^.?!]{0,15}\b(agency|locum)\b'
-    notes: "filling rota gaps with agency workers"
+    regex: '\b(fill\w*|cover\w*|met|being met|staffed)\b[^.?!]{0,25}\b(gap|gaps|vacanc\w+|shift\w*|rota\w*|post\w*|absence\w*)\b[^.?!]{0,20}\b(with|using|through|via|by)\b[^.?!]{0,15}\b(agency|locum)\b'
+    notes: "filling rota gaps with agency workers; vacancies covered by agency staff"
+  - id: gate.agency.gaps_covered_by
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\b(vacanc\w+|gap\w*|shift\w*|rota\w*|post\w*|absence\w*|cover|shortfall\w*)\b[^.?!]{0,25}\b(are |were |being )?(cover\w*|fill\w*|met|staffed|bridg\w+)\b[^.?!]{0,15}\b(by|with|using|through)\b[^.?!]{0,12}\b(agency|locum)\b'
+    notes: "vacancies are being covered by agency workers"
+  - id: gate.agency.significant_use_or_spend
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\b(significant|considerable|substantial|heav\w+|extensive|high(er)?|increas\w+|rising|growing|ongoing|continued|persistent|£\s?\d[\d,.]*[mk]?|\d[\d.]*\s?%)\b[^.?!]{0,20}\b(use|reliance|spend\w*|expenditure|usage|numbers?|proportion)\b[^.?!]{0,15}\b(on |of )?[^.?!]{0,8}\b(agency|locum)\b'
+    notes: "significant use of agency staff; agency spend of £1.2m; a growing proportion of agency workers"
+  - id: gate.agency.spend_or_numbers_rose
+    kind: predicate
+    predicate: workforce.relies_on_agency
+    regex: '\b(agency|locum)\b[^.?!]{0,10}\b(staff|worker\w*|spend\w*|cost\w*|usage|expenditure|numbers?)\b[^.?!]{0,25}\b(has |have |had )?(increas\w+|risen|rose|grew|grown|doubl\w+|higher|up (by|to)|remain\w+ high)\b'
+    notes: "agency spend has increased; agency staff numbers rose"
 
   # --- workforce.has_vacancy_pressure ---------------------------------
   - id: gate.vacancy.high_level
@@ -46,8 +61,23 @@ patterns:
   - id: gate.vacancy.posts_unfilled
     kind: predicate
     predicate: workforce.has_vacancy_pressure
-    regex: '\b(vacanc\w+|posts?|roles?|positions?)\b[^.?!]{0,30}\b(remain|are|were|being|stay\w*)\b[^.?!]{0,15}\b(unfilled|vacant|hard to fill|difficult to fill|open)\b'
+    regex: '\b(vacanc\w+|posts?|roles?|positions?)\b[^.?!]{0,30}\b(remain\w*|are|were|being|stay\w*|left|sat|sit\w*)\b[^.?!]{0,15}\b(unfilled|vacant|hard to fill|difficult to fill|open|empty)\b'
     notes: "posts remain unfilled; vacancies were hard to fill"
+  - id: gate.vacancy.rate_percent
+    kind: predicate
+    predicate: workforce.has_vacancy_pressure
+    regex: '\bvacanc\w+\b[^.?!]{0,20}\b(rate|level|of|at|running at|currently|stands? at|around)\b[^.?!]{0,10}\d[\d.,]*\s?(%|per cent)'
+    notes: "a vacancy rate of 15%; vacancies running at 20 per cent"
+  - id: gate.vacancy.count_of_posts
+    kind: predicate
+    predicate: workforce.has_vacancy_pressure
+    regex: '\b\d[\d.,]*\s+(current |unfilled |long[- ]term |wte |fte |established )*(vacanc\w+|vacant posts?|posts? (are |were )?(vacant|unfilled))\b'
+    notes: "34 vacancies; 12 WTE posts vacant"
+  - id: gate.vacancy.struggle_to_fill
+    kind: predicate
+    predicate: workforce.has_vacancy_pressure
+    regex: '\b(struggl\w+|difficult\w*|challeng\w+|unable|hard)\b[^.?!]{0,25}\b(fill|recruit(ing)? (to|into)|staff)\b[^.?!]{0,15}\b(posts?|vacanc\w+|roles?|positions?)\b'
+    notes: "struggling to fill vacant posts"
 
   # --- workforce.undergoes_tupe -------------------------------------
   - id: gate.tupe.staff_transfer_under
@@ -58,8 +88,13 @@ patterns:
   - id: gate.tupe.applies_to_staff
     kind: predicate
     predicate: workforce.undergoes_tupe
-    regex: '\b(tupe|transfer of undertakings)\b[^.?!]{0,25}\b(will apply|applies|applied|will|would)\b[^.?!]{0,25}\b(staff|employees|the team|these|to)\b'
-    notes: "TUPE will apply to the affected staff"
+    regex: '\btupe\b[^.?!]{0,30}\b(appl\w+|cover\w+|protect\w+|in scope|engaged|relevant)\b[^.?!]{0,25}\b(staff|employees|the (team|workforce)|these|to)\b'
+    notes: "TUPE will apply to the affected staff; TUPE covers the transferring team"
+  - id: gate.tupe.staff_subject_to
+    kind: predicate
+    predicate: workforce.undergoes_tupe
+    regex: '\b(staff|employees|the (team|workforce)|posts?|\d[\d.,]* (staff|employees|posts?))\b[^.?!]{0,25}\b(are|were|will be|to be|being)\b[^.?!]{0,15}\b(subject to|covered by|in scope for|affected by|eligible for|transferr\w* under)\b[^.?!]{0,15}\btupe\b'
+    notes: "the 14 staff are subject to TUPE"
   - id: gate.tupe.tuped_across
     kind: predicate
     predicate: workforce.undergoes_tupe
@@ -70,8 +105,18 @@ patterns:
   - id: gate.cost.facing_pressure
     kind: predicate
     predicate: finance.has_cost_pressure
-    regex: '\b(facing|faces|faced|experienc\w+|under|subject to|absorb\w+)\b[^.?!]{0,30}\b(cost|financial|inflationary|budget(ary)?|pay[- ]award)\b[^.?!]{0,10}\bpressure'
-    notes: "the service is facing significant cost pressures"
+    regex: '\b(facing|faces|faced|experienc\w+|under|subject to|absorb\w+|there (is|are|has been|have been))\b[^.?!]{0,30}\b(cost|financial|inflationary|budget(ary)?|pay[- ]award|demand|price)\b[^.?!]{0,12}\bpressure'
+    notes: "the service is facing significant cost pressures; there are cost pressures"
+  - id: gate.cost.rising_pressure
+    kind: predicate
+    predicate: finance.has_cost_pressure
+    regex: '\b(rising|increasing|mounting|significant|considerable|ongoing|unavoidable|unfunded|substantial|acute)\b[^.?!]{0,15}\b(cost|financial|inflationary|budget(ary)?|price|demand)\b[^.?!]{0,10}\bpressure'
+    notes: "rising cost pressures; significant financial pressure"
+  - id: gate.cost.inflation_hit
+    kind: predicate
+    predicate: finance.has_cost_pressure
+    regex: '\b(inflation\w*|energy costs?|pay award|national insurance|the living wage)\b[^.?!]{0,25}\b(has|have|is|are|will)\b[^.?!]{0,20}\b(add\w+|increas\w+|driv\w+|push\w+|cost\w*|impact\w*|hit)\b'
+    notes: "inflation has added £400k to the contract cost"
   - id: gate.cost.pressure_of_amount
     kind: predicate
     predicate: finance.has_cost_pressure
