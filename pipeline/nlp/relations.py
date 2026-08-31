@@ -253,22 +253,38 @@ def _chunk_spans(conn, chunk_id: str) -> list:
         (chunk_id,)).fetchall()
 
 
+_SUPERSEDE_BATCH = 900   # chunk ids per statement; stays under PostgreSQL's
+                         # bound-parameter cap and off the per-chunk round-trip
+                         # that timed out a full re-run.
+
+
+def _supersede_prior_versions(conn, version: str, chunk_ids: list) -> int:
+    """A version bump (a new pattern file changes the ontology hash, which
+    changes `version`) leaves the prior version's candidates in the queue
+    beside the new set. Supersede them for the chunks about to be reprocessed
+    -- batched, not one per chunk -- and never one a person has decided.
+    Scoped to `chunk_ids` so a `--limit` run does not orphan the rest.
+    Returns the row count."""
+    total = 0
+    for i in range(0, len(chunk_ids), _SUPERSEDE_BATCH):
+        batch = chunk_ids[i:i + _SUPERSEDE_BATCH]
+        marks = ",".join("?" * len(batch))
+        cur = conn.execute(
+            f"UPDATE document_claim_candidates SET superseded = 1 "
+            f"WHERE relation_extractor = ? AND relation_extractor_version <> ? "
+            f"AND superseded = 0 AND document_chunk_id IN ({marks}) "
+            f"AND claim_candidate_id NOT IN "
+            f"  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
+            (EXTRACTOR, version, *batch))
+        total += cur.rowcount if (cur.rowcount or 0) > 0 else 0
+    return total
+
+
 def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
     spans = _chunk_spans(conn, chunk_row["document_chunk_id"])
     conn.execute(
         "DELETE FROM document_claim_candidates WHERE document_chunk_id = ? "
         "AND relation_extractor = ? AND relation_extractor_version = ?",
-        (chunk_row["document_chunk_id"], EXTRACTOR, version))
-    # A version bump (a new pattern file changes the ontology hash, which
-    # changes `version`) would otherwise leave this chunk's prior-version
-    # candidates in the queue beside the new set. Supersede them -- but never
-    # one a person has already decided.
-    conn.execute(
-        "UPDATE document_claim_candidates SET superseded = 1 "
-        "WHERE document_chunk_id = ? AND relation_extractor = ? "
-        "AND relation_extractor_version <> ? AND superseded = 0 "
-        "AND claim_candidate_id NOT IN "
-        "  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
         (chunk_row["document_chunk_id"], EXTRACTOR, version))
     text = chunk_row["text"] or ""
     now = runs.utcnow()
@@ -331,7 +347,10 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
                             input_scope={"source_system": source_system, "limit": limit})
     chunks = _live_chunks(conn, source_system, limit)
     written = 0
+    superseded = 0
     try:
+        superseded = _supersede_prior_versions(
+            conn, version, [c["document_chunk_id"] for c in chunks])
         for chunk_row in chunks:
             written += relations_for_chunk(conn, onto, chunk_row, run_id, version)
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
@@ -346,4 +365,4 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
     else:
         conn.commit()
     return {"run_id": run_id, "extractor_version": version, "chunks": len(chunks),
-            "candidates": written, "dry_run": dry_run}
+            "candidates": written, "superseded_prior": superseded, "dry_run": dry_run}
