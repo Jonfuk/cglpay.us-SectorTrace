@@ -967,6 +967,46 @@ rest are collected but not served.*
 
 ---
 
+### ICB board papers (Module 34)
+
+*Discovery only. `icb_board_paper_candidates` holds everything captured;
+nothing reaches `icb_board_papers` without a person promoting it. Not surfaced
+on the public portal.*
+
+- **An ICB is not the commissioner of these services.** Drug and alcohol
+  treatment in England is commissioned by local authorities out of the public
+  health grant, not by the NHS. An Integrated Care Board plans and funds NHS
+  services. So a substance-misuse mention in an ICB board pack is **context
+  for a person to weigh, not a figure**: it may be dual-diagnosis or
+  mental-health commissioning that overlaps the treatment population, a
+  Combating Drugs Partnership update, or a provider that also holds an NHS
+  contract.
+- **No spend, no headcount, no attribution.** This module extracts no money
+  and no workforce numbers from the documents, and it never maps an ICB to a
+  local authority or adds anything across the two. The 42 ICB areas do not
+  align to LA boundaries and this pipeline does not pretend they do.
+- **`subject_hits` is a finding aid, not a relevance score.** It counts
+  substance-misuse and workforce-pressure terms in the extracted text so the
+  review worklist can be ranked. A high count is a reason to read the
+  document, never a reason to promote it, and `subject_hits = 0` means "not
+  surfaced this run", not "checked and irrelevant" — the document is still
+  captured and queryable.
+- **Capture is not evidence.** Every Board and committee document is archived,
+  text-extracted and indexed regardless of subject. "Collected" and
+  "citable" are different states and the gap between them is a person, the
+  same as Modules 9, 10 and 32.
+- **Coverage is whichever ICBs resolved a governance page.** A board_url is a
+  hand-verified entry in `pipeline/icb_boards.py` or the directory link with
+  `MEETING_PATHS` probed against it; an ICB with neither is an
+  `icb_board_url_unknown` review item. An absent ICB is absence of a
+  resolved page, not evidence it published nothing.
+- **The live-fetch path has not been validated against the real sites.** The
+  directory and crawl parsers are written to the observed structure and
+  exercised by fixtures; the first real run should be watched by a person,
+  per the reduced-testing policy for a new source.
+
+---
+
 ## Personal data
 
 Named individuals — tribunal claimants, deceased persons in coroners' reports,

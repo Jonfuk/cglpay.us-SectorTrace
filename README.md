@@ -132,6 +132,7 @@ request per two seconds per host enforced process-wide, conditional requests,
 | `m31_temporary_accommodation` | MHCLG temporary accommodation (H-CLIC) | Households in temporary accommodation per quarter, with the children and bed-and-breakfast breakdowns (Table TA1) |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | The bounded-crawl exception to `m28`'s one-aggregator rule: SARs a board published but never submitted |
 | `m33_hse_notices` | HSE public enforcement-notices register | Improvement and prohibition notices matched to a tracked provider by exact name; individuals excluded, result kept verbatim |
+| `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Every Board and committee document, captured and text-indexed for substance-misuse and provider mentions; discovery only, an ICB is not a treatment commissioner so a mention is context not a figure |
 
 `run all` prints the order it chose before starting, and grouping modules
 into dependency **waves** (`--jobs N`) lets independent backends run at once

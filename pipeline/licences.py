@@ -186,6 +186,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m31_temporary_accommodation": "ogl_v3",
     "m32_sab_site_reviews": "authority_varies",
     "m33_hse_notices": "hse_notices",
+    "m34_icb_board_papers": "ogl_v3",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by

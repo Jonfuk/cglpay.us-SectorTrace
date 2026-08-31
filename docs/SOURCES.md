@@ -73,6 +73,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m31_temporary_accommodation` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `temporary_accommodation_snapshot`, `temporary_accommodation_breakdowns` | Open Government Licence v3.0 |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | Safety & safeguarding | Ad hoc | `sab_site_crawls`, `safeguarding_adults_boards` | Varies by authority |
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
+| `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 
 <!-- END GENERATED: source-capability-matrix -->
 
@@ -573,6 +574,17 @@ invisible here.
 | Key | None |
 | Rate limit | Default (`resources.hse.gov.uk` serves no robots.txt) |
 | Notes | One organisation-name search per tracked-provider name variant. Notices served on **individuals are excluded at parse time**; a notice is attributed to a provider (`provider_key` set) only on an exact normalised name match, the same discipline as Modules 4 and 18, and a near-miss is a `review_queue` item. Every field is stored verbatim, including `result` — a notice can be appealed, affirmed, modified, cancelled or withdrawn after issue, and this pipeline never infers compliance. **The live-fetch parser is written to the register's documented structure and exercised by a representative fixture; not yet validated against real HSE HTML — first run to be watched by a person.** Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety` |
+
+## Module 34 — Integrated Care Board governance documents
+
+| | |
+| --- | --- |
+| Source | The 42 Integrated Care Boards' own websites. Seeded from the NHS England "integrated care in your area" directory; each ICB's meetings/governance page is a hand-verified entry in `pipeline/icb_boards.py` or the directory link with `MEETING_PATHS` probed against it — the discovery discipline of Modules 9, 10 and 32 |
+| Endpoints | `https://www.england.nhs.uk/integratedcare/integrated-care-in-your-area/` (the directory), then each ICB's own Board and committee pages and the documents linked from them |
+| Licence | OGL v3.0 (recorded as `ogl_v3`). ICB board papers are NHS public-sector information; check an individual document before republishing it wholesale |
+| Key | None |
+| Rate limit | Default (2s/host, conditional requests). 42 distinct hosts, so concurrency across ICBs never raises any one site's request rate |
+| Notes | **Discovery, not extraction, and an ICB is not a commissioner of drug and alcohol treatment** — local authorities are, from the public health grant. A substance-misuse mention in a board pack is context for a person, never a figure, and is never attributed to an LA or added to anything (see `docs/CAVEATS.md`, "ICB board papers (Module 34)"). **Every** Board and committee document is captured, archived and text-indexed regardless of subject; `subject_hits` (substance-misuse + workforce term frequency) and tracked-provider mentions only rank the review worklist, and `subject_hits = 0` means "not surfaced this run", not "irrelevant". Nothing reaches `icb_board_papers` without a person promoting it. `--since` is honoured against the meeting date parsed from a document's link text, so a multi-year back-catalogue is fetched once; the full listing is still walked every run to notice additions. Officer names and incident detail live only in `restricted_icb_paper_snippets`. Not surfaced on the public portal. **Parsers written to the observed structure and exercised by fixtures; first real run to be watched by a person, per the reduced-testing policy for a new source.** |
 
 ## Viability checks
 

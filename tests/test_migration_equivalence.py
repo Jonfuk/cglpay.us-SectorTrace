@@ -174,7 +174,12 @@ class TestTheTreesMatch:
         # schema object: the SQLite file uses a correlated-subquery UPDATE, the
         # PostgreSQL file the equivalent UPDATE ... FROM. The join key is
         # unambiguous so the two produce the same rows.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 80
+        # 81 adds the Module 34 (ICB governance documents) tables:
+        # integrated_care_boards, icb_board_paper_candidates, icb_board_papers,
+        # icb_paper_subject_terms, icb_paper_provider_mentions, icb_site_crawls,
+        # restricted_icb_paper_snippets, plus three indexes. Discovery-only,
+        # same shape as Modules 9/10/32. TEXT/INTEGER -> text/bigint only.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 81
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

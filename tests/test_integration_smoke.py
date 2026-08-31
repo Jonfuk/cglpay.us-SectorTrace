@@ -529,6 +529,22 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "working run. The live-fetch parser has not yet been validated "
               "against real HSE HTML -- see the module docstring.",
     ),
+    Smoke(
+        module="m34_icb_board_papers",
+        produces=("integrated_care_boards", "icb_site_crawls", "review_queue"),
+        signal=(("integrated_care_boards", "name"),
+                ("icb_site_crawls", "status")),
+        limit=3,
+        note="A discovery module (the m09/m24/m32 shape): it seeds the 42 ICBs "
+              "from the NHS England directory and crawls each one's own "
+              "meetings/governance pages for Board and committee documents. "
+              "icb_board_papers is not a signal table -- nothing reaches it "
+              "without a person promoting a candidate, so a --limit 3 run "
+              "legitimately writes only integrated_care_boards, "
+              "icb_board_paper_candidates and icb_site_crawls rows. The "
+              "directory and crawl parsers have not yet been validated against "
+              "the real sites -- see the module docstring.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

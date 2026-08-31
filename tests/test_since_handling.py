@@ -26,7 +26,7 @@ MODULES_HONOURING_SINCE = {
     "m06_workforce_census", "m07_ndtms", "m08_pfd_reports",
     "m11_public_health_grant", "m13_la_budgets", "m14_annual_reports",
     "m16_nhs_jobs", "m29_rough_sleeping", "m30_statutory_homelessness",
-    "m31_temporary_accommodation",
+    "m31_temporary_accommodation", "m34_icb_board_papers",
 }
 
 

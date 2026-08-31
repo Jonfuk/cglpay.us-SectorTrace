@@ -511,6 +511,21 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "breakdown where TA1 publishes it. Never combined with the sector's "
         "own evidence.",
     ),
+    Dataset(
+        "icb-board-papers", "m34_icb_board_papers",
+        "Integrated Care Board governance documents",
+        "The 42 Integrated Care Boards' own websites",
+        "https://www.england.nhs.uk/integratedcare/integrated-care-in-your-area/",
+        "accountability", "England — Integrated Care Board",
+        "Ad hoc",
+        ("icb_board_papers", "integrated_care_boards"),
+        "Discovery only — every Board and committee document is captured and "
+        "text-indexed, nothing is evidence until a person promotes it. An ICB "
+        "does not commission drug and alcohol treatment (local authorities "
+        "do); a mention in a board pack is context, never a figure, and is "
+        "never attributed to an LA or added to anything. Officer names and "
+        "incident detail are held in restricted_ tables.",
+    ),
 )
 
 
