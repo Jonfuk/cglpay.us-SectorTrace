@@ -253,39 +253,22 @@ def _chunk_spans(conn, chunk_id: str) -> list:
         (chunk_id,)).fetchall()
 
 
-_SUPERSEDE_BATCH = 900   # chunk ids per statement; stays under PostgreSQL's
-                         # bound-parameter cap and off the per-chunk round-trip
-                         # that timed out a full re-run.
-
-
-def _supersede_prior_versions(conn, version: str, chunk_ids: list) -> int:
-    """A version bump (a new pattern file changes the ontology hash, which
-    changes `version`) leaves the prior version's candidates in the queue
-    beside the new set. Supersede them for the chunks about to be reprocessed
-    -- batched, not one per chunk -- and never one a person has decided.
-    Scoped to `chunk_ids` so a `--limit` run does not orphan the rest.
-    Returns the row count."""
-    total = 0
-    for i in range(0, len(chunk_ids), _SUPERSEDE_BATCH):
-        batch = chunk_ids[i:i + _SUPERSEDE_BATCH]
-        marks = ",".join("?" * len(batch))
-        cur = conn.execute(
-            f"UPDATE document_claim_candidates SET superseded = 1 "
-            f"WHERE relation_extractor = ? AND relation_extractor_version <> ? "
-            f"AND superseded = 0 AND document_chunk_id IN ({marks}) "
-            f"AND claim_candidate_id NOT IN "
-            f"  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
-            (EXTRACTOR, version, *batch))
-        total += cur.rowcount if (cur.rowcount or 0) > 0 else 0
-    return total
-
-
 def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
     spans = _chunk_spans(conn, chunk_row["document_chunk_id"])
+    # Rebuild this chunk's candidates from scratch. `_candidate_id` does not
+    # encode the extractor version, so deleting only the *current* version
+    # left prior-version rows in place, and the `ON CONFLICT DO NOTHING`
+    # below then refused to overwrite them -- a new pattern file (new
+    # ontology hash -> new version string) produced almost nothing. Delete
+    # every nlp-rule candidate for the chunk that no one has decided; a
+    # decided one is kept (the judgement outlives a re-extraction, and its
+    # stable id means ON CONFLICT keeps it).
     conn.execute(
-        "DELETE FROM document_claim_candidates WHERE document_chunk_id = ? "
-        "AND relation_extractor = ? AND relation_extractor_version = ?",
-        (chunk_row["document_chunk_id"], EXTRACTOR, version))
+        "DELETE FROM document_claim_candidates "
+        "WHERE document_chunk_id = ? AND relation_extractor = ? "
+        "AND claim_candidate_id NOT IN "
+        "  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
+        (chunk_row["document_chunk_id"], EXTRACTOR))
     text = chunk_row["text"] or ""
     now = runs.utcnow()
     written = 0
@@ -300,7 +283,7 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
             obj = triple.object_concept_id or triple.object_literal
             cid = _candidate_id(chunk_row["document_chunk_id"], triple.subject_mention_id,
                                 triple.predicate, obj, offset, offset + len(sentence))
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO document_claim_candidates (claim_candidate_id, document_chunk_id, "
                 "subject_mention_id, subject_hint, predicate, object_concept_id, object_literal, "
                 "assertion_status, relation_extractor, relation_extractor_version, relation_score, "
@@ -311,7 +294,9 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
                  triple.subject_hint, triple.predicate, triple.object_concept_id,
                  triple.object_literal, triple.assertion_status, EXTRACTOR, version,
                  triple.score, sentence, offset, offset + len(sentence), nlp_run_id, now))
-            written += 1
+            # count real inserts, not attempts -- a collision with a decided
+            # candidate is a no-op and must not inflate the total.
+            written += 1 if (cur.rowcount or 0) > 0 else 0
     return written
 
 
@@ -347,10 +332,7 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
                             input_scope={"source_system": source_system, "limit": limit})
     chunks = _live_chunks(conn, source_system, limit)
     written = 0
-    superseded = 0
     try:
-        superseded = _supersede_prior_versions(
-            conn, version, [c["document_chunk_id"] for c in chunks])
         for chunk_row in chunks:
             written += relations_for_chunk(conn, onto, chunk_row, run_id, version)
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
@@ -365,4 +347,4 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
     else:
         conn.commit()
     return {"run_id": run_id, "extractor_version": version, "chunks": len(chunks),
-            "candidates": written, "superseded_prior": superseded, "dry_run": dry_run}
+            "candidates": written, "dry_run": dry_run}

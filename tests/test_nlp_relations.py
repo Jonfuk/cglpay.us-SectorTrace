@@ -171,7 +171,7 @@ def test_dry_run_writes_nothing(conn, settings):
     assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='relations'").fetchone()[0] == 0
 
 
-def test_a_version_bump_supersedes_prior_candidates_but_not_decided_ones(conn, settings):
+def test_a_re_run_drops_prior_version_candidates_but_keeps_decided_ones(conn, settings):
     _pipeline(conn, settings, _ELEMENTS)
     chunk_id = conn.execute("SELECT document_chunk_id FROM document_chunks LIMIT 1").fetchone()[0]
     for cid, decided in (("cc-old-plain", False), ("cc-old-decided", True)):
@@ -189,8 +189,7 @@ def test_a_version_bump_supersedes_prior_candidates_but_not_decided_ones(conn, s
 
     relations.run(conn)
 
-    sup = dict(conn.execute(
-        "SELECT claim_candidate_id, superseded FROM document_claim_candidates "
-        "WHERE claim_candidate_id IN ('cc-old-plain', 'cc-old-decided')").fetchall())
-    assert sup["cc-old-plain"] == 1        # prior version, no decision -> superseded
-    assert sup["cc-old-decided"] == 0      # a person judged it -> left alone
+    left = {r[0] for r in conn.execute(
+        "SELECT claim_candidate_id FROM document_claim_candidates "
+        "WHERE claim_candidate_id IN ('cc-old-plain', 'cc-old-decided')").fetchall()}
+    assert left == {"cc-old-decided"}    # prior-version, undecided -> deleted; decided one kept
