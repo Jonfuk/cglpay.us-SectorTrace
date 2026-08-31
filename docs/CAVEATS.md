@@ -1134,3 +1134,35 @@ person read every sentence cold", and the caveat travels with any figure the
 classifier later supports. Watch the per-batch agreement number
 (`decide-claims-batch` reports it): if the reviewer's calls almost never
 diverge from the model's, the confirmation has stopped being a review.
+
+## Claim predictions (034G, experimental)
+
+`document_claim_predictions` (migration `0082`) holds one row per (chunk,
+category) scored by a trained classifier head. **A prediction is a finding
+aid, never a claim** — the same status as an 034C topic. It is not evidence,
+it is excluded from every export and every portal response, no `graph_claims`
+row is written from it, and **no figure is ever computed across it** (the
+"Things you must not compute" rule at the top of this file applies unchanged).
+`split` on each row says whether the chunk was in the head's fit
+(`train` / `heldout`) or not (`unlabelled`); a reader tallying anything must
+drop the fitted rows.
+
+Any figure a head's predictions ever support carries **all** of:
+
+1. **Single reviewer.** The training corpus was labelled by one person, no
+   inter-reviewer check (see the model-assisted-triage section above).
+2. **Thin.** `MIN_PER_CLASS = 25` — a classifier on 25 positives is few-shot
+   by necessity, not by choice.
+3. **Model-assisted labels.** "A model triaged, a person confirmed each one",
+   not "a person read every sentence cold".
+4. **Beta-box corpus (until the source retrain).** The first heads were
+   trained on the beta box, which is a copy of the source warehouse and is
+   not authoritative. Every such head carries `corpus_status = 'experimental'`
+   on its `claim_head_versions` row. A retrain on the source deployment
+   (`corpus = 'source'`, `corpus_status = 'authoritative'`) is required before
+   a head's predictions support anything public-facing.
+
+A head whose held-out precision is below `MIN_HEAD_PRECISION` (0.80) is
+`quarantined`: it is trained and its metrics recorded, but it never writes a
+prediction. Changing that bar is a tracked commit, argued for — not a knob to
+turn to make more heads pass.

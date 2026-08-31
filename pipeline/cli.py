@@ -486,6 +486,94 @@ def nlp_gate_034g(
         conn.close()
 
 
+@nlp_app.command("claims-train")
+def nlp_claims_train(
+    model: str = typer.Option("both", help="both | logreg | setfit — the bake-off arms to run"),
+    category: list[str] = typer.Option(
+        None, help="Gate category to train (repeatable). Omitted: every `ready` category; "
+        "given, bypasses the gate and records the head as experimental."),
+    min_precision: float = typer.Option(
+        None, min=0.0, max=1.0,
+        help="Held-out precision bar; a head below it is quarantined. Default 0.80."),
+    embedder_model_key: str = typer.Option(
+        None, help="nlp_model_registry key for the 034A embeddings the logreg arm reads"),
+    corpus_label: str = typer.Option("beta-box", help="Which warehouse the decisions came from"),
+    corpus_status: str = typer.Option(
+        "experimental", help="experimental | authoritative — travels with every head"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Fit and evaluate, then roll back; no artifacts"),
+) -> None:
+    """Run the per-category bake-off: a pure-Python logreg on the 034A chunk
+    embeddings and a SetFit head, each fitted on the same train split and
+    scored on the same deterministic held-out set. The higher-precision head
+    that clears `--min-precision` is `selected` and may write predictions;
+    one below the bar is `quarantined`. Nothing is promoted or written to
+    `graph_claims`. Refuses until `gate-034g` is green, unless `--category`
+    is given. See docs/claim-predictions-spec.md.
+    """
+    from pipeline.nlp import claims, claims_features, claims_train
+
+    models = {"both": claims.MODEL_TYPES}.get(model, (model,))
+    kwargs: dict = {"models": models, "corpus_label": corpus_label,
+                    "corpus_status": corpus_status, "dry_run": dry_run}
+    if category:
+        kwargs["categories"] = list(category)
+    if min_precision is not None:
+        kwargs["min_precision"] = min_precision
+    if embedder_model_key:
+        kwargs["embedder_model_key"] = embedder_model_key
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            result = claims_train.train(conn, **kwargs)
+        except (claims_features.FeatureError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from None
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if not result.get("trained") and not result.get("ready", True):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("claims-eval")
+def nlp_claims_eval() -> None:
+    """The claim-head registry: every trained head with its held-out
+    precision/recall/F1, which one is `selected` per category, and the corpus
+    it was trained on. Read-only.
+    """
+    from pipeline.nlp import claims_eval
+
+    conn, _ = _document_connection()
+    try:
+        typer.echo(__import__("json").dumps(claims_eval.summary(conn), indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("claims-predict")
+def nlp_claims_predict(
+    embedder_model_key: str = typer.Option(
+        None, help="nlp_model_registry key for the embeddings to score against"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Score and roll back; report counts only"),
+) -> None:
+    """Score every live embedded chunk with each `selected` head, writing
+    `document_claim_predictions` (a finding aid — not evidence, not exported,
+    not portal-reachable). Zero selected heads is a logged no-op.
+    """
+    from pipeline.nlp import claims_predict
+
+    kwargs: dict = {"dry_run": dry_run}
+    if embedder_model_key:
+        kwargs["embedder_model_key"] = embedder_model_key
+
+    conn, _ = _document_connection()
+    try:
+        result = claims_predict.predict(conn, **kwargs)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("decide-claim")
 def nlp_decide_claim(
     candidate: str = typer.Option(..., help="claim_candidate_id"),

@@ -83,6 +83,11 @@ graphify-out/
 # Extracted PDF page text — derived from data/raw/, regenerable, and large
 data/text/
 
+# Trained 034G claim-prediction head artifacts (logreg blobs, SetFit model
+# dirs). Bind-mounted on the VPS, rebuilt by `nlp claims-train`, and their
+# SHA-256 is on the claim_head_versions row — never committed.
+nlp-cache/
+
 # The documentation site is built, never committed. `uv run mkdocs build`
 # writes it; CI builds it with --strict and keeps nothing.
 /site/
