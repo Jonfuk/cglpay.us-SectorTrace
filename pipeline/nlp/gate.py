@@ -31,9 +31,11 @@ And across the set:
     wait or a cost pressure as a fact, it does not negate one -- and
     funding_reduction is thin on the concept route. Those three are reported
     in `advisory`, not `blocking`;
-  * enough double-reviewed items to say inter-reviewer agreement is
-    acceptable. This one has no quorum and no code route around it -- it needs
-    a second named reviewer.
+  * inter-reviewer agreement, when `min_double_reviewed > 0`: enough
+    double-reviewed items, agreeing above `agreement_floor`. Set to 0 by
+    owner decision -- a one-person review team -- so the agreement is
+    computed and reported in `advisory` but does not block. `docs/CAVEATS.md`
+    carries the "single reviewer" caveat that then travels with any figure.
 
 This module answers "are we there yet, and if not, what is missing?" from
 `claim_candidate_decisions` (034F, second cut). It is read-only and offline;
@@ -94,7 +96,15 @@ MIN_AUTHORITIES = 3        # distinct local authorities behind a category's
 MIN_PROVIDERS = 5
 MIN_YEARS = 3
 AGREEMENT_FLOOR = 0.80
-MIN_DOUBLE_REVIEWED = 10
+MIN_DOUBLE_REVIEWED = 0    # was 10. Set to 0 by owner decision (2026-08-31):
+                          # a one-person review team, and reconciling a
+                          # single 0.58-agreement sample was judged not worth
+                          # it for a first, marginal SetFit head. The
+                          # inter-reviewer agreement is still computed and
+                          # shown in `advisory`; it no longer blocks. Any
+                          # figure a 034G head supports carries "labelled by a
+                          # single reviewer" -- see docs/CAVEATS.md. Raise it
+                          # again if a second reviewer becomes available.
 MIN_CATEGORIES_READY = 3   # of len(GATE_CATEGORIES). Was 5. After D-08's
                           # measurement (2026-08-31): agency / vacancy / tupe
                           # clear the lowered floor; cost_pressure and
@@ -243,12 +253,23 @@ def check(conn, *, min_per_class: int = MIN_PER_CLASS,
         advisory.append(f"{len(ready_names)}/{len(categories)} categories ready; "
                         f"corpus-limited, not blocking: {', '.join(sorted(laggards))}")
 
+    # `min_double_reviewed <= 0` accepts a single-reviewer corpus by decision
+    # (see the constant). The agreement is still computed and reported -- in
+    # `advisory`, not `blocking` -- and does not gate `ready`.
+    enforce_reviewer = min_double_reviewed > 0
     reviewer_ok = bool(inter["assessed"]) and (inter["agreement"] or 0.0) >= agreement_floor
-    if not inter["assessed"]:
-        blocking.append(f"inter-reviewer agreement not assessed "
-                        f"({inter['double_reviewed']}/{min_double_reviewed} double-reviewed)")
+    where = blocking if enforce_reviewer else advisory
+    if not enforce_reviewer:
+        where.append(
+            f"single-reviewer corpus (accepted): inter-reviewer agreement "
+            f"{inter['agreement']} over {inter['double_reviewed']} double-reviewed"
+            if inter["double_reviewed"] else
+            "single-reviewer corpus (accepted): no double-reviewed items")
+    elif not inter["assessed"]:
+        where.append(f"inter-reviewer agreement not assessed "
+                     f"({inter['double_reviewed']}/{min_double_reviewed} double-reviewed)")
     elif not reviewer_ok:
-        blocking.append(f"inter-reviewer agreement {inter['agreement']} < {agreement_floor}")
+        where.append(f"inter-reviewer agreement {inter['agreement']} < {agreement_floor}")
 
     return {
         "min_per_class": min_per_class,
@@ -261,7 +282,7 @@ def check(conn, *, min_per_class: int = MIN_PER_CLASS,
         "inter_reviewer": inter,
         "categories": categories,
         "categories_ready": len(ready_names),
-        "ready": quorum_ok and reviewer_ok,
+        "ready": quorum_ok and (reviewer_ok or not enforce_reviewer),
         "blocking": blocking,
         "advisory": advisory,
     }

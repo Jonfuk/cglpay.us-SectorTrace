@@ -426,8 +426,10 @@ candidates in the whole corpus, so their NEGATIVE class cannot reach the floor
 negate one — and `funding_reduction` is thin on the concept route. The three
 that can train: `agency_reliance`, `vacancy_pressure`, `tupe_transfer`. The
 spread check counts **distinct local authorities**, not source systems. The
-inter-reviewer condition has no quorum and no code route around it — it needs
-a second named reviewer.
+inter-reviewer-agreement condition is **`MIN_DOUBLE_REVIEWED = 0` by owner
+decision** (a one-person review team): the agreement figure is computed and
+shown in `advisory`, it does not block. `docs/CAVEATS.md` carries the
+"single-reviewer corpus" caveat that then travels with any 034G figure.
 
 ```bash
 uv run pipeline nlp gate-034g          # exits 1 with a blocking list until ready
@@ -449,8 +451,9 @@ more often than they name a registered provider — without it, five of the six
 categories cannot reach the per-class floor no matter how the review goes.
 The gate itself was then re-scoped (see the quorum / distinct-authorities
 paragraph above): `funding_reduction` stays corpus-limited but no longer
-blocks; `MIN_DOUBLE_REVIEWED` still needs a second named reviewer, which is a
-process gap, not a code one.
+blocks; `MIN_DOUBLE_REVIEWED` was set to 0 by owner decision, so the
+inter-reviewer check is advisory, not blocking (single-reviewer corpus,
+caveated in `docs/CAVEATS.md`).
 
 Then D-08: the review pass (model-assisted) found that 034F was firing on
 concept-phrase co-occurrence, not predication, so the per-predicate `AFFIRMED`

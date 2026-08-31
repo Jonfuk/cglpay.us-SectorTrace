@@ -1110,7 +1110,13 @@ that keep it defensible, all enforced in code:
   person deciding cold.
 - **The model is not reviewer 2.** The gate's inter-reviewer-agreement
   condition (`MIN_DOUBLE_REVIEWED`, `pipeline/nlp/gate.py`) counts distinct
-  human `decided_by` values only.
+  human `decided_by` values only. That condition is **set to 0 by owner
+  decision (2026-08-31)** — a one-person review team — so the agreement figure
+  is computed and shown in `advisory` but no longer blocks `gate-034g`. The
+  034G corpus is single-reviewer: **any figure a 034G head supports carries
+  "labelled by a single reviewer, no inter-reviewer check"**, on top of the
+  model-triage caveat below. Restore `MIN_DOUBLE_REVIEWED` to a positive value
+  if a second reviewer becomes available.
 - **Agreement is watched.** Report human-vs-suggestion agreement per category
   after each batch; near-total agreement is the signal that the review has
   gone through the motions, and that batch is redone with suggestions hidden.

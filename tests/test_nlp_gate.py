@@ -171,3 +171,29 @@ def test_inter_reviewer_agreement_is_reported(conn, settings):
     assert report["inter_reviewer"]["agreement"] == 0.0
     assert report["inter_reviewer"]["assessed"] is True
     assert any("agreement 0.0" in b for b in report["blocking"])
+
+
+def test_min_double_reviewed_zero_makes_the_reviewer_check_advisory(conn, settings):
+    _seed_entity(conn, "provider:change_grow_live", "Change Grow Live")
+    _seed_entity(conn, "provider:turning_point", "Turning Point")
+    for eid, sysname, prov, yr in [
+        ("za", "committee_paper_promotion", "Change Grow Live", 2021),
+        ("zb", "cdp_document_promotion", "Turning Point", 2022),
+    ]:
+        _doc(conn, settings, eid, sysname, prov, yr)
+    nlp_chunk.run(conn)
+    spans.run(conn, extractor="stub")
+    nlp_context.run(conn)
+    resolve.run(conn)
+    relations.run(conn)
+    pos = _funding_candidate(conn, "za")["claim_candidate_id"]
+    neg = _funding_candidate(conn, "zb")["claim_candidate_id"]
+    decisions.decide(conn, pos, "approved", "Sole Reviewer")     # one person only
+    decisions.decide(conn, neg, "rejected", "Sole Reviewer", reason_code="x")
+
+    report = gate.check(conn, min_per_class=1, heldout_per_class=0,
+                        min_authorities=1, min_subjects=1, min_years=1,
+                        min_double_reviewed=0, min_categories_ready=1)
+    assert report["ready"] is True                              # not gated on a 2nd reviewer
+    assert not any("inter-reviewer" in b for b in report["blocking"])
+    assert any("single-reviewer corpus (accepted)" in a for a in report["advisory"])

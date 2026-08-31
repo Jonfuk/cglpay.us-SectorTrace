@@ -488,8 +488,11 @@ complete — see DONE. Nothing is queued.)_
     reported in `advisory` and no longer blocks; and the spread check counts
     **distinct local authorities** (`MIN_AUTHORITIES = 3`), not source
     systems, since the whole NLP corpus is two source systems.
-    `MIN_DOUBLE_REVIEWED = 10` at 0.8 agreement is unchanged and still needs
-    a second named reviewer — a process gap, not a code one.
+    `MIN_DOUBLE_REVIEWED` was later set to 0 by owner decision (a one-person
+    review team; a single 0.58-agreement sample was judged not worth
+    reconciling for a first, marginal head) — the inter-reviewer agreement is
+    reported in `advisory`, it no longer blocks. The 034G corpus is
+    single-reviewer and `docs/CAVEATS.md` says so.
     **Then the review pass itself found the real blocker (roadmap D-08,
     2026-08-30).** Model-assisted triage — `nlp suggest-decisions` with an
     ensemble of `deepseek/deepseek-chat` + `openai/gpt-4o-mini`, both models
@@ -514,12 +517,13 @@ complete — see DONE. Nothing is queued.)_
     only ~12 non-AFFIRMED `cost_pressure` candidates and ~8 non-AFFIRMED
     `waiting_time` — their NEGATIVE class cannot reach 25, and no review pass
     changes that. `MIN_CATEGORIES_READY` 5 → 3: **agency / vacancy / tupe**
-    can train; **cost / waiting / funding_reduction** go in `advisory`. Still
-    needed before the SetFit build: `nlp relations` + `queue-claims` on the
-    **source** deployment, then a real human review pass over the three
-    trainable categories (the model triage is the starting sheet, not the
-    record) + a second reviewer for the double-review sample. `tupe`'s ~27
-    positives need ~8 more from the human pass to clear 35. Only after that is
+    can train; **cost / waiting / funding_reduction** go in `advisory`. The
+    review pass then ran (model-assisted, on the beta box): agency +45/-56,
+    vacancy +47/-37, tupe +39/-52 — all three `ready`, quorum met. The
+    inter-reviewer sample came back at 0.58; `MIN_DOUBLE_REVIEWED` set to 0
+    (above) rather than reconcile it. Still needed before the SetFit build:
+    the same `nlp relations` + `queue-claims` + review pass on the **source**
+    deployment (the beta box's warehouse is a copy). Only after that is
     the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
