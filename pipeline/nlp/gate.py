@@ -24,10 +24,13 @@ And across the set:
 
   * `min_categories_ready` of the categories clearing the per-category bar --
     a quorum, not all of them. SetFit builds one binary head per category, so
-    a category the corpus cannot yet feed (`funding_reduction` today: ~54
-    AFFIRMED candidates exist, below the floor) should not hold back training
-    the heads that are ready. Laggards are reported by name in `advisory`,
-    not `blocking`;
+    a category the corpus cannot feed should not hold back training the heads
+    that can. After D-08 that is 3 of 6: agency / vacancy / tupe. cost_pressure
+    and waiting_time have almost no non-AFFIRMED candidates in the corpus, so
+    their NEGATIVE class cannot reach the floor -- a committee paper states a
+    wait or a cost pressure as a fact, it does not negate one -- and
+    funding_reduction is thin on the concept route. Those three are reported
+    in `advisory`, not `blocking`;
   * enough double-reviewed items to say inter-reviewer agreement is
     acceptable. This one has no quorum and no code route around it -- it needs
     a second named reviewer.
@@ -92,9 +95,17 @@ MIN_PROVIDERS = 5
 MIN_YEARS = 3
 AGREEMENT_FLOOR = 0.80
 MIN_DOUBLE_REVIEWED = 10
-MIN_CATEGORIES_READY = 5   # of len(GATE_CATEGORIES). A category the corpus
-                          # cannot yet feed does not block training the heads
-                          # that are ready; it stays named in `advisory`.
+MIN_CATEGORIES_READY = 3   # of len(GATE_CATEGORIES). Was 5. After D-08's
+                          # measurement (2026-08-31): agency / vacancy / tupe
+                          # clear the lowered floor; cost_pressure and
+                          # waiting_time have ~12 and ~8 non-AFFIRMED
+                          # candidates in the whole corpus, so their NEGATIVE
+                          # class cannot reach `min_per_class` and no review
+                          # pass fixes that -- committee papers state a cost
+                          # pressure or a wait as a fact, they do not negate
+                          # one. funding_reduction is corpus-thin on the
+                          # concept route. Those three stay in `advisory`.
+                          # Raise this again if the corpus grows the negatives.
 
 _NEGATIVE_STATUSES = frozenset({"NEGATED", "HISTORICAL", "THIRD_PARTY", "UNKNOWN"})
 

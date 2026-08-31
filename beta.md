@@ -505,16 +505,21 @@ complete — see DONE. Nothing is queued.)_
     gate concepts; `ontology/patterns/gate_claims.yml` fires them only on an
     affirming construction. Full-corpus re-run: `AFFIRMED` candidates
     82 / 76 / 73 / 62 / 45 (agency / vacancy / tupe / cost / waiting) — the
-    right band. Single-model (`openai/gpt-oss-120b`) triage *approved*:
-    agency 36, tupe 29, cost 30, vacancy 19, waiting 1. None reach 65. Per the
-    owner's decision the floor was lowered — `MIN_PER_CLASS` 50 → 25,
-    `HELDOUT_PER_CLASS` 15 → 10 (need 35) — a deliberate compromise for a
-    corpus that discusses these pressures mostly as things being managed
-    *down*. A head trained on 25 positives is thin and any figure it supports
-    carries that. Still needed before the SetFit build: `nlp relations` +
-    `queue-claims` on the **source** deployment, then a real human review pass
-    (the model triage is a starting point, not the record); `waiting_time` /
-    `vacancy_pressure` may land in `advisory` even at 25. Only after that is
+    right band. Per the owner's decision the floor was lowered —
+    `MIN_PER_CLASS` 50 → 25, `HELDOUT_PER_CLASS` 15 → 10 (need 35) — a
+    deliberate compromise for a corpus that discusses these pressures mostly
+    as things being managed *down*. After a screen fix (`object_is_bare_number`
+    skips `literal:count` predicates) the model-approved positives are
+    agency 38, vacancy 43, tupe 27, cost 30, waiting 30. But the corpus holds
+    only ~12 non-AFFIRMED `cost_pressure` candidates and ~8 non-AFFIRMED
+    `waiting_time` — their NEGATIVE class cannot reach 25, and no review pass
+    changes that. `MIN_CATEGORIES_READY` 5 → 3: **agency / vacancy / tupe**
+    can train; **cost / waiting / funding_reduction** go in `advisory`. Still
+    needed before the SetFit build: `nlp relations` + `queue-claims` on the
+    **source** deployment, then a real human review pass over the three
+    trainable categories (the model triage is the starting sheet, not the
+    record) + a second reviewer for the double-review sample. `tupe`'s ~27
+    positives need ~8 more from the human pass to clear 35. Only after that is
     the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence

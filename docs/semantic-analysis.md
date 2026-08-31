@@ -416,15 +416,18 @@ on double-reviewed items, a `blocking` list of what is short, and an
 *negative* is a `rejected` one, a `corrected`-away one, or an `approved` but
 `NEGATED` / `HISTORICAL` / `THIRD_PARTY` one.
 
-The overall gate is a **quorum**: `MIN_CATEGORIES_READY` (5 of 6) categories
-clearing the per-category bar, plus the inter-reviewer check — not all six.
-SetFit builds one binary head per category, so a category the corpus cannot
-yet feed (`funding_reduction`: ~54 AFFIRMED candidates exist, below the
-floor) is reported in `advisory` and does not hold back training the heads
-that are ready. The spread check counts **distinct local authorities**, not
-source systems: the whole NLP corpus is two source systems, but the council
-is the unit that must vary. The inter-reviewer condition has no quorum and no
-code route around it — it needs a second named reviewer.
+The overall gate is a **quorum**: `MIN_CATEGORIES_READY` (3 of 6, lowered from
+5 after D-08) categories clearing the per-category bar, plus the inter-reviewer
+check. SetFit builds one binary head per category, so a category the corpus
+cannot feed does not hold back training the ones that can. The three that go
+in `advisory`: `cost_pressure` and `waiting_time` have ~12 and ~8 non-AFFIRMED
+candidates in the whole corpus, so their NEGATIVE class cannot reach the floor
+— a committee paper states a wait or a cost pressure as a fact, it does not
+negate one — and `funding_reduction` is thin on the concept route. The three
+that can train: `agency_reliance`, `vacancy_pressure`, `tupe_transfer`. The
+spread check counts **distinct local authorities**, not source systems. The
+inter-reviewer condition has no quorum and no code route around it — it needs
+a second named reviewer.
 
 ```bash
 uv run pipeline nlp gate-034g          # exits 1 with a blocking list until ready
