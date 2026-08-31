@@ -356,28 +356,40 @@ def train(conn, *, categories: list[str] | None = None,
             heldout_ids = [e.candidate_id for e in heldout_ex]
 
             results: list[HeadResult] = []
+            unavailable: list[dict] = []
             for model_type in models:
-                results.append(_FITTERS[model_type](
-                    category, predicate, train_ex, heldout_ex,
-                    embedder_model_key=embedder_model_key, corpus=corpus_label,
-                    corpus_cutoff=cutoff, min_precision=min_precision,
-                    artifact_root=artifact_root, write_artifacts=not dry_run))
+                try:
+                    results.append(_FITTERS[model_type](
+                        category, predicate, train_ex, heldout_ex,
+                        embedder_model_key=embedder_model_key, corpus=corpus_label,
+                        corpus_cutoff=cutoff, min_precision=min_precision,
+                        artifact_root=artifact_root, write_artifacts=not dry_run))
+                except ImportError as exc:
+                    # A bake-off arm whose backend will not import (SetFit vs a
+                    # transformers major it has not caught up to, say). Skip the
+                    # arm, keep the others -- "run whatever ran", the same
+                    # spirit as claims_predict running whatever passed.
+                    unavailable.append({"model_type": model_type,
+                                        "error": f"{type(exc).__name__}: {exc}"})
             processed += 1
             winner = _persist_category(
                 conn, category=category, predicate=predicate, results=results,
                 heldout_ids=heldout_ids, embedder_model_key=embedder_model_key,
                 corpus=corpus_label, corpus_status=corpus_status, corpus_cutoff=cutoff,
-                min_precision=min_precision, run_id=run_id, now=now)
+                min_precision=min_precision, run_id=run_id, now=now) if results else None
             if not dry_run:
                 conn.commit()
-            summary.append({
+            entry = {
                 "category": category, "corpus_cutoff": cutoff,
                 "n_train": len(train_ex), "n_heldout": len(heldout_ex),
                 "selected": winner.model_version if winner else None,
                 "heads": [{"model_type": r.model_type, "model_version": r.model_version,
                            "precision": r.metrics.precision, "recall": r.metrics.recall,
                            "f1": r.metrics.f1, "status": r.status} for r in results],
-            })
+            }
+            if unavailable:
+                entry["unavailable"] = unavailable
+            summary.append(entry)
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
         runs.finish_run(conn, run_id, status="failed", rows_processed=processed,
                         error=f"{type(exc).__name__}: {exc}")

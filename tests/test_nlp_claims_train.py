@@ -60,6 +60,23 @@ def test_head_below_the_precision_bar_is_quarantined(conn, tmp_path):
     assert row["selected"] == 0            # no prediction rights
 
 
+def test_a_bakeoff_arm_that_will_not_import_is_skipped(conn, tmp_path, monkeypatch):
+    def _boom(*a, **k):
+        raise ImportError("cannot import name 'default_logdir' from 'transformers.training_args'")
+
+    monkeypatch.setitem(claims_train._FITTERS, "setfit", _boom)
+    seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=20)
+    result = claims_train.train(conn, categories=["vacancy_pressure"],
+                                models=("logreg", "setfit"),
+                                embedder_model_key=STUB_MODEL_KEY, corpus_label="fixture",
+                                artifact_root=tmp_path)
+    [entry] = result["trained"]
+    assert [h["model_type"] for h in entry["heads"]] == ["logreg"]   # logreg still trained
+    assert entry["unavailable"][0]["model_type"] == "setfit"
+    assert "default_logdir" in entry["unavailable"][0]["error"]
+    assert [r["model_type"] for r in _heads(conn, "vacancy_pressure")] == ["logreg"]
+
+
 def test_dry_run_writes_no_rows_and_no_artifacts(conn, tmp_path):
     seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=3)
     claims_train.train(conn, categories=["vacancy_pressure"], dry_run=True,
