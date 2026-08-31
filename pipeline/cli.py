@@ -466,19 +466,29 @@ def nlp_queue_claims(
 
 @nlp_app.command("gate-034g")
 def nlp_gate_034g(
-    min_per_class: int = typer.Option(50, min=1, help="Decided examples needed per class to train"),
-    heldout_per_class: int = typer.Option(15, min=0, help="Held-out eval examples needed per class"),
+    min_per_class: int = typer.Option(
+        None, min=1, help="Decided examples needed per class to train "
+        "(default: gate.MIN_PER_CLASS, currently 25)"),
+    heldout_per_class: int = typer.Option(
+        None, min=0, help="Held-out eval examples needed per class "
+        "(default: gate.HELDOUT_PER_CLASS, currently 10)"),
 ) -> None:
-    """Report whether 034G (SetFit classifiers) can start: per-category
-    positive/negative decided-example counts, source/subject/time spread,
-    inter-reviewer agreement, and what is still missing. Read-only.
+    """Report whether 034G can start: per-category positive/negative
+    decided-example counts, source/subject/time spread, inter-reviewer
+    agreement, and what is still missing. Read-only. With no flags it uses
+    the same thresholds `nlp claims-train` does, so the two never disagree.
     """
     from pipeline.nlp import gate
 
+    kwargs = {}
+    if min_per_class is not None:
+        kwargs["min_per_class"] = min_per_class
+    if heldout_per_class is not None:
+        kwargs["heldout_per_class"] = heldout_per_class
+
     conn, _ = _document_connection()
     try:
-        report = gate.check(conn, min_per_class=min_per_class,
-                            heldout_per_class=heldout_per_class)
+        report = gate.check(conn, **kwargs)
         typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
         if not report["ready"]:
             raise typer.Exit(code=1)
