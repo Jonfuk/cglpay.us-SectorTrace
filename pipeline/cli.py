@@ -510,6 +510,9 @@ def nlp_claims_train(
     corpus_label: str = typer.Option("beta-box", help="Which warehouse the decisions came from"),
     corpus_status: str = typer.Option(
         "experimental", help="experimental | authoritative — travels with every head"),
+    artifact_root: Path = typer.Option(
+        None, help="Where trained head artifacts are written (default nlp-cache/claims). "
+        "Point it at a persistent path when the default is inside an ephemeral container."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fit and evaluate, then roll back; no artifacts"),
 ) -> None:
     """Run the per-category bake-off: a pure-Python logreg on the 034A chunk
@@ -531,6 +534,8 @@ def nlp_claims_train(
         kwargs["min_precision"] = min_precision
     if embedder_model_key:
         kwargs["embedder_model_key"] = embedder_model_key
+    if artifact_root is not None:
+        kwargs["artifact_root"] = artifact_root
 
     conn, _ = _document_connection()
     try:
