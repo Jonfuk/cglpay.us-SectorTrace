@@ -500,15 +500,22 @@ complete — see DONE. Nothing is queued.)_
     almost all non-claims: `relations.py`'s `CONCEPT_PREDICATE` fires on a
     concept phrase co-occurring with a subject anaphor, not on an affirming
     predication, so questions, scrutiny-proposal titles, "we are reducing
-    agency use" statements and budget lines all came through AFFIRMED. **No
-    review pass — human or model-assisted — can reach 65 positives out of
-    pools that hold 0–6.** 034G is blocked on 034D/F precision now, not on
-    reviewer labour; quorum tuning cannot reach around 0-of-6. The fix is a
-    relation-pattern pass (an affirming verb in a non-negated, non-hypothetical,
-    non-interrogative clause with the subject in it), run on the **source**
-    deployment, re-synced here, and re-checked with the same ensemble triage.
-    Only after that, and only if the rebuilt candidates yield a trainable
-    positive count, is the SetFit
+    agency use" statements and budget lines all came through AFFIRMED.
+    **Fixed and re-measured (2026-08-31).** `CONCEPT_PREDICATE` lost the five
+    gate concepts; `ontology/patterns/gate_claims.yml` fires them only on an
+    affirming construction. Full-corpus re-run: `AFFIRMED` candidates
+    82 / 76 / 73 / 62 / 45 (agency / vacancy / tupe / cost / waiting) — the
+    right band. Single-model (`openai/gpt-oss-120b`) triage *approved*:
+    agency 36, tupe 29, cost 30, vacancy 19, waiting 1. None reach 65. Per the
+    owner's decision the floor was lowered — `MIN_PER_CLASS` 50 → 25,
+    `HELDOUT_PER_CLASS` 15 → 10 (need 35) — a deliberate compromise for a
+    corpus that discusses these pressures mostly as things being managed
+    *down*. A head trained on 25 positives is thin and any figure it supports
+    carries that. Still needed before the SetFit build: `nlp relations` +
+    `queue-claims` on the **source** deployment, then a real human review pass
+    (the model triage is a starting point, not the record); `waiting_time` /
+    `vacancy_pressure` may land in `advisory` even at 25. Only after that is
+    the SetFit
     build (setfit into the `nlp` extra; one binary head per category over
     chunk embeddings; predictions to a new versioned table with a confidence
     column; a min-precision gate before any prediction is written) worth

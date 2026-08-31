@@ -4,7 +4,15 @@
 of conditions before training a model is worth doing. Per category:
 
   * >= `min_per_class` decided POSITIVE and >= `min_per_class` decided
-    NEGATIVE examples;
+    NEGATIVE examples. This floor was 50 + a 15 held-out margin (65). After
+    D-08 the relation patterns were rebuilt for precision, and model-assisted
+    triage over the whole corpus then showed the honest supply: ~20-40 real
+    affirmative claims per gate predicate, not 65 -- England-wide committee
+    papers discuss these pressures mostly as things being managed *down*. The
+    floor is now 25 + a 10 held-out margin (35), a deliberate compromise: a
+    SetFit head on 25 positives is thin, few-shot's own premise, and any
+    figure it later supports carries that in its caveat. Below 25 do not
+    train the head at all;
   * authority and time spread across those examples (not 40 from one council
     in one year) -- authority, not source_system: the whole NLP corpus is two
     source systems, but every committee paper carries an authority_ons_code,
@@ -69,8 +77,11 @@ GATE_CATEGORIES: dict[str, str] = {
     "waiting_time": "service.reports_waiting_time",
 }
 
-MIN_PER_CLASS = 50
-HELDOUT_PER_CLASS = 15
+MIN_PER_CLASS = 25        # was 50. Lowered after D-08 -- the corpus supplies
+                          # ~20-40 real affirmative claims per gate predicate,
+                          # not 50+. A deliberate compromise; see the module
+                          # docstring. Do not train a head below this.
+HELDOUT_PER_CLASS = 10    # was 15.
 MIN_AUTHORITIES = 3        # distinct local authorities behind a category's
                           # examples. Replaces a source-system count: the whole
                           # NLP corpus is two source systems, but every

@@ -148,7 +148,8 @@ def template_id(predicate: str, assertion_status: str, span: str | None,
 
 
 def screen_reason(span: str | None, object_literal: str | None,
-                  object_concept_id: str | None) -> str | None:
+                  object_concept_id: str | None,
+                  *, count_object_ok: bool = False) -> str | None:
     """A deterministic, inspectable flag for an extraction that is structurally
     broken -- not a judgement about the claim. A flagged row is exported with
     `suggested_decision='rejected'`; a person still confirms the batch.
@@ -159,7 +160,9 @@ def screen_reason(span: str | None, object_literal: str | None,
         same breath.
       * `object_is_bare_number` -- the object is a 1-3 digit literal with no
         resolved concept: an "of £15k" / "below 15" artifact, not a value the
-        predicate is about.
+        predicate is about. NOT flagged when `count_object_ok` -- for a
+        `literal:count` predicate (a vacancy count, a waiting-time in weeks)
+        a bare number is exactly the object.
     """
     text = (span or "").strip()
     if len(text) < SCREEN_MIN_SPAN:
@@ -167,7 +170,7 @@ def screen_reason(span: str | None, object_literal: str | None,
     if len(text) > SCREEN_MAX_SPAN:
         return "span_too_long"
     literal = (object_literal or "").strip()
-    if (literal and not object_concept_id
+    if (not count_object_ok and literal and not object_concept_id
             and literal.replace(",", "").replace(".", "").isdigit()
             and len(literal) <= 3):
         return "object_is_bare_number"
@@ -211,6 +214,15 @@ def _labels() -> tuple[dict, dict]:
             {cid: con.label for cid, con in onto.concepts.items()})
 
 
+def _count_object_predicates() -> frozenset[str]:
+    """Predicates whose object IS a bare count -- a vacancy number, a
+    waiting-time in weeks -- so the `object_is_bare_number` screen must not
+    reject them."""
+    onto = ontology_mod.default()
+    return frozenset(rid for rid, rel in onto.relations.items()
+                     if rel.object == "literal:count")
+
+
 def sheet_rows(conn, *, predicate: str, status: str = "queued",
                source_system: str | None = None, group_by: str = "none",
                sample: bool = False, sample_target: int = 130,
@@ -244,10 +256,12 @@ def sheet_rows(conn, *, predicate: str, status: str = "queued",
     raw = conn.execute(sql, params).fetchall()
 
     relation_labels, concept_labels = _labels()
+    count_object = _count_object_predicates()
     rows: list[dict] = []
     for r in raw:
         screen = screen_reason(r["evidence_span"], r["object_literal"],
-                               r["object_concept_id"])
+                               r["object_concept_id"],
+                               count_object_ok=r["predicate"] in count_object)
         row = {
             "candidate_id": r["claim_candidate_id"],
             "group_id": group_id(r["predicate"], r["assertion_status"],

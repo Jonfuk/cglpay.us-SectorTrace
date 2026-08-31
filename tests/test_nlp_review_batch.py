@@ -150,7 +150,15 @@ def test_screen_reason_flags_broken_extractions():
     assert sr("x" * 1300, None, None) == "span_too_long"
     assert sr("a" * 60, "15", None) == "object_is_bare_number"
     assert sr("a" * 60, "15", "concept:money") is None      # resolved -> fine
+    assert sr("a" * 60, "15", None, count_object_ok=True) is None   # a vacancy count
     assert sr("A clean sentence of a reasonable length about staffing.", None, None) is None
+
+
+def test_count_object_predicates_include_vacancy_and_waiting_time():
+    got = review_batch._count_object_predicates()
+    assert "workforce.has_vacancy_pressure" in got
+    assert "service.reports_waiting_time" in got
+    assert "workforce.relies_on_agency" not in got          # object: none
 
 
 # a genuine candidate: one run-on sentence (no internal full stop, so the

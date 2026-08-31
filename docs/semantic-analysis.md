@@ -449,6 +449,17 @@ paragraph above): `funding_reduction` stays corpus-limited but no longer
 blocks; `MIN_DOUBLE_REVIEWED` still needs a second named reviewer, which is a
 process gap, not a code one.
 
+Then D-08: the review pass (model-assisted) found that 034F was firing on
+concept-phrase co-occurrence, not predication, so the per-predicate `AFFIRMED`
+counts (400+) were ~99% non-claims. `CONCEPT_PREDICATE` lost the five gate
+concepts; `ontology/patterns/gate_claims.yml` fires them only on an affirming
+construction. Re-run over the full corpus, the honest supply is ~45-82
+`AFFIRMED` candidates and ~20-40 model-approved *positives* per gate predicate
+— not 65. `MIN_PER_CLASS` was lowered 50 → 25 (`HELDOUT_PER_CLASS` 15 → 10) as
+a deliberate compromise; a SetFit head on 25 positives is thin, and any figure
+it later supports carries that. `waiting_time` and `vacancy_pressure` may still
+fall short even of 25 and land in `advisory`.
+
 ## The tranches (BETA-034)
 
 Ship and stop at each letter; later letters need not be correct for the
@@ -462,7 +473,7 @@ earlier ones to be useful.
 | **034D** | GLiNER zero-shot **entity** spans (`PROVIDER`, `COMMISSIONER`, `SERVICE`, `SUBSTANCE`, `TREATMENT`, `ROLE`, `LOCATION`, `PROGRAMME`) into `document_concept_mentions` (migration `0066`); offline dictionary stub for CI; `resolve.py` a separate deterministic step; neither writes `entity_id` | **shipped** — grow `gold_spans.json` and swap the stub for GLiNER against it |
 | **034E** | assertion / context detection into `document_assertions` (migration `0067`) — `AFFIRMED` / `NEGATED` / `HISTORICAL` / `HYPOTHETICAL` / `CONDITIONAL` / `THIRD_PARTY` / `UNKNOWN`; `assertion_status` and `detector_confidence` separate; stdlib cue tagger always on, medSpaCy `ConText` an optional path (not in the extra) | **shipped** — grow `assertion_cases.json`; wire medSpaCy if its model install is worth it |
 | **034F** | machine claim candidates (`document_claim_candidates`, migration `0068`) via controlled concept→predicate + pattern triggers — **not** co-occurrence; `promote.py` queues a slice into `review_queue`; `decisions.py` records approve / reject / **correct** into `claim_candidate_decisions` (034G's training signal) | **shipped bar the graph write** — being `graph_claims`' first writer is held as its own decision |
-| **034G** | SetFit few-shot classifiers — **gated**: ≥ ~50 positive *and* ≥ ~50 negative decided examples per category, source/provider/time diversity, a held-out eval set, a minimum precision (precision favoured over recall) | **gated** — `pipeline nlp gate-034g` reports readiness; closing it is reviewer labour |
+| **034G** | SetFit few-shot classifiers — **gated**: ≥ 25 positive *and* ≥ 25 negative decided examples per category (was 50; lowered after D-08 — the corpus supplies ~20-40 real affirmative claims per predicate, not 50+), authority/time diversity, a 10-example held-out margin, a minimum precision (precision favoured over recall) | **gated** — `pipeline nlp gate-034g` reports readiness; the 034F precision work is done (D-08), the floor is a compromise, and a head trained on 25 positives carries that in any figure's caveat |
 | **034H** | active learning (review-queue ordering), then BERTopic (fenced: `/api/admin/*` finding aid only — not exported, not attributed, never counted or differenced across; `nlp_topic_model_runs` carries the full config, clusters are run-local), then RAG/LLM | gated / deferred |
 
 ## Deferred behind a decision
