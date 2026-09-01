@@ -1,6 +1,6 @@
 """The closed analyst tool catalogue (BETA-109).
 
-Exactly five typed, side-effect-free tools. No argument is a table name, URL,
+Exactly eleven typed, side-effect-free tools. No argument is a table name, URL,
 path or SQL fragment; bad arguments raise `ToolError` and execute nothing;
 every tool returns the standard envelope with a `result_ids` whitelist.
 """
@@ -11,9 +11,9 @@ import pytest
 from pipeline.assistant import tools
 
 
-def test_catalogue_is_exactly_five_named_tools():
+def test_catalogue_is_exactly_eleven_named_tools():
     assert set(tools.TOOL_NAMES) == set(tools.tool_schemas())
-    assert len(tools.TOOL_NAMES) == 5
+    assert len(tools.TOOL_NAMES) == 11
 
 
 @pytest.mark.parametrize("bad", [

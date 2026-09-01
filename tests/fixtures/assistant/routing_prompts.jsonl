@@ -18,6 +18,12 @@
 {"id": "r014", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find committee text on the cost of living affecting frontline drug workers."}
 {"id": "r015", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Where do documents mention unfilled prescriber posts in the service?"}
 {"id": "r016", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Any passages about a service handing back a contract early?"}
+{"id": "r-analysis-automated", "kind": "route", "expect_tool": "inspect_automated_signals", "category": "analysis", "question": "Show automated signals for this release."}
+{"id": "r-analysis-themes", "kind": "route", "expect_tool": "inspect_emerging_themes", "category": "analysis", "question": "Which emerging themes are promotion ready?"}
+{"id": "r-analysis-structured", "kind": "route", "expect_tool": "compare_structured_metrics", "category": "analysis", "question": "Compare the structured metric values for authority A."}
+{"id": "r-analysis-links", "kind": "route", "expect_tool": "inspect_cross_source_links", "category": "analysis", "question": "Inspect cross-source links for this authority."}
+{"id": "r-analysis-lineage", "kind": "route", "expect_tool": "trace_signal_lineage", "category": "analysis", "question": "Trace the lineage of this automated signal."}
+{"id": "r-analysis-health", "kind": "route", "expect_tool": "inspect_analysis_health", "category": "analysis", "question": "How healthy is the analysis pipeline?"}
 {"id": "r017", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Find where the papers describe rising referrals without extra funding."}
 {"id": "r018", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "Show me passages naming the provider that lost the alcohol treatment tender."}
 {"id": "r019", "kind": "route", "expect_tool": "search_document_passages", "category": "retrieval", "question": "What do documents say about apprentice or trainee routes into keyworking?"}

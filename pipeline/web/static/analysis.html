@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analysis control plane</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+  <header class="topbar"><div class="brand"><strong>SectorTrace analysis</strong><span class="muted">admin-only automated signals</span></div><a class="iconbtn portallink" href="/admin/">&larr; Admin</a></header>
+  <main class="analysis-page">
+    <p class="muted">Canonical facts and human-verified Evidence Graph claims remain separate. This workspace shows versioned signals, discoveries, links and operational health.</p>
+    <div class="cards" id="analysis-cards"></div>
+    <div class="split">
+      <section class="panel"><h2>Domain status</h2><div id="analysis-domains"></div></section>
+      <section class="panel"><h2>Emerging themes</h2><div id="analysis-themes"></div></section>
+    </div>
+    <section class="panel"><h2>Recent automated signals</h2><div id="analysis-signals"></div></section>
+  </main>
+  <script type="module" src="/admin/js/analysis.js"></script>
+</body>
+</html>

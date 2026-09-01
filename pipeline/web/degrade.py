@@ -146,6 +146,12 @@ REQUIREMENTS: dict[str, Requirement] = {
         tables=("assistant_runs",),
         label="Assistant run ledger",
     ),
+    "analysis_platform": Requirement(
+        min_migration=86,
+        tables=("analysis_releases", "automated_signals", "structured_signals",
+                "cross_source_signal_links", "adaptation_proposals"),
+        label="Analysis control plane",
+    ),
 }
 
 

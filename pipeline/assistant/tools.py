@@ -1,6 +1,6 @@
 """The closed, public-safe analyst tool catalogue (BETA-109).
 
-Exactly five typed, in-process, side-effect-free tools sit between a natural
+Exactly eleven typed, in-process, side-effect-free tools sit between a natural
 question and the warehouse's existing read-only query code:
 
   * ``search_document_passages``  — hybrid retrieval over parsed committee and
@@ -42,6 +42,12 @@ TOOL_NAMES = (
     "inspect_claim_gate",
     "inspect_source_coverage",
     "inspect_freshness",
+    "inspect_automated_signals",
+    "inspect_emerging_themes",
+    "compare_structured_metrics",
+    "inspect_cross_source_links",
+    "trace_signal_lineage",
+    "inspect_analysis_health",
 )
 
 _MAX_QUERY_LEN = 400
@@ -102,6 +108,27 @@ _SCHEMAS: dict[str, dict[str, tuple]] = {
     },
     "inspect_freshness": {
         "table": ("token", False, {}),
+    },
+    "inspect_automated_signals": {
+        "release_id": ("token", False, {}), "domain_id": ("token", False, {}),
+        "subject_id": ("token", False, {}), "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "inspect_emerging_themes": {
+        "domain_id": ("token", False, {}), "status": ("enum", False, {"choices": ("shadow", "promotion_ready", "promoted")}),
+        "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "compare_structured_metrics": {
+        "subject_id": ("token", True, {}), "metric": ("token", False, {}),
+        "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "inspect_cross_source_links": {
+        "release_id": ("token", False, {}), "subject_id": ("token", False, {}),
+        "relationship_type": ("enum", False, {"choices": ("same_event", "entity_overlap", "temporal_context", "metric_context", "value_conflict", "narrative_structured_alignment")}),
+        "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
+    },
+    "trace_signal_lineage": {"signal_id": ("token", True, {})},
+    "inspect_analysis_health": {
+        "source_table": ("token", False, {}), "limit": ("int", False, {"min": 1, "max": _MAX_LIMIT}),
     },
 }
 
@@ -168,6 +195,12 @@ _DESCRIPTIONS = {
         "The newest and oldest retrieved_at, and the row count, per evidence "
         "table — the honest 'how stale is this' signal. Optionally for one "
         "named table (e.g. contracts, cqc_locations, committee_papers).",
+    "inspect_automated_signals": "Inspect validated admin-only automated signals by release, domain or canonical subject. Results include direction, assertion status, provenance references and the immutable release identity.",
+    "inspect_emerging_themes": "Inspect shadow and promotion-ready emerging themes, including recurrence counts and grounded representative passages.",
+    "compare_structured_metrics": "Compare deterministic structured metric calculations for one canonical subject. Values, periods, units and anomaly scores come from validated source rows; the assistant cannot calculate or alter them.",
+    "inspect_cross_source_links": "Inspect deterministic cross-source links and conflicts. Source evidence remains independently addressable and absence is never a contradiction.",
+    "trace_signal_lineage": "Trace one automated signal to its release, source evidence, model calls and verifier results.",
+    "inspect_analysis_health": "Inspect source freshness, schema/parse health, topic outliers, model agreement, verifier pass rates, cost and adaptation proposals.",
 }
 
 
@@ -346,12 +379,81 @@ def _t_freshness(conn, settings, *, table=None) -> tuple[dict, list]:
     return data, [r["table"] for r in rows]
 
 
+def _t_automated_signals(conn, settings, *, release_id=None, domain_id=None,
+                         subject_id=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
+    from pipeline.analysis.store import list_signals
+    rows = list_signals(conn, release_id=release_id, domain_id=domain_id,
+                        subject_id=subject_id, limit=limit)
+    return {"signals": rows, "caveat": "Automated signals are not verified claims."}, [r["signal_id"] for r in rows]
+
+
+def _t_emerging_themes(conn, settings, *, domain_id=None, status=None,
+                       limit=_MAX_LIMIT) -> tuple[dict, list]:
+    where, params = [], []
+    if domain_id:
+        where.append("domain_id = ?")
+        params.append(domain_id)
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    params.append(limit)
+    sql = "SELECT * FROM emerging_themes" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT ?"
+    rows = [dict(row) for row in conn.execute(sql, params)]
+    return {"themes": rows, "caveat": "Emerging themes remain in shadow until admin promotion."}, [r["theme_id"] for r in rows]
+
+
+def _t_structured(conn, settings, *, subject_id, metric=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
+    where = ["a.subject_id = ?"]
+    params = [subject_id]
+    if metric:
+        where.append("s.metric = ?")
+        params.append(metric)
+    params.append(limit)
+    rows = [dict(row) for row in conn.execute("SELECT s.*, a.domain_id, a.subject_id, a.direction FROM structured_signals s JOIN automated_signals a ON a.signal_id = s.signal_id WHERE " + " AND ".join(where) + " ORDER BY s.created_at DESC LIMIT ?", params)]
+    return {"structured": rows, "caveat": "Arithmetic and direction are deterministic; no model-generated numbers are included."}, [r["structured_signal_id"] for r in rows]
+
+
+def _t_links(conn, settings, *, release_id=None, subject_id=None,
+             relationship_type=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
+    from pipeline.analysis.linking import list_links
+    rows = list_links(conn, release_id=release_id, subject_id=subject_id,
+                      relationship_type=relationship_type, limit=limit)
+    return {"links": rows, "caveat": "Links are temporal/metric context, not causal findings."}, [r["link_id"] for r in rows]
+
+
+def _t_lineage(conn, settings, *, signal_id) -> tuple[dict, list]:
+    signal = conn.execute("SELECT * FROM automated_signals WHERE signal_id = ?", (signal_id,)).fetchone()
+    if signal is None:
+        raise ToolError(f"no automated signal {signal_id!r}")
+    calls = [dict(row) for row in conn.execute("SELECT * FROM analysis_model_calls WHERE release_id = ? AND domain_id = ?", (signal["release_id"], signal["domain_id"]))]
+    verifiers = [dict(row) for row in conn.execute("SELECT * FROM analysis_verifier_results WHERE signal_id = ?", (signal_id,))]
+    return {"signal": dict(signal), "model_calls": calls, "verifiers": verifiers}, [signal_id]
+
+
+def _t_health(conn, settings, *, source_table=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
+    where, params = [], []
+    if source_table:
+        where.append("source_table = ?")
+        params.append(source_table)
+    params.append(limit)
+    sql = "SELECT * FROM analysis_health_snapshots" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY collected_at DESC LIMIT ?"
+    rows = [dict(row) for row in conn.execute(sql, params)]
+    proposals = [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?", (limit,))]
+    return {"health": rows, "proposals": proposals}, [r["health_snapshot_id"] for r in rows]
+
+
 _WRAPPERS: dict[str, Callable] = {
     "search_document_passages": _t_search,
     "inspect_claim_candidates": _t_claim_candidates,
     "inspect_claim_gate": _t_claim_gate,
     "inspect_source_coverage": _t_source_coverage,
     "inspect_freshness": _t_freshness,
+    "inspect_automated_signals": _t_automated_signals,
+    "inspect_emerging_themes": _t_emerging_themes,
+    "compare_structured_metrics": _t_structured,
+    "inspect_cross_source_links": _t_links,
+    "trace_signal_lineage": _t_lineage,
+    "inspect_analysis_health": _t_health,
 }
 
 _CAVEAT_BY_TOOL = {name: fn for name, fn in _WRAPPERS.items()}

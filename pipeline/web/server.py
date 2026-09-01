@@ -115,8 +115,10 @@ STATIC_FILES: dict[str, tuple[str, str, Path]] = {
 # the same reason the rest of this map is: no directory walk, no traversal.
 for _module in ("shell", "dom", "context", "theme", "palette", "pipeline",
                  "health", "exports", "candidates", "census", "claims", "search",
-                 "claimreview"):
+                 "claimreview", "analysis"):
     STATIC_FILES[f"/admin/js/{_module}.js"] = (f"js/{_module}.js", JS, STATIC_DIR)
+STATIC_FILES["/admin/analysis"] = ("analysis.html", HTML, STATIC_DIR)
+STATIC_FILES["/admin/analysis/"] = ("analysis.html", HTML, STATIC_DIR)
 
 # Portal ES modules, listed rather than globbed for the same reason as above.
 for _module in ("theme", "components", "palette", "filterstate", "myarea",
@@ -856,6 +858,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             handler = self._post_routes().get(path)
             if handler is None:
+                match = re.fullmatch(r"/api/admin/analysis/runs/([A-Za-z0-9:_-]{1,120})/(cancel|resume)", path)
+                if match:
+                    handler = self._analysis_cancel if match.group(2) == "cancel" else self._analysis_resume
+                    body = self._read_json()
+                    body["run_id"] = match.group(1)
+                    return self._send_json(handler(body))
+                match = re.fullmatch(r"/api/admin/analysis/releases/([A-Za-z0-9:_-]{1,120})/(activate|rollback)", path)
+                if match:
+                    handler = self._analysis_activate if match.group(2) == "activate" else self._analysis_rollback
+                    body = self._read_json()
+                    body["release_id"] = match.group(1)
+                    return self._send_json(handler(body))
+            if handler is None:
                 raise ApiError(f"No route for POST {path}", status=404)
             return self._send_json(handler(self._read_json()))
 
@@ -1187,6 +1202,41 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/health":
             return health.health(conn, self.settings)
+
+        if path.startswith("/api/admin/" + "analysis"):
+            degrade.preflight(conn, "analysis_platform")
+            from pipeline.web import analysis as analysis_admin
+            if path == "/api/admin/analysis/overview":
+                return analysis_admin.overview(conn)
+            if path == "/api/admin/analysis/domains":
+                return analysis_admin.domains_view(conn)
+            if path == "/api/admin/analysis/coverage":
+                return analysis_admin.coverage(conn)
+            if path == "/api/admin/analysis/signals":
+                return {"signals": analysis_admin.list_signals(conn, release_id=_str(params, "release_id"), domain_id=_str(params, "domain_id"), subject_id=_str(params, "subject_id"), limit=_int(params, "limit", 100))}
+            if path == "/api/admin/analysis/structured":
+                return analysis_admin.structured(conn, domain_id=_str(params, "domain_id"), limit=_int(params, "limit", 100))
+            if path == "/api/admin/analysis/topics":
+                return analysis_admin.topics(conn, release_id=_str(params, "release_id"), limit=_int(params, "limit", 100))
+            if path == "/api/admin/analysis/themes":
+                return analysis_admin.themes(conn, status=_str(params, "status"), limit=_int(params, "limit", 100))
+            if path == "/api/admin/analysis/links":
+                from pipeline.analysis.linking import list_links
+                return {"links": list_links(conn, release_id=_str(params, "release_id"), subject_id=_str(params, "subject_id"), relationship_type=_str(params, "relationship_type"), limit=_int(params, "limit", 100))}
+            if path == "/api/admin/analysis/entities":
+                return analysis_admin.entities(conn, status=_str(params, "status"), limit=_int(params, "limit", 100))
+            if path == "/api/admin/analysis/graph":
+                return analysis_admin.graph(conn)
+            if path == "/api/admin/analysis/models":
+                return analysis_admin.models(conn)
+            if path == "/api/admin/analysis/prevalence":
+                return {"prevalence": []}
+            if path == "/api/admin/analysis/operations":
+                return analysis_admin.operations(conn)
+            match = re.fullmatch(r"/api/admin/analysis/reports/([A-Za-z0-9:_-]{1,120})", path)
+            if match:
+                return analysis_admin.report(conn, match.group(1))
+            raise ApiError(f"No route for GET {path}", status=404)
 
         if path == "/api/admin/freshness":
             # Its own route because it is seconds of table scans; see
@@ -1881,7 +1931,94 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/qc-sample/draw": self._qc_draw,
             "/api/admin/qc-finding": self._qc_finding,
             "/api/admin/assistant": self._assistant_ask,
+            "/api/admin/analysis/runs": self._analysis_run,
+            "/api/admin/analysis/releases/activate": self._analysis_activate,
+            "/api/admin/analysis/releases/rollback": self._analysis_rollback,
+            "/api/admin/analysis/themes/promote": self._analysis_promote_theme,
+            "/api/admin/analysis/proposals/accept": self._analysis_accept_proposal,
+            "/api/admin/analysis/proposals/dismiss": self._analysis_dismiss_proposal,
+            "/api/admin/analysis/graph/rebuild": self._analysis_graph_rebuild,
         }
+
+    def _analysis_run(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import analysis as analysis_admin
+            return analysis_admin.start_run(conn, self.settings, body)
+        except (ValueError, KeyError) as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+    def _analysis_cancel(self, body: dict) -> Any:
+        return self._analysis_run_state(body, "cancelled")
+
+    def _analysis_resume(self, body: dict) -> Any:
+        return self._analysis_run_state(body, "pending")
+
+    def _analysis_run_state(self, body: dict, status: str) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            run_id = str(body.get("run_id", ""))
+            row = conn.execute("SELECT domain_run_id FROM analysis_domain_runs WHERE domain_run_id = ?", (run_id,)).fetchone()
+            if row is None:
+                raise ApiError(f"No analysis run {run_id}.", status=404)
+            conn.execute("UPDATE analysis_domain_runs SET status = ? WHERE domain_run_id = ?", (status, run_id))
+            conn.commit()
+            return {"run_id": run_id, "status": status}
+        finally:
+            conn.close()
+
+    def _analysis_activate(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import analysis as analysis_admin
+            return analysis_admin.activate(conn, str(body.get("release_id", "")))
+        except (ValueError, KeyError) as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+    def _analysis_rollback(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import analysis as analysis_admin
+            return analysis_admin.rollback(conn, str(body.get("release_id", "")), body.get("reason"))
+        except KeyError as exc:
+            raise ApiError(str(exc), status=404) from None
+        finally:
+            conn.close()
+
+    def _analysis_promote_theme(self, body: dict) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.web import analysis as analysis_admin
+            return analysis_admin.promote_theme(conn, str(body.get("theme_id", "")))
+        except (ValueError, KeyError) as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+    def _analysis_proposal_decision(self, body: dict, status: str) -> Any:
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.analysis.operations import decide_proposal
+            decide_proposal(conn, str(body.get("proposal_id", "")), status=status, admin_reason=body.get("reason"))
+            conn.commit()
+            return {"proposal_id": body.get("proposal_id"), "status": status}
+        except (ValueError, KeyError) as exc:
+            raise ApiError(str(exc), status=400) from None
+        finally:
+            conn.close()
+
+    def _analysis_accept_proposal(self, body: dict) -> Any:
+        return self._analysis_proposal_decision(body, "accepted")
+
+    def _analysis_dismiss_proposal(self, body: dict) -> Any:
+        return self._analysis_proposal_decision(body, "dismissed")
+
+    def _analysis_graph_rebuild(self, body: dict) -> Any:
+        raise ApiError("Graph rebuild requires an explicitly configured Neo4j signal projection worker.", status=503)
 
     def _qc_draw(self, body: dict) -> Any:
         """Draw a reproducible QC sample (BETA-106). Deterministic on the
