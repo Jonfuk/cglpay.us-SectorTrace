@@ -8,6 +8,7 @@ losing the run state.
 from __future__ import annotations
 
 import json
+import structlog
 import time
 import uuid
 from importlib.metadata import PackageNotFoundError, version
@@ -44,6 +45,9 @@ from pipeline.analysis.structured import (
 )
 
 
+log = structlog.get_logger()
+
+
 class AnalysisWorker:
     """Claim and execute queued analysis runs one at a time."""
 
@@ -76,6 +80,8 @@ class AnalysisWorker:
             self._heartbeat("idle")
             return result
         except Exception as exc:  # worker must leave a durable failure, not hang
+            log.exception("analysis_run_failed", run_id=run_id,
+                          error_type=type(exc).__name__, error=str(exc))
             self._fail(run_id, exc)
             self._heartbeat("failed")
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
@@ -555,6 +561,11 @@ class AnalysisWorker:
                 "UPDATE analysis_runs SET status = 'failed', current_stage = 'failed', "
                 "error_detail = ?, completed_at = ?, updated_at = ? WHERE run_id = ?",
                 (f"{type(exc).__name__}: {exc}", now, now, run_id))
+            conn.execute(
+                "UPDATE analysis_domain_runs SET status = 'failed', prerequisite_status = 'failed', "
+                "completed_at = COALESCE(completed_at, ?), error_detail = COALESCE(error_detail, ?) "
+                "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable', 'failed')",
+                (now, f"{type(exc).__name__}: {exc}", run_id))
             conn.commit()
         finally:
             conn.close()

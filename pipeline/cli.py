@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -63,6 +64,7 @@ def analysis_worker(
     """Process queued admin analysis runs from the shared warehouse."""
     from pipeline.analysis.worker import AnalysisWorker
 
+    configure_logging("analysis_worker", console_level=logging.INFO)
     settings = get_settings()
     db_conn = db.get_connection(settings)
     try:

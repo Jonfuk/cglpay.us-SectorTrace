@@ -154,6 +154,18 @@ def test_analysis_worker_claims_and_completes_structured_run(conn, settings):
     assert analysis_admin.worker_status(conn)["worker_id"] == "test-analysis-worker"
 
 
+def test_analysis_worker_failure_is_durable_and_marks_active_domain_failed(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    worker = AnalysisWorker(settings, worker_id="test-analysis-worker")
+    worker._fail(started["run_id"], RuntimeError("database probe failed"))
+
+    failed = analysis_admin.run(conn, started["run_id"])
+    assert failed["status"] == "failed"
+    assert failed["error_detail"] == "RuntimeError: database probe failed"
+    assert failed["domains"][0]["status"] == "failed"
+    assert failed["domains"][0]["error_detail"] == "RuntimeError: database probe failed"
+
+
 def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
     common = {
         "currency": "GBP", "source_url": "https://example.test/contract",
