@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
+from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded, run_batches
 from pipeline.analysis.domains import AnalysisDomainSpec, domain_registry
 from pipeline.analysis.graph import EDGE_TYPES, NODE_LABELS, exact_entity_attachment
 from pipeline.analysis.linking import link_signals
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
 from pipeline.analysis.operations import detect_drift
+from pipeline.analysis.prevalence import diagnostics
+from pipeline.analysis.quality import ProgramMetrics, promotion_eligible
 from pipeline.analysis.releases import create_release, load_release
 from pipeline.analysis.structured import Observation, anomaly, compare_periods
 from pipeline.web import analysis as analysis_admin
@@ -82,3 +87,23 @@ def test_graph_projection_isolated_from_canonical_claims():
 def test_admin_analysis_read_models_are_admin_only(conn):
     assert analysis_admin.overview(conn)["counts"]["automated_signals"] == 0
     assert analysis_admin.graph(conn)["canonical_claim_isolation"] is True
+
+
+def test_batch_budget_stops_at_ceiling_and_boundary():
+    budget = CallBudget(ceiling_micros=10)
+    budget.before_call(10)
+    budget.record(10)
+    with pytest.raises(CostCeilingExceeded):
+        budget.before_call(1)
+    budget = CallBudget()
+    budget.cancel()
+    with pytest.raises(AnalysisCancelled):
+        run_batches([1, 2], lambda batch: batch, budget=budget)
+
+
+def test_program_and_prevalence_gates_are_conservative():
+    baseline = ProgramMetrics(.70, 1.0, 0, .90)
+    assert promotion_eligible(ProgramMetrics(.75, 1.0, 0, .89), baseline)
+    assert not promotion_eligible(ProgramMetrics(.75, .99, 0, .89), baseline)
+    assert diagnostics(positives=49, negatives=50, subjects=10, pacc=.5, emq=.5).suppressed
+    assert diagnostics(positives=50, negatives=50, subjects=10, pacc=.02, emq=.01).continue_exploration

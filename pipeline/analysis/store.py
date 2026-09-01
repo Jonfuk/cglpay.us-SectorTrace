@@ -6,7 +6,7 @@ import uuid
 from typing import Iterable
 
 from pipeline.analysis.domains import get_domain
-from pipeline.analysis.signals import Signal
+from pipeline.analysis.signals import Signal, utcnow
 
 
 def save_signal(conn, signal: Signal) -> None:
@@ -26,6 +26,26 @@ def save_signals(conn, signals: Iterable[Signal]) -> int:
         save_signal(conn, signal)
         count += 1
     return count
+
+
+def save_structured_signal(conn, signal: Signal, comparison: dict) -> str:
+    """Persist the common signal and its exact structured calculation."""
+    save_signal(conn, signal)
+    previous = comparison["previous"]
+    current = comparison["current"]
+    structured_id = f"structured-{uuid.uuid4()}"
+    conn.execute(
+        "INSERT INTO structured_signals (structured_signal_id, signal_id, source_table, source_row_id, "
+        "comparison_source_table, comparison_source_row_id, metric, unit, value_before, value_after, "
+        "absolute_change, percentage_change, comparable, robust_z, anomaly_status, calculation_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (structured_id, signal.signal_id, current["source_table"], current["source_row_id"],
+         previous["source_table"], previous["source_row_id"], current["metric"], current["unit"],
+         str(previous["value"]), str(current["value"]), comparison.get("absolute_change"),
+         comparison.get("percentage_change"), int(bool(comparison.get("comparable"))),
+         comparison.get("robust_z"), "unusual" if comparison.get("statistically_unusual") else None,
+         json.dumps(comparison, sort_keys=True), utcnow()))
+    return structured_id
 
 
 def signal_row(row) -> dict:
@@ -72,10 +92,10 @@ def record_theme(conn, *, release_id: str, domain_id: str, theme: dict) -> str:
     conn.execute(
         "INSERT INTO emerging_themes (theme_id, release_id, domain_id, theme_key, status, "
         "passage_count, document_count, subject_count, novelty_similarity, evidence_json, "
-        "promotion_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+        "promotion_reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (theme_id, release_id, domain_id, theme.get("theme_key", "unknown"), status,
          theme.get("passage_count", 0), theme.get("document_count", 0),
          theme.get("subject_count", 0), theme.get("novelty_similarity"),
          json.dumps(theme.get("passages", []), sort_keys=True),
-         "recurrence and grounding bar met" if status == "promotion_ready" else None))
+         "recurrence and grounding bar met" if status == "promotion_ready" else None, utcnow()))
     return theme_id

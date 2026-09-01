@@ -903,6 +903,12 @@ class Handler(BaseHTTPRequestHandler):
             # same numbers. Operator answers stay no-store: the review queue
             # changes as you work on it.
             max_age = PUBLIC_MAX_AGE if path.startswith("/api/v1/") else None
+            report_match = re.fullmatch(r"/api/admin/analysis/reports/([A-Za-z0-9:_-]{1,120})", path)
+            if report_match and _str(params, "format") in {"csv", "html"}:
+                from pipeline.analysis.report import bundle
+                from pipeline.web import analysis as analysis_admin
+                body, content_type = bundle(analysis_admin.report(conn, report_match.group(1)), _str(params, "format"))
+                return self._send(200, body.encode("utf-8"), content_type, max_age=0)
             if path.startswith("/api/v1/"):
                 # The server-side twin of that max-age header: an in-process
                 # cache over the same derived payloads, so a warehouse hot with
