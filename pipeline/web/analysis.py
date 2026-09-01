@@ -50,6 +50,10 @@ def _cost_snapshot(conn, release_id: str, run_id: str | None = None) -> dict[str
     row = conn.execute(
         "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micros), 0) AS cost_micros "
         f"FROM analysis_model_calls WHERE {clause}", params).fetchone()
+    if run_id:
+        run = conn.execute("SELECT cost_micros FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+        return {"model_calls": int(row["calls"]),
+                "cost_micros": int(run["cost_micros"] if run else row["cost_micros"] or 0)}
     return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
 
 

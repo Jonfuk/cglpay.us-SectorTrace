@@ -187,6 +187,49 @@ def test_analysis_worker_processes_narrative_domain(conn, settings):
     assert result["domains"][0]["status"] == "complete"
 
 
+def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
+    now = "2025-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
+        "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
+        "VALUES ('evidence-analysis-1', 'fixture', 'https://example.test/doc', ?, 200, 'hash-analysis', "
+        "'/data/doc.pdf', 'application/pdf', 10, 'committee_papers', 'authority-1', ?)", (now, now))
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
+        "created_at, updated_at) VALUES ('document-analysis-1', 'evidence-analysis-1', 'committee_papers', "
+        "'authority-1', 'REPORT', ?, ?)", (now, now))
+    conn.execute(
+        "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
+        "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
+        "('version-analysis-1', 'document-analysis-1', 'fixture', '1', '1', 'hash', 'complete', 1, ?)", (now,))
+    conn.execute(
+        "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
+        "text_sha256) VALUES ('element-analysis-1', 'version-analysis-1', 'PARAGRAPH', 1, "
+        "'The service reported high caseloads.', 'text-hash')")
+
+    class FakeModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            self.last_cost_micros = 7
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            return {"signal": {"signal_type": "workforce_strain", "subtype": "caseload",
+                                "assertion_status": "affirmed", "direction": "adverse",
+                                "evidence_quote": "high caseloads", "scope_quote": "high caseloads",
+                                "period_start": None, "period_end": None,
+                                "planned_or_hypothetical": False}}
+
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="model-fixture-worker",
+                            model_client_factory=FakeModelClient).run_once()
+    assert result["run_id"] == started["run_id"]
+    assert result["cost_micros"] == 14
+    signal = conn.execute("SELECT signal_type, direction, human_verified FROM automated_signals "
+                          "WHERE release_id = ?", (started["release_id"],)).fetchone()
+    assert dict(signal) == {"signal_type": "workforce_strain", "direction": "adverse", "human_verified": 0}
+
+
 def test_batch_budget_stops_at_ceiling_and_boundary():
     budget = CallBudget(ceiling_micros=10)
     budget.before_call(10)
