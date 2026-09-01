@@ -62,7 +62,11 @@ def _columns(conn, table: str) -> set[str]:
         # failed probe aborts the transaction, so clear it before using cursor
         # descriptions as the portable schema probe.
         conn.rollback()
-        cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
+        try:
+            cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
+        except Exception:
+            conn.rollback()
+            raise
         return {str(item[0]) for item in (getattr(cursor, "description", None) or [])}
 
 
@@ -83,6 +87,10 @@ def observations_from_table(conn, table: str) -> list[Observation]:
         columns = _columns(conn, table)
         rows = conn.execute(f"SELECT * FROM {table}").fetchall()
     except Exception:
+        # Keep the worker's write connection usable after an unavailable or
+        # reshaped source table. SQLite tolerates the failed read; PostgreSQL
+        # requires the transaction to be rolled back before the next write.
+        conn.rollback()
         return []
     required = {mapping["subject_id"], mapping["period"]}
     if not required <= columns:

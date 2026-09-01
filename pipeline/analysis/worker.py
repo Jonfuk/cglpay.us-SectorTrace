@@ -483,6 +483,9 @@ class AnalysisWorker:
             try:
                 conn.execute(f"SELECT 1 FROM {table} LIMIT 1")
             except Exception:
+                # A missing table aborts a PostgreSQL transaction. The caller
+                # still needs to write the domain's unavailable status.
+                conn.rollback()
                 missing.append(table)
         return missing
 
