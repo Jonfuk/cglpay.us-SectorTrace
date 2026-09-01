@@ -10,6 +10,36 @@
   <header class="topbar"><div class="brand"><strong>SectorTrace analysis</strong><span class="muted">admin-only automated signals</span></div><a class="iconbtn portallink" href="/admin/">&larr; Admin</a></header>
   <main class="analysis-page">
     <p class="muted">Canonical facts and human-verified Evidence Graph claims remain separate. This workspace shows versioned signals, discoveries, links and operational health.</p>
+    <section class="panel analysis-control-panel">
+      <div class="analysis-section-head">
+        <div><h2>Run analysis</h2><p class="muted small">Start a bounded admin run against the selected domains. Runs are versioned and remain separate from canonical claims.</p></div>
+        <span class="badge" id="analysis-executor">Loading executor…</span>
+      </div>
+      <form id="analysis-run-form" class="analysis-run-form">
+        <label>Run type
+          <select id="analysis-run-kind">
+            <option value="complete">Complete platform release</option>
+            <option value="discovery">Discovery</option>
+            <option value="optimization">Optimization</option>
+            <option value="pilot">Domain pilot</option>
+          </select>
+        </label>
+        <label>Cost ceiling (£, optional)
+          <input id="analysis-cost-ceiling" type="number" min="0" step="0.01" inputmode="decimal" placeholder="No ceiling">
+        </label>
+        <div class="analysis-domain-picker">
+          <span class="form-label">Domains</span>
+          <div id="analysis-domain-options" class="checkgrid"><span class="muted small">Loading domains…</span></div>
+        </div>
+        <div class="actions analysis-form-actions">
+          <button class="btn primary" type="submit" id="analysis-start">Start run</button>
+          <button class="btn" type="button" id="analysis-refresh">Refresh</button>
+        </div>
+      </form>
+      <p class="small" id="analysis-action-message" role="status"></p>
+    </section>
+    <section class="panel" id="analysis-current-run-panel"><h2>Current run</h2><div id="analysis-current-run"><div class="empty">No analysis run has been started.</div></div></section>
+    <section class="panel"><h2>Run history</h2><div id="analysis-run-history"><div class="empty">No run history.</div></div></section>
     <div class="cards" id="analysis-cards"></div>
     <div class="split">
       <section class="panel"><h2>Domain status</h2><div id="analysis-domains"></div></section>
