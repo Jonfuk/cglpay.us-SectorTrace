@@ -154,8 +154,12 @@ def coverage(conn) -> dict[str, Any]:
     return {"coverage": [dict(row) for row in rows]}
 
 
-def structured(conn, *, domain_id: str | None = None, limit: int = 100) -> dict[str, Any]:
+def structured(conn, *, release_id: str | None = None, domain_id: str | None = None,
+               limit: int = 100) -> dict[str, Any]:
     where, params = [], []
+    if release_id:
+        where.append("a.release_id = ?")
+        params.append(release_id)
     if domain_id:
         where.append("s.domain_id = ?")
         params.append(domain_id)
@@ -177,8 +181,12 @@ def topics(conn, *, release_id: str | None = None, limit: int = 100) -> dict[str
     return {"topics": [dict(row) for row in conn.execute(sql, params)]}
 
 
-def themes(conn, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
+def themes(conn, *, release_id: str | None = None, status: str | None = None,
+           limit: int = 100) -> dict[str, Any]:
     where, params = [], []
+    if release_id:
+        where.append("release_id = ?")
+        params.append(release_id)
     if status:
         where.append("status = ?")
         params.append(status)
@@ -222,9 +230,9 @@ def report(conn, release_id: str) -> dict[str, Any]:
         raise KeyError(f"unknown analysis release {release_id!r}")
     return {"release_manifest": manifest, "domains": domains_view(conn),
             "signals": list_signals(conn, release_id=release_id),
-            "structured": structured(conn)["structured"],
+            "structured": structured(conn, release_id=release_id)["structured"],
             "links": {"links": [dict(row) for row in conn.execute("SELECT * FROM cross_source_signal_links WHERE release_id = ?", (release_id,))]},
-            "themes": themes(conn)["themes"], "operations": operations(conn)}
+            "themes": themes(conn, release_id=release_id)["themes"], "operations": operations(conn)}
 
 
 def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:

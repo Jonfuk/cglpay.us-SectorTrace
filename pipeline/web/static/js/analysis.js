@@ -45,7 +45,7 @@ function renderHistory(items) {
 function renderReleases(items) {
   const target = document.querySelector('#analysis-releases');
   if (!items.length) { target.innerHTML = '<div class="empty">No releases.</div>'; return; }
-  target.innerHTML = `<div class="densewrap"><table class="dense"><thead><tr><th>Created</th><th>Release</th><th>Status</th><th>Actions</th></tr></thead><tbody>${items.map(release => `<tr><td>${esc(time(release.created_at))}</td><td><strong>${esc(release.release_id)}</strong><div class="small mono">${esc(release.manifest_sha256)}</div></td><td><span class="badge ${release.status === 'active' ? 'approved' : release.status === 'rolled_back' ? 'rejected' : 'pending'}">${esc(release.status)}</span></td><td><div class="actions"><button class="btn approve" data-release-action="activate" data-release-id="${esc(release.release_id)}" ${release.status === 'active' || release.status === 'rolled_back' ? 'disabled' : ''}>Activate</button><button class="btn reject" data-release-action="rollback" data-release-id="${esc(release.release_id)}" ${release.status === 'rolled_back' ? 'disabled' : ''}>Rollback</button><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}" download>JSON</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=csv" download>CSV</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=html" target="_blank" rel="noopener">Printable HTML</a></div></td></tr>`).join('')}</tbody></table></div>`;
+  target.innerHTML = `<div class="densewrap"><table class="dense"><thead><tr><th>Created</th><th>Release</th><th>Status</th><th>Actions</th></tr></thead><tbody>${items.map(release => `<tr><td>${esc(time(release.created_at))}</td><td><strong>${esc(release.release_id)}</strong><div class="small mono">${esc(release.manifest_sha256)}</div></td><td><span class="badge ${release.status === 'active' ? 'approved' : release.status === 'rolled_back' ? 'rejected' : 'pending'}">${esc(release.status)}</span></td><td><div class="actions"><button class="btn approve" data-release-action="activate" data-release-id="${esc(release.release_id)}" ${release.status === 'active' || release.status === 'rolled_back' ? 'disabled' : ''}>Activate</button><button class="btn reject" data-release-action="rollback" data-release-id="${esc(release.release_id)}" ${release.status === 'rolled_back' ? 'disabled' : ''}>Rollback</button><button class="btn" data-graph-action="rebuild" data-release-id="${esc(release.release_id)}">Queue graph</button><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}" download>JSON</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=csv" download>CSV</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=html" target="_blank" rel="noopener">Printable HTML</a></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderOverview(overview, domains, operations, models) {
@@ -105,6 +105,20 @@ document.addEventListener('click', async event => {
   try { await actionRun(button.dataset.runAction, button.dataset.runId); await load(); }
   catch (error) { document.querySelector('#analysis-action-message').textContent = error.message; document.querySelector('#analysis-action-message').className = 'error'; }
   finally { button.disabled = false; }
+});
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-graph-action]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await post('/api/admin/analysis/graph/rebuild', {release_id: button.dataset.releaseId});
+    document.querySelector('#analysis-action-message').textContent = `Graph projection queued for ${button.dataset.releaseId}.`;
+    await load();
+  } catch (error) {
+    document.querySelector('#analysis-action-message').textContent = error.message;
+    document.querySelector('#analysis-action-message').className = 'error';
+  } finally { button.disabled = false; }
 });
 
 document.addEventListener('click', async event => {

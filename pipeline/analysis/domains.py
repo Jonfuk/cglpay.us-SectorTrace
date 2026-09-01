@@ -67,7 +67,7 @@ _DOMAINS: tuple[AnalysisDomainSpec, ...] = (
                 ("committee_papers", "icb_board_papers", "foi_requests"), "authority_id",
                 ("commissioning_procurement", "funding_pressure")),
     _narrative("quality_safety", "quality_safety",
-                ("cqc_location_reports", "pfd_reports", "sar_documents", "hse_enforcement_notices"),
+                ("pfd_reports", "sar_documents", "hse_enforcement_notices"),
                 "authority_id", ("safety_event", "regulatory_event")),
     _narrative("legal_employment", "legal_employment", ("tribunal_cases",), "provider_id",
                 ("provider_change",)),
@@ -114,6 +114,19 @@ _DOMAINS: tuple[AnalysisDomainSpec, ...] = (
         consolidation_key=("subject_id", "period_end", "metric"),
         cross_source_rules=("safety_event", "narrative_structured_alignment", "temporal_context"),
         reporting_views=("structured", "links"), quality_contract={"min_comparable_observations": 5}),
+    AnalysisDomainSpec(
+        domain_id="housing_pressure",
+        source_tables=("rough_sleeping_snapshot", "statutory_homelessness_snapshot",
+                       "temporary_accommodation_snapshot"),
+        analysis_unit="subject_period_metric", canonical_subject_keys=("authority_id",),
+        population_query="SELECT * FROM rough_sleeping_snapshot",
+        taxonomy_namespace="housing", discovery_policy={"open_set": False},
+        extractor_or_detector="structured_comparison",
+        verification_policy={"canonical_numbers": True},
+        consolidation_key=("subject_id", "period_end", "metric"),
+        cross_source_rules=("housing_context", "narrative_structured_alignment", "temporal_context"),
+        reporting_views=("structured", "links"),
+        quality_contract={"min_comparable_observations": 5}),
 )
 
 

@@ -1221,11 +1221,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/admin/analysis/signals":
                 return {"signals": analysis_admin.list_signals(conn, release_id=_str(params, "release_id"), domain_id=_str(params, "domain_id"), subject_id=_str(params, "subject_id"), limit=_int(params, "limit", 100))}
             if path == "/api/admin/analysis/structured":
-                return analysis_admin.structured(conn, domain_id=_str(params, "domain_id"), limit=_int(params, "limit", 100))
+                return analysis_admin.structured(conn, release_id=_str(params, "release_id"), domain_id=_str(params, "domain_id"), limit=_int(params, "limit", 100))
             if path == "/api/admin/analysis/topics":
                 return analysis_admin.topics(conn, release_id=_str(params, "release_id"), limit=_int(params, "limit", 100))
             if path == "/api/admin/analysis/themes":
-                return analysis_admin.themes(conn, status=_str(params, "status"), limit=_int(params, "limit", 100))
+                return analysis_admin.themes(conn, release_id=_str(params, "release_id"), status=_str(params, "status"), limit=_int(params, "limit", 100))
             if path == "/api/admin/analysis/links":
                 from pipeline.analysis.linking import list_links
                 return {"links": list_links(conn, release_id=_str(params, "release_id"), subject_id=_str(params, "subject_id"), relationship_type=_str(params, "relationship_type"), limit=_int(params, "limit", 100))}
