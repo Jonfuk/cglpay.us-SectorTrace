@@ -18,6 +18,10 @@ Commands:
   build                 Build the local OCR worker image.
   verify                Print the installed OCR tool versions.
   status                Show document processing status.
+  analysis-start        Start the persistent admin analysis worker.
+  analysis-stop         Stop the persistent admin analysis worker.
+  analysis-logs         Follow the admin analysis worker log.
+  analysis-once         Process one queued admin analysis run and exit.
   validate              Run canonical document integrity checks.
   shell                 Open an interactive shell in the worker.
   command <pipeline…>   Run any pipeline command, e.g. `documents stats`.
@@ -56,6 +60,16 @@ run_pipeline() {
   docker run "${args[@]}" "$image" "$@"
 }
 
+analysis_args() {
+  require_env_file
+  printf '%s\n' --user "$worker_user" --env-file "$env_file" \
+    --add-host=host.docker.internal:host-gateway \
+    -e UV_CACHE_DIR=/tmp/uv-cache -e LOGS_DIR=/tmp/sectortrace-logs
+  if [[ -d "$data_dir" ]]; then
+    printf '%s\n' -v "$data_dir:/app/data"
+  fi
+}
+
 case "${1:-}" in
   build)
     docker build -f "$repo_dir/deploy/Dockerfile.documents" -t "$image" "$repo_dir"
@@ -66,6 +80,22 @@ case "${1:-}" in
     ;;
   status)
     run_pipeline documents status
+    ;;
+  analysis-start)
+    args=()
+    mapfile -t args < <(analysis_args)
+    docker rm -f sectortrace-analysis-worker >/dev/null 2>&1 || true
+    docker run -d --name sectortrace-analysis-worker --restart unless-stopped \
+      "${args[@]}" "$image" analysis worker
+    ;;
+  analysis-stop)
+    docker stop sectortrace-analysis-worker
+    ;;
+  analysis-logs)
+    docker logs -f --tail=200 sectortrace-analysis-worker
+    ;;
+  analysis-once)
+    run_pipeline analysis worker --once
     ;;
   validate)
     run_pipeline documents validate

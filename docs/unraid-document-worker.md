@@ -95,6 +95,18 @@ processes document windows in resumable batches, records emerging themes, and
 honours Stop/Resume from `/admin/analysis`. The `.env` used by the service must
 point at the same `DATABASE_URL` as the web application.
 
+For a host using the standalone helper rather than the Ansible-generated
+Compose file:
+
+```bash
+./deploy/unraid-document-worker.sh build
+./deploy/unraid-document-worker.sh analysis-start
+./deploy/unraid-document-worker.sh analysis-logs
+```
+
+`analysis-stop` stops the named worker container, and `analysis-once` is useful
+for a smoke test or a manually bounded queue drain.
+
 For a filesystem-backed archive, add this volume to every worker command:
 
 ```bash
