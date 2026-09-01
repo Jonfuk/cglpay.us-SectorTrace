@@ -83,9 +83,16 @@ def observations_from_table(conn, table: str) -> list[Observation]:
     for index, raw in enumerate(rows):
         row = dict(raw)
         subject_id = row.get(mapping["subject_id"])
+        subject_type = mapping["subject_type"]
+        if table == "contracts" and subject_id in (None, ""):
+            subject_id, subject_type = row.get("buyer_ons_code"), "authority_id"
+        if table == "council_spend" and subject_id in (None, ""):
+            subject_id, subject_type = row.get("authority_ons_code"), "authority_id"
         if subject_id in (None, ""):
             continue
         period = row.get(mapping["period"])
+        if table == "contracts" and period in (None, ""):
+            period = row.get("date_published")
         for metric in mapping["metrics"]:
             if metric not in columns or numeric(row.get(metric)) is None:
                 continue
@@ -98,7 +105,7 @@ def observations_from_table(conn, table: str) -> list[Observation]:
                 unit = f"GBP*{row['amounts_multiplier']}"
             result.append(Observation(
                 source_table=table, source_row_id=_row_id(row, columns, table, index),
-                subject_type=mapping["subject_type"], subject_id=str(subject_id), metric=metric,
+                subject_type=subject_type, subject_id=str(subject_id), metric=metric,
                 value=row.get(metric), unit=str(unit), period_start=None, period_end=str(period)))
     return result
 

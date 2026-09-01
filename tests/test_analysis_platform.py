@@ -21,6 +21,8 @@ from pipeline.analysis.structured import (
     anomaly,
     categorical_transitions,
     compare_periods,
+    comparisons_for_domain,
+    observations_from_table,
 )
 from pipeline.analysis.worker import AnalysisWorker
 from pipeline.web import analysis as analysis_admin
@@ -150,6 +152,30 @@ def test_analysis_worker_claims_and_completes_structured_run(conn, settings):
     assert result["status"] == "complete"
     assert result["domains"][0]["status"] == "complete"
     assert analysis_admin.worker_status(conn)["worker_id"] == "test-analysis-worker"
+
+
+def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
+    common = {
+        "currency": "GBP", "source_url": "https://example.test/contract",
+        "retrieved_at": "2025-01-01T00:00:00+00:00", "http_status": 200,
+        "source_system": "fixture", "payload_sha256": "hash",
+    }
+    for notice_id, value, period in (("n1", 100, "2024-01-01"), ("n2", 125, "2025-01-01")):
+        conn.execute(
+            "INSERT INTO contracts (notice_id, supplier_id, ocid, value_core, currency, date_start, "
+            "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+            "VALUES (?, 'provider-1', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (notice_id, f"ocid-{notice_id}", value, common["currency"], period,
+             common["source_url"], common["retrieved_at"], common["http_status"],
+             common["source_system"], common["payload_sha256"]))
+    observations = observations_from_table(conn, "contracts")
+    assert comparisons_for_domain(observations)[0]["absolute_change"] == 25
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="structured-fixture-worker").run_once()
+    assert result["run_id"] == started["run_id"]
+    assert conn.execute("SELECT COUNT(*) FROM structured_signals WHERE signal_id IN "
+                        "(SELECT signal_id FROM automated_signals WHERE release_id = ?)",
+                        (started["release_id"],)).fetchone()[0] == 1
 
 
 def test_analysis_worker_processes_narrative_domain(conn, settings):
