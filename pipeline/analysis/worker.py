@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import structlog
+import threading
 import time
 import uuid
 from importlib.metadata import PackageNotFoundError, version
@@ -75,16 +76,38 @@ class AnalysisWorker:
             self._heartbeat("idle")
             return None
         self._heartbeat("running")
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=self._run_heartbeat_loop,
+            args=(heartbeat_stop,),
+            name=f"{self.worker_id}-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             result = self._execute(run_id)
-            self._heartbeat("idle")
-            return result
         except Exception as exc:  # worker must leave a durable failure, not hang
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2)
             log.exception("analysis_run_failed", run_id=run_id,
                           error_type=type(exc).__name__, error=str(exc))
             self._fail(run_id, exc)
             self._heartbeat("failed")
             return {"run_id": run_id, "status": "failed", "error": str(exc)}
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
+        self._heartbeat("idle")
+        return result
+
+    def _run_heartbeat_loop(self, stop: threading.Event) -> None:
+        """Keep liveness visible while a run is CPU-bound between batches."""
+        interval = max(0.5, min(self.poll_seconds, 5.0))
+        while not stop.wait(interval):
+            try:
+                self._heartbeat("running")
+            except Exception as exc:
+                log.exception("analysis_heartbeat_failed",
+                              worker_id=self.worker_id, error=str(exc))
 
     def _heartbeat(self, status: str) -> None:
         conn = db.get_connection(self.settings)
