@@ -123,6 +123,15 @@ def test_analysis_worker_claims_and_completes_structured_run(conn, settings):
     assert analysis_admin.worker_status(conn)["worker_id"] == "test-analysis-worker"
 
 
+def test_analysis_worker_processes_narrative_domain(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, poll_seconds=.1, batch_size=2,
+                            worker_id="test-narrative-worker").run_once()
+    assert result["run_id"] == started["run_id"]
+    assert result["status"] == "complete"
+    assert result["domains"][0]["status"] == "complete"
+
+
 def test_batch_budget_stops_at_ceiling_and_boundary():
     budget = CallBudget(ceiling_micros=10)
     budget.before_call(10)
