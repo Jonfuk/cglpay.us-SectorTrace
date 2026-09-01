@@ -5,12 +5,14 @@ const row = value => `<div class="small">${esc(value)}</div>`;
 const money = micros => micros == null ? '—' : `£${(Number(micros || 0) / 1000000).toFixed(4)}`;
 const time = value => value ? new Date(value).toLocaleString('en-GB', {dateStyle: 'medium', timeStyle: 'short'}) : '—';
 const terminal = new Set(['cancelled', 'complete', 'failed', 'interrupted']);
+let pollHandle = null;
 
 function selectedDomains() {
   return [...document.querySelectorAll('#analysis-domain-options input:checked')].map(input => input.value);
 }
 
 function renderDomainOptions(domains) {
+  if (document.querySelector('#analysis-domain-options input')) return;
   document.querySelector('#analysis-domain-options').innerHTML = domains.map(item =>
     `<label class="checkitem"><input type="checkbox" value="${esc(item.domain_id)}" checked><span>${esc(item.domain_id)}</span></label>`).join('');
 }
@@ -44,6 +46,10 @@ function renderOverview(overview, domains, operations) {
   renderDomainOptions(domains.domains);
   renderRun(overview.latest_run, document.querySelector('#analysis-current-run'));
   renderHistory(operations.runs || []);
+  const active = overview.latest_run && !terminal.has(overview.latest_run.status);
+  document.querySelector('#analysis-start').disabled = Boolean(active);
+  if (pollHandle) window.clearTimeout(pollHandle);
+  if (active) pollHandle = window.setTimeout(load, 3000);
 }
 
 async function actionRun(action, runId) {
@@ -77,7 +83,7 @@ document.querySelector('#analysis-run-form').addEventListener('submit', async ev
       domains: selectedDomains(), cost_ceiling_micros: ceiling ? Math.round(Number(ceiling) * 1000000) : 0});
     message.textContent = 'Run queued.'; await load();
   } catch (error) { message.className = 'error'; message.textContent = error.message; }
-  finally { button.disabled = false; }
+  finally { button.disabled = false; await load(); }
 });
 
 document.querySelector('#analysis-refresh').addEventListener('click', load);
