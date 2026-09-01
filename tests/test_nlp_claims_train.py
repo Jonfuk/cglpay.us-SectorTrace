@@ -14,7 +14,7 @@ import pytest
 
 from pipeline.nlp import claims, claims_train
 from pipeline.nlp.claims_train import HeadResult, Metrics, _persist_category
-from tests.nlp_claims_support import STUB_MODEL_KEY, seed_labelled
+from tests.nlp_claims_support import STUB_MODEL_KEY, seed_labelled, seed_unlabelled_chunks
 
 LOGREG = ("logreg",)
 KW = dict(models=LOGREG, embedder_model_key=STUB_MODEL_KEY, corpus_label="fixture")
@@ -31,6 +31,9 @@ def _heads(conn, category=None):
 
 def test_logreg_head_trains_selects_and_records(conn, tmp_path):
     seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=1)
+    # unlabelled corpus that clusters with the negatives, so corpus negatives
+    # are genuine negatives and the base-rate check stays low.
+    seed_unlabelled_chunks(conn, "vac", n=200, separable_label=0)
     result = claims_train.train(conn, categories=["vacancy_pressure"],
                                 artifact_root=tmp_path, **KW)
 
@@ -41,14 +44,47 @@ def test_logreg_head_trains_selects_and_records(conn, tmp_path):
     assert row["corpus"] == "fixture" and row["corpus_status"] == "experimental"
     assert row["heldout_precision"] >= 0.8          # separable fixture
     assert row["n_heldout_pos"] == claims.HELDOUT_PER_CLASS
+    assert row["n_corpus_neg"] == 15 * claims.CORPUS_NEG_PER_POS   # 25 pos - 10 held out, x3
+    assert row["positive_rate"] is not None and row["positive_rate"] <= 0.15
+    assert row["max_positive_rate"] == claims.MAX_POSITIVE_RATE
     assert json.loads(row["heldout_candidate_ids_json"])  # the carve is recorded
-    # the artifact is on disk and its hash is what was stored
+    # held-out ids are real decided candidates, never the synthetic negatives
+    assert not any(cid.startswith("corpusneg:")
+                   for cid in json.loads(row["heldout_candidate_ids_json"]))
     assert (tmp_path / "vacancy_pressure").glob("*.json")
     assert row["artifact_sha256"]
-    # the run is closed ok
     run = conn.execute("SELECT status FROM nlp_runs WHERE run_id = ?",
                        (result["run_id"],)).fetchone()
     assert run["status"] == "ok"
+
+
+def test_base_rate_guard_quarantines_a_head_that_over_fires(conn, tmp_path, monkeypatch):
+    # No corpus negatives, so the head never learns what the bulk of the
+    # corpus looks like; a separable labelled fixture still gives it high
+    # held-out precision.
+    monkeypatch.setattr(claims, "CORPUS_NEG_PER_POS", 0)
+    seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=30)
+    seed_unlabelled_chunks(conn, "noise", n=400, separable_label=None)  # centre-of-mass
+
+    result = claims_train.train(conn, categories=["vacancy_pressure"],
+                                artifact_root=tmp_path, **KW)
+    [row] = _heads(conn, "vacancy_pressure")
+    assert row["heldout_precision"] >= 0.8            # precision alone would pass
+    assert row["positive_rate"] > claims.MAX_POSITIVE_RATE
+    assert row["status"] == "quarantined" and row["selected"] == 0
+    assert result["trained"][0]["heads"][0]["positive_rate"] > 0.15
+
+
+def test_corpus_negatives_rescue_the_same_head(conn, tmp_path):
+    # Same noisy corpus, but corpus negatives ON: the head learns the bulk as
+    # negative, base rate drops, and it passes.
+    seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=31)
+    seed_unlabelled_chunks(conn, "noise2", n=400, separable_label=None)
+    claims_train.train(conn, categories=["vacancy_pressure"], artifact_root=tmp_path, **KW)
+    [row] = _heads(conn, "vacancy_pressure")
+    assert row["n_corpus_neg"] == 45   # (25 - 10 held-out) * 3
+    assert row["positive_rate"] <= claims.MAX_POSITIVE_RATE
+    assert row["status"] == "passed"
 
 
 def test_head_below_the_precision_bar_is_quarantined(conn, tmp_path):
@@ -136,7 +172,8 @@ def _result(model_type, precision, status="passed"):
     return HeadResult(
         model_type=model_type, model_version=f"{model_type}-c-0-x",
         config_sha256="x" * 64, metrics=Metrics(precision, 0.5, 0.5),
-        n_train_pos=1, n_train_neg=1, n_heldout_pos=1, n_heldout_neg=1,
+        n_train_pos=1, n_train_neg=1, n_corpus_neg=3, n_heldout_pos=1, n_heldout_neg=1,
+        positive_rate=0.05, max_positive_rate=0.15,
         status=status, artifact_path=None, artifact_sha256="h",
         setfit_base_model=None)
 

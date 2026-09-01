@@ -47,12 +47,15 @@ CREATE TABLE IF NOT EXISTS claim_head_versions (
 
     n_train_pos                bigint NOT NULL,
     n_train_neg                bigint NOT NULL,
+    n_corpus_neg               bigint NOT NULL DEFAULT 0,
     n_heldout_pos              bigint NOT NULL,
     n_heldout_neg              bigint NOT NULL,
     heldout_precision          double precision NOT NULL,
     heldout_recall             double precision NOT NULL,
     heldout_f1                 double precision NOT NULL,
     min_precision              double precision NOT NULL,
+    positive_rate              double precision,
+    max_positive_rate          double precision NOT NULL DEFAULT 1.0,
     status                     text NOT NULL,
     selected                   bigint NOT NULL DEFAULT 0,
 

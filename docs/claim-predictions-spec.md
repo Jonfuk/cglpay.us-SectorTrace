@@ -50,10 +50,29 @@ defines them). Two candidate models per category — logreg on the stored
 MiniLM embeddings, and SetFit — are each fitted on an identical train split,
 evaluated once on an identical deterministic held-out set, and recorded. Per
 category the head with the highest held-out precision **that also clears
-`min_precision`** is `selected`; the others are `quarantined` (below the bar)
-or `lost-bakeoff` (above the bar, lower precision). `claims-predict` then runs
-only the `selected` heads over every embedded chunk and writes
-`document_claim_predictions`.
+`min_precision` and the base-rate guard** is `selected`; the others are
+`quarantined` or `lost-bakeoff` (cleared both, lower precision).
+`claims-predict` then runs only the `selected` heads over every embedded
+chunk and writes `document_claim_predictions`.
+
+**Two guards, added after the first beta-box run** (2026-09-01) showed a head
+can pass a 10-example held-out set and still fire on half the corpus:
+
+- **Corpus negatives.** The reviewer-labelled negatives are all *rejected
+  review-queue candidates* — sentences a rule already thought might be a
+  claim. A head trained on those alone learns "queue-approved vs
+  queue-rejected", and out of distribution on the 99%+ of chunks never queued
+  it defaults to positive. So the training negative class is topped up with
+  `CORPUS_NEG_PER_POS` (3) random unlabelled chunks per training positive,
+  labelled 0. A sampled chunk could rarely be a real unflagged claim; at a
+  base rate well under 1% that is acceptable negative-class noise, and
+  `n_corpus_neg` is recorded on the head row. Held-out stays pure reviewer
+  labels.
+- **Base-rate quarantine.** After the fit, the head scores a random corpus
+  sample (`BASE_RATE_SAMPLE`, 2000 chunks, a disjoint draw from the corpus
+  negatives). If its predicted-positive rate exceeds `MAX_POSITIVE_RATE`
+  (0.15, `--max-positive-rate`) it is `quarantined` regardless of held-out
+  precision. `positive_rate` and `max_positive_rate` are on the head row.
 
 ## What it is NOT — the fences
 

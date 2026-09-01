@@ -32,6 +32,26 @@ MIN_HEAD_PRECISION = 0.80
 # gate checks the room exists, this is the code that takes it.
 HELDOUT_PER_CLASS = 10
 
+# The reviewer-labelled negatives are all REJECTED review-queue candidates --
+# sentences a rule already thought might be a claim. A head trained on those
+# alone learns "queue-approved vs queue-rejected", not "affirmed claim vs the
+# rest of the corpus", and out of distribution on the 99%+ of chunks that
+# were never queued it defaults to positive. Measured on the beta box
+# (2026-09-01): the agency head then flagged 52% of 168k chunks. So the
+# training negative class is topped up with random unlabelled chunks -- this
+# many per reviewed positive. A sampled chunk could in rare cases be a real
+# unflagged claim; at a base rate well under 1% that is acceptable noise in
+# the negative class, and it is recorded (`n_corpus_neg` on the head row).
+CORPUS_NEG_PER_POS = 3
+
+# A gate-category claim is a rare event. After the fit, the head scores a
+# random sample of the corpus; if it predicts positive on more than this
+# fraction it is QUARANTINED regardless of held-out precision -- a head that
+# passed a 10-example held-out set can still be noise, and this is the check
+# that catches it. Overridable per run with `--max-positive-rate`.
+MAX_POSITIVE_RATE = 0.15
+BASE_RATE_SAMPLE = 2000
+
 # Mixed into the held-out selection hash. A fixed string, not a tunable: it
 # only has to be stable so the same corpus carves the same held-out set on
 # every machine and every re-run. It is recorded in the head's config hash so

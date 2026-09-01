@@ -181,12 +181,13 @@ class TestTheTreesMatch:
         # same shape as Modules 9/10/32. TEXT/INTEGER -> text/bigint only.
         # 82 adds claim_head_versions + document_claim_predictions (034G) — one
         # row per trained claim-prediction head (both bake-off arms, with
-        # held-out precision/recall/F1 and a selected flag) and one row per
-        # (chunk, category) a selected head scores. A finding aid, fenced like
-        # 034C topics: not evidence, not exported, not portal-reachable, no
-        # graph_claims write. Two indexes plus a partial UNIQUE index (one
-        # selected head per category). TEXT/INTEGER/REAL ->
-        # text/bigint/double precision only.
+        # held-out precision/recall/F1, a corpus-wide positive_rate and its
+        # max_positive_rate guard, n_corpus_neg synthetic negatives, and a
+        # selected flag) and one row per (chunk, category) a selected head
+        # scores. A finding aid, fenced like 034C topics: not evidence, not
+        # exported, not portal-reachable, no graph_claims write. Two indexes
+        # plus a partial UNIQUE index (one selected head per category).
+        # TEXT/INTEGER/REAL -> text/bigint/double precision only.
         assert len(list(MIGRATIONS.glob("*.sql"))) == 82
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])

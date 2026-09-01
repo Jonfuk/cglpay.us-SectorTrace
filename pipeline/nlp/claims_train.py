@@ -15,10 +15,22 @@ deterministic held-out set:
     is a poor domain fit; whether that beats plain logreg here is the point
     of measuring both.
 
-Per category the head with the higher held-out **precision** that also clears
-`min_precision` is `selected` and may write predictions; a head below the bar
-is `quarantined` (recorded, never writes); a head that cleared the bar but
-lost on precision is `lost-bakeoff`. Ties go to logreg.
+Two guards on top of held-out precision, both added after the first beta-box
+run showed a head can pass a 10-example held-out set and still be noise:
+
+  * the reviewer-labelled negatives are all REJECTED review-queue candidates,
+    so the training negative class is topped up with random unlabelled chunks
+    (`CORPUS_NEG_PER_POS` per positive) -- the head then learns "affirmed
+    claim vs the whole corpus", not "queue-approved vs queue-rejected";
+  * after the fit, the head scores a random corpus sample; if its
+    predicted-positive rate exceeds `max_positive_rate` it is `quarantined`
+    regardless of held-out precision -- a gate-category claim is a rare
+    event, and a head firing on 20-50% of the corpus has learned an artefact.
+
+Per category the head with the higher held-out **precision** that clears both
+`min_precision` and the base-rate guard is `selected` and may write
+predictions; one that fails either is `quarantined`; one that cleared both
+but lost on precision is `lost-bakeoff`. Ties go to logreg.
 
 Nothing is promoted, nothing is written to `graph_claims`, the review queue
 is not touched. See `docs/claim-predictions-spec.md`.
@@ -140,14 +152,24 @@ class HeadResult:
     config_sha256: str
     metrics: Metrics
     n_train_pos: int
-    n_train_neg: int
+    n_train_neg: int          # reviewer-labelled negatives only
+    n_corpus_neg: int         # random unlabelled chunks added to the training negative class
     n_heldout_pos: int
     n_heldout_neg: int
+    positive_rate: float | None   # predicted-positive fraction on a random corpus sample
+    max_positive_rate: float
     status: str
     artifact_path: str | None
     artifact_sha256: str | None
     setfit_base_model: str | None
     predictor: object = field(repr=False, default=None)  # LogRegHead or a SetFit model, for the caller
+
+    def _status_from_checks(self, min_precision: float) -> str:
+        if self.metrics.precision < min_precision:
+            return "quarantined"
+        if self.positive_rate is not None and self.positive_rate > self.max_positive_rate:
+            return "quarantined"
+        return "passed"
 
 
 def _model_version(model_type: str, category: str, cutoff: str, config_hash: str) -> str:
@@ -156,24 +178,36 @@ def _model_version(model_type: str, category: str, cutoff: str, config_hash: str
 
 
 def _config_hash(model_type: str, category: str, predicate: str, *, embedder_model_key: str,
-                 corpus: str, corpus_cutoff: str, min_precision: float) -> str:
+                 corpus: str, corpus_cutoff: str, min_precision: float,
+                 max_positive_rate: float) -> str:
     hp = _LOGREG_HYPERPARAMS if model_type == "logreg" else _SETFIT_HYPERPARAMS
     return runs.config_sha256({
         "model_type": model_type, "category": category, "predicate": predicate,
         "embedder_model_key": embedder_model_key if model_type == "logreg" else None,
         "setfit_base_model": claims.SETFIT_BASE_MODEL if model_type == "setfit" else None,
         "hyperparams": hp, "heldout_seed": claims.HELDOUT_SEED,
-        "heldout_per_class": claims.HELDOUT_PER_CLASS, "corpus": corpus,
+        "heldout_per_class": claims.HELDOUT_PER_CLASS,
+        "corpus_neg_per_pos": claims.CORPUS_NEG_PER_POS, "corpus": corpus,
         "corpus_cutoff": corpus_cutoff, "min_precision": min_precision,
+        "max_positive_rate": max_positive_rate,
     })
 
 
 # --- the two fitters -------------------------------------------------
 
-def _train_logreg(category, predicate, train_ex, heldout_ex, *, embedder_model_key,
-                  corpus, corpus_cutoff, min_precision, artifact_root, write_artifacts):
+def _split_counts(kept: list) -> tuple[int, int, int]:
+    """(reviewer positives, reviewer negatives, corpus negatives) among the
+    kept training examples."""
+    corpus_neg = sum(1 for e in kept if e.candidate_id.startswith("corpusneg:"))
+    pos = sum(1 for e in kept if e.label == 1)
+    return pos, len(kept) - pos - corpus_neg, corpus_neg
+
+
+def _train_logreg(category, predicate, train_ex, heldout_ex, base_rate_rows, *,
+                  embedder_model_key, corpus, corpus_cutoff, min_precision,
+                  max_positive_rate, artifact_root, write_artifacts):
     Xtr, ytr, kept_tr = _matrix(train_ex)
-    Xho, yho, kept_ho = _matrix(heldout_ex)
+    Xho, yho, _ = _matrix(heldout_ex)
     if Xtr.shape[0] == 0 or Xho.shape[0] == 0:
         raise claims_features.FeatureError(
             f"{category}: no embedded examples under {embedder_model_key!r} "
@@ -181,9 +215,16 @@ def _train_logreg(category, predicate, train_ex, heldout_ex, *, embedder_model_k
     head = _fit_logreg(Xtr, ytr, **_LOGREG_HYPERPARAMS)
     pred = [1 if p >= 0.5 else 0 for p in head.proba(Xho)]
     metrics = Metrics.score([int(v) for v in yho], pred)
+
+    positive_rate = None
+    if base_rate_rows:
+        Xbr = np.asarray([unpack(r.embedding) for r in base_rate_rows], dtype=np.float64)
+        positive_rate = round(float((head.proba(Xbr) >= 0.5).mean()), 4)
+
     config_hash = _config_hash("logreg", category, predicate,
                                embedder_model_key=embedder_model_key, corpus=corpus,
-                               corpus_cutoff=corpus_cutoff, min_precision=min_precision)
+                               corpus_cutoff=corpus_cutoff, min_precision=min_precision,
+                               max_positive_rate=max_positive_rate)
     version = _model_version("logreg", category, corpus_cutoff, config_hash)
 
     blob = json.dumps({
@@ -191,26 +232,29 @@ def _train_logreg(category, predicate, train_ex, heldout_ex, *, embedder_model_k
         "embedder_model_key": embedder_model_key, "dim": head.dim,
         "coef": head.coef, "intercept": head.intercept,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    artifact_path = artifact_sha256 = None
+    artifact_path = None
     if write_artifacts:
         dest = artifact_root / category
         dest.mkdir(parents=True, exist_ok=True)
         target = dest / f"{version}.json"
         target.write_bytes(blob)
         artifact_path = target.as_posix()
-    artifact_sha256 = _hash_bytes(blob)
 
-    return HeadResult(
+    n_pos, n_neg, n_corpus_neg = _split_counts(kept_tr)
+    r = HeadResult(
         model_type="logreg", model_version=version, config_sha256=config_hash,
-        metrics=metrics, n_train_pos=int(ytr.sum()), n_train_neg=int(len(ytr) - ytr.sum()),
+        metrics=metrics, n_train_pos=n_pos, n_train_neg=n_neg, n_corpus_neg=n_corpus_neg,
         n_heldout_pos=int(yho.sum()), n_heldout_neg=int(len(yho) - yho.sum()),
-        status="passed" if metrics.precision >= min_precision else "quarantined",
-        artifact_path=artifact_path, artifact_sha256=artifact_sha256,
+        positive_rate=positive_rate, max_positive_rate=max_positive_rate, status="passed",
+        artifact_path=artifact_path, artifact_sha256=_hash_bytes(blob),
         setfit_base_model=None, predictor=head)
+    r.status = r._status_from_checks(min_precision)
+    return r
 
 
-def _train_setfit(category, predicate, train_ex, heldout_ex, *, embedder_model_key,
-                  corpus, corpus_cutoff, min_precision, artifact_root, write_artifacts):
+def _train_setfit(category, predicate, train_ex, heldout_ex, base_rate_rows, *,
+                  embedder_model_key, corpus, corpus_cutoff, min_precision,
+                  max_positive_rate, artifact_root, write_artifacts):
     # Imported here, never at module load: setfit (and its datasets / sklearn
     # deps) is `nlp`-extra only and absent from the default test env.
     from datasets import Dataset  # type: ignore
@@ -233,9 +277,16 @@ def _train_setfit(category, predicate, train_ex, heldout_ex, *, embedder_model_k
 
     preds = [int(v) for v in model.predict([e.text for e in kept_ho])]
     metrics = Metrics.score([e.label for e in kept_ho], preds)
+
+    positive_rate = None
+    if base_rate_rows:
+        br = [int(v) for v in model.predict([r.text for r in base_rate_rows])]
+        positive_rate = round(sum(br) / len(br), 4)
+
     config_hash = _config_hash("setfit", category, predicate,
                                embedder_model_key=embedder_model_key, corpus=corpus,
-                               corpus_cutoff=corpus_cutoff, min_precision=min_precision)
+                               corpus_cutoff=corpus_cutoff, min_precision=min_precision,
+                               max_positive_rate=max_positive_rate)
     version = _model_version("setfit", category, corpus_cutoff, config_hash)
 
     artifact_path = artifact_sha256 = None
@@ -246,16 +297,17 @@ def _train_setfit(category, predicate, train_ex, heldout_ex, *, embedder_model_k
         artifact_path = dest.as_posix()
         artifact_sha256 = _hash_path(dest)
 
-    return HeadResult(
+    n_pos, n_neg, n_corpus_neg = _split_counts(kept_tr)
+    r = HeadResult(
         model_type="setfit", model_version=version, config_sha256=config_hash,
-        metrics=metrics,
-        n_train_pos=sum(e.label for e in kept_tr),
-        n_train_neg=sum(1 - e.label for e in kept_tr),
+        metrics=metrics, n_train_pos=n_pos, n_train_neg=n_neg, n_corpus_neg=n_corpus_neg,
         n_heldout_pos=sum(e.label for e in kept_ho),
         n_heldout_neg=sum(1 - e.label for e in kept_ho),
-        status="passed" if metrics.precision >= min_precision else "quarantined",
+        positive_rate=positive_rate, max_positive_rate=max_positive_rate, status="passed",
         artifact_path=artifact_path, artifact_sha256=artifact_sha256,
         setfit_base_model=claims.SETFIT_BASE_MODEL, predictor=model)
+    r.status = r._status_from_checks(min_precision)
+    return r
 
 
 _FITTERS = {"logreg": _train_logreg, "setfit": _train_setfit}
@@ -267,18 +319,20 @@ _UPSERT_HEAD = """
 INSERT INTO claim_head_versions (
     model_version, category, predicate, model_type, embedder_model_key,
     setfit_base_model, config_sha256, corpus, corpus_cutoff, corpus_status,
-    heldout_candidate_ids_json, n_train_pos, n_train_neg, n_heldout_pos,
-    n_heldout_neg, heldout_precision, heldout_recall, heldout_f1, min_precision,
-    status, selected, artifact_path, artifact_sha256, code_commit, nlp_run_id,
-    trained_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    heldout_candidate_ids_json, n_train_pos, n_train_neg, n_corpus_neg,
+    n_heldout_pos, n_heldout_neg, heldout_precision, heldout_recall, heldout_f1,
+    min_precision, positive_rate, max_positive_rate, status, selected,
+    artifact_path, artifact_sha256, code_commit, nlp_run_id, trained_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(model_version) DO UPDATE SET
     heldout_candidate_ids_json = excluded.heldout_candidate_ids_json,
     n_train_pos = excluded.n_train_pos, n_train_neg = excluded.n_train_neg,
+    n_corpus_neg = excluded.n_corpus_neg,
     n_heldout_pos = excluded.n_heldout_pos, n_heldout_neg = excluded.n_heldout_neg,
     heldout_precision = excluded.heldout_precision,
     heldout_recall = excluded.heldout_recall, heldout_f1 = excluded.heldout_f1,
-    min_precision = excluded.min_precision, status = excluded.status,
+    min_precision = excluded.min_precision, positive_rate = excluded.positive_rate,
+    max_positive_rate = excluded.max_positive_rate, status = excluded.status,
     selected = excluded.selected, artifact_path = excluded.artifact_path,
     artifact_sha256 = excluded.artifact_sha256, code_commit = excluded.code_commit,
     nlp_run_id = excluded.nlp_run_id, trained_at = excluded.trained_at
@@ -309,8 +363,10 @@ def _persist_category(conn, *, category, predicate, results: list[HeadResult],
             r.model_version, category, predicate, r.model_type,
             embedder_model_key if r.model_type == "logreg" else None,
             r.setfit_base_model, r.config_sha256, corpus, corpus_cutoff, corpus_status,
-            heldout_json, r.n_train_pos, r.n_train_neg, r.n_heldout_pos, r.n_heldout_neg,
+            heldout_json, r.n_train_pos, r.n_train_neg, r.n_corpus_neg,
+            r.n_heldout_pos, r.n_heldout_neg,
             r.metrics.precision, r.metrics.recall, r.metrics.f1, min_precision,
+            r.positive_rate, r.max_positive_rate,
             r.status, 1 if r is winner else 0, r.artifact_path, r.artifact_sha256,
             runs.code_commit(), run_id, now))
     return winner
@@ -321,6 +377,7 @@ def _persist_category(conn, *, category, predicate, results: list[HeadResult],
 def train(conn, *, categories: list[str] | None = None,
           models: tuple[str, ...] = claims.MODEL_TYPES,
           min_precision: float = claims.MIN_HEAD_PRECISION,
+          max_positive_rate: float = claims.MAX_POSITIVE_RATE,
           embedder_model_key: str = claims.DEFAULT_EMBEDDER_MODEL_KEY,
           corpus_label: str = "beta-box", corpus_status: str = "experimental",
           artifact_root=None, dry_run: bool = False) -> dict:
@@ -338,9 +395,11 @@ def train(conn, *, categories: list[str] | None = None,
         raise claims_features.FeatureError(f"not gate categories: {unknown}")
 
     config = {"models": list(models), "min_precision": min_precision,
+              "max_positive_rate": max_positive_rate,
               "embedder_model_key": embedder_model_key, "corpus": corpus_label,
               "corpus_status": corpus_status, "categories": categories,
-              "heldout_seed": claims.HELDOUT_SEED}
+              "heldout_seed": claims.HELDOUT_SEED,
+              "corpus_neg_per_pos": claims.CORPUS_NEG_PER_POS}
     run_id = runs.start_run(conn, claims.TRAIN_STAGE, config=config,
                             input_scope={"categories": categories})
     now = runs.utcnow()
@@ -355,14 +414,30 @@ def train(conn, *, categories: list[str] | None = None,
             cutoff = claims_features.corpus_cutoff(train_ex + heldout_ex)
             heldout_ids = [e.candidate_id for e in heldout_ex]
 
+            # Top up the training negative class with random unlabelled chunks
+            # so the head learns "affirmed claim vs the whole corpus", not the
+            # queue-approved/rejected artefact, and measure the trained head's
+            # corpus-wide positive rate on a separate random draw.
+            labelled_chunks = {e.chunk_id for e in examples}
+            n_pos_train = sum(1 for e in train_ex if e.label == 1)
+            corpus_neg = claims_features.corpus_negatives(
+                conn, category, embedder_model_key=embedder_model_key,
+                n=n_pos_train * claims.CORPUS_NEG_PER_POS, exclude=labelled_chunks)
+            aug_train = train_ex + corpus_neg
+            base_rate = claims_features.base_rate_sample(
+                conn, category, embedder_model_key=embedder_model_key,
+                n=claims.BASE_RATE_SAMPLE,
+                exclude=labelled_chunks | {e.chunk_id for e in corpus_neg})
+
             results: list[HeadResult] = []
             unavailable: list[dict] = []
             for model_type in models:
                 try:
                     results.append(_FITTERS[model_type](
-                        category, predicate, train_ex, heldout_ex,
+                        category, predicate, aug_train, heldout_ex, base_rate,
                         embedder_model_key=embedder_model_key, corpus=corpus_label,
                         corpus_cutoff=cutoff, min_precision=min_precision,
+                        max_positive_rate=max_positive_rate,
                         artifact_root=artifact_root, write_artifacts=not dry_run))
                 except ImportError as exc:
                     # A bake-off arm whose backend will not import (SetFit vs a
@@ -381,11 +456,13 @@ def train(conn, *, categories: list[str] | None = None,
                 conn.commit()
             entry = {
                 "category": category, "corpus_cutoff": cutoff,
-                "n_train": len(train_ex), "n_heldout": len(heldout_ex),
+                "n_train": len(train_ex), "n_corpus_neg": len(corpus_neg),
+                "n_heldout": len(heldout_ex),
                 "selected": winner.model_version if winner else None,
                 "heads": [{"model_type": r.model_type, "model_version": r.model_version,
                            "precision": r.metrics.precision, "recall": r.metrics.recall,
-                           "f1": r.metrics.f1, "status": r.status} for r in results],
+                           "f1": r.metrics.f1, "positive_rate": r.positive_rate,
+                           "status": r.status} for r in results],
             }
             if unavailable:
                 entry["unavailable"] = unavailable
@@ -405,4 +482,5 @@ def train(conn, *, categories: list[str] | None = None,
     else:
         conn.commit()
     return {"trained": summary, "run_id": run_id, "ready": report["ready"],
-            "min_precision": min_precision, "dry_run": dry_run}
+            "min_precision": min_precision, "max_positive_rate": max_positive_rate,
+            "dry_run": dry_run}

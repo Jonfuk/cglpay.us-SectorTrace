@@ -93,3 +93,48 @@ def seed_labelled(conn, category: str, *, n_pos: int, n_neg: int,
         ids.append(cand)
     conn.commit()
     return ids
+
+
+def seed_unlabelled_chunks(conn, tag: str, *, n: int, separable_label: int | None = None,
+                           seed: int = 0) -> list[str]:
+    """`n` live chunks with a stub embedding and NO candidate/decision -- the
+    corpus the heads score and sample negatives from. `separable_label` fixes
+    the embedding cluster (0 or 1) so a test can make a head fire, or leave it
+    None for centre-of-mass noise."""
+    rng = random.Random(f"unlabelled-{tag}-{seed}")
+    _ensure_registry(conn)
+    ev = f"ev-unl-{tag}-{seed}"
+    doc = f"doc-unl-{tag}-{seed}"
+    ver = f"ver-unl-{tag}-{seed}"
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, retrieved_at, "
+        "payload_sha256, created_at) VALUES (?, 'committee_paper_promotion', ?, ?, ?)",
+        (ev, _NOW, (ev * 64)[:64], _NOW))
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, document_type, "
+        "created_at, updated_at) VALUES (?, ?, 'COMMITTEE_PAPER', ?, ?)", (doc, ev, _NOW, _NOW))
+    conn.execute(
+        "INSERT INTO document_versions (document_version_id, document_id, parser_name, "
+        "parser_version, parse_schema_version, config_hash, status, is_active, created_at) "
+        "VALUES (?, ?, 'fixture', '1', '1', 'cfg', 'GOOD', 1, ?)", (ver, doc, _NOW))
+    ids = []
+    for i in range(n):
+        chunk = f"chunk-unl-{tag}-{seed}-{i}"
+        conn.execute(
+            "INSERT INTO document_chunks (document_chunk_id, document_version_id, "
+            "chunker_name, chunker_version, chunk_index, text, text_sha256, "
+            "token_estimate, char_start, char_end, created_at) "
+            "VALUES (?, ?, 'fixture', '1', ?, ?, ?, 10, 0, 50, ?)",
+            (chunk, ver, i, f"unlabelled corpus chunk {tag} {i}", (chunk * 64)[:64], _NOW))
+        if separable_label is None:
+            values = [rng.gauss(0, 1.0) for _ in range(_DIM)]
+        else:
+            centre = 1.0 if separable_label == 1 else -1.0
+            values = [centre + rng.gauss(0, 0.25) for _ in range(_DIM)]
+        conn.execute(
+            "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
+            "embedding, created_at) VALUES (?, ?, ?, ?, ?)",
+            (chunk, STUB_MODEL_KEY, _DIM, struct.pack("<%df" % _DIM, *values), _NOW))
+        ids.append(chunk)
+    conn.commit()
+    return ids

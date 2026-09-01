@@ -7,7 +7,7 @@ import random
 import pytest
 
 from pipeline.nlp import claims, claims_features
-from tests.nlp_claims_support import STUB_MODEL_KEY, seed_labelled
+from tests.nlp_claims_support import STUB_MODEL_KEY, seed_labelled, seed_unlabelled_chunks
 
 CATEGORY = "vacancy_pressure"
 
@@ -75,3 +75,23 @@ def test_predict_population_is_live_embedded_chunks(conn):
                  "WHERE document_chunk_id = ?", (pop[0].chunk_id,))
     conn.commit()
     assert len(claims_features.predict_population(conn, embedder_model_key=STUB_MODEL_KEY)) == 4
+
+
+def test_corpus_negatives_are_unlabelled_chunks_as_label_zero(conn):
+    seed_labelled(conn, CATEGORY, n_pos=3, n_neg=2)
+    labelled_chunks = {e.chunk_id for e in _examples(conn)}
+    seed_unlabelled_chunks(conn, "cn", n=40)
+
+    negs = claims_features.corpus_negatives(
+        conn, CATEGORY, embedder_model_key=STUB_MODEL_KEY, n=15, exclude=labelled_chunks)
+    assert len(negs) == 15
+    assert all(e.label == 0 and e.candidate_id.startswith("corpusneg:") for e in negs)
+    assert labelled_chunks.isdisjoint({e.chunk_id for e in negs})
+    # deterministic and disjoint from the base-rate draw
+    again = claims_features.corpus_negatives(
+        conn, CATEGORY, embedder_model_key=STUB_MODEL_KEY, n=15, exclude=labelled_chunks)
+    assert [e.chunk_id for e in negs] == [e.chunk_id for e in again]
+    base = claims_features.base_rate_sample(
+        conn, CATEGORY, embedder_model_key=STUB_MODEL_KEY, n=15,
+        exclude=labelled_chunks | {e.chunk_id for e in negs})
+    assert {e.chunk_id for e in negs}.isdisjoint({r.chunk_id for r in base})

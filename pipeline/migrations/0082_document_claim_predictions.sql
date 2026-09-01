@@ -23,9 +23,12 @@
 --                              logistic regression on the 034A chunk
 --                              embeddings, and SetFit -- get a row carrying
 --                              their held-out precision / recall / F1 and a
---                              status of 'passed' / 'quarantined'
---                              (held-out precision below the bar) /
---                              'lost-bakeoff' (cleared the bar, lost on
+--                              status of 'passed' / 'quarantined' (held-out
+--                              precision below the bar, OR positive_rate
+--                              above max_positive_rate -- a head that fires
+--                              on too much of the corpus has learned the
+--                              review-queue artefact, not the claim) /
+--                              'lost-bakeoff' (cleared both, lost on
 --                              precision). selected = 1 marks the single
 --                              head per category that is allowed to write
 --                              predictions. Versioned the way nlp_runs
@@ -75,13 +78,16 @@ CREATE TABLE IF NOT EXISTS claim_head_versions (
     heldout_candidate_ids_json TEXT NOT NULL,      -- JSON array of claim_candidate_id, the deterministic carve
 
     n_train_pos                INTEGER NOT NULL,
-    n_train_neg                INTEGER NOT NULL,
+    n_train_neg                INTEGER NOT NULL,   -- reviewer-labelled negatives only
+    n_corpus_neg               INTEGER NOT NULL DEFAULT 0,   -- random unlabelled chunks added to the training negative class
     n_heldout_pos              INTEGER NOT NULL,
     n_heldout_neg              INTEGER NOT NULL,
     heldout_precision          REAL NOT NULL,
     heldout_recall             REAL NOT NULL,
     heldout_f1                 REAL NOT NULL,
-    min_precision              REAL NOT NULL,      -- the bar this run applied (default 0.80, --min-precision override)
+    min_precision              REAL NOT NULL,      -- the precision bar this run applied (default 0.80, --min-precision)
+    positive_rate              REAL,               -- fraction of a random corpus sample the head calls positive; NULL if not sampled
+    max_positive_rate          REAL NOT NULL DEFAULT 1.0,   -- quarantine if positive_rate exceeds this (default 0.15, --max-positive-rate)
     status                     TEXT NOT NULL,      -- 'passed' | 'quarantined' | 'lost-bakeoff'
     selected                   INTEGER NOT NULL DEFAULT 0,
 

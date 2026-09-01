@@ -145,3 +145,38 @@ def predict_population(conn, *, embedder_model_key: str) -> list[PopulationRow]:
     SetFit heads of a category score an identical population."""
     return [PopulationRow(r["document_chunk_id"], r["text"] or "", r["embedding"])
             for r in conn.execute(_PREDICT_POP_SQL, (embedder_model_key,)).fetchall()]
+
+
+def _deterministic_sample(rows: list[PopulationRow], *, tag: str, n: int,
+                          exclude: set[str]) -> list[PopulationRow]:
+    """The `n` rows whose `HELDOUT_SEED|tag|chunk_id` hash sorts first, after
+    dropping `exclude`. Stable across machines and re-runs; a different `tag`
+    gives a disjoint draw from the same pool."""
+    pool = [r for r in rows if r.chunk_id not in exclude]
+    pool.sort(key=lambda r: hashlib.sha256(
+        f"{claims.HELDOUT_SEED}|{tag}|{r.chunk_id}".encode("utf-8")).hexdigest())
+    return pool[:n]
+
+
+def corpus_negatives(conn, category: str, *, embedder_model_key: str, n: int,
+                     exclude: set[str]) -> list[Example]:
+    """`n` random unlabelled chunks as synthetic negatives for `category`, so
+    the head learns "affirmed claim vs the whole corpus" rather than the
+    review-queue artefact. `exclude` is every chunk that is already a
+    reviewer-labelled example (any split). A sampled chunk is assumed
+    non-affirming -- true well over 99% of the time at these base rates."""
+    rows = predict_population(conn, embedder_model_key=embedder_model_key)
+    sample = _deterministic_sample(rows, tag=f"corpusneg|{category}", n=n, exclude=exclude)
+    return [Example(candidate_id=f"corpusneg:{p.chunk_id}", chunk_id=p.chunk_id,
+                    text=p.text, label=0, decided_at="", embedding=p.embedding)
+            for p in sample]
+
+
+def base_rate_sample(conn, category: str, *, embedder_model_key: str, n: int,
+                     exclude: set[str]) -> list[PopulationRow]:
+    """`n` random unlabelled chunks to measure a trained head's corpus-wide
+    predicted-positive rate on. Drawn with a different tag from
+    `corpus_negatives`, so the base-rate check is never run on chunks the
+    head trained on."""
+    rows = predict_population(conn, embedder_model_key=embedder_model_key)
+    return _deterministic_sample(rows, tag=f"baserate|{category}", n=n, exclude=exclude)
