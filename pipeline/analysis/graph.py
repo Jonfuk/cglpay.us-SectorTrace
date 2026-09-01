@@ -51,29 +51,33 @@ def signal_store_from_settings(settings: Any) -> SignalGraphStore:
         from neo4j import GraphDatabase
     except ImportError as exc:
         raise SignalGraphError("the graph extra is not installed") from exc
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password),
-        database=settings.neo4j_database)
+    driver = GraphDatabase.driver(settings.neo4j_uri,
+                                  auth=(settings.neo4j_user, settings.neo4j_password))
     if getattr(settings, "neo4j_verify_connectivity", True):
-        driver.verify_connectivity()
-    return SignalGraphStore(driver)
+        with driver.session(database=settings.neo4j_database) as session:
+            session.run("RETURN 1").consume()
+    return SignalGraphStore(driver, database=getattr(settings, "neo4j_database", None))
 
 
 class SignalGraphStore:
     """Small driver wrapper whose Cypher never mentions canonical Claim nodes."""
 
-    def __init__(self, driver: Any):
+    def __init__(self, driver: Any, *, database: str | None = None):
         self.driver = driver
+        self.database = database
+
+    def _session(self):
+        return self.driver.session(database=self.database) if self.database else self.driver.session()
 
     def ensure_schema(self) -> None:
-        with self.driver.session() as session:
+        with self._session() as session:
             for label in NODE_LABELS:
                 session.run(f"CREATE INDEX signal_{label.lower()}_id IF NOT EXISTS FOR (n:{label}) ON (n.id)").consume()
 
     def _run(self, query: str, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
-        with self.driver.session() as session:
+        with self._session() as session:
             session.run(query, rows=rows).consume()
         return len(rows)
 

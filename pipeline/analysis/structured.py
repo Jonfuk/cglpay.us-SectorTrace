@@ -55,7 +55,13 @@ _TABLE_ADAPTERS: dict[str, dict[str, Any]] = {
 
 
 def _columns(conn, table: str) -> set[str]:
-    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    try:
+        return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    except Exception:
+        # PostgreSQL deliberately has no PRAGMA. Cursor descriptions are the
+        # portable schema probe used by the worker's health stage as well.
+        cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
+        return {str(item[0]) for item in (getattr(cursor, "description", None) or [])}
 
 
 def _row_id(row: Any, columns: set[str], table: str, index: int) -> str:
