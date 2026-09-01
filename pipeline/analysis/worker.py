@@ -24,7 +24,13 @@ from pipeline.analysis.narrative import (
     discover_themes,
     extraction_prompt,
 )
-from pipeline.analysis.operations import utcnow
+from pipeline.analysis.operations import (
+    HealthSnapshot,
+    detect_drift,
+    save_proposal,
+    save_snapshot,
+    utcnow,
+)
 from pipeline.analysis.releases import load_release
 from pipeline.analysis.store import record_theme, record_topic, save_structured_signal
 from pipeline.analysis.structured import (
@@ -127,6 +133,7 @@ class AnalysisWorker:
             self._execute_domain(run_id, domain_id)
 
         self._link_run(run_id)
+        self._record_health(run_id, requested)
 
         return self._refresh_run(run_id, force_complete=True)
 
@@ -236,6 +243,55 @@ class AnalysisWorker:
                         relationship_type="narrative_structured_alignment", window_days=365)
                     if link:
                         save_link(conn, link)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _record_health(self, run_id: str, requested: list[str]) -> None:
+        """Persist a small, source-local health snapshot after each run."""
+        conn = db.get_connection(self.settings)
+        try:
+            row = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if row is None:
+                return
+            self._update_run(conn, run_id, current_stage="monitoring")
+            for domain_id in requested:
+                spec = domains.get_domain(domain_id)
+                for table in spec.source_tables:
+                    observed_schema: dict[str, Any] = {}
+                    exists = True
+                    try:
+                        cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
+                        description = getattr(cursor, "description", None) or []
+                        observed_schema = {str(item[0]): str(item[1] or "unknown") for item in description}
+                        count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                    except Exception:
+                        exists, count = False, None
+                    current = {
+                        "expected_schema": {"table": table},
+                        "observed_schema": observed_schema,
+                        "row_count": count,
+                        "parse_success": exists,
+                        "content_hash": None,
+                    }
+                    baseline_row = conn.execute(
+                        "SELECT expected_schema_json, observed_schema_json, row_count, parse_success, content_hash "
+                        "FROM analysis_health_snapshots WHERE source_table = ? ORDER BY collected_at DESC LIMIT 1",
+                        (table,)).fetchone()
+                    baseline = {}
+                    if baseline_row:
+                        baseline = {"expected_schema": json.loads(baseline_row["expected_schema_json"] or "{}"),
+                                    "observed_schema": json.loads(baseline_row["observed_schema_json"] or "{}"),
+                                    "row_count": baseline_row["row_count"],
+                                    "parse_success": bool(baseline_row["parse_success"]),
+                                    "content_hash": baseline_row["content_hash"]}
+                    save_snapshot(conn, HealthSnapshot(
+                        source_table=table, collected_at=utcnow(), collection_success=exists,
+                        parse_success=exists, expected_schema={"table": table},
+                        observed_schema=observed_schema, row_count=count),
+                        release_id=row["release_id"], domain_id=domain_id)
+                    for proposal in detect_drift(current, baseline):
+                        save_proposal(conn, proposal, release_id=row["release_id"], domain_id=domain_id)
             conn.commit()
         finally:
             conn.close()
