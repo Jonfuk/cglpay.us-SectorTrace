@@ -24,10 +24,12 @@ app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
 documents_app = typer.Typer(help="Inspect, parse, validate, and search archived documents.")
 nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunks, embeddings, search).")
+analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
+app.add_typer(analysis_app, name="analysis")
 app.add_typer(mirror_app, name="mirror")
 
 
@@ -49,6 +51,31 @@ def _document_reference(row):
         raw_object_path=row["raw_object_path"], mime_type=row["mime_type"],
         content_length=row["content_length"], source_table=row["source_table"], source_key=row["source_key"],
     )
+
+
+@analysis_app.command("worker")
+def analysis_worker(
+    once: bool = typer.Option(False, "--once", help="Claim one run and exit when it finishes."),
+    poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis windows processed per batch."),
+    worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
+) -> None:
+    """Process queued admin analysis runs from the shared warehouse."""
+    from pipeline.analysis.worker import AnalysisWorker
+
+    settings = get_settings()
+    db_conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(db_conn, db.migrations_dir_for(settings))
+    finally:
+        db_conn.close()
+    worker = AnalysisWorker(settings, poll_seconds=poll_seconds, batch_size=batch_size,
+                            worker_id=worker_id)
+    if once:
+        result = worker.run_once()
+        typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
+    else:
+        worker.run_forever()
 
 
 @documents_app.command("inspect")

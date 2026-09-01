@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any
 
 from pipeline.analysis import domains, releases
@@ -21,6 +22,23 @@ def _limit(value: Any, default: int = 100) -> int:
 _ACTIVE_RUN_STATUSES = {"queued", "running", "paused", "cancelling"}
 _TERMINAL_RUN_STATUSES = {"cancelled", "complete", "failed", "interrupted"}
 _RUN_KINDS = {"discovery", "optimization", "pilot", "complete"}
+
+
+def worker_status(conn, *, max_age_seconds: int = 30) -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT worker_id, last_seen_at, status, version FROM analysis_worker_heartbeats "
+        "ORDER BY last_seen_at DESC LIMIT 1").fetchone()
+    if row is None:
+        return {"online": False, "worker_id": None, "last_seen_at": None,
+                "status": "not_seen", "version": None}
+    try:
+        seen = datetime.fromisoformat(row["last_seen_at"])
+        age = (datetime.now(timezone.utc) - seen).total_seconds()
+    except (TypeError, ValueError):
+        age = max_age_seconds + 1
+    return {"online": age <= max_age_seconds, "worker_id": row["worker_id"],
+            "last_seen_at": row["last_seen_at"], "status": row["status"],
+            "version": row["version"], "age_seconds": round(max(0, age), 1)}
 
 
 def _cost_snapshot(conn, release_id: str) -> dict[str, int]:
@@ -78,7 +96,8 @@ def _run_summary(conn, run_id: str) -> dict[str, Any]:
     item["progress_percent"] = round(
         100 * item["completed_domains"] / item["total_domains"], 1
     ) if item["total_domains"] else 0
-    item["control_plane_only"] = True
+    item["worker"] = worker_status(conn)
+    item["control_plane_only"] = not item["worker"]["online"]
     return item
 
 
@@ -115,10 +134,13 @@ def overview(conn) -> dict[str, Any]:
     for table in ("automated_signals", "structured_signals", "emerging_themes", "cross_source_signal_links", "adaptation_proposals"):
         counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
     latest_run = conn.execute("SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT 1").fetchone()
+    worker = worker_status(conn)
     return {"active_release": dict(release) if release else None, "counts": counts,
             "domains": domains_view(conn)["domains"],
             "latest_run": _run_summary(conn, latest_run["run_id"]) if latest_run else None,
-            "executor": "control_plane_only",
+            "executor": "worker_online" if worker["online"] else
+            ("worker_offline" if worker["worker_id"] else "control_plane_only"),
+            "worker": worker,
             "quality_boundary": "Automated signals are admin-only and human_verified is always false."}
 
 

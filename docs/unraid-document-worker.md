@@ -1,6 +1,6 @@
 # Unraid document-analysis worker
 
-Run document analysis in this dedicated Docker image on Unraid. It contains
+Run document and admin analysis in this dedicated Docker image on Unraid. It contains
 the Python document dependencies plus the operating-system OCR binaries
 Tesseract and Ghostscript. The ordinary `Dockerfile` remains the lightweight
 Railway/web image and should not be used for OCR batches.
@@ -78,6 +78,22 @@ Or use:
 ```bash
 ./deploy/unraid-document-worker.sh status
 ```
+
+## Run the admin analysis worker
+
+The admin analysis page writes queued runs to the shared PostgreSQL warehouse.
+Run the same image as a persistent queue consumer so those runs are claimed and
+processed:
+
+```bash
+docker compose -f docker-compose.documents.yml up -d analysis-worker
+docker compose -f docker-compose.documents.yml logs -f analysis-worker
+```
+
+The worker updates `analysis_worker_heartbeats`, claims one run at a time,
+processes document windows in resumable batches, records emerging themes, and
+honours Stop/Resume from `/admin/analysis`. The `.env` used by the service must
+point at the same `DATABASE_URL` as the web application.
 
 For a filesystem-backed archive, add this volume to every worker command:
 
