@@ -12,7 +12,7 @@ from pipeline.analysis.graph import (
     queue_release_projection,
 )
 from pipeline.analysis.linking import link_signals
-from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
+from pipeline.analysis.models import AnalysisModelClient, AnalysisModelInvalidJSON, AnalysisModelUnavailable
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
 from pipeline.analysis.operations import decide_proposal, detect_drift, save_proposal
 from pipeline.analysis.prevalence import diagnostics
@@ -169,6 +169,33 @@ def test_model_unavailability_is_recorded(conn, settings, monkeypatch):
     assert row["status"] == "unavailable"
     assert row["model_id"] == "test/model"
     assert row["error_detail"] == "analysis model support requires the assistant extra"
+
+
+def test_invalid_json_is_retried_once(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+
+    class RetryClient:
+        def __init__(self, connection):
+            self.conn = connection
+            self.calls = 0
+            self.last_cost_micros = 3
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            self.calls += 1
+            if self.calls == 1:
+                raise AnalysisModelInvalidJSON("malformed test response")
+            return {"signal": None}
+
+    worker = AnalysisWorker(settings, worker_id="retry-fixture-worker")
+    worker._budget = CallBudget()
+    worker._current_run_id = started["run_id"]
+    client = RetryClient(conn)
+    result = worker._model_call_with_json_retry(client, "test prompt", role="scout", domain_id="da",
+                                                window_id="window-1", run_id=started["run_id"])
+    assert result == {"signal": None}
+    assert client.calls == 2
+    assert worker._budget.calls == 1
 
 
 def test_graph_projection_isolated_from_canonical_claims():

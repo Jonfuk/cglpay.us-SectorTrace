@@ -21,6 +21,10 @@ class AnalysisModelUnavailable(RuntimeError):
     """The optional model backend is not configured or did not answer."""
 
 
+class AnalysisModelInvalidJSON(AnalysisModelUnavailable):
+    """The model answered, but its response was not a complete JSON object."""
+
+
 class AnalysisModelClient:
     def __init__(self, settings: Any, *, release_id: str, run_id: str,
                  models: dict[str, str], conn) -> None:
@@ -105,7 +109,7 @@ class AnalysisModelClient:
                          latency_ms=round((time.monotonic() - started) * 1000),
                          status="invalid_json", cached=False,
                          error_detail=f"invalid JSON response: {type(exc).__name__}: {exc}")
-            raise AnalysisModelUnavailable("analysis model returned invalid JSON") from exc
+            raise AnalysisModelInvalidJSON("analysis model returned invalid JSON") from exc
         usage = getattr(response, "usage", None)
         raw_cost = getattr(usage, "cost", None) if usage is not None else None
         try:

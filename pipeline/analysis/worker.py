@@ -25,7 +25,7 @@ from pipeline.analysis import domains
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
 from pipeline.analysis.graph import project_release, signal_store_from_settings
 from pipeline.analysis.linking import link_signals, save_link
-from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
+from pipeline.analysis.models import AnalysisModelClient, AnalysisModelInvalidJSON, AnalysisModelUnavailable
 from pipeline.analysis.narrative import (
     candidate_from_payload,
     candidate_to_signal,
@@ -498,12 +498,16 @@ class AnalysisWorker:
                                        subject_type=passage["subject_type"],
                                        subject_id=str(passage["subject_id"]), text=passage["text"])
             try:
-                first = self._model_call(client, prompt, role="scout", domain_id=domain_id,
-                                         window_id=passage["evidence_ref"])
-                second = self._model_call(client, prompt, role="extractor", domain_id=domain_id,
-                                          window_id=passage["evidence_ref"])
+                first = self._model_call_with_json_retry(client, prompt, role="scout", domain_id=domain_id,
+                                                         window_id=passage["evidence_ref"], run_id=run_id)
+                second = self._model_call_with_json_retry(client, prompt, role="extractor", domain_id=domain_id,
+                                                          window_id=passage["evidence_ref"], run_id=run_id)
             except CostCeilingExceeded:
                 raise
+            except AnalysisModelInvalidJSON as exc:
+                log.warning("analysis_model_invalid_json_skipped", run_id=run_id, domain_id=domain_id,
+                            window_id=passage["evidence_ref"], error=str(exc))
+                continue
             except AnalysisModelUnavailable as exc:
                 log.warning("analysis_model_unavailable", run_id=run_id, domain_id=domain_id,
                             window_id=passage["evidence_ref"], error=str(exc))
@@ -532,6 +536,24 @@ class AnalysisWorker:
             conn.commit()
         if model_unavailable:
             self._update_run(conn, run_id, current_stage="discovering")
+
+    def _model_call_with_json_retry(self, client, prompt: str, *, role: str,
+                                    domain_id: str, window_id: str, run_id: str):
+        """Retry one malformed JSON response, then let the caller skip it.
+
+        A malformed response is a model-output defect local to one passage;
+        turning it into a domain-wide stop discards the rest of a large
+        corpus. Other unavailability errors still propagate to the existing
+        fail-closed path.
+        """
+        try:
+            return self._model_call(client, prompt, role=role, domain_id=domain_id, window_id=window_id)
+        except AnalysisModelInvalidJSON:
+            log.warning("analysis_model_invalid_json_retry", run_id=run_id, domain_id=domain_id,
+                        role=role, window_id=window_id)
+            retry_prompt = (f"{prompt}\n\nIMPORTANT: your previous response was incomplete or invalid JSON. "
+                            "Return one complete JSON object only, with no markdown, commentary or trailing text.")
+            return self._model_call(client, retry_prompt, role=role, domain_id=domain_id, window_id=window_id)
 
     def _model_call(self, client, prompt: str, *, role: str, domain_id: str,
                     window_id: str) -> dict[str, Any] | None:
