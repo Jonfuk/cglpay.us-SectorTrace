@@ -356,7 +356,7 @@ class AnalysisWorker:
                 for row in batch:
                     text = str(row["text"] or "").strip()
                     passages.append({"text": text, "document_id": row["document_id"],
-                                     "subject_id": row["source_key"] or row["document_id"],
+                                     "subject_id": self._document_subject_id(row["source_key"], row["document_id"]),
                                      "subject_type": spec.canonical_subject_keys[0],
                                      "evidence_ref": row["document_element_id"]})
                     conn.execute(
@@ -394,6 +394,11 @@ class AnalysisWorker:
             self._finalise_cancelled(run_id)
         finally:
             conn.close()
+
+    @staticmethod
+    def _document_subject_id(source_key: str | None, document_id: str) -> str:
+        """Use the source adapter's canonical key, not its document URL suffix."""
+        return str(source_key or document_id).split("|", 1)[0]
 
     def _extract_narrative_signals(self, conn, run_id: str, domain_id: str, spec,
                                    release_id: str, passages: list[dict[str, Any]]) -> None:

@@ -121,10 +121,19 @@ def run(conn, run_id: str) -> dict[str, Any]:
     return _run_summary(conn, run_id)
 
 
-def domains_view(conn) -> dict[str, Any]:
-    runs = {row["domain_id"]: dict(row) for row in conn.execute(
-        "SELECT domain_id, status, prerequisite_status, missing_tables_json, rows_processed, rows_written "
-        "FROM analysis_domain_runs WHERE domain_run_id IN (SELECT MAX(domain_run_id) FROM analysis_domain_runs GROUP BY domain_id)")}
+def domains_view(conn, *, release_id: str | None = None) -> dict[str, Any]:
+    clause = ""
+    params: list[Any] = []
+    if release_id:
+        clause = "AND dr.release_id = ?"
+        params.append(release_id)
+    rows = conn.execute(
+        "SELECT dr.domain_id, dr.status, dr.prerequisite_status, dr.missing_tables_json, "
+        "dr.rows_processed, dr.rows_written FROM analysis_domain_runs dr "
+        "WHERE NOT EXISTS (SELECT 1 FROM analysis_domain_runs newer "
+        "WHERE newer.domain_id = dr.domain_id AND newer.started_at > dr.started_at) "
+        f"{clause}", params).fetchall()
+    runs = {row["domain_id"]: dict(row) for row in rows}
     result = []
     for domain_id, spec in domains.domain_registry().items():
         row = runs.get(domain_id, {})
@@ -232,10 +241,11 @@ def report(conn, release_id: str) -> dict[str, Any]:
     manifest = releases.load_release(conn, release_id)
     if manifest is None:
         raise KeyError(f"unknown analysis release {release_id!r}")
-    return {"release_manifest": manifest, "domains": domains_view(conn),
+    from pipeline.analysis.linking import list_links
+    return {"release_manifest": manifest, "domains": domains_view(conn, release_id=release_id),
             "signals": list_signals(conn, release_id=release_id),
             "structured": structured(conn, release_id=release_id)["structured"],
-            "links": {"links": [dict(row) for row in conn.execute("SELECT * FROM cross_source_signal_links WHERE release_id = ?", (release_id,))]},
+            "links": {"links": list_links(conn, release_id=release_id)},
             "themes": themes(conn, release_id=release_id)["themes"], "operations": operations(conn)}
 
 

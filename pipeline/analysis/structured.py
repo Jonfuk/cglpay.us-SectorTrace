@@ -114,6 +114,21 @@ def observations_for_domain(conn, source_tables: Iterable[str]) -> list[Observat
     observations: list[Observation] = []
     seen: set[tuple[str, str, str, str, str]] = set()
     for table in source_tables:
+        if table == "hse_enforcement_notices":
+            try:
+                rows = conn.execute(
+                    "SELECT provider_key, SUBSTR(issue_date, 1, 4) AS period_end, COUNT(*) AS value "
+                    "FROM hse_enforcement_notices WHERE provider_key IS NOT NULL AND issue_date IS NOT NULL "
+                    "GROUP BY provider_key, SUBSTR(issue_date, 1, 4)").fetchall()
+            except Exception:
+                rows = []
+            for row in rows:
+                observations.append(Observation(
+                    source_table=table, source_row_id=f"{table}:{row['provider_key']}:{row['period_end']}",
+                    subject_type="provider_id", subject_id=str(row["provider_key"]),
+                    metric="enforcement_notice_count", value=row["value"], unit="count",
+                    period_start=None, period_end=str(row["period_end"])))
+            continue
         for observation in observations_from_table(conn, table):
             key = (observation.source_table, observation.source_row_id, observation.subject_id,
                    observation.metric, str(observation.period_end))
