@@ -41,10 +41,15 @@ def worker_status(conn, *, max_age_seconds: int = 30) -> dict[str, Any]:
             "version": row["version"], "age_seconds": round(max(0, age), 1)}
 
 
-def _cost_snapshot(conn, release_id: str) -> dict[str, int]:
+def _cost_snapshot(conn, release_id: str, run_id: str | None = None) -> dict[str, int]:
+    clause = "release_id = ?"
+    params: list[Any] = [release_id]
+    if run_id:
+        clause += " AND run_id = ?"
+        params.append(run_id)
     row = conn.execute(
         "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micros), 0) AS cost_micros "
-        "FROM analysis_model_calls WHERE release_id = ?", (release_id,)).fetchone()
+        f"FROM analysis_model_calls WHERE {clause}", params).fetchone()
     return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
 
 
@@ -92,7 +97,7 @@ def _run_summary(conn, run_id: str) -> dict[str, Any]:
     item["domains"] = domain_items
     item["domain_counts"] = dict(counts)
     item["completed_domains"] = sum(counts.get(status, 0) for status in ("complete", "unavailable"))
-    item.update(_cost_snapshot(conn, item["release_id"]))
+    item.update(_cost_snapshot(conn, item["release_id"], item["run_id"]))
     item["progress_percent"] = round(
         100 * item["completed_domains"] / item["total_domains"], 1
     ) if item["total_domains"] else 0

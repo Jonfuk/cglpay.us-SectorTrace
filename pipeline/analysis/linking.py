@@ -69,7 +69,8 @@ def save_link(conn, link: dict[str, Any]) -> None:
     conn.execute(
         "INSERT INTO cross_source_signal_links (link_id, release_id, left_signal_id, right_signal_id, "
         "relationship_type, subject_type, subject_id, period_start, period_end, join_reason_json, "
-        "explanation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "explanation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (left_signal_id, right_signal_id, relationship_type) DO NOTHING",
         (link["link_id"], link["release_id"], link["left_signal_id"], link["right_signal_id"],
          link["relationship_type"], link["subject_type"], link["subject_id"],
          link.get("period_start"), link.get("period_end"), json.dumps(link["join_reason"], sort_keys=True),

@@ -11,7 +11,12 @@ from pipeline.analysis.operations import detect_drift
 from pipeline.analysis.prevalence import diagnostics
 from pipeline.analysis.quality import ProgramMetrics, promotion_eligible
 from pipeline.analysis.releases import create_release, load_release
-from pipeline.analysis.structured import Observation, anomaly, compare_periods
+from pipeline.analysis.structured import (
+    Observation,
+    anomaly,
+    categorical_transitions,
+    compare_periods,
+)
 from pipeline.analysis.worker import AnalysisWorker
 from pipeline.web import analysis as analysis_admin
 
@@ -57,6 +62,17 @@ def test_structured_comparison_and_anomaly_guards():
     assert compare_periods(previous, current)["percentage_change"] == 50
     assert anomaly(10, [1, 1, 1, 1, 1])["robust_z"] is None
     assert compare_periods(previous, Observation("metric", "r3", "authority", "a1", "vacancies", 1, "percent", "2025", "2025"))["comparable"] is False
+
+
+def test_categorical_transitions_keep_states_and_do_not_calculate():
+    changes = categorical_transitions(
+        [{"location_id": "l1", "provider_key": "p1", "overall_rating": "Good", "rated": "2024-01-01"},
+         {"location_id": "l2", "provider_key": "p1", "overall_rating": "Requires improvement", "rated": "2025-01-01"}],
+        subject_key="provider_key", metric="overall_rating", period_key="rated",
+        source_table="cqc_locations", source_id_key="location_id", subject_type="provider_id")
+    assert changes[0]["previous"]["value"] == "Good"
+    assert changes[0]["current"]["value"] == "Requires improvement"
+    assert changes[0]["absolute_change"] is None
 
 
 def test_links_require_canonical_identity_and_block_causal_explanation():

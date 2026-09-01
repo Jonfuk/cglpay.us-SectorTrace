@@ -16,6 +16,7 @@ from typing import Any
 from pipeline import db
 from pipeline.analysis import domains
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
+from pipeline.analysis.linking import link_signals, save_link
 from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
 from pipeline.analysis.narrative import (
     candidate_from_payload,
@@ -25,8 +26,10 @@ from pipeline.analysis.narrative import (
 )
 from pipeline.analysis.operations import utcnow
 from pipeline.analysis.releases import load_release
-from pipeline.analysis.store import record_theme, save_structured_signal
+from pipeline.analysis.store import record_theme, record_topic, save_structured_signal
 from pipeline.analysis.structured import (
+    categorical_signal,
+    categorical_transitions,
     comparisons_for_domain,
     observations_for_domain,
     structured_signal,
@@ -123,6 +126,8 @@ class AnalysisWorker:
                 return self._finalise_cancelled(run_id)
             self._execute_domain(run_id, domain_id)
 
+        self._link_run(run_id)
+
         return self._refresh_run(run_id, force_complete=True)
 
     def _execute_domain(self, run_id: str, domain_id: str) -> None:
@@ -172,6 +177,18 @@ class AnalysisWorker:
             conn.commit()
             observations = observations_for_domain(conn, spec.source_tables)
             comparisons = comparisons_for_domain(observations)
+            if domain_id == "regulation_enforcement":
+                try:
+                    cqc_rows = [dict(row) for row in conn.execute(
+                        "SELECT location_id, COALESCE(provider_key, location_id) AS provider_key, "
+                        "overall_rating, overall_rating_date FROM cqc_locations "
+                        "WHERE overall_rating IS NOT NULL AND overall_rating_date IS NOT NULL").fetchall()]
+                except Exception:
+                    cqc_rows = []
+                comparisons.extend(categorical_transitions(
+                    cqc_rows, subject_key="provider_key", metric="overall_rating",
+                    period_key="overall_rating_date", source_table="cqc_locations",
+                    source_id_key="location_id", subject_type="provider_id"))
             written = 0
             for start in range(0, len(comparisons), self.batch_size):
                 if self._cancelled(run_id):
@@ -179,9 +196,11 @@ class AnalysisWorker:
                 batch = comparisons[start:start + self.batch_size]
                 for comparison in batch:
                     current = comparison["current"]
-                    signal = structured_signal(
+                    signal = (structured_signal(
                         comparison, release_id=run["release_id"], domain_id=domain_id,
-                        signal_type=f"{current['metric']}_change")
+                        signal_type=f"{current['metric']}_change") if current["unit"] != "category" else
+                        categorical_signal(comparison, release_id=run["release_id"], domain_id=domain_id,
+                                           signal_type=f"{current['metric']}_transition"))
                     if signal is None:
                         continue
                     save_structured_signal(conn, signal, comparison)
@@ -192,6 +211,31 @@ class AnalysisWorker:
                 conn.commit()
             self._finish_domain(conn, run_id, domain_id, "complete", len(observations), written,
                                 prerequisite_status="ready", missing_tables=[], error_detail=None)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _link_run(self, run_id: str) -> None:
+        """Create only allowlisted, canonical-identity links between signals."""
+        conn = db.get_connection(self.settings)
+        try:
+            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
+                return
+            rows = [dict(row) for row in conn.execute(
+                "SELECT * FROM automated_signals WHERE release_id = ? ORDER BY created_at",
+                (run["release_id"],)).fetchall()]
+            self._update_run(conn, run_id, current_stage="connecting")
+            for index, left in enumerate(rows):
+                for right in rows[index + 1:]:
+                    if left["domain_id"] == right["domain_id"]:
+                        continue
+                    link = link_signals(
+                        left, right, left_spec=domains.get_domain(left["domain_id"]),
+                        right_spec=domains.get_domain(right["domain_id"]),
+                        relationship_type="narrative_structured_alignment", window_days=365)
+                    if link:
+                        save_link(conn, link)
             conn.commit()
         finally:
             conn.close()
@@ -245,6 +289,8 @@ class AnalysisWorker:
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
                 theme["passages"] = theme.get("passages", [])[:25]
                 record_theme(conn, release_id=run["release_id"], domain_id=domain_id, theme=theme)
+                record_topic(conn, release_id=run["release_id"], domain_id=domain_id,
+                             topic_number=themes.index(theme), theme=theme)
                 written += 1
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
             self._extract_narrative_signals(conn, run_id, domain_id, spec, run["release_id"], passages)

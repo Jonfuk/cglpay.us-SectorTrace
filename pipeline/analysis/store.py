@@ -106,3 +106,19 @@ def record_theme(conn, *, release_id: str, domain_id: str, theme: dict) -> str:
          json.dumps(theme.get("passages", []), sort_keys=True),
          "recurrence and grounding bar met" if status == "promotion_ready" else None, utcnow()))
     return theme_id
+
+
+def record_topic(conn, *, release_id: str, domain_id: str, topic_number: int,
+                 theme: dict) -> str:
+    """Persist the stable topic explorer row alongside its emerging theme."""
+    topic_id = f"topic-{release_id}-{domain_id}-{topic_number}"
+    conn.execute(
+        "INSERT INTO analysis_topics (topic_id, release_id, domain_id, topic_number, label, "
+        "novelty_similarity, outlier, representative_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (topic_id) DO UPDATE SET label = excluded.label, "
+        "novelty_similarity = excluded.novelty_similarity, outlier = excluded.outlier, "
+        "representative_json = excluded.representative_json",
+        (topic_id, release_id, domain_id, topic_number, theme.get("theme_key"),
+         theme.get("novelty_similarity"), int(bool(theme.get("outlier"))),
+         json.dumps(theme.get("passages", [])[:5], sort_keys=True), utcnow()))
+    return topic_id
