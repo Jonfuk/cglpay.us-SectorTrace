@@ -3,12 +3,186 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Iterable
 
 from pipeline.analysis.signals import Signal, new_signal
 
 MISSING_STATUSES = frozenset({"missing", "suppressed", "schema_incompatible", "unavailable"})
+
+# These adapters intentionally name fields from the canonical module schemas.
+# They are part of the provenance contract: a new source schema must be added
+# explicitly rather than inferred from arbitrary columns.
+_TABLE_ADAPTERS: dict[str, dict[str, Any]] = {
+    "contracts": {"subject_id": "supplier_id", "subject_type": "provider",
+                  "period": "date_start", "metrics": ("value_core", "value_max"), "unit": "currency"},
+    "council_spend": {"subject_id": "provider_key", "subject_type": "provider",
+                      "period": "period", "metrics": ("amount",), "unit": "GBP"},
+    "charity_financials": {"subject_id": "charity_number", "subject_type": "charity",
+                            "period": "financial_year_end",
+                            "metrics": ("total_income", "total_expenditure", "income_from_govt_contracts",
+                                        "income_from_govt_grants", "inc_charitable_activities",
+                                        "exp_charitable_activities"), "unit": "GBP"},
+    "charity_accounts_extracts": {"subject_id": "charity_number", "subject_type": "charity",
+                                   "period": "financial_year_end",
+                                   "metrics": ("staff_costs_total", "wages_and_salaries",
+                                                "agency_and_third_party", "key_management_remuneration"),
+                                   "unit": "GBP"},
+    "workforce_census_metrics": {"subject_id": "workforce_segment", "subject_type": "workforce_segment",
+                                  "period": "census_year", "metrics": ("value",), "unit": "unit"},
+    "nhs_job_adverts": {"subject_id": "provider_key", "subject_type": "provider",
+                        "period": "posted_date", "metrics": ("salary_min", "salary_max"), "unit": "salary_period"},
+    "provider_pay_mentions": {"subject_id": "provider_key", "subject_type": "provider",
+                               "period": "retrieved_at", "metrics": ("salary_min", "salary_max"), "unit": "salary_period"},
+    "ndtms_la_statistics": {"subject_id": "ons_code", "subject_type": "authority",
+                             "period": "financial_year", "metrics": ("value",), "unit": "published"},
+    "ndtms_monthly_statistics": {"subject_id": "ons_code", "subject_type": "authority",
+                                  "period": "report_month", "metrics": ("value",), "unit": "published"},
+    "fingertips_la_values": {"subject_id": "ons_code", "subject_type": "authority",
+                             "period": "time_period_sortable", "metrics": ("value",), "unit": "published"},
+    "la_revenue_budgets": {"subject_id": "ons_code", "subject_type": "authority",
+                           "period": "financial_year", "metrics": ("amount",), "unit": "GBP"},
+    "rough_sleeping_snapshot": {"subject_id": "ons_code", "subject_type": "authority",
+                                 "period": "snapshot_year", "metrics": ("count", "rate_per_100k"), "unit": "published"},
+    "statutory_homelessness_snapshot": {"subject_id": "ons_code", "subject_type": "authority",
+                                         "period": "quarter_start", "metrics": ("total_initial_assessments",
+                                                                                    "total_owed_duty"), "unit": "count"},
+    "temporary_accommodation_snapshot": {"subject_id": "ons_code", "subject_type": "authority",
+                                          "period": "quarter_start", "metrics": ("total_households_ta",
+                                                                                     "children_in_ta"), "unit": "count"},
+}
+
+
+def _columns(conn, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _row_id(row: Any, columns: set[str], table: str, index: int) -> str:
+    for key in ("id", "notice_id", "job_reference", "report_ref", "publication_slug",
+                "document_url", "financial_year_end", "source_row_id"):
+        if key in columns and row[key] not in (None, ""):
+            return str(row[key])
+    return f"{table}:{index}"
+
+
+def observations_from_table(conn, table: str) -> list[Observation]:
+    """Read only explicitly mapped numeric fields from one canonical table."""
+    mapping = _TABLE_ADAPTERS.get(table)
+    if mapping is None:
+        return []
+    try:
+        columns = _columns(conn, table)
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+    except Exception:
+        return []
+    required = {mapping["subject_id"], mapping["period"]}
+    if not required <= columns:
+        return []
+    result: list[Observation] = []
+    for index, raw in enumerate(rows):
+        row = dict(raw)
+        subject_id = row.get(mapping["subject_id"])
+        if subject_id in (None, ""):
+            continue
+        period = row.get(mapping["period"])
+        for metric in mapping["metrics"]:
+            if metric not in columns or numeric(row.get(metric)) is None:
+                continue
+            unit = row.get(mapping["unit"], mapping["unit"]) if mapping["unit"] in columns else mapping["unit"]
+            if unit in (None, ""):
+                unit = mapping["unit"]
+            if table == "contracts" and metric == "value_core":
+                unit = row.get("currency") or "currency"
+            if table == "la_revenue_budgets" and row.get("amounts_multiplier"):
+                unit = f"GBP*{row['amounts_multiplier']}"
+            result.append(Observation(
+                source_table=table, source_row_id=_row_id(row, columns, table, index),
+                subject_type=mapping["subject_type"], subject_id=str(subject_id), metric=metric,
+                value=row.get(metric), unit=str(unit), period_start=None, period_end=str(period)))
+    return result
+
+
+def observations_for_domain(conn, source_tables: Iterable[str]) -> list[Observation]:
+    observations: list[Observation] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for table in source_tables:
+        for observation in observations_from_table(conn, table):
+            key = (observation.source_table, observation.source_row_id, observation.subject_id,
+                   observation.metric, str(observation.period_end))
+            if key not in seen:
+                observations.append(observation)
+                seen.add(key)
+    return observations
+
+
+def comparisons_for_domain(observations: Iterable[Observation], *, improving_when: str = "decrease") -> list[dict[str, Any]]:
+    """Create consecutive, same-unit comparisons and anomaly metadata."""
+    grouped: dict[tuple[str, str, str, str], list[Observation]] = defaultdict(list)
+    for observation in observations:
+        grouped[(observation.subject_type, observation.subject_id, observation.metric,
+                 observation.unit)].append(observation)
+    results: list[dict[str, Any]] = []
+    for rows in grouped.values():
+        rows.sort(key=lambda row: str(row.period_end or ""))
+        for index in range(1, len(rows)):
+            previous, current = rows[index - 1], rows[index]
+            comparison = compare_periods(previous, current, improving_when=improving_when)
+            current_value = numeric(current.value)
+            if current_value is not None:
+                comparison.update(anomaly(current_value, [numeric(row.value) for row in rows[:index]
+                                                          if numeric(row.value) is not None]))
+            results.append(comparison)
+    return results
+
+
+def categorical_transitions(rows: Iterable[dict[str, Any]], *, subject_key: str,
+                            metric: str, period_key: str, source_table: str,
+                            source_id_key: str, direction: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """Return auditable categorical state changes without numeric coercion."""
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row.get(subject_key) in (None, "") or row.get(metric) in (None, ""):
+            continue
+        grouped[str(row[subject_key])].append(dict(row))
+    result = []
+    for subject_id, values in grouped.items():
+        values.sort(key=lambda row: str(row.get(period_key) or ""))
+        for previous, current in zip(values, values[1:]):
+            before, after = str(previous[metric]), str(current[metric])
+            if before == after:
+                continue
+            result.append({
+                "comparable": True, "incompatibility_reason": None,
+                "previous": {"source_table": source_table, "source_row_id": str(previous[source_id_key]),
+                              "subject_type": "canonical_subject", "subject_id": subject_id,
+                              "metric": metric, "value": before, "unit": "category",
+                              "period_end": previous.get(period_key)},
+                "current": {"source_table": source_table, "source_row_id": str(current[source_id_key]),
+                             "subject_type": "canonical_subject", "subject_id": subject_id,
+                             "metric": metric, "value": after, "unit": "category",
+                             "period_end": current.get(period_key)},
+                "period_start": previous.get(period_key), "period_end": current.get(period_key),
+                "absolute_change": None, "percentage_change": None,
+                "direction": (direction or {}).get(f"{before}->{after}", "unknown"),
+                "calculation": "categorical state transition; no arithmetic performed",
+            })
+    return result
+
+
+def categorical_signal(comparison: dict[str, Any], *, release_id: str, domain_id: str,
+                       signal_type: str) -> Signal:
+    """Create an automated signal for an explicitly observed category change."""
+    current = comparison["current"]
+    refs = [f"{comparison['previous']['source_table']}:{comparison['previous']['source_row_id']}",
+            f"{current['source_table']}:{current['source_row_id']}"]
+    return new_signal(release_id=release_id, domain_id=domain_id,
+                      taxonomy_namespace=domain_id, signal_type=signal_type,
+                      subject_type=current["subject_type"], subject_id=current["subject_id"],
+                      direction=comparison["direction"], assertion_status="affirmed",
+                      period_start=comparison.get("period_start"), period_end=comparison.get("period_end"),
+                      evidence_refs=refs, derivation_method="deterministic_categorical_transition",
+                      confidence_contract={"canonical_values": True, "comparison": comparison})
 
 
 @dataclass(frozen=True)

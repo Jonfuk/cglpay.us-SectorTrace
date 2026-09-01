@@ -16,7 +16,8 @@ def save_signal(conn, signal: Signal) -> None:
         "INSERT INTO automated_signals (signal_id, release_id, domain_id, taxonomy_namespace, "
         "signal_type, subject_type, subject_id, direction, assertion_status, period_start, "
         "period_end, evidence_refs_json, derivation_method, confidence_contract_json, "
-        "human_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "human_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (signal_id) DO NOTHING",
         signal.db_values())
 
 
@@ -33,12 +34,18 @@ def save_structured_signal(conn, signal: Signal, comparison: dict) -> str:
     save_signal(conn, signal)
     previous = comparison["previous"]
     current = comparison["current"]
-    structured_id = f"structured-{uuid.uuid4()}"
+    # A stable child id makes cancel/resume idempotent. Re-running a cached
+    # comparison must not create a second structured row for the same signal.
+    structured_id = f"structured-{signal.signal_id}"
     conn.execute(
         "INSERT INTO structured_signals (structured_signal_id, signal_id, source_table, source_row_id, "
         "comparison_source_table, comparison_source_row_id, metric, unit, value_before, value_after, "
         "absolute_change, percentage_change, comparable, robust_z, anomaly_status, calculation_json, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (structured_signal_id) DO UPDATE SET "
+        "absolute_change = excluded.absolute_change, percentage_change = excluded.percentage_change, "
+        "robust_z = excluded.robust_z, anomaly_status = excluded.anomaly_status, "
+        "calculation_json = excluded.calculation_json",
         (structured_id, signal.signal_id, current["source_table"], current["source_row_id"],
          previous["source_table"], previous["source_row_id"], current["metric"], current["unit"],
          str(previous["value"]), str(current["value"]), comparison.get("absolute_change"),

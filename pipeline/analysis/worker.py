@@ -15,21 +15,34 @@ from typing import Any
 
 from pipeline import db
 from pipeline.analysis import domains
-from pipeline.analysis.budget import AnalysisCancelled
-from pipeline.analysis.narrative import discover_themes
+from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
+from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
+from pipeline.analysis.narrative import (
+    candidate_from_payload,
+    candidate_to_signal,
+    discover_themes,
+    extraction_prompt,
+)
 from pipeline.analysis.operations import utcnow
-from pipeline.analysis.store import record_theme
+from pipeline.analysis.releases import load_release
+from pipeline.analysis.store import record_theme, save_structured_signal
+from pipeline.analysis.structured import (
+    comparisons_for_domain,
+    observations_for_domain,
+    structured_signal,
+)
 
 
 class AnalysisWorker:
     """Claim and execute queued analysis runs one at a time."""
 
     def __init__(self, settings, *, poll_seconds: float = 5.0, batch_size: int = 100,
-                 worker_id: str | None = None):
+                 worker_id: str | None = None, model_client_factory=None):
         self.settings = settings
         self.poll_seconds = max(0.1, float(poll_seconds))
         self.batch_size = max(1, int(batch_size))
         self.worker_id = worker_id or f"analysis-worker-{uuid.uuid4()}"
+        self.model_client_factory = model_client_factory or AnalysisModelClient
 
     def run_forever(self) -> None:
         """Poll until interrupted, allowing the container to restart safely."""
@@ -100,6 +113,8 @@ class AnalysisWorker:
             if run is None:
                 raise KeyError(run_id)
             requested = json.loads(run["requested_domains_json"] or "[]")
+            self._budget = CallBudget(ceiling_micros=int(run["cost_ceiling_micros"] or 0))
+            self._current_run_id = run_id
         finally:
             conn.close()
 
@@ -136,10 +151,47 @@ class AnalysisWorker:
                 conn.commit()
                 self._execute_narrative(run_id, domain_id, spec)
                 return
-            self._finish_domain(
-                conn, run_id, domain_id, "unavailable", 0, 0,
-                prerequisite_status="ready", missing_tables=[],
-                error_detail="no structured feature builder is configured for this domain")
+            conn.commit()
+            self._execute_structured(run_id, domain_id, spec)
+        finally:
+            conn.close()
+
+    def _execute_structured(self, run_id: str, domain_id: str, spec) -> None:
+        """Compute exact comparisons from the source tables named by a domain.
+
+        This path never asks a model to calculate a number.  It reads the
+        canonical source rows, retains both row references, and makes the
+        resulting signal idempotent so a cancelled run can resume safely.
+        """
+        conn = db.get_connection(self.settings)
+        try:
+            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise KeyError(run_id)
+            self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
+            conn.commit()
+            observations = observations_for_domain(conn, spec.source_tables)
+            comparisons = comparisons_for_domain(observations)
+            written = 0
+            for start in range(0, len(comparisons), self.batch_size):
+                if self._cancelled(run_id):
+                    return self._finalise_cancelled(run_id)
+                batch = comparisons[start:start + self.batch_size]
+                for comparison in batch:
+                    current = comparison["current"]
+                    signal = structured_signal(
+                        comparison, release_id=run["release_id"], domain_id=domain_id,
+                        signal_type=f"{current['metric']}_change")
+                    if signal is None:
+                        continue
+                    save_structured_signal(conn, signal, comparison)
+                    written += 1
+                self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
+                self._update_domain_progress(conn, run_id, domain_id,
+                                              min(start + len(batch), len(observations)), written)
+                conn.commit()
+            self._finish_domain(conn, run_id, domain_id, "complete", len(observations), written,
+                                prerequisite_status="ready", missing_tables=[], error_detail=None)
             conn.commit()
         finally:
             conn.close()
@@ -154,7 +206,7 @@ class AnalysisWorker:
                 raise KeyError(run_id)
             source_marks = ", ".join("?" for _ in spec.source_tables)
             rows = conn.execute(
-                "SELECT de.document_element_id, d.document_id, de.text "
+                "SELECT de.document_element_id, d.document_id, d.source_key, de.text "
                 "FROM document_elements de "
                 "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
                 "JOIN document_records d ON d.document_id = dv.document_id "
@@ -168,7 +220,8 @@ class AnalysisWorker:
                 for row in batch:
                     text = str(row["text"] or "").strip()
                     passages.append({"text": text, "document_id": row["document_id"],
-                                     "subject_id": row["document_id"],
+                                     "subject_id": row["source_key"] or row["document_id"],
+                                     "subject_type": spec.canonical_subject_keys[0],
                                      "evidence_ref": row["document_element_id"]})
                     conn.execute(
                         "INSERT INTO analysis_windows (window_id, domain_run_id, domain_id, "
@@ -193,6 +246,8 @@ class AnalysisWorker:
                 theme["passages"] = theme.get("passages", [])[:25]
                 record_theme(conn, release_id=run["release_id"], domain_id=domain_id, theme=theme)
                 written += 1
+            self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
+            self._extract_narrative_signals(conn, run_id, domain_id, spec, run["release_id"], passages)
             self._finish_domain(conn, run_id, domain_id, "complete", processed, written,
                                 prerequisite_status="ready", missing_tables=[], error_detail=None)
             conn.commit()
@@ -201,6 +256,65 @@ class AnalysisWorker:
             self._finalise_cancelled(run_id)
         finally:
             conn.close()
+
+    def _extract_narrative_signals(self, conn, run_id: str, domain_id: str, spec,
+                                   release_id: str, passages: list[dict[str, Any]]) -> None:
+        manifest = load_release(conn, release_id) or {}
+        models = manifest.get("models", {})
+        client = self.model_client_factory(
+            self.settings, release_id=release_id, run_id=run_id, models=models, conn=conn)
+        model_unavailable = False
+        for passage in passages:
+            if self._cancelled(run_id):
+                raise AnalysisCancelled("analysis run cancelled at a batch boundary")
+            prompt = extraction_prompt(namespace=spec.taxonomy_namespace,
+                                       subject_type=passage["subject_type"],
+                                       subject_id=str(passage["subject_id"]), text=passage["text"])
+            try:
+                first = self._model_call(client, prompt, role="scout", domain_id=domain_id,
+                                         window_id=passage["evidence_ref"])
+                second = self._model_call(client, prompt, role="extractor", domain_id=domain_id,
+                                          window_id=passage["evidence_ref"])
+            except CostCeilingExceeded:
+                raise
+            except AnalysisModelUnavailable:
+                model_unavailable = True
+                break
+            candidate = candidate_from_payload(
+                first, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
+                subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
+                model_output=first)
+            second_candidate = candidate_from_payload(
+                second, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
+                subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
+                model_output=second)
+            if candidate is None or second_candidate is None:
+                continue
+            signal = candidate_to_signal(candidate, release_id=release_id, source_text=passage["text"],
+                                         second_model=second_candidate)
+            if signal is None:
+                continue
+            from pipeline.analysis.store import save_signal
+            save_signal(conn, signal)
+            conn.execute(
+                "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, passed, score, reasons_json, created_at) "
+                "VALUES (?, ?, 'dual_model_exact_grounding', 1, 1.0, '[]', ?)",
+                (f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()))
+            conn.commit()
+        if model_unavailable:
+            self._update_run(conn, run_id, current_stage="discovering")
+
+    def _model_call(self, client, prompt: str, *, role: str, domain_id: str,
+                    window_id: str) -> dict[str, Any] | None:
+        budget = getattr(self, "_budget", CallBudget())
+        budget.before_call()
+        payload = client.generate_json(prompt, role=role, domain_id=domain_id, window_id=window_id)
+        budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
+        conn = client.conn
+        conn.execute("UPDATE analysis_runs SET cost_micros = ?, updated_at = ? WHERE run_id = ?",
+                     (budget.spent_micros, utcnow(), self._current_run_id))
+        conn.commit()
+        return payload
 
     @staticmethod
     def _missing_tables(conn, tables: tuple[str, ...]) -> list[str]:

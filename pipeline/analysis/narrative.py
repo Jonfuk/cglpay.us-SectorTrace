@@ -30,6 +30,49 @@ class NarrativeCandidate:
     model_outputs: tuple[dict[str, Any], ...] = ()
 
 
+def extraction_prompt(*, namespace: str, subject_type: str, subject_id: str, text: str) -> str:
+    """Build the bounded extraction prompt used by both analysis models."""
+    return (
+        "Extract at most one grounded automated signal from this source passage. "
+        "Return {\"signal\": null} when no qualifying signal is present. "
+        "Otherwise return a JSON object under signal with exactly these fields: "
+        "signal_type, subtype, assertion_status, direction, evidence_quote, scope_quote, "
+        "period_start, period_end, planned_or_hypothetical. Quotes must be exact contiguous "
+        "substrings from the passage. Do not infer names, identifiers, dates or numbers. "
+        f"The canonical namespace is {namespace!r}; subject type is {subject_type!r}; "
+        f"subject id is {subject_id!r}.\n\nPASSAGE:\n{text}"
+    )
+
+
+def candidate_from_payload(payload: dict[str, Any] | None, *, namespace: str,
+                           subject_type: str, subject_id: str, evidence_ref: str,
+                           model_output: dict[str, Any] | None = None) -> NarrativeCandidate | None:
+    """Convert model JSON to a candidate while retaining canonical identity."""
+    signal = payload.get("signal") if isinstance(payload, dict) else None
+    if not isinstance(signal, dict):
+        return None
+    required = ("signal_type", "assertion_status", "direction", "evidence_quote", "scope_quote")
+    if any(not str(signal.get(field) or "").strip() for field in required):
+        return None
+    assertion_status = str(signal["assertion_status"])
+    direction = str(signal["direction"])
+    if assertion_status not in ("affirmed", "negated", "historical", "planned", "hypothetical", "unknown"):
+        return None
+    if direction not in ("adverse", "improving", "neutral", "mixed", "unknown"):
+        return None
+    return NarrativeCandidate(
+        namespace=namespace, signal_type=str(signal["signal_type"]),
+        subtype=str(signal.get("subtype")) if signal.get("subtype") is not None else None,
+        assertion_status=assertion_status, direction=direction,
+        subject_type=subject_type, subject_id=subject_id,
+        evidence_quote=str(signal["evidence_quote"]), scope_quote=str(signal["scope_quote"]),
+        evidence_ref=evidence_ref,
+        period_start=signal.get("period_start"), period_end=signal.get("period_end"),
+        planned_or_hypothetical=bool(signal.get("planned_or_hypothetical", False)),
+        model_outputs=(model_output,) if model_output else (),
+    )
+
+
 def exact_substring(text: str, quote: str) -> bool:
     return bool(quote) and quote in text
 

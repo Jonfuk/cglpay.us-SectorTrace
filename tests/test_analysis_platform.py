@@ -119,7 +119,7 @@ def test_analysis_worker_claims_and_completes_structured_run(conn, settings):
                             worker_id="test-analysis-worker").run_once()
     assert result["run_id"] == started["run_id"]
     assert result["status"] == "complete"
-    assert result["domains"][0]["status"] == "unavailable"
+    assert result["domains"][0]["status"] == "complete"
     assert analysis_admin.worker_status(conn)["worker_id"] == "test-analysis-worker"
 
 
