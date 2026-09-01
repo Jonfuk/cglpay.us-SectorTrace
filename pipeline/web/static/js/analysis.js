@@ -41,11 +41,18 @@ function renderHistory(items) {
   target.innerHTML = `<div class="densewrap"><table class="dense"><thead><tr><th>Started</th><th>Run</th><th>Status</th><th>Progress</th><th>Cost</th><th>Action</th></tr></thead><tbody>${items.map(run => `<tr><td>${esc(time(run.started_at))}</td><td><strong>${esc(run.run_kind)}</strong><div class="small mono">${esc(run.run_id)}</div></td><td><span class="badge ${terminal.has(run.status) ? '' : 'pending'}">${esc(run.status)}</span></td><td>${esc(run.progress_percent)}% (${esc(run.completed_domains)}/${esc(run.total_domains)})</td><td>${esc(money(run.cost_micros))}</td><td>${run.status === 'cancelled' || run.status === 'failed' || run.status === 'interrupted' ? `<button class="btn" data-run-action="resume" data-run-id="${esc(run.run_id)}">Resume</button>` : runActions(run)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-function renderOverview(overview, domains, operations) {
+function renderReleases(items) {
+  const target = document.querySelector('#analysis-releases');
+  if (!items.length) { target.innerHTML = '<div class="empty">No releases.</div>'; return; }
+  target.innerHTML = `<div class="densewrap"><table class="dense"><thead><tr><th>Created</th><th>Release</th><th>Status</th><th>Actions</th></tr></thead><tbody>${items.map(release => `<tr><td>${esc(time(release.created_at))}</td><td><strong>${esc(release.release_id)}</strong><div class="small mono">${esc(release.manifest_sha256)}</div></td><td><span class="badge ${release.status === 'active' ? 'approved' : release.status === 'rolled_back' ? 'rejected' : 'pending'}">${esc(release.status)}</span></td><td><div class="actions"><button class="btn approve" data-release-action="activate" data-release-id="${esc(release.release_id)}" ${release.status === 'active' || release.status === 'rolled_back' ? 'disabled' : ''}>Activate</button><button class="btn reject" data-release-action="rollback" data-release-id="${esc(release.release_id)}" ${release.status === 'rolled_back' ? 'disabled' : ''}>Rollback</button><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}" download>JSON</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=csv" download>CSV</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=html" target="_blank" rel="noopener">Printable HTML</a></div></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderOverview(overview, domains, operations, models) {
   document.querySelector('#analysis-executor').textContent = overview.executor === 'control_plane_only' ? 'Control plane ready' : (overview.executor || 'Unknown executor');
   renderDomainOptions(domains.domains);
   renderRun(overview.latest_run, document.querySelector('#analysis-current-run'));
   renderHistory(operations.runs || []);
+  renderReleases(models.releases || []);
   const active = overview.latest_run && !terminal.has(overview.latest_run.status);
   document.querySelector('#analysis-start').disabled = Boolean(active);
   if (pollHandle) window.clearTimeout(pollHandle);
@@ -60,11 +67,11 @@ async function actionRun(action, runId) {
 
 async function load() {
   try {
-    const [overview, domains, themes, signals, operations] = await Promise.all([
+    const [overview, domains, themes, signals, operations, models] = await Promise.all([
       get('/api/admin/analysis/overview'), get('/api/admin/analysis/domains'),
       get('/api/admin/analysis/themes?limit=12'), get('/api/admin/analysis/signals?limit=20'),
-      get('/api/admin/analysis/operations')]);
-    renderOverview(overview, domains, operations);
+      get('/api/admin/analysis/operations'), get('/api/admin/analysis/models')]);
+    renderOverview(overview, domains, operations, models);
     document.querySelector('#analysis-cards').innerHTML = Object.entries(overview.counts).map(([key, value]) => `<div class="card"><strong>${esc(value)}</strong><span>${esc(key.replaceAll('_', ' '))}</span></div>`).join('');
     document.querySelector('#analysis-domains').innerHTML = domains.domains.map(item => `<div class="listrow"><strong>${esc(item.domain_id)}</strong>${row(item.status)}${row(item.source_tables.join(', '))}</div>`).join('');
     document.querySelector('#analysis-themes').innerHTML = themes.themes.length ? themes.themes.map(item => `<div class="listrow"><strong>${esc(item.theme_key)}</strong>${row(`${item.status} · ${item.passage_count} passages`)}</div>`).join('') : row('No emerging themes recorded.');
@@ -93,6 +100,20 @@ document.addEventListener('click', async event => {
   button.disabled = true;
   try { await actionRun(button.dataset.runAction, button.dataset.runId); await load(); }
   catch (error) { document.querySelector('#analysis-action-message').textContent = error.message; document.querySelector('#analysis-action-message').className = 'error'; }
+  finally { button.disabled = false; }
+});
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-release-action]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const action = button.dataset.releaseAction;
+    const body = action === 'rollback' ? {reason: window.prompt('Reason for rollback (optional):') || null} : {};
+    await post(`/api/admin/analysis/releases/${encodeURIComponent(button.dataset.releaseId)}/${action}`, body);
+    document.querySelector('#analysis-action-message').textContent = `${action === 'activate' ? 'Activated' : 'Rolled back'} ${button.dataset.releaseId}.`;
+    await load();
+  } catch (error) { document.querySelector('#analysis-action-message').textContent = error.message; document.querySelector('#analysis-action-message').className = 'error'; }
   finally { button.disabled = false; }
 });
 

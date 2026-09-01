@@ -189,6 +189,7 @@ main { padding: 16px 16px 16px 224px; max-width: 1720px; margin: 0 auto; }  /* B
 .analysis-page details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
 .analysis-page .densewrap { max-height: 360px; overflow: auto; }
 .analysis-page #analysis-action-message { min-height: 1.5em; margin: 10px 0 0; }
+.analysis-page .dense td:last-child { min-width: 280px; }
 
 /* --- overview ------------------------------------------------------------ */
 
