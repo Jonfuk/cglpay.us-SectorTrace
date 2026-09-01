@@ -1,7 +1,10 @@
 """QuaPy-style document-level prevalence diagnostics for narrative corpora."""
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
+
+from pipeline.analysis.signals import utcnow
 
 
 @dataclass(frozen=True)
@@ -27,3 +30,16 @@ def diagnostics(*, positives: int, negatives: int, subjects: int, pacc: float | 
     return PrevalenceResult(pacc, emq, positives, negatives, subjects,
                             residual or disagreement, False,
                             "residual prevalence or estimator disagreement" if residual or disagreement else None)
+
+
+def save_diagnostics(conn, *, release_id: str, domain_id: str,
+                     result: PrevalenceResult) -> str:
+    prevalence_id = f"prevalence-{uuid.uuid4()}"
+    conn.execute(
+        "INSERT INTO analysis_prevalence_diagnostics (prevalence_id, release_id, domain_id, positives, "
+        "negatives, subjects, pacc, emq, continue_exploration, suppressed, reason, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (prevalence_id, release_id, domain_id, result.positives, result.negatives, result.subjects,
+         result.pacc, result.emq, int(result.continue_exploration), int(result.suppressed),
+         result.reason, utcnow()))
+    return prevalence_id

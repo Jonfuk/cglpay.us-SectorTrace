@@ -228,6 +228,9 @@ def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
     signal = conn.execute("SELECT signal_type, direction, human_verified FROM automated_signals "
                           "WHERE release_id = ?", (started["release_id"],)).fetchone()
     assert dict(signal) == {"signal_type": "workforce_strain", "direction": "adverse", "human_verified": 0}
+    prevalence = conn.execute("SELECT positives, subjects, suppressed FROM analysis_prevalence_diagnostics "
+                              "WHERE release_id = ?", (started["release_id"],)).fetchone()
+    assert dict(prevalence) == {"positives": 1, "subjects": 1, "suppressed": 1}
 
 
 def test_batch_budget_stops_at_ceiling_and_boundary():

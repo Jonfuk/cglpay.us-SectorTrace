@@ -32,6 +32,7 @@ from pipeline.analysis.operations import (
     save_snapshot,
     utcnow,
 )
+from pipeline.analysis.prevalence import diagnostics, save_diagnostics
 from pipeline.analysis.releases import load_release
 from pipeline.analysis.store import record_theme, record_topic, save_structured_signal
 from pipeline.analysis.structured import (
@@ -388,6 +389,14 @@ class AnalysisWorker:
                 written += 1
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
             self._extract_narrative_signals(conn, run_id, domain_id, spec, run["release_id"], passages)
+            positive_row = conn.execute(
+                "SELECT COUNT(DISTINCT signal_id), COUNT(DISTINCT subject_id) FROM automated_signals "
+                "WHERE release_id = ? AND domain_id = ?", (run["release_id"], domain_id)).fetchone()
+            positives, subjects = int(positive_row[0]), int(positive_row[1])
+            save_diagnostics(
+                conn, release_id=run["release_id"], domain_id=domain_id,
+                result=diagnostics(positives=positives, negatives=max(0, processed - positives),
+                                   subjects=subjects, pacc=None, emq=None))
             self._finish_domain(conn, run_id, domain_id, "complete", processed, written,
                                 prerequisite_status="ready", missing_tables=[], error_detail=None)
             conn.commit()

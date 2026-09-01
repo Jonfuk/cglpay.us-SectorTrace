@@ -231,6 +231,19 @@ def models(conn) -> dict[str, Any]:
             "programs": [dict(row) for row in conn.execute("SELECT * FROM analysis_program_versions ORDER BY created_at DESC LIMIT 100")]}
 
 
+def prevalence(conn, *, release_id: str | None = None, limit: int = 100) -> dict[str, Any]:
+    params: list[Any] = []
+    clause = ""
+    if release_id:
+        clause = " WHERE release_id = ?"
+        params.append(release_id)
+    params.append(_limit(limit))
+    rows = conn.execute(
+        "SELECT * FROM analysis_prevalence_diagnostics" + clause +
+        " ORDER BY created_at DESC LIMIT ?", params).fetchall()
+    return {"prevalence": [dict(row) for row in rows]}
+
+
 def operations(conn) -> dict[str, Any]:
     return {"health": [dict(row) for row in conn.execute("SELECT * FROM analysis_health_snapshots ORDER BY collected_at DESC LIMIT 100")],
             "proposals": [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals ORDER BY created_at DESC LIMIT 100")],
@@ -246,7 +259,9 @@ def report(conn, release_id: str) -> dict[str, Any]:
             "signals": list_signals(conn, release_id=release_id),
             "structured": structured(conn, release_id=release_id)["structured"],
             "links": {"links": list_links(conn, release_id=release_id)},
-            "themes": themes(conn, release_id=release_id)["themes"], "operations": operations(conn)}
+            "themes": themes(conn, release_id=release_id)["themes"],
+            "prevalence": prevalence(conn, release_id=release_id)["prevalence"],
+            "operations": operations(conn)}
 
 
 def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:

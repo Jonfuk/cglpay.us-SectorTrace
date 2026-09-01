@@ -1236,7 +1236,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/admin/analysis/models":
                 return analysis_admin.models(conn)
             if path == "/api/admin/analysis/prevalence":
-                return {"prevalence": []}
+                from pipeline.web import analysis as analysis_admin
+                return analysis_admin.prevalence(conn, release_id=_str(params, "release_id"), limit=_int(params, "limit", 100))
             if path == "/api/admin/analysis/operations":
                 return analysis_admin.operations(conn)
             if path == "/api/admin/analysis/runs":
