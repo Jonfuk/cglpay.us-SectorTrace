@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from pipeline.analysis import structured as structured_analysis
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded, run_batches
 from pipeline.analysis.domains import AnalysisDomainSpec, domain_registry
 from pipeline.analysis.graph import (
@@ -69,6 +70,31 @@ def test_structured_comparison_and_anomaly_guards():
     assert compare_periods(previous, current)["percentage_change"] == 50
     assert anomaly(10, [1, 1, 1, 1, 1])["robust_z"] is None
     assert compare_periods(previous, Observation("metric", "r3", "authority", "a1", "vacancies", 1, "percent", "2025", "2025"))["comparable"] is False
+
+
+def test_postgres_schema_probe_rolls_back_failed_pragma():
+    class Cursor:
+        description = [("supplier_id",), ("date_start",)]
+
+    class PostgresLikeConnection:
+        def __init__(self):
+            self.failed = False
+            self.rollback_count = 0
+
+        def execute(self, sql):
+            if sql.startswith("PRAGMA"):
+                self.failed = True
+                raise RuntimeError("syntax error at PRAGMA")
+            if self.failed and self.rollback_count == 0:
+                raise RuntimeError("current transaction is aborted")
+            return Cursor()
+
+        def rollback(self):
+            self.rollback_count += 1
+
+    conn = PostgresLikeConnection()
+    assert structured_analysis._columns(conn, "contracts") == {"supplier_id", "date_start"}
+    assert conn.rollback_count == 1
 
 
 def test_categorical_transitions_keep_states_and_do_not_calculate():
