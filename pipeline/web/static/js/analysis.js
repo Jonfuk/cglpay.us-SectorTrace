@@ -49,7 +49,10 @@ function renderReleases(items) {
 }
 
 function renderOverview(overview, domains, operations, models) {
-  document.querySelector('#analysis-executor').textContent = overview.executor === 'control_plane_only' ? 'Control plane ready' : (overview.executor || 'Unknown executor');
+  const executorLabels = {worker_online: 'Worker online', worker_offline: 'Worker offline', control_plane_only: 'Control plane only'};
+  const worker = overview.worker || {};
+  document.querySelector('#analysis-executor').textContent = executorLabels[overview.executor] || overview.executor || 'Unknown executor';
+  document.querySelector('#analysis-executor').title = worker.worker_id ? `${worker.worker_id} · ${worker.status || 'unknown'}` : 'No analysis worker heartbeat has been received';
   renderDomainOptions(domains.domains);
   renderRun(overview.latest_run, document.querySelector('#analysis-current-run'));
   renderHistory(operations.runs || []);

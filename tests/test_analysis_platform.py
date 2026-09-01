@@ -4,7 +4,12 @@ import pytest
 
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded, run_batches
 from pipeline.analysis.domains import AnalysisDomainSpec, domain_registry
-from pipeline.analysis.graph import EDGE_TYPES, NODE_LABELS, exact_entity_attachment
+from pipeline.analysis.graph import (
+    EDGE_TYPES,
+    NODE_LABELS,
+    exact_entity_attachment,
+    queue_release_projection,
+)
 from pipeline.analysis.linking import link_signals
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
 from pipeline.analysis.operations import detect_drift
@@ -99,6 +104,14 @@ def test_graph_projection_isolated_from_canonical_claims():
     assert "SUPPORTED_BY" not in EDGE_TYPES
     assert exact_entity_attachment("entity-1", [{"exact": True}]) == "entity-1"
     assert exact_entity_attachment("entity-1", [{"exact": False}]) is None
+
+
+def test_signal_graph_rebuild_is_durable_and_isolated(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    result = queue_release_projection(conn, release["release_id"])
+    assert result["status"] == "queued"
+    assert conn.execute("SELECT COUNT(*) FROM signal_graph_projection_queue WHERE release_id = ?",
+                        (release["release_id"],)).fetchone()[0] == 1
 
 
 def test_admin_analysis_read_models_are_admin_only(conn):

@@ -2034,7 +2034,20 @@ class Handler(BaseHTTPRequestHandler):
         return self._analysis_proposal_decision(body, "dismissed")
 
     def _analysis_graph_rebuild(self, body: dict) -> Any:
-        raise ApiError("Graph rebuild requires an explicitly configured Neo4j signal projection worker.", status=503)
+        conn = db.get_connection(self.settings)
+        try:
+            from pipeline.analysis.graph import queue_release_projection
+            release_id = str(body.get("release_id") or "")
+            if not release_id:
+                row = conn.execute("SELECT release_id FROM analysis_releases ORDER BY created_at DESC LIMIT 1").fetchone()
+                release_id = row["release_id"] if row else ""
+            if not release_id:
+                raise ApiError("No analysis release is available to project.", status=400)
+            return queue_release_projection(conn, release_id)
+        except KeyError as exc:
+            raise ApiError(f"No analysis release {exc.args[0]}.", status=404) from None
+        finally:
+            conn.close()
 
     def _qc_draw(self, body: dict) -> Any:
         """Draw a reproducible QC sample (BETA-106). Deterministic on the

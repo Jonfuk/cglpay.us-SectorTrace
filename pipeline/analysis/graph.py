@@ -16,6 +16,49 @@ class SignalGraphError(RuntimeError):
     pass
 
 
+def queue_release_projection(conn, release_id: str) -> dict[str, Any]:
+    """Queue an isolated signal projection for a known analysis release."""
+    release = conn.execute("SELECT release_id FROM analysis_releases WHERE release_id = ?", (release_id,)).fetchone()
+    if release is None:
+        raise KeyError(release_id)
+    objects = [("release", release_id)]
+    objects.extend(("signal", row["signal_id"]) for row in conn.execute(
+        "SELECT signal_id FROM automated_signals WHERE release_id = ?", (release_id,)))
+    objects.extend(("theme", row["theme_id"]) for row in conn.execute(
+        "SELECT theme_id FROM emerging_themes WHERE release_id = ?", (release_id,)))
+    pending = 0
+    for object_type, object_id in objects:
+        existing = conn.execute(
+            "SELECT 1 FROM signal_graph_projection_queue WHERE release_id = ? AND object_type = ? "
+            "AND object_id = ? AND processed_at IS NULL LIMIT 1",
+            (release_id, object_type, object_id)).fetchone()
+        if existing:
+            continue
+        conn.execute(
+            "INSERT INTO signal_graph_projection_queue (queue_id, release_id, object_type, object_id, operation, created_at) "
+            "VALUES (?, ?, ?, ?, 'upsert', ?)",
+            (f"signal-graph-queue-{uuid.uuid4()}", release_id, object_type, object_id, utcnow()))
+        pending += 1
+    conn.commit()
+    return {"release_id": release_id, "queued": pending, "status": "queued"}
+
+
+def signal_store_from_settings(settings: Any) -> SignalGraphStore:
+    """Build the optional Neo4j signal store, failing closed when disabled."""
+    if not getattr(settings, "neo4j_enabled", False):
+        raise SignalGraphError("Neo4j signal projection is disabled")
+    try:
+        from neo4j import GraphDatabase
+    except ImportError as exc:
+        raise SignalGraphError("the graph extra is not installed") from exc
+    driver = GraphDatabase.driver(
+        settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password),
+        database=settings.neo4j_database)
+    if getattr(settings, "neo4j_verify_connectivity", True):
+        driver.verify_connectivity()
+    return SignalGraphStore(driver)
+
+
 class SignalGraphStore:
     """Small driver wrapper whose Cypher never mentions canonical Claim nodes."""
 

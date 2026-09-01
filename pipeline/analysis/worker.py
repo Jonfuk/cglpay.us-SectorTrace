@@ -16,6 +16,7 @@ from typing import Any
 from pipeline import db
 from pipeline.analysis import domains
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
+from pipeline.analysis.graph import project_release, signal_store_from_settings
 from pipeline.analysis.linking import link_signals, save_link
 from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
 from pipeline.analysis.narrative import (
@@ -58,6 +59,7 @@ class AnalysisWorker:
         while True:
             self._heartbeat("polling")
             if self.run_once() is None:
+                self._process_graph_queue()
                 time.sleep(self.poll_seconds)
 
     def run_once(self) -> dict[str, Any] | None:
@@ -92,6 +94,40 @@ class AnalysisWorker:
                 (self.worker_id, now, status, worker_version))
             conn.commit()
         finally:
+            conn.close()
+
+    def _process_graph_queue(self) -> None:
+        """Project one queued release when the deployment explicitly enables Neo4j."""
+        conn = db.get_connection(self.settings)
+        store = None
+        try:
+            queue = conn.execute(
+                "SELECT release_id FROM signal_graph_projection_queue WHERE processed_at IS NULL "
+                "ORDER BY created_at LIMIT 1").fetchone()
+            if queue is None:
+                return
+            try:
+                store = signal_store_from_settings(self.settings)
+            except Exception:
+                return
+            self._heartbeat("projecting")
+            release_id = queue["release_id"]
+            project_release(conn, store, release_id)
+            conn.execute(
+                "UPDATE signal_graph_projection_queue SET processed_at = ?, attempt_count = attempt_count + 1, "
+                "last_error = NULL WHERE release_id = ? AND processed_at IS NULL",
+                (utcnow(), release_id))
+            conn.commit()
+        except Exception as exc:
+            if queue is not None:
+                conn.execute(
+                    "UPDATE signal_graph_projection_queue SET attempt_count = attempt_count + 1, last_error = ? "
+                    "WHERE release_id = ? AND processed_at IS NULL",
+                    (str(exc), queue["release_id"]))
+                conn.commit()
+        finally:
+            if store is not None:
+                store.driver.close()
             conn.close()
 
     def _claim(self) -> str | None:
