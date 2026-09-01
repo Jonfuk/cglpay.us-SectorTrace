@@ -225,8 +225,11 @@ class AnalysisWorker:
                 raise KeyError(run_id)
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
             conn.commit()
+            self._heartbeat("running")
             observations = observations_for_domain(conn, spec.source_tables)
+            self._heartbeat("running")
             comparisons = comparisons_for_domain(observations)
+            self._heartbeat("running")
             if domain_id == "regulation_enforcement":
                 try:
                     cqc_rows = [dict(row) for row in conn.execute(

@@ -27,10 +27,11 @@ function renderRun(run, target) {
   const status = run.status || 'unknown';
   const pct = Number(run.progress_percent || 0);
   const domains = (run.domains || []).map(item => `<div class="listrow"><strong>${esc(item.domain_id)}</strong>${row(`${item.status} · ${item.rows_processed || 0} rows processed`)}</div>`).join('');
-  const executorNote = run.control_plane_only ? '<div class="warn">Run control is connected. Processing remains queued until the analysis worker is configured.</div>' : '';
+  const executorNote = run.control_plane_only && status === 'queued' ? '<div class="warn">Run control is connected. Processing remains queued until the analysis worker is configured.</div>' : '';
+  const staleHeartbeatNote = run.control_plane_only && status === 'running' ? '<div class="warn">The worker heartbeat is stale while this run is active. Check the worker container if progress does not resume.</div>' : '';
   const errorDetail = run.error_detail || (run.domains || []).find(item => item.error_detail)?.error_detail;
   const failureNote = errorDetail ? `<div class="error"><strong>Failure:</strong> ${esc(errorDetail)}</div>` : '';
-  target.innerHTML = `<div class="run-summary">${executorNote}${failureNote}
+  target.innerHTML = `<div class="run-summary">${executorNote}${staleHeartbeatNote}${failureNote}
     <div class="run-summary-head"><div><strong>${esc(run.run_kind)} run</strong>${row(`${run.status} · ${run.current_stage || 'queued'} · ${run.run_id}`)}</div><div class="actions">${runActions(run)}</div></div>
     <div class="progress-track" aria-label="${esc(pct)} percent complete"><span style="width:${Math.min(100, Math.max(0, pct))}%"></span></div>
     <div class="run-metrics"><span><strong>${esc(pct)}%</strong> complete</span><span><strong>${esc(run.completed_domains || 0)}/${esc(run.total_domains || 0)}</strong> domains</span><span><strong>${esc(run.model_calls || 0)}</strong> calls / estimate <strong>${esc(run.estimated_calls ?? '—')}</strong></span><span><strong>${esc(money(run.cost_micros))}</strong> spent / estimate <strong>${esc(money(run.estimated_cost_micros))}</strong></span><span>ceiling <strong>${esc(run.cost_ceiling_micros ? money(run.cost_ceiling_micros) : 'none')}</strong></span></div>
