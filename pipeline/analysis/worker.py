@@ -504,7 +504,9 @@ class AnalysisWorker:
                                           window_id=passage["evidence_ref"])
             except CostCeilingExceeded:
                 raise
-            except AnalysisModelUnavailable:
+            except AnalysisModelUnavailable as exc:
+                log.warning("analysis_model_unavailable", run_id=run_id, domain_id=domain_id,
+                            window_id=passage["evidence_ref"], error=str(exc))
                 model_unavailable = True
                 break
             candidate = candidate_from_payload(

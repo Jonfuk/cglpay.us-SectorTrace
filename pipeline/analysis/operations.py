@@ -46,8 +46,16 @@ def detect_drift(current: dict[str, Any], baseline: dict[str, Any] | None = None
     """Produce proposals only; no parser, policy, taxonomy or model is changed."""
     proposals: list[dict[str, Any]] = []
     baseline = baseline or {}
-    if current.get("expected_schema") and current.get("observed_schema") and current["expected_schema"] != current["observed_schema"]:
-        proposals.append({"proposal_type": "schema_drift", "trigger": {"expected": current["expected_schema"], "observed": current["observed_schema"]}})
+    expected_schema = current.get("expected_schema") or {}
+    observed_schema = current.get("observed_schema") or {}
+    # Health snapshots currently carry a table-name marker as their expected
+    # schema, while observed_schema is the actual column/type map. That marker
+    # is not a schema contract and must not be compared to the column map.
+    # Explicit column maps remain comparable for future callers.
+    comparable_schema = not (set(expected_schema) == {"table"} and
+                             isinstance(observed_schema, dict) and "table" not in observed_schema)
+    if expected_schema and observed_schema and comparable_schema and expected_schema != observed_schema:
+        proposals.append({"proposal_type": "schema_drift", "trigger": {"expected": expected_schema, "observed": observed_schema}})
     if current.get("content_hash") != baseline.get("content_hash") and not current.get("row_count"):
         proposals.append({"proposal_type": "content_changed_no_usable_records", "trigger": {"content_hash_changed": True, "row_count": current.get("row_count")}})
     if current.get("parse_success") is False:

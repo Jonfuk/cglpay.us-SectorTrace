@@ -247,6 +247,7 @@ def prevalence(conn, *, release_id: str | None = None, limit: int = 100) -> dict
 def operations(conn) -> dict[str, Any]:
     return {"health": [dict(row) for row in conn.execute("SELECT * FROM analysis_health_snapshots ORDER BY collected_at DESC LIMIT 100")],
             "proposals": [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals ORDER BY created_at DESC LIMIT 100")],
+            "model_calls": [dict(row) for row in conn.execute("SELECT * FROM analysis_model_calls ORDER BY created_at DESC LIMIT 100")],
             **runs(conn)}
 
 

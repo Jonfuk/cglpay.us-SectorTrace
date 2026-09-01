@@ -79,6 +79,16 @@ function renderProposals(items) {
   }).join('')}</tbody></table></div>`;
 }
 
+function renderModelCalls(items) {
+  const target = document.querySelector('#analysis-model-calls');
+  if (!items.length) { target.innerHTML = '<div class="empty">No model calls recorded.</div>'; return; }
+  target.innerHTML = `<div class="densewrap"><table class="dense model-call-table"><thead><tr><th>Created</th><th>Run / domain</th><th>Model</th><th>Status</th><th>Cost</th><th>Error</th></tr></thead><tbody>${items.map(call => {
+    const status = call.status || 'unknown';
+    const badge = status === 'ok' ? 'approved' : status === 'unavailable' || status === 'error' || status === 'invalid_json' ? 'rejected' : 'pending';
+    return `<tr><td>${esc(time(call.created_at))}</td><td>${row(call.run_id || 'No run')}${row(call.domain_id || '—')}</td><td>${esc(call.model_id)}${row(call.cached ? 'cached' : `${call.latency_ms ?? '—'} ms`)}</td><td><span class="badge ${badge}">${esc(status)}</span></td><td>${esc(money(call.cost_micros))}</td><td>${call.error_detail ? `<div class="error">${esc(call.error_detail)}</div>` : '—'}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
 function renderOverview(overview, domains, operations, models) {
   const executorLabels = {worker_online: 'Worker online', worker_offline: 'Worker offline', control_plane_only: 'Control plane only'};
   const worker = overview.worker || {};
@@ -89,6 +99,7 @@ function renderOverview(overview, domains, operations, models) {
   renderHistory(operations.runs || []);
   renderReleases(models.releases || []);
   renderProposals(operations.proposals || []);
+  renderModelCalls(operations.model_calls || []);
   const active = overview.latest_run && !terminal.has(overview.latest_run.status);
   document.querySelector('#analysis-start').disabled = Boolean(active);
   if (pollHandle) window.clearTimeout(pollHandle);

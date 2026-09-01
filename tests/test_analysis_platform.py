@@ -12,6 +12,7 @@ from pipeline.analysis.graph import (
     queue_release_projection,
 )
 from pipeline.analysis.linking import link_signals
+from pipeline.analysis.models import AnalysisModelClient, AnalysisModelUnavailable
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
 from pipeline.analysis.operations import decide_proposal, detect_drift, save_proposal
 from pipeline.analysis.prevalence import diagnostics
@@ -141,6 +142,33 @@ def test_links_require_canonical_identity_and_block_causal_explanation():
 def test_drift_is_proposal_only():
     proposals = detect_drift({"expected_schema": {"value": "number"}, "observed_schema": {"value": "text"}, "extractor_agreement": .90}, {"extractor_agreement": .99})
     assert {item["proposal_type"] for item in proposals} >= {"schema_drift", "extractor_agreement_drift"}
+
+
+def test_table_name_health_marker_is_not_schema_drift():
+    assert not any(item["proposal_type"] == "schema_drift" for item in detect_drift(
+        {"expected_schema": {"table": "committee_papers"},
+         "observed_schema": {"full_text": "25", "meeting_date": "25"}}))
+
+
+def test_model_unavailability_is_recorded(conn, settings, monkeypatch):
+    release = create_release(conn, settings, domains=["da"])
+    original_import = __import__("builtins").__import__
+
+    def no_openai(name, *args, **kwargs):
+        if name == "openai":
+            raise ImportError("test missing extra")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", no_openai)
+    client = AnalysisModelClient(settings, release_id=release["release_id"], run_id="run-model-error",
+                                 models={"scout": "test/model"}, conn=conn)
+    with pytest.raises(AnalysisModelUnavailable, match="requires the assistant extra"):
+        client.generate_json("test prompt", role="scout", domain_id="da", window_id="window-1")
+
+    row = conn.execute("SELECT status, model_id, error_detail FROM analysis_model_calls").fetchone()
+    assert row["status"] == "unavailable"
+    assert row["model_id"] == "test/model"
+    assert row["error_detail"] == "analysis model support requires the assistant extra"
 
 
 def test_graph_projection_isolated_from_canonical_claims():

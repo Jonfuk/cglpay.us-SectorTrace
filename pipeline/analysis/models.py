@@ -34,9 +34,15 @@ class AnalysisModelClient:
 
     def generate_json(self, prompt: str, *, role: str, domain_id: str,
                       window_id: str | None = None) -> dict[str, Any] | None:
+        self.last_cost_micros = 0
+        self.last_cached = False
         model_id = self.models.get(role)
         if not model_id:
-            raise AnalysisModelUnavailable(f"no model configured for analysis role {role!r}")
+            detail = f"no model configured for analysis role {role!r}"
+            self._record(model_id="unconfigured", domain_id=domain_id, prompt_sha=hashlib.sha256(prompt.encode()).hexdigest(),
+                         window_id=window_id, response=None, cost_micros=None, latency_ms=0,
+                         status="unavailable", cached=False, error_detail=detail)
+            raise AnalysisModelUnavailable(detail)
         prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
         cached = self.conn.execute(
             "SELECT response_json, cost_micros FROM analysis_model_calls "
@@ -48,17 +54,29 @@ class AnalysisModelClient:
             self.last_cached = True
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=cached["response_json"], cost_micros=0, latency_ms=0,
-                         status="ok", cached=True)
+                         status="ok", cached=True, error_detail=None)
             return json.loads(cached["response_json"])
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise AnalysisModelUnavailable("analysis model support requires the assistant extra") from exc
+            detail = "analysis model support requires the assistant extra"
+            self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
+                         response=None, cost_micros=None, latency_ms=0,
+                         status="unavailable", cached=False, error_detail=detail)
+            raise AnalysisModelUnavailable(detail) from exc
         if not getattr(self.settings, "assistant_enabled", False):
-            raise AnalysisModelUnavailable("analysis model support is disabled")
+            detail = "analysis model support is disabled"
+            self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
+                         response=None, cost_micros=None, latency_ms=0,
+                         status="unavailable", cached=False, error_detail=detail)
+            raise AnalysisModelUnavailable(detail)
         base_url = getattr(self.settings, "assistant_ollama_url", "")
         if not base_url:
-            raise AnalysisModelUnavailable("no OpenAI-compatible analysis endpoint is configured")
+            detail = "no OpenAI-compatible analysis endpoint is configured"
+            self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
+                         response=None, cost_micros=None, latency_ms=0,
+                         status="unavailable", cached=False, error_detail=detail)
+            raise AnalysisModelUnavailable(detail)
         started = time.monotonic()
         try:
             client = OpenAI(base_url=base_url, api_key=resolved_api_key(self.settings) or "no-key-configured")
@@ -75,15 +93,18 @@ class AnalysisModelClient:
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=None, cost_micros=None,
                          latency_ms=round((time.monotonic() - started) * 1000),
-                         status="error", cached=False)
-            raise AnalysisModelUnavailable(f"{model_id} did not respond: {type(exc).__name__}: {exc}") from exc
+                         status="error", cached=False,
+                         error_detail=f"{type(exc).__name__}: {exc}")
+            detail = f"{model_id} did not respond: {type(exc).__name__}: {exc}"
+            raise AnalysisModelUnavailable(detail) from exc
         try:
             payload = json.loads(content)
         except (TypeError, ValueError) as exc:
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=content, cost_micros=None,
                          latency_ms=round((time.monotonic() - started) * 1000),
-                         status="invalid_json", cached=False)
+                         status="invalid_json", cached=False,
+                         error_detail=f"invalid JSON response: {type(exc).__name__}: {exc}")
             raise AnalysisModelUnavailable("analysis model returned invalid JSON") from exc
         usage = getattr(response, "usage", None)
         raw_cost = getattr(usage, "cost", None) if usage is not None else None
@@ -100,11 +121,11 @@ class AnalysisModelClient:
 
     def _record(self, *, model_id: str, domain_id: str, prompt_sha: str, window_id: str | None,
                 response: str | None, cost_micros: int | None, latency_ms: int,
-                status: str, cached: bool) -> None:
+                status: str, cached: bool, error_detail: str | None = None) -> None:
         self.conn.execute(
             "INSERT INTO analysis_model_calls (model_call_id, release_id, run_id, domain_id, window_id, "
-            "model_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "model_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, status, error_detail, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (f"model-call-{uuid.uuid4()}", self.release_id, self.run_id, domain_id, window_id,
-             model_id, prompt_sha, response, int(cached), cost_micros, latency_ms, status, utcnow()))
+             model_id, prompt_sha, response, int(cached), cost_micros, latency_ms, status, error_detail, utcnow()))
         self.conn.commit()
