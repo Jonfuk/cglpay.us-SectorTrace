@@ -16,6 +16,8 @@ sectortrace — operate the self-hosted stack
 
   sectortrace <pipeline-command> [args]   run a pipeline command in the app
   sectortrace documents <args>            run in the documents worker instead
+  sectortrace analysis <args>             run an analysis-worker command
+  sectortrace analysis-worker-logs        follow the analysis worker log
   sectortrace psql                        a psql shell on the warehouse
   sectortrace shell                       a shell in the app container
   sectortrace ps | logs [svc] | restart [svc] | up | down
@@ -56,6 +58,15 @@ case "$1" in
     documents)
         shift
         exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    analysis)
+        shift
+        exec docker compose -f docker-compose.documents.yml run --rm --entrypoint pipeline analysis-worker analysis "$@"
+        ;;
+
+    analysis-worker-logs)
+        exec docker compose -f docker-compose.documents.yml logs -f --tail=200 analysis-worker
         ;;
 
     *)

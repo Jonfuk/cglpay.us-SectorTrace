@@ -443,6 +443,17 @@ cd /opt/sectortrace/state
 docker compose -f docker-compose.documents.yml run --rm documents documents status
 docker compose -f docker-compose.documents.yml run --rm documents documents process \
   --source-system committee_papers --limit 25
+docker compose -f docker-compose.documents.yml ps analysis-worker
+docker compose -f docker-compose.documents.yml logs -f --tail=200 analysis-worker
+```
+
+The same documents image also runs the persistent `analysis-worker` service.
+It consumes runs started from `/admin/analysis` and must use the same
+`DATABASE_URL` as the always-on app. Ansible starts it after the app health
+gate; a manual host can start it with:
+
+```bash
+docker compose -f docker-compose.documents.yml up -d analysis-worker
 ```
 
 It shares the `sectortrace_net` Docker network with the always-on stack, so

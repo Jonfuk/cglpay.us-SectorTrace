@@ -163,6 +163,15 @@
   until: sectortrace_health.status is defined and sectortrace_health.status == 200
   failed_when: sectortrace_health.status is not defined or sectortrace_health.status != 200
 
+# The analysis control plane lives in the always-on app, while the executor
+# uses the heavy document-worker image. Start the queue consumer only after the
+# app health gate has proved that migrations and the shared warehouse are ready.
+- name: Bring up the analysis worker
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml up -d analysis-worker
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
 # The one-time catch-up of document_embeddings.embedding_vec for rows that
 # predate migration 0071. Deliberately *after* the health gate, never inside
 # `pipeline migrate`: on a populated warehouse this fills six figures of rows
