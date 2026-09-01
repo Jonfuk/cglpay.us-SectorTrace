@@ -5,7 +5,7 @@ import json
 import uuid
 from typing import Iterable
 
-from pipeline.analysis.domains import AnalysisDomainSpec, get_domain
+from pipeline.analysis.domains import get_domain
 from pipeline.analysis.signals import Signal
 
 
@@ -41,12 +41,15 @@ def list_signals(conn, *, release_id: str | None = None, domain_id: str | None =
     where: list[str] = []
     params: list = []
     if release_id:
-        where.append("release_id = ?"); params.append(release_id)
+        where.append("release_id = ?")
+        params.append(release_id)
     if domain_id:
         get_domain(domain_id)
-        where.append("domain_id = ?"); params.append(domain_id)
+        where.append("domain_id = ?")
+        params.append(domain_id)
     if subject_id:
-        where.append("subject_id = ?"); params.append(subject_id)
+        where.append("subject_id = ?")
+        params.append(subject_id)
     params.append(max(1, min(int(limit), 500)))
     rows = conn.execute("SELECT * FROM automated_signals" +
                        ((" WHERE " + " AND ".join(where)) if where else "") +
