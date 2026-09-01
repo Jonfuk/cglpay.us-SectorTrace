@@ -27,7 +27,8 @@ function renderRun(run, target) {
   const status = run.status || 'unknown';
   const pct = Number(run.progress_percent || 0);
   const domains = (run.domains || []).map(item => `<div class="listrow"><strong>${esc(item.domain_id)}</strong>${row(`${item.status} · ${item.rows_processed || 0} rows processed`)}</div>`).join('');
-  target.innerHTML = `<div class="run-summary">
+  const executorNote = run.control_plane_only ? '<div class="warn">Run control is connected. Processing remains queued until the analysis worker is configured.</div>' : '';
+  target.innerHTML = `<div class="run-summary">${executorNote}
     <div class="run-summary-head"><div><strong>${esc(run.run_kind)} run</strong>${row(`${run.status} · ${run.current_stage || 'queued'} · ${run.run_id}`)}</div><div class="actions">${runActions(run)}</div></div>
     <div class="progress-track" aria-label="${esc(pct)} percent complete"><span style="width:${Math.min(100, Math.max(0, pct))}%"></span></div>
     <div class="run-metrics"><span><strong>${esc(pct)}%</strong> complete</span><span><strong>${esc(run.completed_domains || 0)}/${esc(run.total_domains || 0)}</strong> domains</span><span><strong>${esc(run.model_calls || 0)}</strong> model calls</span><span><strong>${esc(money(run.cost_micros))}</strong> spent</span><span>ceiling <strong>${esc(run.cost_ceiling_micros ? money(run.cost_ceiling_micros) : 'none')}</strong></span></div>

@@ -107,6 +107,11 @@ def test_analysis_run_controls_are_durable_and_resumable(conn, settings):
     assert resumed["domains"][0]["status"] == "pending"
 
 
+def test_analysis_run_rejects_empty_domain_selection(conn, settings):
+    with pytest.raises(ValueError, match="at least one"):
+        analysis_admin.start_run(conn, settings, {"domains": []})
+
+
 def test_batch_budget_stops_at_ceiling_and_boundary():
     budget = CallBudget(ceiling_micros=10)
     budget.before_call(10)

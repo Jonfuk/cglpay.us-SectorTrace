@@ -180,6 +180,8 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     requested = body.get("domains")
     if requested is not None and (not isinstance(requested, list) or not all(isinstance(x, str) for x in requested)):
         raise ValueError("domains must be a list of domain ids")
+    if requested == []:
+        raise ValueError("select at least one analysis domain")
     run_kind = str(body.get("run_kind") or "complete")
     if run_kind not in _RUN_KINDS:
         raise ValueError(f"run_kind must be one of {sorted(_RUN_KINDS)}")
