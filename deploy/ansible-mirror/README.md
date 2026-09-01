@@ -95,6 +95,13 @@ change does not also start crawling live public sources a second time from a
 second box. If a queue item specifically needs to exercise collection, that
 is a deliberate follow-up decision, not this role's default.
 
+On a beta box, the playbook does start the persistent admin analysis worker in
+the documents-worker image. It consumes runs created by `/admin/analysis` and
+shares the beta warehouse with the app. Operate it with
+`sectortrace-mirror analysis-start`, `sectortrace-mirror analysis-stop`, and
+`sectortrace-mirror analysis-worker-logs`. Disaster-recovery mirrors do not
+start this consumer because their warehouse is replaced by sync.
+
 That follow-up is a file: **`<state_dir>/.env.merge`**, which for a mirror
 is `/opt/sectortrace-mirror/state/.env.merge`. Put the module API keys (and
 any other per-box environment overrides) there, one `KEY=VALUE` per line,
@@ -517,16 +524,12 @@ Set the list back to empty and re-run to tear all of it down again.
 - **No backup timer.** The mirror is a copy of something that is already
   backed up, and its restore path is "sync again". Note what that means the
   moment you promote it: from then on nothing here is backed up by anything.
-- **A documents-worker image, mostly pointless to run here.** Derived output
-  goes into the warehouse, and the warehouse is replaced at the next sync. It
-  is built because a mirror is also the box you take a source deployment's
-  place with, and an image that has never been built is a bad thing to
-  discover on that day. The one case where running it here earns its keep:
-  `mirror_nlp_rebuild: true`, where the sync itself uses it to rebuild
-  `document_embeddings` a source that ships no `nlp` extra never produced —
-  see "What a sync does", step 8. `sectortrace-mirror nlp <args>` also routes
-  here, for the same reason (the `nlp` extra is in this image, not the
-  always-on app).
+- **The documents-worker image.** Document parsing remains available on
+  demand, and beta boxes additionally keep the `analysis-worker` queue
+  consumer running so `/admin/analysis` can execute against the seeded,
+  writable warehouse. Disaster-recovery mirrors do not start that consumer.
+  `sectortrace-mirror nlp <args>` routes here too, because the `nlp` extra is
+  in this image rather than the always-on app.
 
 ## The analyst assistant (optional, off)
 

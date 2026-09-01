@@ -288,7 +288,9 @@ Its wizard asks up front which of two things to build:
   seeds from the same sync paths **once** rather than nightly, and is then
   left as an ordinary writable database — for testing that branch's changes
   against realistic data without the next nightly sync discarding what
-  testing wrote, and without touching production.
+  testing wrote, and without touching production. The documents-worker image
+  also runs the persistent admin analysis queue consumer in this mode; it is
+  not started on disaster-recovery mirrors.
 
 Six of its seven roles are the self-host build's, used unchanged. The thing
 to know before running it is that the warehouse is replaced wholesale on

@@ -27,6 +27,10 @@ sectortrace-mirror — operate the mirror stack
   sectortrace-mirror check-source               compare both warehouses, change neither
   sectortrace-mirror promote --confirm          stop being a mirror; take the source's place
   sectortrace-mirror documents <args>           run in the documents worker instead
+  sectortrace-mirror analysis <args>            run an analysis-worker command
+  sectortrace-mirror analysis-start            start the beta analysis worker
+  sectortrace-mirror analysis-stop             stop the beta analysis worker
+  sectortrace-mirror analysis-worker-logs      follow the analysis worker log
   sectortrace-mirror nlp <args>                 semantic-analysis layer; runs in the documents worker
   sectortrace-mirror psql                       a psql shell on this box's warehouse
   sectortrace-mirror shell                      a shell in the app container
@@ -39,10 +43,10 @@ Examples
   sectortrace-mirror coverage-report
   sectortrace-mirror logs app
 
-What NOT to do here: anything that writes evidence. Collection, promotion
-and review-queue decisions belong on the source deployment — this box's
-warehouse is replaced wholesale by the next sync, and work done here is
-discarded without a word.
+What NOT to do here: collection, promotion and review-queue decisions. Those
+belong on the source deployment. Admin analysis is supported on beta mirrors;
+on a disaster-recovery mirror this box's warehouse is replaced wholesale by
+the next sync, so derived work done there is discarded.
 EOF_USAGE
 }
 
@@ -56,6 +60,14 @@ case "$1" in
     down)    exec docker compose down ;;
     logs)    shift; exec docker compose logs -f --tail=200 "$@" ;;
     restart) shift; exec docker compose restart "$@" ;;
+
+    analysis-start)
+        exec docker compose -f docker-compose.documents.yml up -d analysis-worker
+        ;;
+
+    analysis-stop)
+        exec docker compose -f docker-compose.documents.yml stop analysis-worker
+        ;;
 
     shell)   exec docker compose exec app /bin/bash ;;
     # The container's own client, so there is never a client/server version
@@ -154,6 +166,15 @@ EOF_PROMOTE
     documents)
         shift
         exec docker compose -f docker-compose.documents.yml run --rm documents "$@"
+        ;;
+
+    analysis)
+        shift
+        exec docker compose -f docker-compose.documents.yml run --rm --entrypoint pipeline analysis-worker analysis "$@"
+        ;;
+
+    analysis-worker-logs)
+        exec docker compose -f docker-compose.documents.yml logs -f --tail=200 analysis-worker
         ;;
 
     # The semantic-analysis layer (034*, `pipeline nlp …`) needs the `nlp`

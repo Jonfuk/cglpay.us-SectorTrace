@@ -260,7 +260,9 @@
 
 - name: Build the documents-worker image
   ansible.builtin.command:
-    cmd: docker compose -f docker-compose.documents.yml build documents
+    cmd: >-
+      docker compose -f docker-compose.documents.yml build documents
+      {% if mirror_role == 'beta' %}analysis-worker{% endif %}
     chdir: "{{ state_dir }}"
   changed_when: true
 
@@ -323,6 +325,18 @@
   delay: 5
   until: sectortrace_mirror_health.status is defined and sectortrace_mirror_health.status == 200
   failed_when: sectortrace_mirror_health.status is not defined or sectortrace_mirror_health.status != 200
+
+# The analysis control plane lives in the always-on app, while the executor
+# uses the heavy document-worker image. A beta mirror is writable and is the
+# supported mirror mode for running admin analysis against seeded data. A
+# disaster-recovery mirror deliberately has no queue consumer because its
+# warehouse is replaced by sync and is not a working copy.
+- name: Bring up the analysis worker on beta mirrors
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml up -d analysis-worker
+    chdir: "{{ state_dir }}"
+  when: mirror_role == 'beta'
+  changed_when: true
 
 # The one-time catch-up of document_embeddings.embedding_vec for rows that
 # predate migration 0071. Deliberately *after* the health gate, never inside
