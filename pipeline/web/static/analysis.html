@@ -41,6 +41,19 @@
     <section class="panel" id="analysis-current-run-panel"><h2>Current run</h2><div id="analysis-current-run"><div class="empty">No analysis run has been started.</div></div></section>
     <section class="panel"><h2>Run history</h2><div id="analysis-run-history"><div class="empty">No run history.</div></div></section>
     <section class="panel"><div class="analysis-section-head"><div><h2>Release controls</h2><p class="muted small">Activate only a complete release. Rollback records an admin decision and never changes canonical claims.</p></div></div><div id="analysis-releases"><div class="empty">No releases.</div></div></section>
+    <section class="panel">
+      <div class="analysis-section-head">
+        <div><h2>Adaptation proposals</h2><p class="muted small">Review operational drift findings before recording an admin decision. Proposals never change parsers, taxonomies or models automatically.</p></div>
+        <label class="proposal-filter">Show
+          <select id="analysis-proposal-filter">
+            <option value="pending" selected>Pending only</option>
+            <option value="all">All proposals</option>
+            <option value="decided">Decided only</option>
+          </select>
+        </label>
+      </div>
+      <div id="analysis-proposals"><div class="empty">Loading proposals…</div></div>
+    </section>
     <div class="cards" id="analysis-cards"></div>
     <div class="split">
       <section class="panel"><h2>Domain status</h2><div id="analysis-domains"></div></section>

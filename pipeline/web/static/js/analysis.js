@@ -5,6 +5,8 @@ const row = value => `<div class="small">${esc(value)}</div>`;
 const money = micros => micros == null ? '—' : `£${(Number(micros || 0) / 1000000).toFixed(4)}`;
 const time = value => value ? new Date(value).toLocaleString('en-GB', {dateStyle: 'medium', timeStyle: 'short'}) : '—';
 const terminal = new Set(['cancelled', 'complete', 'failed', 'interrupted']);
+const proposalFilter = {value: 'pending'};
+let proposalItems = [];
 let pollHandle = null;
 
 function selectedDomains() {
@@ -51,6 +53,32 @@ function renderReleases(items) {
   target.innerHTML = `<div class="densewrap"><table class="dense"><thead><tr><th>Created</th><th>Release</th><th>Status</th><th>Actions</th></tr></thead><tbody>${items.map(release => `<tr><td>${esc(time(release.created_at))}</td><td><strong>${esc(release.release_id)}</strong><div class="small mono">${esc(release.manifest_sha256)}</div></td><td><span class="badge ${release.status === 'active' ? 'approved' : release.status === 'rolled_back' ? 'rejected' : 'pending'}">${esc(release.status)}</span></td><td><div class="actions"><button class="btn approve" data-release-action="activate" data-release-id="${esc(release.release_id)}" ${release.status === 'active' || release.status === 'rolled_back' ? 'disabled' : ''}>Activate</button><button class="btn reject" data-release-action="rollback" data-release-id="${esc(release.release_id)}" ${release.status === 'rolled_back' ? 'disabled' : ''}>Rollback</button><button class="btn" data-graph-action="rebuild" data-release-id="${esc(release.release_id)}">Queue graph</button><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}" download>JSON</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=csv" download>CSV</a><a class="btn" href="/api/admin/analysis/reports/${encodeURIComponent(release.release_id)}?format=html" target="_blank" rel="noopener">Printable HTML</a></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 
+function proposalTrigger(value) {
+  try { return JSON.stringify(JSON.parse(value || '{}'), null, 2); }
+  catch (_) { return String(value || '{}'); }
+}
+
+function proposalBadge(status) {
+  return status === 'accepted' ? 'approved' : status === 'dismissed' ? 'rejected' : 'pending';
+}
+
+function renderProposals(items) {
+  proposalItems = Array.isArray(items) ? items : [];
+  const target = document.querySelector('#analysis-proposals');
+  const filtered = proposalItems.filter(item => proposalFilter.value === 'all'
+    || (proposalFilter.value === 'pending' ? item.status === 'pending' : item.status !== 'pending'));
+  const pending = proposalItems.filter(item => item.status === 'pending').length;
+  if (!proposalItems.length) { target.innerHTML = '<div class="empty">No adaptation proposals recorded.</div>'; return; }
+  const summary = `<div class="proposal-summary small"><strong>${esc(pending)}</strong> pending · <strong>${esc(proposalItems.length)}</strong> shown in the operations window</div>`;
+  if (!filtered.length) { target.innerHTML = `${summary}<div class="empty">No proposals match this filter.</div>`; return; }
+  target.innerHTML = `${summary}<div class="densewrap"><table class="dense proposal-table"><thead><tr><th>Created</th><th>Proposal</th><th>Scope</th><th>Trigger</th><th>Status</th><th>Decision</th></tr></thead><tbody>${filtered.map(proposal => {
+    const status = proposal.status || 'pending';
+    const decision = status === 'pending' ? `<div class="actions"><button class="btn approve" data-proposal-action="accept" data-proposal-id="${esc(proposal.proposal_id)}">Accept</button><button class="btn" data-proposal-action="defer" data-proposal-id="${esc(proposal.proposal_id)}">Defer</button><button class="btn reject" data-proposal-action="dismiss" data-proposal-id="${esc(proposal.proposal_id)}">Dismiss</button></div>` : row(proposal.decided_at ? `Decided ${time(proposal.decided_at)}` : 'Decision recorded');
+    const reason = proposal.admin_reason ? row(`Reason: ${proposal.admin_reason}`) : '';
+    return `<tr><td>${esc(time(proposal.created_at))}</td><td><strong>${esc(proposal.proposal_type)}</strong>${row(proposal.proposal_id)}</td><td>${row(proposal.domain_id || 'All domains')}${row(proposal.release_id || 'No release')}</td><td><details><summary>View trigger</summary><pre class="context">${esc(proposalTrigger(proposal.trigger_json))}</pre>${proposal.automatic_action ? row(`Suggested safe action: ${proposal.automatic_action}`) : ''}</details></td><td><span class="badge ${proposalBadge(status)}">${esc(status)}</span>${reason}</td><td>${decision}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
 function renderOverview(overview, domains, operations, models) {
   const executorLabels = {worker_online: 'Worker online', worker_offline: 'Worker offline', control_plane_only: 'Control plane only'};
   const worker = overview.worker || {};
@@ -60,6 +88,7 @@ function renderOverview(overview, domains, operations, models) {
   renderRun(overview.latest_run, document.querySelector('#analysis-current-run'));
   renderHistory(operations.runs || []);
   renderReleases(models.releases || []);
+  renderProposals(operations.proposals || []);
   const active = overview.latest_run && !terminal.has(overview.latest_run.status);
   document.querySelector('#analysis-start').disabled = Boolean(active);
   if (pollHandle) window.clearTimeout(pollHandle);
@@ -106,6 +135,10 @@ document.querySelector('#analysis-run-form').addEventListener('submit', async ev
 });
 
 document.querySelector('#analysis-refresh').addEventListener('click', load);
+document.querySelector('#analysis-proposal-filter').addEventListener('change', event => {
+  proposalFilter.value = event.target.value;
+  renderProposals(proposalItems);
+});
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-run-action]');
   if (!button) return;
@@ -113,6 +146,25 @@ document.addEventListener('click', async event => {
   try { await actionRun(button.dataset.runAction, button.dataset.runId); await load(); }
   catch (error) { document.querySelector('#analysis-action-message').textContent = error.message; document.querySelector('#analysis-action-message').className = 'error'; }
   finally { button.disabled = false; }
+});
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-proposal-action]');
+  if (!button) return;
+  const action = button.dataset.proposalAction;
+  const label = action === 'accept' ? 'accept' : action === 'dismiss' ? 'dismiss' : 'defer';
+  const reason = window.prompt(`Reason to ${label} this proposal (optional):`);
+  if (reason === null) return;
+  button.disabled = true;
+  try {
+    await post(`/api/admin/analysis/proposals/${action}`, {proposal_id: button.dataset.proposalId, reason: reason || null});
+    document.querySelector('#analysis-action-message').className = 'small';
+    document.querySelector('#analysis-action-message').textContent = `Proposal ${button.dataset.proposalId} marked ${action === 'accept' ? 'accepted' : action === 'dismiss' ? 'dismissed' : 'deferred'}.`;
+    await load();
+  } catch (error) {
+    document.querySelector('#analysis-action-message').textContent = error.message;
+    document.querySelector('#analysis-action-message').className = 'error';
+  } finally { button.disabled = false; }
 });
 
 document.addEventListener('click', async event => {

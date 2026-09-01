@@ -13,7 +13,7 @@ from pipeline.analysis.graph import (
 )
 from pipeline.analysis.linking import link_signals
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
-from pipeline.analysis.operations import detect_drift
+from pipeline.analysis.operations import decide_proposal, detect_drift, save_proposal
 from pipeline.analysis.prevalence import diagnostics
 from pipeline.analysis.quality import ProgramMetrics, promotion_eligible
 from pipeline.analysis.releases import create_release, load_release
@@ -161,6 +161,25 @@ def test_signal_graph_rebuild_is_durable_and_isolated(conn, settings):
 def test_admin_analysis_read_models_are_admin_only(conn):
     assert analysis_admin.overview(conn)["counts"]["automated_signals"] == 0
     assert analysis_admin.graph(conn)["canonical_claim_isolation"] is True
+
+
+def test_adaptation_proposals_are_visible_and_decidable(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    proposal_id = save_proposal(conn, {"proposal_type": "parse_rate_drift", "trigger": {"percentage_points": -4.5}},
+                                release_id=release["release_id"], domain_id="da")
+    conn.commit()
+
+    proposals = analysis_admin.operations(conn)["proposals"]
+    proposal = next(item for item in proposals if item["proposal_id"] == proposal_id)
+    assert proposal["release_id"] == release["release_id"]
+    assert proposal["status"] == "pending"
+    assert proposal["trigger_json"] == '{"percentage_points": -4.5}'
+
+    decide_proposal(conn, proposal_id, status="deferred", admin_reason="Review after the next pilot.")
+    conn.commit()
+    decided = next(item for item in analysis_admin.operations(conn)["proposals"] if item["proposal_id"] == proposal_id)
+    assert decided["status"] == "deferred"
+    assert decided["admin_reason"] == "Review after the next pilot."
 
 
 def test_analysis_run_controls_are_durable_and_resumable(conn, settings):

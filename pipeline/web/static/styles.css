@@ -190,6 +190,11 @@ main { padding: 16px 16px 16px 224px; max-width: 1720px; margin: 0 auto; }  /* B
 .analysis-page .densewrap { max-height: 360px; overflow: auto; }
 .analysis-page #analysis-action-message { min-height: 1.5em; margin: 10px 0 0; }
 .analysis-page .dense td:last-child { min-width: 280px; }
+.proposal-filter { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.proposal-summary { color: var(--muted); margin: 10px 0 6px; }
+.proposal-table td:nth-child(4) { min-width: 260px; }
+.proposal-table td:nth-child(6) { min-width: 230px; }
+.proposal-table .context { margin-top: 8px; }
 
 /* --- overview ------------------------------------------------------------ */
 

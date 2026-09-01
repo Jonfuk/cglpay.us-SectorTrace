@@ -1951,6 +1951,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/admin/analysis/releases/rollback": self._analysis_rollback,
             "/api/admin/analysis/themes/promote": self._analysis_promote_theme,
             "/api/admin/analysis/proposals/accept": self._analysis_accept_proposal,
+            "/api/admin/analysis/proposals/defer": self._analysis_defer_proposal,
             "/api/admin/analysis/proposals/dismiss": self._analysis_dismiss_proposal,
             "/api/admin/analysis/graph/rebuild": self._analysis_graph_rebuild,
         }
@@ -2030,6 +2031,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _analysis_accept_proposal(self, body: dict) -> Any:
         return self._analysis_proposal_decision(body, "accepted")
+
+    def _analysis_defer_proposal(self, body: dict) -> Any:
+        return self._analysis_proposal_decision(body, "deferred")
 
     def _analysis_dismiss_proposal(self, body: dict) -> Any:
         return self._analysis_proposal_decision(body, "dismissed")
