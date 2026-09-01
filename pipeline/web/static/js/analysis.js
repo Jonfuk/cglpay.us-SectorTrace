@@ -31,7 +31,7 @@ function renderRun(run, target) {
   target.innerHTML = `<div class="run-summary">${executorNote}
     <div class="run-summary-head"><div><strong>${esc(run.run_kind)} run</strong>${row(`${run.status} · ${run.current_stage || 'queued'} · ${run.run_id}`)}</div><div class="actions">${runActions(run)}</div></div>
     <div class="progress-track" aria-label="${esc(pct)} percent complete"><span style="width:${Math.min(100, Math.max(0, pct))}%"></span></div>
-    <div class="run-metrics"><span><strong>${esc(pct)}%</strong> complete</span><span><strong>${esc(run.completed_domains || 0)}/${esc(run.total_domains || 0)}</strong> domains</span><span><strong>${esc(run.model_calls || 0)}</strong> model calls</span><span><strong>${esc(money(run.cost_micros))}</strong> spent</span><span>ceiling <strong>${esc(run.cost_ceiling_micros ? money(run.cost_ceiling_micros) : 'none')}</strong></span></div>
+    <div class="run-metrics"><span><strong>${esc(pct)}%</strong> complete</span><span><strong>${esc(run.completed_domains || 0)}/${esc(run.total_domains || 0)}</strong> domains</span><span><strong>${esc(run.model_calls || 0)}</strong> calls / estimate <strong>${esc(run.estimated_calls ?? '—')}</strong></span><span><strong>${esc(money(run.cost_micros))}</strong> spent / estimate <strong>${esc(money(run.estimated_cost_micros))}</strong></span><span>ceiling <strong>${esc(run.cost_ceiling_micros ? money(run.cost_ceiling_micros) : 'none')}</strong></span></div>
     <details><summary>Domain detail</summary><div class="run-domains">${domains || '<div class="empty">No domains selected.</div>'}</div></details>
   </div>`;
 }

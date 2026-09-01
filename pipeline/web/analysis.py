@@ -30,6 +30,30 @@ def _cost_snapshot(conn, release_id: str) -> dict[str, int]:
     return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
 
 
+def _estimate_run(conn, selected: list[str]) -> tuple[int | None, int | None]:
+    """Forecast two model calls per available source row.
+
+    This is deliberately a forecast, not a claim about work completed. A
+    missing source table contributes nothing, and cost is only projected when
+    the warehouse has a historical model-call rate to use.
+    """
+    source_rows = 0
+    for domain_id in selected:
+        spec = domains.get_domain(domain_id)
+        for table in spec.source_tables:
+            try:
+                source_rows += int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            except Exception:
+                continue
+    if not source_rows:
+        return None, None
+    calls = source_rows * 2
+    average = conn.execute(
+        "SELECT AVG(cost_micros) FROM analysis_model_calls WHERE cost_micros IS NOT NULL"
+    ).fetchone()[0]
+    return calls, round(calls * float(average)) if average is not None else None
+
+
 def _run_summary(conn, run_id: str) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
     if row is None:
@@ -200,6 +224,10 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     now = utcnow()
     estimated_calls = body.get("estimated_calls")
     estimated_cost = body.get("estimated_cost_micros")
+    if estimated_calls is None or estimated_cost is None:
+        forecast_calls, forecast_cost = _estimate_run(conn, selected)
+        estimated_calls = estimated_calls if estimated_calls is not None else forecast_calls
+        estimated_cost = estimated_cost if estimated_cost is not None else forecast_cost
     manifest = releases.create_release(
         conn, settings, domains=selected,
         config={"run_kind": run_kind, "cost_ceiling_micros": ceiling,
