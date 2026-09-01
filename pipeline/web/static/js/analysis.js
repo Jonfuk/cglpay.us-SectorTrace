@@ -71,15 +71,20 @@ async function actionRun(action, runId) {
 
 async function load() {
   try {
-    const [overview, domains, themes, signals, operations, models] = await Promise.all([
+    const [overview, domains, themes, signals, operations, models, structured, links, graph, prevalence] = await Promise.all([
       get('/api/admin/analysis/overview'), get('/api/admin/analysis/domains'),
       get('/api/admin/analysis/themes?limit=12'), get('/api/admin/analysis/signals?limit=20'),
-      get('/api/admin/analysis/operations'), get('/api/admin/analysis/models')]);
+      get('/api/admin/analysis/operations'), get('/api/admin/analysis/models'),
+      get('/api/admin/analysis/structured?limit=1'), get('/api/admin/analysis/links?limit=1'),
+      get('/api/admin/analysis/graph'), get('/api/admin/analysis/prevalence?limit=1')]);
     renderOverview(overview, domains, operations, models);
     document.querySelector('#analysis-cards').innerHTML = Object.entries(overview.counts).map(([key, value]) => `<div class="card"><strong>${esc(value)}</strong><span>${esc(key.replaceAll('_', ' '))}</span></div>`).join('');
     document.querySelector('#analysis-domains').innerHTML = domains.domains.map(item => `<div class="listrow"><strong>${esc(item.domain_id)}</strong>${row(item.status)}${row(item.source_tables.join(', '))}</div>`).join('');
     document.querySelector('#analysis-themes').innerHTML = themes.themes.length ? themes.themes.map(item => `<div class="listrow"><strong>${esc(item.theme_key)}</strong>${row(`${item.status} · ${item.passage_count} passages`)}</div>`).join('') : row('No emerging themes recorded.');
     document.querySelector('#analysis-signals').innerHTML = signals.signals.length ? signals.signals.map(item => `<div class="listrow"><strong>${esc(item.signal_type)}</strong>${row(`${item.domain_id} · ${item.subject_id} · ${item.direction}`)}</div>`).join('') : row('No automated signals recorded.');
+    const pending = graph.pending || 0;
+    const latestPrevalence = prevalence.prevalence?.[0];
+    document.querySelector('#analysis-output-summary').innerHTML = `<div class="run-metrics"><span><strong>${esc(structured.structured?.length || 0)}</strong> structured sample</span><span><strong>${esc(links.links?.length || 0)}</strong> link sample</span><span><strong>${esc(pending)}</strong> graph queued</span><span><strong>${esc(latestPrevalence ? `${latestPrevalence.positives}/${latestPrevalence.positives + latestPrevalence.negatives}` : '—')}</strong> latest narrative prevalence sample</span></div>`;
   } catch (error) { document.querySelector('#analysis-action-message').textContent = error.message; document.querySelector('#analysis-action-message').className = 'error'; }
 }
 
