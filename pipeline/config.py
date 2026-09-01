@@ -339,6 +339,14 @@ class Settings(BaseSettings):
     assistant_router_timeout_seconds: float = 0.0
     assistant_overall_timeout_seconds: float = 0.0
 
+    # Analysis releases resolve these once into an immutable manifest. They
+    # intentionally inherit the assistant choices when unset, while retaining
+    # the analysis-specific names needed for release provenance.
+    claim_signal_scout_model: str = ""
+    claim_signal_extractor_model: str = ""
+    claim_signal_reflection_model: str = ""
+    analysis_cost_ceiling_micros: int = 0
+
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
     # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
