@@ -89,6 +89,24 @@ def test_admin_analysis_read_models_are_admin_only(conn):
     assert analysis_admin.graph(conn)["canonical_claim_isolation"] is True
 
 
+def test_analysis_run_controls_are_durable_and_resumable(conn, settings):
+    started = analysis_admin.start_run(
+        conn, settings, {"domains": ["da"], "run_kind": "pilot", "cost_ceiling_micros": 2500})
+    assert started["status"] == "queued"
+    assert started["run_kind"] == "pilot"
+    assert started["cost_ceiling_micros"] == 2500
+    assert started["domains"][0]["status"] == "pending"
+    assert analysis_admin.runs(conn)["runs"][0]["run_id"] == started["run_id"]
+
+    cancelled = analysis_admin.cancel_run(conn, started["run_id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["domains"][0]["status"] == "cancelled"
+
+    resumed = analysis_admin.resume_run(conn, started["run_id"])
+    assert resumed["status"] == "queued"
+    assert resumed["domains"][0]["status"] == "pending"
+
+
 def test_batch_budget_stops_at_ceiling_and_boundary():
     budget = CallBudget(ceiling_micros=10)
     budget.before_call(10)

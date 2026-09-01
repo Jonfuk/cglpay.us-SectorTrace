@@ -1239,6 +1239,14 @@ class Handler(BaseHTTPRequestHandler):
                 return {"prevalence": []}
             if path == "/api/admin/analysis/operations":
                 return analysis_admin.operations(conn)
+            if path == "/api/admin/analysis/runs":
+                return analysis_admin.runs(conn, limit=_int(params, "limit", 20))
+            match = re.fullmatch(r"/api/admin/analysis/runs/([A-Za-z0-9:_-]{1,120})", path)
+            if match:
+                try:
+                    return analysis_admin.run(conn, match.group(1))
+                except KeyError as exc:
+                    raise ApiError(f"No analysis run {match.group(1)}.", status=404) from exc
             match = re.fullmatch(r"/api/admin/analysis/reports/([A-Za-z0-9:_-]{1,120})", path)
             if match:
                 return analysis_admin.report(conn, match.group(1))
@@ -1965,13 +1973,15 @@ class Handler(BaseHTTPRequestHandler):
     def _analysis_run_state(self, body: dict, status: str) -> Any:
         conn = db.get_connection(self.settings)
         try:
+            from pipeline.web import analysis as analysis_admin
             run_id = str(body.get("run_id", ""))
-            row = conn.execute("SELECT domain_run_id FROM analysis_domain_runs WHERE domain_run_id = ?", (run_id,)).fetchone()
-            if row is None:
-                raise ApiError(f"No analysis run {run_id}.", status=404)
-            conn.execute("UPDATE analysis_domain_runs SET status = ? WHERE domain_run_id = ?", (status, run_id))
-            conn.commit()
-            return {"run_id": run_id, "status": status}
+            try:
+                return (analysis_admin.cancel_run(conn, run_id) if status == "cancelled"
+                        else analysis_admin.resume_run(conn, run_id))
+            except KeyError:
+                raise ApiError(f"No analysis run {run_id}.", status=404) from None
+            except ValueError as exc:
+                raise ApiError(str(exc), status=400) from None
         finally:
             conn.close()
 

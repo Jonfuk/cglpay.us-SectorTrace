@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
 from typing import Any
 
 from pipeline.analysis import domains, releases
@@ -15,6 +16,57 @@ def _limit(value: Any, default: int = 100) -> int:
         return max(1, min(int(value), 500))
     except (TypeError, ValueError):
         return default
+
+
+_ACTIVE_RUN_STATUSES = {"queued", "running", "paused", "cancelling"}
+_TERMINAL_RUN_STATUSES = {"cancelled", "complete", "failed", "interrupted"}
+_RUN_KINDS = {"discovery", "optimization", "pilot", "complete"}
+
+
+def _cost_snapshot(conn, release_id: str) -> dict[str, int]:
+    row = conn.execute(
+        "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micros), 0) AS cost_micros "
+        "FROM analysis_model_calls WHERE release_id = ?", (release_id,)).fetchone()
+    return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
+
+
+def _run_summary(conn, run_id: str) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None:
+        raise KeyError(run_id)
+    item = dict(row)
+    item["requested_domains"] = json.loads(item.pop("requested_domains_json") or "[]")
+    domains_rows = conn.execute(
+        "SELECT domain_run_id, domain_id, status, prerequisite_status, "
+        "missing_tables_json, rows_processed, rows_written, started_at, "
+        "completed_at, error_detail FROM analysis_domain_runs "
+        "WHERE run_id = ? ORDER BY domain_id", (run_id,)).fetchall()
+    domain_items = []
+    for domain_row in domains_rows:
+        domain = dict(domain_row)
+        domain["missing_tables"] = json.loads(domain.pop("missing_tables_json") or "[]")
+        domain_items.append(domain)
+    counts = Counter(domain["status"] for domain in domain_items)
+    item["domains"] = domain_items
+    item["domain_counts"] = dict(counts)
+    item["completed_domains"] = sum(counts.get(status, 0) for status in ("complete", "unavailable"))
+    item.update(_cost_snapshot(conn, item["release_id"]))
+    item["progress_percent"] = round(
+        100 * item["completed_domains"] / item["total_domains"], 1
+    ) if item["total_domains"] else 0
+    item["control_plane_only"] = True
+    return item
+
+
+def runs(conn, *, limit: int = 20) -> dict[str, Any]:
+    rows = conn.execute(
+        "SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT ?", (_limit(limit, 20),)
+    ).fetchall()
+    return {"runs": [_run_summary(conn, row["run_id"]) for row in rows]}
+
+
+def run(conn, run_id: str) -> dict[str, Any]:
+    return _run_summary(conn, run_id)
 
 
 def domains_view(conn) -> dict[str, Any]:
@@ -38,8 +90,11 @@ def overview(conn) -> dict[str, Any]:
     counts = {}
     for table in ("automated_signals", "structured_signals", "emerging_themes", "cross_source_signal_links", "adaptation_proposals"):
         counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    latest_run = conn.execute("SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT 1").fetchone()
     return {"active_release": dict(release) if release else None, "counts": counts,
             "domains": domains_view(conn)["domains"],
+            "latest_run": _run_summary(conn, latest_run["run_id"]) if latest_run else None,
+            "executor": "control_plane_only",
             "quality_boundary": "Automated signals are admin-only and human_verified is always false."}
 
 
@@ -106,7 +161,8 @@ def models(conn) -> dict[str, Any]:
 
 def operations(conn) -> dict[str, Any]:
     return {"health": [dict(row) for row in conn.execute("SELECT * FROM analysis_health_snapshots ORDER BY collected_at DESC LIMIT 100")],
-            "proposals": [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals ORDER BY created_at DESC LIMIT 100")]}
+            "proposals": [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals ORDER BY created_at DESC LIMIT 100")],
+            **runs(conn)}
 
 
 def report(conn, release_id: str) -> dict[str, Any]:
@@ -124,11 +180,73 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     requested = body.get("domains")
     if requested is not None and (not isinstance(requested, list) or not all(isinstance(x, str) for x in requested)):
         raise ValueError("domains must be a list of domain ids")
-    manifest = releases.create_release(conn, settings, domains=requested, config={"cost_ceiling_micros": body.get("cost_ceiling_micros", 0)})
+    run_kind = str(body.get("run_kind") or "complete")
+    if run_kind not in _RUN_KINDS:
+        raise ValueError(f"run_kind must be one of {sorted(_RUN_KINDS)}")
+    try:
+        ceiling = max(0, int(body.get("cost_ceiling_micros") or 0))
+    except (TypeError, ValueError):
+        raise ValueError("cost_ceiling_micros must be a non-negative integer") from None
+    active = conn.execute(
+        "SELECT run_id FROM analysis_runs WHERE status IN (?, ?, ?, ?) "
+        "ORDER BY updated_at DESC LIMIT 1", tuple(_ACTIVE_RUN_STATUSES)
+    ).fetchone()
+    if active:
+        raise ValueError(f"analysis run {active['run_id']} is already active")
+    selected = requested or sorted(domains.domain_registry())
+    run_id = f"analysis-run-{uuid.uuid4()}"
+    now = utcnow()
+    estimated_calls = body.get("estimated_calls")
+    estimated_cost = body.get("estimated_cost_micros")
+    manifest = releases.create_release(
+        conn, settings, domains=selected,
+        config={"run_kind": run_kind, "cost_ceiling_micros": ceiling,
+                "estimated_calls": estimated_calls, "estimated_cost_micros": estimated_cost})
+    conn.execute(
+        "INSERT INTO analysis_runs (run_id, release_id, run_kind, status, "
+        "requested_domains_json, total_domains, estimated_calls, estimated_cost_micros, "
+        "cost_ceiling_micros, started_at, updated_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, manifest["release_id"], run_kind, json.dumps(selected), len(selected),
+         estimated_calls, estimated_cost, ceiling, now, now))
     for domain_id in manifest["domains"]:
-        conn.execute("INSERT INTO analysis_domain_runs (domain_run_id, release_id, domain_id, status, started_at) VALUES (?, ?, ?, 'pending', ?)", (f"domain-run-{uuid.uuid4()}", manifest["release_id"], domain_id, utcnow()))
+        conn.execute(
+            "INSERT INTO analysis_domain_runs (domain_run_id, run_id, release_id, domain_id, status, started_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?)",
+            (f"domain-run-{uuid.uuid4()}", run_id, manifest["release_id"], domain_id, now))
     conn.commit()
-    return manifest
+    return {**_run_summary(conn, run_id), "release_manifest": manifest}
+
+
+def cancel_run(conn, run_id: str) -> dict[str, Any]:
+    item = _run_summary(conn, run_id)
+    if item["status"] in _TERMINAL_RUN_STATUSES:
+        raise ValueError(f"analysis run {run_id} is already {item['status']}")
+    now = utcnow()
+    conn.execute(
+        "UPDATE analysis_runs SET status = 'cancelled', current_stage = 'cancelled', "
+        "cancelled_at = ?, completed_at = ?, updated_at = ? WHERE run_id = ?",
+        (now, now, now, run_id))
+    conn.execute(
+        "UPDATE analysis_domain_runs SET status = 'cancelled' "
+        "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
+    conn.commit()
+    return _run_summary(conn, run_id)
+
+
+def resume_run(conn, run_id: str) -> dict[str, Any]:
+    item = _run_summary(conn, run_id)
+    if item["status"] not in {"cancelled", "paused", "failed", "interrupted"}:
+        raise ValueError(f"analysis run {run_id} cannot resume from {item['status']}")
+    now = utcnow()
+    conn.execute(
+        "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
+        "cancelled_at = NULL, completed_at = NULL, error_detail = NULL, updated_at = ? "
+        "WHERE run_id = ?", (now, run_id))
+    conn.execute(
+        "UPDATE analysis_domain_runs SET status = 'pending', error_detail = NULL "
+        "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
+    conn.commit()
+    return _run_summary(conn, run_id)
 
 
 def activate(conn, release_id: str) -> dict[str, Any]:
