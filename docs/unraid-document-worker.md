@@ -22,7 +22,7 @@ From the repository checkout on Unraid:
 
 ```bash
 cd /mnt/user/Data/cglpay.us-SectorTrace
-git pull origin master
+git pull origin beta
 docker build -f deploy/Dockerfile.documents -t sectortrace-document-worker:latest .
 ```
 
@@ -91,9 +91,16 @@ docker compose -f docker-compose.documents.yml logs -f analysis-worker
 ```
 
 The worker updates `analysis_worker_heartbeats`, claims one run at a time,
-processes document windows in resumable batches, records emerging themes, and
-honours Stop/Resume from `/admin/analysis`. The `.env` used by the service must
-point at the same `DATABASE_URL` as the web application.
+processes document windows and structured comparisons in resumable batches,
+records emerging themes, signals, prevalence diagnostics, health snapshots and
+cross-source links, and honours Stop/Resume from `/admin/analysis`. The `.env`
+used by the service must point at the same `DATABASE_URL` as the web application.
+
+With the optional assistant configuration enabled, the same image performs the
+dual-model narrative extraction and records model prompts, responses, cache
+hits, latency and provider-reported cost. Without it, deterministic structured
+analysis and dependency-free narrative discovery still run; model extraction
+is recorded as unavailable rather than silently treated as a verified signal.
 
 For a host using the standalone helper rather than the Ansible-generated
 Compose file:
@@ -159,6 +166,11 @@ This projects the document evidence records (source URL, retrieval metadata,
 hash, and archive path) into Neo4j. Parsed document text and elements remain
 canonical PostgreSQL records; they are not automatically promoted to claims or
 duplicated as graph nodes.
+
+The `/admin/analysis` release table also has **Queue graph**. That action queues
+only the isolated `AutomatedSignal`, `StructuredSignal`, `EmergingTheme` and
+`AnalysisRelease` projection. The persistent analysis worker consumes it when
+`NEO4J_ENABLED=true`; it never writes `graph_claims` or public graph routes.
 
 ## Run a batch
 
