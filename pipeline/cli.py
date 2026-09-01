@@ -59,6 +59,8 @@ def analysis_worker(
     once: bool = typer.Option(False, "--once", help="Claim one run and exit when it finishes."),
     poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls."),
     batch_size: int = typer.Option(100, min=1, help="Analysis windows processed per batch."),
+    comparison_workers: int | None = typer.Option(None, "--comparison-workers", min=1,
+                                                   help="CPU processes for structured comparisons; auto by default."),
     worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
 ) -> None:
     """Process queued admin analysis runs from the shared warehouse."""
@@ -72,7 +74,7 @@ def analysis_worker(
     finally:
         db_conn.close()
     worker = AnalysisWorker(settings, poll_seconds=poll_seconds, batch_size=batch_size,
-                            worker_id=worker_id)
+                            worker_id=worker_id, comparison_workers=comparison_workers)
     if once:
         result = worker.run_once()
         typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))

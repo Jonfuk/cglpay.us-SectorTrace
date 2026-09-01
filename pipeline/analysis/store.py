@@ -31,13 +31,44 @@ def save_signals(conn, signals: Iterable[Signal]) -> int:
 
 def save_structured_signal(conn, signal: Signal, comparison: dict) -> str:
     """Persist the common signal and its exact structured calculation."""
-    save_signal(conn, signal)
-    previous = comparison["previous"]
-    current = comparison["current"]
-    # A stable child id makes cancel/resume idempotent. Re-running a cached
-    # comparison must not create a second structured row for the same signal.
-    structured_id = f"structured-{signal.signal_id}"
-    conn.execute(
+    save_structured_signals(conn, [(signal, comparison)])
+    return f"structured-{signal.signal_id}"
+
+
+def save_structured_signals(conn, items: Iterable[tuple[Signal, dict]]) -> int:
+    """Persist a batch of structured signals with one write per table.
+
+    The analysis worker is the only writer for this batch. Keeping both
+    ``executemany`` calls here preserves that single-writer rule while
+    avoiding one round trip for every comparison.
+    """
+    values = list(items)
+    if not values:
+        return 0
+    for signal, _comparison in values:
+        get_domain(signal.domain_id)
+    signal_rows = [signal.db_values() for signal, _comparison in values]
+    structured_rows = []
+    for signal, comparison in values:
+        previous = comparison["previous"]
+        current = comparison["current"]
+        structured_rows.append((
+            f"structured-{signal.signal_id}", signal.signal_id,
+            current["source_table"], current["source_row_id"],
+            previous["source_table"], previous["source_row_id"],
+            current["metric"], current["unit"], str(previous["value"]),
+            str(current["value"]), comparison.get("absolute_change"),
+            comparison.get("percentage_change"), int(bool(comparison.get("comparable"))),
+            comparison.get("robust_z"),
+            "unusual" if comparison.get("statistically_unusual") else None,
+            json.dumps(comparison, sort_keys=True), utcnow()))
+    conn.executemany(
+        "INSERT INTO automated_signals (signal_id, release_id, domain_id, taxonomy_namespace, "
+        "signal_type, subject_type, subject_id, direction, assertion_status, period_start, "
+        "period_end, evidence_refs_json, derivation_method, confidence_contract_json, "
+        "human_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (signal_id) DO NOTHING", signal_rows)
+    conn.executemany(
         "INSERT INTO structured_signals (structured_signal_id, signal_id, source_table, source_row_id, "
         "comparison_source_table, comparison_source_row_id, metric, unit, value_before, value_after, "
         "absolute_change, percentage_change, comparable, robust_z, anomaly_status, calculation_json, created_at) "
@@ -45,14 +76,8 @@ def save_structured_signal(conn, signal: Signal, comparison: dict) -> str:
         "ON CONFLICT (structured_signal_id) DO UPDATE SET "
         "absolute_change = excluded.absolute_change, percentage_change = excluded.percentage_change, "
         "robust_z = excluded.robust_z, anomaly_status = excluded.anomaly_status, "
-        "calculation_json = excluded.calculation_json",
-        (structured_id, signal.signal_id, current["source_table"], current["source_row_id"],
-         previous["source_table"], previous["source_row_id"], current["metric"], current["unit"],
-         str(previous["value"]), str(current["value"]), comparison.get("absolute_change"),
-         comparison.get("percentage_change"), int(bool(comparison.get("comparable"))),
-         comparison.get("robust_z"), "unusual" if comparison.get("statistically_unusual") else None,
-         json.dumps(comparison, sort_keys=True), utcnow()))
-    return structured_id
+        "calculation_json = excluded.calculation_json", structured_rows)
+    return len(values)
 
 
 def signal_row(row) -> dict:

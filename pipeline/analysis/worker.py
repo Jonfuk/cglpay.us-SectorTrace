@@ -7,13 +7,18 @@ losing the run state.
 """
 from __future__ import annotations
 
+import hashlib
 import json
-import structlog
+import multiprocessing
+import os
 import threading
 import time
+from concurrent.futures import ProcessPoolExecutor
 import uuid
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+
+import structlog
 
 from pipeline import db
 from pipeline.analysis import domains
@@ -36,7 +41,7 @@ from pipeline.analysis.operations import (
 )
 from pipeline.analysis.prevalence import diagnostics, save_diagnostics
 from pipeline.analysis.releases import load_release
-from pipeline.analysis.store import record_theme, record_topic, save_structured_signal
+from pipeline.analysis.store import record_theme, record_topic, save_structured_signals
 from pipeline.analysis.structured import (
     categorical_signal,
     categorical_transitions,
@@ -49,16 +54,40 @@ from pipeline.analysis.structured import (
 log = structlog.get_logger()
 
 
+def _comparison_partition(observations):
+    """Process-pool target for the pure in-memory comparison stage."""
+    return comparisons_for_domain(observations)
+
+
+def _partition_observations(observations, partitions):
+    """Keep each subject/metric/unit group together in one process."""
+    buckets = [[] for _ in range(max(1, partitions))]
+    for observation in observations:
+        key = "\x1f".join((observation.subject_type, observation.subject_id,
+                            observation.metric, observation.unit))
+        slot = int.from_bytes(hashlib.blake2s(key.encode(), digest_size=4).digest(), "big") % len(buckets)
+        buckets[slot].append(observation)
+    return [bucket for bucket in buckets if bucket]
+
+
 class AnalysisWorker:
     """Claim and execute queued analysis runs one at a time."""
 
     def __init__(self, settings, *, poll_seconds: float = 5.0, batch_size: int = 100,
-                 worker_id: str | None = None, model_client_factory=None):
+                 worker_id: str | None = None, model_client_factory=None,
+                 comparison_workers: int | None = None):
         self.settings = settings
         self.poll_seconds = max(0.1, float(poll_seconds))
         self.batch_size = max(1, int(batch_size))
         self.worker_id = worker_id or f"analysis-worker-{uuid.uuid4()}"
         self.model_client_factory = model_client_factory or AnalysisModelClient
+        if comparison_workers is None:
+            try:
+                available_cpus = len(os.sched_getaffinity(0))
+            except AttributeError:
+                available_cpus = os.cpu_count() or 1
+            comparison_workers = min(max(1, available_cpus), 4)
+        self.comparison_workers = max(1, int(comparison_workers))
 
     def run_forever(self) -> None:
         """Poll until interrupted, allowing the container to restart safely."""
@@ -251,7 +280,7 @@ class AnalysisWorker:
             self._heartbeat("running")
             observations = observations_for_domain(conn, spec.source_tables)
             self._heartbeat("running")
-            comparisons = comparisons_for_domain(observations)
+            comparisons = self._comparisons(observations)
             self._heartbeat("running")
             if domain_id == "regulation_enforcement":
                 try:
@@ -270,6 +299,7 @@ class AnalysisWorker:
                 if self._cancelled(run_id):
                     return self._finalise_cancelled(run_id)
                 batch = comparisons[start:start + self.batch_size]
+                batch_items = []
                 for comparison in batch:
                     current = comparison["current"]
                     signal = (structured_signal(
@@ -279,8 +309,8 @@ class AnalysisWorker:
                                            signal_type=f"{current['metric']}_transition"))
                     if signal is None:
                         continue
-                    save_structured_signal(conn, signal, comparison)
-                    written += 1
+                    batch_items.append((signal, comparison))
+                written += save_structured_signals(conn, batch_items)
                 self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
                 self._update_domain_progress(conn, run_id, domain_id,
                                               min(start + len(batch), len(observations)), written)
@@ -291,6 +321,17 @@ class AnalysisWorker:
             conn.commit()
         finally:
             conn.close()
+
+    def _comparisons(self, observations):
+        """Run CPU-bound comparisons in processes, with one DB writer left."""
+        if self.comparison_workers <= 1 or len(observations) < 10_000:
+            return comparisons_for_domain(observations)
+        partitions = _partition_observations(observations, self.comparison_workers)
+        with ProcessPoolExecutor(
+                max_workers=min(self.comparison_workers, len(partitions)),
+                mp_context=multiprocessing.get_context("spawn")) as pool:
+            results = pool.map(_comparison_partition, partitions)
+            return [comparison for partition in results for comparison in partition]
 
     def _link_run(self, run_id: str) -> None:
         """Create only allowlisted, canonical-identity links between signals."""

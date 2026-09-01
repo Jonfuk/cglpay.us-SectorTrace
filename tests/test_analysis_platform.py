@@ -72,6 +72,22 @@ def test_structured_comparison_and_anomaly_guards():
     assert compare_periods(previous, Observation("metric", "r3", "authority", "a1", "vacancies", 1, "percent", "2025", "2025"))["comparable"] is False
 
 
+def test_parallel_structured_comparisons_match_serial_results():
+    observations = [
+        Observation("contracts", f"row-{subject}-{period}", "provider_id", f"provider-{subject}",
+                    "value_core", period + subject, "GBP", None, str(period))
+        for subject in range(120) for period in range(100)
+    ]
+    serial = comparisons_for_domain(observations)
+    parallel = AnalysisWorker(None, comparison_workers=2)._comparisons(observations)
+
+    def signature(item):
+        return (item["current"]["subject_id"], item["current"]["period_end"],
+                item["absolute_change"], item["percentage_change"])
+
+    assert sorted(map(signature, parallel)) == sorted(map(signature, serial))
+
+
 def test_postgres_schema_probe_rolls_back_failed_pragma():
     class Cursor:
         description = [("supplier_id",), ("date_start",)]

@@ -95,6 +95,9 @@ processes document windows and structured comparisons in resumable batches,
 records emerging themes, signals, prevalence diagnostics, health snapshots and
 cross-source links, and honours Stop/Resume from `/admin/analysis`. The `.env`
 used by the service must point at the same `DATABASE_URL` as the web application.
+Structured comparisons automatically use up to four available CPU processes;
+the main worker remains the sole database writer. For a one-off override, pass
+`--comparison-workers N` to `pipeline analysis worker`.
 
 With the optional assistant configuration enabled, the same image performs the
 dual-model narrative extraction and records model prompts, responses, cache
