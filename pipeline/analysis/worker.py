@@ -252,6 +252,7 @@ class AnalysisWorker:
                 self._update_domain_progress(conn, run_id, domain_id,
                                               min(start + len(batch), len(observations)), written)
                 conn.commit()
+                self._heartbeat("running")
             self._finish_domain(conn, run_id, domain_id, "complete", len(observations), written,
                                 prerequisite_status="ready", missing_tables=[], error_detail=None)
             conn.commit()
@@ -372,6 +373,7 @@ class AnalysisWorker:
                 self._update_run(conn, run_id, current_domain=domain_id, current_stage="windowing")
                 self._update_domain_progress(conn, run_id, domain_id, processed, 0)
                 conn.commit()
+                self._heartbeat("running")
 
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="discovering")
             themes = discover_themes(passages)
