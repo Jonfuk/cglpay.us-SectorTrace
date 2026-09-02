@@ -42,7 +42,19 @@ def refresh_authority_geometry(conn) -> int:
     if db.backend_of(conn) != "postgres" or not db.has_extension(conn, "postgis"):
         return 0
 
+    extension = conn.execute(
+        "SELECT current_schema() AS application_schema, n.nspname AS "
+        "postgis_schema FROM pg_extension e "
+        "JOIN pg_namespace n ON n.oid = e.extnamespace "
+        "WHERE e.extname = 'postgis'").fetchone()
+    if not extension:
+        return 0
+
     with conn:
+        conn.execute(
+            "SELECT set_config('search_path', ?, true)",
+            (f"{extension['application_schema']},"
+             f"{extension['postgis_schema']},pg_catalog",))
         conn.execute("ALTER TABLE authorities ADD COLUMN IF NOT EXISTS "
                      "geom geometry(MultiPolygon, 4326)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_authorities_geom "

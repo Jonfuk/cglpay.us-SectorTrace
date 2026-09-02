@@ -27,8 +27,28 @@
 -- in a MultiPolygon column.
 
 DO $$
+DECLARE
+    postgis_schema name;
+    application_schema name;
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'postgis') THEN
+    SELECT n.nspname
+      INTO postgis_schema
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+     WHERE e.extname = 'postgis';
+
+    IF postgis_schema IS NOT NULL THEN
+        -- Scratch benchmark schemas intentionally exclude `public` from
+        -- search_path so unqualified DROP/CREATE statements cannot touch the
+        -- real warehouse. Make the extension's own schema visible only for
+        -- this guarded block; PostGIS is installed in a schema selected by
+        -- the cluster rather than guaranteed to be public.
+        SELECT current_schema() INTO application_schema;
+        PERFORM set_config(
+            'search_path',
+            format('%I,%I,pg_catalog', application_schema, postgis_schema),
+            true
+        );
         ALTER TABLE authorities ADD COLUMN IF NOT EXISTS geom geometry(MultiPolygon, 4326);
         CREATE INDEX IF NOT EXISTS idx_authorities_geom ON authorities USING gist (geom);
         UPDATE authorities
