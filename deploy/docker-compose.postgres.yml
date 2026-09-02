@@ -1,0 +1,63 @@
+# Local development / test PostgreSQL for the PostgreSQL-only warehouse
+# (performance.md Phase 1). It is the small, un-tuned dev sibling of the
+# self-host stack in deploy/ansible/.../docker-compose.selfhost.yml.j2: the
+# same image (deploy/postgres/Dockerfile — postgres:18 + pgvector + postgis,
+# pg_trgm from contrib) and the same first-boot role/extension setup, without
+# the production tuning, Caddy, Neo4j, or restart policy. It exists so a
+# developer, the offline test suite, and CI all point DATABASE_URL at one
+# backend, matching the production family.
+#
+#   docker compose -f deploy/docker-compose.postgres.yml up -d --build
+#   export DATABASE_URL=postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
+#   export DATABASE_RO_URL=postgresql://sectortrace_reader:sectortrace_reader_dev@localhost:5432/sectortrace
+#   uv run pipeline migrate
+#
+# Reset to a clean database with `docker compose -f deploy/docker-compose.postgres.yml down -v`.
+# The credentials here are fixed dev values that provision a throwaway local
+# container and mean nothing anywhere else.
+services:
+  postgres:
+    build:
+      context: ./postgres
+    image: sectortrace-postgres:18
+    environment:
+      POSTGRES_USER: sectortrace_app
+      POSTGRES_PASSWORD: sectortrace_app_dev
+      # Deliberately the maintenance database, NOT sectortrace. The warehouse
+      # needs the builtin C.UTF-8 collation so ORDER BY matches SQLite's BINARY
+      # ordering and verify-migration agrees across engines; letting the image
+      # create it from POSTGRES_DB would use the cluster default instead.
+      # postgres/initdb/01-roles.sql creates it properly with TEMPLATE =
+      # template0. (This image sets LANG=en_US.utf8, and initdb refuses
+      # --locale-provider=builtin when LC_CTYPE disagrees, so the CREATE
+      # DATABASE form is the one that works.)
+      POSTGRES_DB: postgres
+    ports:
+      # Host 5432 → container 5432. Change the host side if a local PostgreSQL
+      # already owns the port.
+      - "5432:5432"
+    volumes:
+      # The whole /var/lib/postgresql — what the 18+ image declares as its
+      # VOLUME (PGDATA is .../18/docker inside it). Mounting .../data instead
+      # leaves PGDATA on the container's writable layer and the image refuses
+      # to start.
+      - sectortrace-pgdata:/var/lib/postgresql
+      # Runs only against an empty data directory: a fresh init, never a re-run
+      # against an existing volume.
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    # Docker's default /dev/shm is 64MB; parallel query workers and pgvector's
+    # index build live there and fail late with "could not resize shared memory
+    # segment" if it is too small.
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sectortrace_app -d sectortrace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # On the very first boot the server is not listening on TCP while initdb
+      # runs and 01-roles.sql executes; without a start_period the retries
+      # expire during that window and the container is reported unhealthy.
+      start_period: 30s
+
+volumes:
+  sectortrace-pgdata:
