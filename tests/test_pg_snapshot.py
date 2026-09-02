@@ -59,4 +59,4 @@ def test_scratch_schema_keeps_database_extensions_visible():
     url = pg.with_schema("postgresql://localhost/warehouse", "bench_123")
     options = parse_qs(urlsplit(url).query)["options"][0]
 
-    assert options == "-csearch_path=bench_123,public"
+    assert options == "-csearch_path=bench_123"

@@ -28,15 +28,15 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
         CREATE INDEX IF NOT EXISTS idx_authorities_name_trgm
-            ON authorities USING gin (name gin_trgm_ops);
+            ON authorities USING gin (name public.gin_trgm_ops);
         CREATE INDEX IF NOT EXISTS idx_companies_name_trgm
-            ON companies USING gin (company_name gin_trgm_ops);
+            ON companies USING gin (company_name public.gin_trgm_ops);
         CREATE INDEX IF NOT EXISTS idx_providers_name_trgm
-            ON providers USING gin (canonical_name gin_trgm_ops);
+            ON providers USING gin (canonical_name public.gin_trgm_ops);
         CREATE INDEX IF NOT EXISTS idx_contracts_supplier_name_trgm
-            ON contracts USING gin (supplier_name_raw gin_trgm_ops);
+            ON contracts USING gin (supplier_name_raw public.gin_trgm_ops);
         CREATE INDEX IF NOT EXISTS idx_contracts_buyer_name_trgm
-            ON contracts USING gin (buyer_name gin_trgm_ops);
+            ON contracts USING gin (buyer_name public.gin_trgm_ops);
     ELSE
         RAISE NOTICE 'pg_trgm not installed - trigram indexes skipped; fuzzy name search and the contract text filter will sequential-scan';
     END IF;
