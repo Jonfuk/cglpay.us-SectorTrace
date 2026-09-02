@@ -288,6 +288,7 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
                 and getattr(embedder, "dimension", None) == VECTOR_COLUMN_DIM
                 and db.has_extension(conn, "vector"))
     if with_vec:
+        _set_vector_search_path(conn)
         insert_sql = (
             "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
             "embedding, embedding_vec, nlp_run_id, created_at) "
@@ -332,6 +333,27 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
             "pending": len(pending), "embedded": written, "dry_run": dry_run}
 
 
+def _set_vector_search_path(conn) -> None:
+    """Expose pgvector only inside the current transaction.
+
+    Scratch schemas deliberately omit the database's extension schema from
+    their ordinary search path. This preserves schema isolation while allowing
+    pgvector's ``vector`` type and ``vector_cosine_ops`` to resolve for the
+    small number of statements that use them.
+    """
+    extension = conn.execute(
+        "SELECT current_schema() AS application_schema, n.nspname AS "
+        "vector_schema FROM pg_extension e "
+        "JOIN pg_namespace n ON n.oid = e.extnamespace "
+        "WHERE e.extname = 'vector'").fetchone()
+    if not extension:
+        return
+    conn.execute(
+        "SELECT set_config('search_path', ?, true)",
+        (f"{extension['application_schema']},"
+         f"{extension['vector_schema']},pg_catalog",))
+
+
 def _ensure_vector_index(conn) -> None:
     """Create the HNSW index on `embedding_vec` if it is absent, single-threaded.
 
@@ -343,6 +365,7 @@ def _ensure_vector_index(conn) -> None:
     scopes the setting to this transaction.
     """
     with conn:
+        _set_vector_search_path(conn)
         conn.execute("SET LOCAL max_parallel_maintenance_workers = 0")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_document_embeddings_vec "
@@ -376,6 +399,7 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
                 "note": "pgvector not present; nothing to backfill"}
 
     with conn:
+        _set_vector_search_path(conn)
         conn.execute(
             f"ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS "
             f"embedding_vec vector({VECTOR_COLUMN_DIM})")
@@ -405,6 +429,7 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
     written = 0
     for start in range(0, len(pending), max(1, batch_size)):
         chunk = pending[start:start + max(1, batch_size)]
+        _set_vector_search_path(conn)
         conn.executemany(
             "UPDATE document_embeddings SET embedding_vec = ?::vector "
             "WHERE document_chunk_id = ? AND model_key = ?",

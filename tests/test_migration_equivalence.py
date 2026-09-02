@@ -189,8 +189,12 @@ class TestTheTreesMatch:
         # plus a partial UNIQUE index (one selected head per category).
         # TEXT/INTEGER/REAL -> text/bigint/double precision only.
         # 92 adds transport diagnostics to analysis model calls. 93 adds
-        # durable retry state for unattended analysis worker recovery.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 93
+        # durable retry state for unattended analysis worker recovery. The
+        # ordered 0093z hotfix restores v_wage_per_employee after a
+        # scratch-schema benchmark bug removed the derived view from the live
+        # PostgreSQL schema; 0094 remains reserved for the roadmap's next
+        # forward migration.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 94
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

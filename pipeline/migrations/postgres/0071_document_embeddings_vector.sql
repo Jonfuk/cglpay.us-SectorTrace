@@ -26,8 +26,27 @@
 -- empty column and grows as the backfill fills rows.
 
 DO $$
+DECLARE
+    vector_schema name;
+    application_schema name;
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    SELECT n.nspname
+      INTO vector_schema
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+     WHERE e.extname = 'vector';
+
+    IF vector_schema IS NOT NULL THEN
+        -- Scratch benchmark schemas exclude `public` from search_path to
+        -- prevent unqualified migration statements touching the warehouse.
+        -- Add only pgvector's schema for this guarded block so its type and
+        -- operator class resolve without weakening that isolation.
+        SELECT current_schema() INTO application_schema;
+        PERFORM set_config(
+            'search_path',
+            format('%I,%I,pg_catalog', application_schema, vector_schema),
+            true
+        );
         ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS embedding_vec vector(384);
         -- Build the HNSW index single-threaded. pgvector's *parallel* build
         -- reserves a shared-memory segment the size of maintenance_work_mem in
