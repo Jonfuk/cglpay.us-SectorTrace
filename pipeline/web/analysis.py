@@ -90,7 +90,7 @@ def _run_summary(conn, run_id: str) -> dict[str, Any]:
     domains_rows = conn.execute(
         "SELECT domain_run_id, domain_id, status, prerequisite_status, "
         "missing_tables_json, rows_processed, rows_written, started_at, "
-        "completed_at, error_detail FROM analysis_domain_runs "
+        "completed_at, error_detail, next_retry_at FROM analysis_domain_runs "
         "WHERE run_id = ? ORDER BY domain_id", (run_id,)).fetchall()
     domain_items = []
     for domain_row in domains_rows:
@@ -335,10 +335,11 @@ def resume_run(conn, run_id: str) -> dict[str, Any]:
     now = utcnow()
     conn.execute(
         "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
-        "cancelled_at = NULL, completed_at = NULL, error_detail = NULL, updated_at = ? "
+        "cancelled_at = NULL, completed_at = NULL, error_detail = NULL, "
+        "automatic_retry_count = 0, next_retry_at = NULL, updated_at = ? "
         "WHERE run_id = ?", (now, run_id))
     conn.execute(
-        "UPDATE analysis_domain_runs SET status = 'pending', error_detail = NULL "
+        "UPDATE analysis_domain_runs SET status = 'pending', error_detail = NULL, next_retry_at = NULL "
         "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
     conn.commit()
     return _run_summary(conn, run_id)

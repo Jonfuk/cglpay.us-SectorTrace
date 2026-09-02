@@ -76,6 +76,13 @@ turns into a clarification, never a crash and never an execution.
    and honour `Retry-After`. Repeated transient failures open a short local
    circuit so a failing endpoint is not hammered.
 
+   For unattended analysis batches, model/provider exhaustion pauses the
+   unfinished domain instead of marking it complete. The worker automatically
+   retries after `ANALYSIS_RETRY_COOLDOWN_SECONDS`; a stale worker heartbeat is
+   recovered in the same way. `ANALYSIS_MAX_AUTOMATIC_RETRIES` caps retries so
+   a persistent outage becomes a visible failed run rather than an endless
+   loop. `resume_run` remains available for a deliberate manual retry.
+
    For analysis releases that use dedicated `CLAIM_SIGNAL_*_MODEL` settings,
    use the matching `CLAIM_SIGNAL_SCOUT_FALLBACK_MODELS`,
    `CLAIM_SIGNAL_EXTRACTOR_FALLBACK_MODELS` and

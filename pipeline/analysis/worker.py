@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -55,6 +56,14 @@ from pipeline.analysis.structured import (
 )
 
 log = structlog.get_logger()
+
+
+def _retry_at(seconds: float) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(0.0, float(seconds)))).isoformat()
+
+
+def _stale_before(seconds: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=max(0.0, float(seconds)))).isoformat()
 
 
 def _comparison_partition(observations):
@@ -111,7 +120,7 @@ class AnalysisWorker:
         heartbeat_stop = threading.Event()
         heartbeat_thread = threading.Thread(
             target=self._run_heartbeat_loop,
-            args=(heartbeat_stop,),
+            args=(heartbeat_stop, run_id),
             name=f"{self.worker_id}-heartbeat",
             daemon=True,
         )
@@ -131,17 +140,17 @@ class AnalysisWorker:
         self._heartbeat("idle")
         return result
 
-    def _run_heartbeat_loop(self, stop: threading.Event) -> None:
+    def _run_heartbeat_loop(self, stop: threading.Event, run_id: str) -> None:
         """Keep liveness visible while a run is CPU-bound between batches."""
         interval = max(0.5, min(self.poll_seconds, 5.0))
         while not stop.wait(interval):
             try:
-                self._heartbeat("running")
+                self._heartbeat("running", run_id=run_id)
             except Exception as exc:
                 log.exception("analysis_heartbeat_failed",
                               worker_id=self.worker_id, error=str(exc))
 
-    def _heartbeat(self, status: str) -> None:
+    def _heartbeat(self, status: str, *, run_id: str | None = None) -> None:
         conn = db.get_connection(self.settings)
         try:
             try:
@@ -154,6 +163,10 @@ class AnalysisWorker:
                 "VALUES (?, ?, ?, ?) ON CONFLICT (worker_id) DO UPDATE SET "
                 "last_seen_at = excluded.last_seen_at, status = excluded.status, version = excluded.version",
                 (self.worker_id, now, status, worker_version))
+            if run_id is not None:
+                conn.execute(
+                    "UPDATE analysis_runs SET updated_at = ? WHERE run_id = ? AND status = 'running'",
+                    (now, run_id))
             conn.commit()
         finally:
             conn.close()
@@ -195,6 +208,7 @@ class AnalysisWorker:
     def _claim(self) -> str | None:
         conn = db.get_connection(self.settings)
         try:
+            self._recover_runs(conn)
             row = conn.execute(
                 "SELECT run_id FROM analysis_runs WHERE status = 'queued' "
                 "ORDER BY updated_at, started_at LIMIT 1").fetchone()
@@ -213,6 +227,68 @@ class AnalysisWorker:
         finally:
             conn.close()
 
+    def _recover_runs(self, conn) -> None:
+        """Pause dead work and requeue due automatic retries transactionally."""
+        now = utcnow()
+        retry_at = _retry_at(getattr(self.settings, "analysis_retry_cooldown_seconds", 300.0))
+        stale_before = _stale_before(getattr(self.settings, "analysis_stale_worker_seconds", 900.0))
+        stale_rows = conn.execute(
+            "SELECT run_id FROM analysis_runs WHERE status = 'running' AND updated_at < ?",
+            (stale_before,)).fetchall()
+        for row in stale_rows:
+            run_id = row["run_id"]
+            changed = conn.execute(
+                "UPDATE analysis_runs SET status = 'paused', current_stage = 'waiting_for_retry', "
+                "error_detail = ?, next_retry_at = ?, completed_at = NULL, updated_at = ? "
+                "WHERE run_id = ? AND status = 'running'",
+                ("worker heartbeat became stale; automatic retry scheduled", retry_at, now, run_id)).rowcount
+            if changed:
+                conn.execute(
+                    "UPDATE analysis_domain_runs SET status = 'paused', completed_at = NULL, "
+                    "error_detail = ?, next_retry_at = ? WHERE run_id = ? AND status = 'running'",
+                    ("worker heartbeat became stale; automatic retry scheduled", retry_at, run_id))
+                log.warning("analysis_run_requeued_after_stale_worker", run_id=run_id,
+                            retry_at=retry_at)
+
+        due_rows = conn.execute(
+            "SELECT run_id, COALESCE(automatic_retry_count, 0) AS automatic_retry_count "
+            "FROM analysis_runs WHERE status = 'paused' AND next_retry_at IS NOT NULL "
+            "AND next_retry_at <= ? ORDER BY updated_at",
+            (now,)).fetchall()
+        max_retries = max(0, int(getattr(self.settings, "analysis_max_automatic_retries", 12)))
+        for row in due_rows:
+            run_id = row["run_id"]
+            retry_count = int(row["automatic_retry_count"] or 0)
+            if retry_count >= max_retries:
+                conn.execute(
+                    "UPDATE analysis_runs SET status = 'failed', current_stage = 'failed', "
+                    "error_detail = ?, completed_at = ?, next_retry_at = NULL, updated_at = ? "
+                    "WHERE run_id = ? AND status = 'paused'",
+                    ("automatic retry limit reached", now, now, run_id))
+                conn.execute(
+                    "UPDATE analysis_domain_runs SET status = 'failed', prerequisite_status = 'failed', "
+                    "completed_at = COALESCE(completed_at, ?), next_retry_at = NULL, "
+                    "error_detail = COALESCE(error_detail, ?) "
+                    "WHERE run_id = ? AND status = 'paused'",
+                    (now, "automatic retry limit reached", run_id))
+                log.error("analysis_run_automatic_retry_limit_reached", run_id=run_id,
+                          retry_count=retry_count)
+                continue
+            changed = conn.execute(
+                "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
+                "current_domain = NULL, automatic_retry_count = automatic_retry_count + 1, "
+                "next_retry_at = NULL, error_detail = NULL, updated_at = ? "
+                "WHERE run_id = ? AND status = 'paused'",
+                (now, run_id)).rowcount
+            if changed:
+                conn.execute(
+                    "UPDATE analysis_domain_runs SET status = 'pending', next_retry_at = NULL, "
+                    "error_detail = NULL WHERE run_id = ? AND status = 'paused'",
+                    (run_id,))
+                log.info("analysis_run_automatically_requeued", run_id=run_id,
+                         retry_count=retry_count + 1)
+        conn.commit()
+
     def _execute(self, run_id: str) -> dict[str, Any]:
         conn = db.get_connection(self.settings)
         try:
@@ -229,6 +305,11 @@ class AnalysisWorker:
             if self._cancelled(run_id):
                 return self._finalise_cancelled(run_id)
             self._execute_domain(run_id, domain_id)
+            if self._run_status(run_id) == "paused":
+                return self._refresh_run(run_id)
+
+        if self._run_status(run_id) == "paused":
+            return self._refresh_run(run_id)
 
         self._link_run(run_id)
         self._record_health(run_id, requested)
@@ -464,7 +545,13 @@ class AnalysisWorker:
                              topic_number=themes.index(theme), theme=theme)
                 written += 1
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
-            self._extract_narrative_signals(conn, run_id, domain_id, spec, run["release_id"], passages)
+            extraction_complete = self._extract_narrative_signals(
+                conn, run_id, domain_id, spec, run["release_id"], passages)
+            if not extraction_complete:
+                self._pause_for_retry(conn, run_id, domain_id,
+                                      "model/provider availability exhausted; automatic retry scheduled")
+                conn.commit()
+                return
             positive_row = conn.execute(
                 "SELECT COUNT(DISTINCT signal_id), COUNT(DISTINCT subject_id) FROM automated_signals "
                 "WHERE release_id = ? AND domain_id = ?", (run["release_id"], domain_id)).fetchone()
@@ -488,7 +575,7 @@ class AnalysisWorker:
         return str(source_key or document_id).split("|", 1)[0]
 
     def _extract_narrative_signals(self, conn, run_id: str, domain_id: str, spec,
-                                   release_id: str, passages: list[dict[str, Any]]) -> None:
+                                   release_id: str, passages: list[dict[str, Any]]) -> bool:
         manifest = load_release(conn, release_id) or {}
         models = manifest.get("models", {})
         client = self.model_client_factory(
@@ -548,6 +635,7 @@ class AnalysisWorker:
             conn.commit()
         if model_unavailable:
             self._update_run(conn, run_id, current_stage="discovering")
+        return not model_unavailable
 
     def _model_call_with_json_retry(self, client, prompt: str, *, role: str,
                                     domain_id: str, window_id: str, run_id: str):
@@ -606,6 +694,19 @@ class AnalysisWorker:
             "UPDATE analysis_domain_runs SET rows_processed = ?, rows_written = ? "
             "WHERE run_id = ? AND domain_id = ?", (processed, written, run_id, domain_id))
 
+    def _pause_for_retry(self, conn, run_id: str, domain_id: str, error_detail: str) -> None:
+        now = utcnow()
+        retry_at = _retry_at(getattr(self.settings, "analysis_retry_cooldown_seconds", 300.0))
+        conn.execute(
+            "UPDATE analysis_domain_runs SET status = 'paused', completed_at = NULL, "
+            "next_retry_at = ?, error_detail = ? WHERE run_id = ? AND domain_id = ?",
+            (retry_at, error_detail, run_id, domain_id))
+        conn.execute(
+            "UPDATE analysis_runs SET status = 'paused', current_stage = 'waiting_for_retry', "
+            "next_retry_at = ?, error_detail = ?, completed_at = NULL, updated_at = ? "
+            "WHERE run_id = ? AND status = 'running'",
+            (retry_at, error_detail, now, run_id))
+
     @staticmethod
     def _finish_domain(conn, run_id: str, domain_id: str, status: str,
                        processed: int, written: int, *, prerequisite_status: str,
@@ -630,7 +731,9 @@ class AnalysisWorker:
                 status, stage = "cancelled", "cancelled"
             elif any(value == "failed" for value in statuses):
                 status, stage = "failed", "failed"
-            elif force_complete or statuses and all(value in {"complete", "unavailable"} for value in statuses):
+            elif any(value == "paused" for value in statuses):
+                status, stage = "paused", "waiting_for_retry"
+            elif statuses and all(value in {"complete", "unavailable"} for value in statuses):
                 status, stage = "complete", "complete"
             else:
                 status, stage = "running", "processing"
@@ -639,6 +742,14 @@ class AnalysisWorker:
                              completed_at=now if status in {"complete", "failed", "cancelled"} else None)
             conn.commit()
             return read_run(conn, self_run_id)
+        finally:
+            conn.close()
+
+    def _run_status(self, run_id: str) -> str | None:
+        conn = db.get_connection(self.settings)
+        try:
+            row = conn.execute("SELECT status FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            return row["status"] if row else None
         finally:
             conn.close()
 

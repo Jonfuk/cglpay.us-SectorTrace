@@ -381,6 +381,74 @@ def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
     assert dict(prevalence) == {"positives": 1, "subjects": 1, "suppressed": 1}
 
 
+def test_analysis_worker_pauses_narrative_run_when_models_are_exhausted(conn, settings):
+    now = "2025-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
+        "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
+        "VALUES ('evidence-analysis-outage', 'fixture', 'https://example.test/outage', ?, 200, 'hash-outage', "
+        "'/data/outage.pdf', 'application/pdf', 10, 'committee_papers', 'authority-outage', ?)", (now, now))
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
+        "created_at, updated_at) VALUES ('document-analysis-outage', 'evidence-analysis-outage', "
+        "'committee_papers', 'authority-outage', 'REPORT', ?, ?)", (now, now))
+    conn.execute(
+        "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
+        "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
+        "('version-analysis-outage', 'document-analysis-outage', 'fixture', '1', '1', 'hash', 'complete', 1, ?)", (now,))
+    conn.execute(
+        "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
+        "text_sha256) VALUES ('element-analysis-outage', 'version-analysis-outage', 'PARAGRAPH', 1, "
+        "'The service reported high caseloads.', 'text-hash-outage')")
+
+    class UnavailableModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            self.last_cost_micros = 0
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            raise AnalysisModelUnavailable("all configured providers are rate limited")
+
+    settings.analysis_retry_cooldown_seconds = 300
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="outage-fixture-worker",
+                            model_client_factory=UnavailableModelClient).run_once()
+
+    assert result["run_id"] == started["run_id"]
+    assert result["status"] == "paused"
+    assert result["domains"][0]["status"] == "paused"
+    assert result["next_retry_at"]
+    assert result["domains"][0]["next_retry_at"]
+    assert result["completed_domains"] == 0
+
+
+def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    conn.execute(
+        "UPDATE analysis_runs SET status = 'running', updated_at = '2000-01-01T00:00:00+00:00' "
+        "WHERE run_id = ?", (started["run_id"],))
+    conn.execute(
+        "UPDATE analysis_domain_runs SET status = 'running' WHERE run_id = ?", (started["run_id"],))
+    conn.commit()
+
+    worker = AnalysisWorker(settings, worker_id="recovery-fixture-worker")
+    assert worker._claim() is None
+    stale = analysis_admin.run(conn, started["run_id"])
+    assert stale["status"] == "paused"
+    assert stale["domains"][0]["status"] == "paused"
+
+    conn.execute(
+        "UPDATE analysis_runs SET next_retry_at = '2000-01-01T00:00:00+00:00' WHERE run_id = ?",
+        (started["run_id"],))
+    conn.commit()
+    assert worker._claim() == started["run_id"]
+    recovered = analysis_admin.run(conn, started["run_id"])
+    assert recovered["status"] == "running"
+    assert recovered["automatic_retry_count"] == 1
+    assert recovered["domains"][0]["status"] == "pending"
+
+
 def test_batch_budget_stops_at_ceiling_and_boundary():
     budget = CallBudget(ceiling_micros=10)
     budget.before_call(10)

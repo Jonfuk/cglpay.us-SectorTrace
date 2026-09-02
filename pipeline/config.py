@@ -376,6 +376,13 @@ class Settings(BaseSettings):
     claim_signal_reflection_fallback_models: str = ""
     claim_signal_skip_extractor_on_null: bool = True
     analysis_cost_ceiling_micros: int = 0
+    # Overnight analysis recovery. A model/provider outage pauses the current
+    # domain and retries it after the cooldown; a worker heartbeat going stale
+    # is treated the same way. The retry cap prevents an unattended batch from
+    # looping forever when every configured provider is unavailable.
+    analysis_retry_cooldown_seconds: float = 300.0
+    analysis_stale_worker_seconds: float = 900.0
+    analysis_max_automatic_retries: int = 12
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
