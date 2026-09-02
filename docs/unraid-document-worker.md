@@ -104,6 +104,10 @@ dual-model narrative extraction and records model prompts, responses, cache
 hits, latency and provider-reported cost. Without it, deterministic structured
 analysis and dependency-free narrative discovery still run; model extraction
 is recorded as unavailable rather than silently treated as a verified signal.
+The narrative model stage uses up to four concurrent passages by default;
+`ANALYSIS_MODEL_CONCURRENCY` can lower that for a provider with tighter limits.
+Run `pipeline analysis health --max-age-seconds 120` inside the worker image to
+check the heartbeat used by the deployment watchdog.
 
 For a host using the standalone helper rather than the Ansible-generated
 Compose file:

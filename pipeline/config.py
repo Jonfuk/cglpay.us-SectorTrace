@@ -382,7 +382,10 @@ class Settings(BaseSettings):
     # looping forever when every configured provider is unavailable.
     analysis_retry_cooldown_seconds: float = 300.0
     analysis_stale_worker_seconds: float = 900.0
-    analysis_max_automatic_retries: int = 12
+    analysis_model_concurrency: int = 4
+    # 96 five-minute cooldowns cover a normal overnight window while keeping
+    # a finite bound. Permanent configuration errors fail immediately.
+    analysis_max_automatic_retries: int = 96
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 

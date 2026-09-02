@@ -81,7 +81,11 @@ turns into a clarification, never a crash and never an execution.
    retries after `ANALYSIS_RETRY_COOLDOWN_SECONDS`; a stale worker heartbeat is
    recovered in the same way. `ANALYSIS_MAX_AUTOMATIC_RETRIES` caps retries so
    a persistent outage becomes a visible failed run rather than an endless
-   loop. `resume_run` remains available for a deliberate manual retry.
+   loop. The narrative extractor uses up to four bounded concurrent passages
+   (`ANALYSIS_MODEL_CONCURRENCY=4`); runs with a hard cost ceiling stay serial
+   so the ceiling remains exact. `resume_run` remains available for a
+   deliberate manual retry. Permanent configuration/authentication errors fail
+   immediately instead of consuming the retry window.
 
    For analysis releases that use dedicated `CLAIM_SIGNAL_*_MODEL` settings,
    use the matching `CLAIM_SIGNAL_SCOUT_FALLBACK_MODELS`,

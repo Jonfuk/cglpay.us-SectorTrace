@@ -26,6 +26,10 @@ class AnalysisModelUnavailable(RuntimeError):
     """The optional model backend is not configured or did not answer."""
 
 
+class AnalysisModelConfigurationError(AnalysisModelUnavailable):
+    """A permanent configuration/authentication error that should fail fast."""
+
+
 class AnalysisModelInvalidJSON(AnalysisModelUnavailable):
     """The model answered, but its response was not a complete JSON object."""
 
@@ -55,19 +59,24 @@ class AnalysisModelClient:
             self._record(model_id="unconfigured", domain_id=domain_id, prompt_sha=hashlib.sha256(prompt.encode()).hexdigest(),
                          window_id=window_id, response=None, cost_micros=None, latency_ms=0,
                          status="unavailable", cached=False, error_detail=detail)
-            raise AnalysisModelUnavailable(detail)
+            raise AnalysisModelConfigurationError(detail)
         prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
+        model_candidates = list(dict.fromkeys([model_id, *(self.fallback_models.get(role, []) or [])]))
+        placeholders = ", ".join("?" for _ in model_candidates)
         cached = self.conn.execute(
-            "SELECT response_json, cost_micros FROM analysis_model_calls "
-            "WHERE release_id = ? AND model_id = ? AND prompt_sha256 = ? "
+            "SELECT model_id, provider_id, response_json FROM analysis_model_calls "
+            "WHERE release_id = ? AND model_id IN (" + placeholders + ") AND prompt_sha256 = ? "
             "AND status = 'ok' ORDER BY created_at DESC LIMIT 1",
-            (self.release_id, model_id, prompt_sha)).fetchone()
+            (self.release_id, *model_candidates, prompt_sha)).fetchone()
         if cached and cached["response_json"]:
             self.last_cost_micros = 0
             self.last_cached = True
-            self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
+            served_model_id = cached["model_id"] or model_id
+            self.last_telemetry = {"actual_model": served_model_id, "provider": cached["provider_id"],
+                                   "cached": True}
+            self._record(model_id=served_model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=cached["response_json"], cost_micros=0, latency_ms=0,
-                         status="ok", cached=True, error_detail=None)
+                         status="ok", cached=True, error_detail=None, provider_id=cached["provider_id"])
             return json.loads(cached["response_json"])
         try:
             from openai import OpenAI
@@ -76,20 +85,20 @@ class AnalysisModelClient:
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=None, cost_micros=None, latency_ms=0,
                          status="unavailable", cached=False, error_detail=detail)
-            raise AnalysisModelUnavailable(detail) from exc
+            raise AnalysisModelConfigurationError(detail) from exc
         if not getattr(self.settings, "assistant_enabled", False):
             detail = "analysis model support is disabled"
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=None, cost_micros=None, latency_ms=0,
                          status="unavailable", cached=False, error_detail=detail)
-            raise AnalysisModelUnavailable(detail)
+            raise AnalysisModelConfigurationError(detail)
         base_url = getattr(self.settings, "assistant_ollama_url", "")
         if not base_url:
             detail = "no OpenAI-compatible analysis endpoint is configured"
             self._record(model_id=model_id, domain_id=domain_id, prompt_sha=prompt_sha, window_id=window_id,
                          response=None, cost_micros=None, latency_ms=0,
                          status="unavailable", cached=False, error_detail=detail)
-            raise AnalysisModelUnavailable(detail)
+            raise AnalysisModelConfigurationError(detail)
         started = time.monotonic()
         telemetry = TransportTelemetry()
         try:
@@ -138,6 +147,9 @@ class AnalysisModelClient:
                          retry_count=self.last_telemetry.get("retry_count", 0),
                          status_code=(self.last_telemetry.get("status_codes") or [None])[-1])
             detail = f"{model_id} did not respond: {type(exc).__name__}: {exc}"
+            status_codes = self.last_telemetry.get("status_codes") or []
+            if any(status in {400, 401, 403, 404, 422} for status in status_codes):
+                raise AnalysisModelConfigurationError(detail) from exc
             raise AnalysisModelUnavailable(detail) from exc
         try:
             payload = json.loads(content)

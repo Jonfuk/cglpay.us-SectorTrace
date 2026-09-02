@@ -338,6 +338,21 @@
   when: mirror_role == 'beta'
   changed_when: true
 
+- name: Enable and start the analysis-worker watchdog on beta mirrors
+  ansible.builtin.service:
+    name: sectortrace-mirror-analysis-watchdog.timer
+    enabled: true
+    state: started
+  when: mirror_role == 'beta'
+
+- name: Stop the analysis-worker watchdog outside beta mirrors
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-analysis-watchdog.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: mirror_role != 'beta'
+
 # The one-time catch-up of document_embeddings.embedding_vec for rows that
 # predate migration 0071. Deliberately *after* the health gate, never inside
 # `pipeline migrate`: on a populated warehouse this fills six figures of rows
@@ -546,6 +561,12 @@
     dest: /usr/local/bin/sectortrace-mirror-verify
     mode: "0700"
 
+- name: Install the analysis-worker watchdog script
+  ansible.builtin.template:
+    src: sectortrace-mirror-analysis-watchdog.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-analysis-watchdog
+    mode: "0700"
+
 - name: Install the sync, alert and verify units
   ansible.builtin.template:
     src: "{{ item }}.j2"
@@ -559,6 +580,8 @@
     - sectortrace-mirror-verify.timer
     - sectortrace-mirror-verify-deep.service
     - sectortrace-mirror-verify-deep.timer
+    - sectortrace-mirror-analysis-watchdog.service
+    - sectortrace-mirror-analysis-watchdog.timer
   notify: Reload systemd
 
 # Created here rather than by the sync, which runs as a container and would

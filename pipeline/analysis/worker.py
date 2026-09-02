@@ -14,7 +14,7 @@ import os
 import threading
 import time
 import uuid
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -28,6 +28,7 @@ from pipeline.analysis.graph import project_release, signal_store_from_settings
 from pipeline.analysis.linking import link_signals, save_link
 from pipeline.analysis.models import (
     AnalysisModelClient,
+    AnalysisModelConfigurationError,
     AnalysisModelInvalidJSON,
     AnalysisModelUnavailable,
 )
@@ -100,6 +101,7 @@ class AnalysisWorker:
                 available_cpus = os.cpu_count() or 1
             comparison_workers = min(max(1, available_cpus), 4)
         self.comparison_workers = max(1, int(comparison_workers))
+        self._budget_lock = threading.RLock()
 
     def run_forever(self) -> None:
         """Poll until interrupted, allowing the container to restart safely."""
@@ -545,6 +547,10 @@ class AnalysisWorker:
                              topic_number=themes.index(theme), theme=theme)
                 written += 1
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
+            # Model calls use private connections so four passages can run in
+            # parallel; release this connection's write transaction before
+            # those writers begin.
+            conn.commit()
             extraction_complete = self._extract_narrative_signals(
                 conn, run_id, domain_id, spec, run["release_id"], passages)
             if not extraction_complete:
@@ -578,64 +584,95 @@ class AnalysisWorker:
                                    release_id: str, passages: list[dict[str, Any]]) -> bool:
         manifest = load_release(conn, release_id) or {}
         models = manifest.get("models", {})
-        client = self.model_client_factory(
-            self.settings, release_id=release_id, run_id=run_id, models=models,
-            fallback_models=manifest.get("model_fallbacks", {}), conn=conn)
+        fallback_models = manifest.get("model_fallbacks", {})
         model_unavailable = False
-        for passage in passages:
-            if self._cancelled(run_id):
-                raise AnalysisCancelled("analysis run cancelled at a batch boundary")
+        requested_workers = max(1, min(4, int(getattr(
+            self.settings, "analysis_model_concurrency", 4))))
+        # A hard cost ceiling cannot account for the cost of concurrent calls
+        # until their responses arrive. Keep that guarantee strict.
+        if getattr(self, "_budget", CallBudget()).ceiling_micros > 0:
+            requested_workers = 1
+        with ThreadPoolExecutor(max_workers=requested_workers,
+                                thread_name_prefix="analysis-model") as pool:
+            for start in range(0, len(passages), requested_workers):
+                if self._cancelled(run_id):
+                    raise AnalysisCancelled("analysis run cancelled at a batch boundary")
+                futures = [pool.submit(
+                    self._extract_narrative_passage, passage, run_id, domain_id, spec,
+                    release_id, models, fallback_models)
+                    for passage in passages[start:start + requested_workers]]
+                for future in as_completed(futures):
+                    try:
+                        extracted = future.result()
+                    except CostCeilingExceeded:
+                        raise
+                    except AnalysisModelConfigurationError:
+                        raise
+                    except AnalysisModelUnavailable as exc:
+                        log.warning("analysis_model_unavailable", run_id=run_id, domain_id=domain_id,
+                                    error=str(exc))
+                        model_unavailable = True
+                        continue
+                    if extracted is None:
+                        continue
+                    passage, candidate, second_candidate = extracted
+                    signal = candidate_to_signal(
+                        candidate, release_id=release_id, source_text=passage["text"],
+                        second_model=second_candidate)
+                    if signal is None:
+                        continue
+                    from pipeline.analysis.store import save_signal
+                    save_signal(conn, signal)
+                    conn.execute(
+                        "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, passed, score, reasons_json, created_at) "
+                        "VALUES (?, ?, 'dual_model_exact_grounding', 1, 1.0, '[]', ?)",
+                        (f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()))
+                    conn.commit()
+                if model_unavailable:
+                    break
+        if model_unavailable:
+            self._update_run(conn, run_id, current_stage="discovering")
+        return not model_unavailable
+
+    def _extract_narrative_passage(self, passage, run_id: str, domain_id: str, spec,
+                                   release_id: str, models: dict[str, str], fallback_models):
+        """Extract one passage on a private connection; the caller writes signals."""
+        conn = db.get_connection(self.settings)
+        try:
+            client = self.model_client_factory(
+                self.settings, release_id=release_id, run_id=run_id, models=models,
+                fallback_models=fallback_models, conn=conn)
             prompt = extraction_prompt(namespace=spec.taxonomy_namespace,
                                        subject_type=passage["subject_type"],
                                        subject_id=str(passage["subject_id"]), text=passage["text"])
             try:
-                first = self._model_call_with_json_retry(client, prompt, role="scout", domain_id=domain_id,
-                                                         window_id=passage["evidence_ref"], run_id=run_id)
+                first = self._model_call_with_json_retry(
+                    client, prompt, role="scout", domain_id=domain_id,
+                    window_id=passage["evidence_ref"], run_id=run_id)
                 first_candidate = candidate_from_payload(
                     first, namespace=spec.taxonomy_namespace,
                     subject_type=passage["subject_type"],
                     subject_id=str(passage["subject_id"]),
                     evidence_ref=passage["evidence_ref"], model_output=first)
-                # A null/invalid scout result cannot become an accepted signal,
-                # so there is nothing for the independent extractor to verify.
-                # Positive candidates still receive the original dual-model
-                # agreement check.
-                if first_candidate is None and getattr(self.settings, "claim_signal_skip_extractor_on_null", True):
-                    continue
-                second = self._model_call_with_json_retry(client, prompt, role="extractor", domain_id=domain_id,
-                                                         window_id=passage["evidence_ref"], run_id=run_id)
-            except CostCeilingExceeded:
-                raise
+                if first_candidate is None and getattr(
+                        self.settings, "claim_signal_skip_extractor_on_null", True):
+                    return None
+                second = self._model_call_with_json_retry(
+                    client, prompt, role="extractor", domain_id=domain_id,
+                    window_id=passage["evidence_ref"], run_id=run_id)
             except AnalysisModelInvalidJSON as exc:
-                log.warning("analysis_model_invalid_json_skipped", run_id=run_id, domain_id=domain_id,
-                            window_id=passage["evidence_ref"], error=str(exc))
-                continue
-            except AnalysisModelUnavailable as exc:
-                log.warning("analysis_model_unavailable", run_id=run_id, domain_id=domain_id,
-                            window_id=passage["evidence_ref"], error=str(exc))
-                model_unavailable = True
-                break
-            candidate = first_candidate
+                log.warning("analysis_model_invalid_json_skipped", run_id=run_id,
+                            domain_id=domain_id, window_id=passage["evidence_ref"], error=str(exc))
+                return None
             second_candidate = candidate_from_payload(
                 second, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
                 subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
                 model_output=second)
-            if candidate is None or second_candidate is None:
-                continue
-            signal = candidate_to_signal(candidate, release_id=release_id, source_text=passage["text"],
-                                         second_model=second_candidate)
-            if signal is None:
-                continue
-            from pipeline.analysis.store import save_signal
-            save_signal(conn, signal)
-            conn.execute(
-                "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, passed, score, reasons_json, created_at) "
-                "VALUES (?, ?, 'dual_model_exact_grounding', 1, 1.0, '[]', ?)",
-                (f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()))
-            conn.commit()
-        if model_unavailable:
-            self._update_run(conn, run_id, current_stage="discovering")
-        return not model_unavailable
+            if first_candidate is None or second_candidate is None:
+                return None
+            return passage, first_candidate, second_candidate
+        finally:
+            conn.close()
 
     def _model_call_with_json_retry(self, client, prompt: str, *, role: str,
                                     domain_id: str, window_id: str, run_id: str):
@@ -658,13 +695,15 @@ class AnalysisWorker:
     def _model_call(self, client, prompt: str, *, role: str, domain_id: str,
                     window_id: str) -> dict[str, Any] | None:
         budget = getattr(self, "_budget", CallBudget())
-        budget.before_call()
+        with self._budget_lock:
+            budget.before_call()
         payload = client.generate_json(prompt, role=role, domain_id=domain_id, window_id=window_id)
-        budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
-        conn = client.conn
-        conn.execute("UPDATE analysis_runs SET cost_micros = ?, updated_at = ? WHERE run_id = ?",
-                     (budget.spent_micros, utcnow(), self._current_run_id))
-        conn.commit()
+        with self._budget_lock:
+            budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
+            conn = client.conn
+            conn.execute("UPDATE analysis_runs SET cost_micros = ?, updated_at = ? WHERE run_id = ?",
+                         (budget.spent_micros, utcnow(), self._current_run_id))
+            conn.commit()
         return payload
 
     @staticmethod

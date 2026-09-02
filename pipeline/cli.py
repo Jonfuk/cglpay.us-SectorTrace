@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -80,6 +81,40 @@ def analysis_worker(
         typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
     else:
         worker.run_forever()
+
+
+@analysis_app.command("health")
+def analysis_health(
+    max_age_seconds: float | None = typer.Option(
+        None, "--max-age-seconds", min=1.0,
+        help="Maximum heartbeat age; defaults to ANALYSIS_STALE_WORKER_SECONDS."),
+) -> None:
+    """Exit non-zero when the persistent analysis worker heartbeat is stale."""
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        row = conn.execute(
+            "SELECT worker_id, last_seen_at, status, version FROM analysis_worker_heartbeats "
+            "ORDER BY last_seen_at DESC LIMIT 1").fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo('{"status":"missing_heartbeat"}')
+        raise typer.Exit(code=1)
+    try:
+        seen_at = datetime.fromisoformat(row["last_seen_at"])
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - seen_at).total_seconds())
+    except (TypeError, ValueError):
+        typer.echo('{"status":"invalid_heartbeat"}')
+        raise typer.Exit(code=1)
+    threshold = max_age_seconds or float(getattr(settings, "analysis_stale_worker_seconds", 900.0))
+    payload = {"status": row["status"], "worker_id": row["worker_id"],
+               "last_seen_at": row["last_seen_at"], "age_seconds": round(age_seconds, 1),
+               "max_age_seconds": threshold}
+    typer.echo(__import__("json").dumps(payload, sort_keys=True))
+    if age_seconds > threshold:
+        raise typer.Exit(code=1)
 
 
 @documents_app.command("inspect")

@@ -99,7 +99,9 @@ On a beta box, the playbook does start the persistent admin analysis worker in
 the documents-worker image. It consumes runs created by `/admin/analysis` and
 shares the beta warehouse with the app. Operate it with
 `sectortrace-mirror analysis-start`, `sectortrace-mirror analysis-stop`, and
-`sectortrace-mirror analysis-worker-logs`. Disaster-recovery mirrors do not
+`sectortrace-mirror analysis-worker-logs`. A five-minute systemd watchdog also
+checks the worker heartbeat and restarts a wedged container; Docker's
+`restart: unless-stopped` handles process crashes. Disaster-recovery mirrors do not
 start this consumer because their warehouse is replaced by sync.
 
 That follow-up is a file: **`<state_dir>/.env.merge`**, which for a mirror

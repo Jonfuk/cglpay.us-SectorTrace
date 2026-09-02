@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import threading
+import time
+
 import pytest
 
 from pipeline.analysis import structured as structured_analysis
@@ -14,6 +18,7 @@ from pipeline.analysis.graph import (
 from pipeline.analysis.linking import link_signals
 from pipeline.analysis.models import (
     AnalysisModelClient,
+    AnalysisModelConfigurationError,
     AnalysisModelInvalidJSON,
     AnalysisModelUnavailable,
 )
@@ -173,6 +178,37 @@ def test_model_unavailability_is_recorded(conn, settings, monkeypatch):
     assert row["status"] == "unavailable"
     assert row["model_id"] == "test/model"
     assert row["error_detail"] == "analysis model support requires the assistant extra"
+
+
+def test_permanent_analysis_configuration_error_fails_fast(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    client = AnalysisModelClient(settings, release_id=release["release_id"], run_id="run-config-error",
+                                 models={"scout": "test/model"}, conn=conn)
+    with pytest.raises(AnalysisModelConfigurationError, match="assistant extra"):
+        client.generate_json("test prompt", role="scout", domain_id="da", window_id="window-1")
+
+
+def test_analysis_cache_reuses_successful_fallback_model(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    prompt = "cached fallback prompt"
+    prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
+    conn.execute(
+        "INSERT INTO analysis_model_calls (model_call_id, release_id, domain_id, window_id, model_id, "
+        "provider_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, status, created_at) "
+        "VALUES ('cached-fallback-call', ?, 'da', 'window-1', 'backup/model', 'provider-1', ?, ?, 0, 17, 42, 'ok', ?)",
+        (release["release_id"], prompt_sha,
+         '{"signal": null}', "2025-01-01T00:00:00+00:00"))
+    conn.commit()
+
+    client = AnalysisModelClient(
+        settings, release_id=release["release_id"], run_id="run-cache-hit",
+        models={"scout": "primary/model"}, fallback_models={"scout": ["backup/model"]}, conn=conn)
+    assert client.generate_json(prompt, role="scout", domain_id="da", window_id="window-2") == {"signal": None}
+    assert client.last_cached is True
+    row = conn.execute(
+        "SELECT model_id, cached, cost_micros FROM analysis_model_calls "
+        "WHERE run_id = 'run-cache-hit' ORDER BY created_at DESC LIMIT 1").fetchone()
+    assert dict(row) == {"model_id": "backup/model", "cached": 1, "cost_micros": 0}
 
 
 def test_analysis_release_captures_model_fallback_order(conn, settings, monkeypatch):
@@ -421,6 +457,39 @@ def test_analysis_worker_pauses_narrative_run_when_models_are_exhausted(conn, se
     assert result["next_retry_at"]
     assert result["domains"][0]["next_retry_at"]
     assert result["completed_domains"] == 0
+
+
+def test_analysis_worker_limits_narrative_model_concurrency_to_four(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    state = {"active": 0, "maximum": 0, "calls": 0}
+    state_lock = threading.Lock()
+
+    class ConcurrentModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            self.last_cost_micros = 0
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            with state_lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+                state["calls"] += 1
+            time.sleep(0.03)
+            with state_lock:
+                state["active"] -= 1
+            return {"signal": None}
+
+    worker = AnalysisWorker(settings, worker_id="concurrency-fixture-worker",
+                            model_client_factory=ConcurrentModelClient)
+    worker._budget = CallBudget()
+    worker._current_run_id = started["run_id"]
+    passages = [{"text": f"passage {index}", "subject_id": f"subject-{index}",
+                 "subject_type": "authority", "evidence_ref": f"element-{index}"}
+                for index in range(8)]
+    assert worker._extract_narrative_signals(
+        conn, started["run_id"], "da", domain_registry()["da"], started["release_id"], passages)
+    assert state == {"active": 0, "maximum": 4, "calls": 8}
 
 
 def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):
