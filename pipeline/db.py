@@ -792,6 +792,50 @@ def upsert(
     conn.execute(sql, row)
 
 
+def upsert_many(
+    conn: Connection,
+    table: str,
+    rows: Sequence[dict],
+    natural_key: Sequence[str],
+    preserve: Sequence[str] = (),
+) -> int:
+    """Batch :func:`upsert` using one cached statement shape.
+
+    All rows must have the same columns; accepting a ragged batch would make
+    the statement shape depend on row order and quietly turn a bulk write back
+    into a collection of special cases. ``IS DISTINCT FROM`` suppresses a
+    pointless conflict update on both supported SQL engines while still
+    updating provenance, hashes, timestamps, or canonical values that changed.
+    """
+    if not rows:
+        return 0
+    columns = list(rows[0].keys())
+    if not columns or any(set(row) != set(columns) for row in rows):
+        raise ValueError("upsert_many rows must share one column shape")
+    missing = set(natural_key) - set(columns)
+    if missing:
+        raise ValueError(f"natural key columns are missing from rows: {sorted(missing)}")
+    protected = set(preserve)
+    updates = [c for c in columns if c not in natural_key and c not in protected]
+    key_sql = ", ".join(natural_key)
+    column_sql = ", ".join(columns)
+    placeholders = ", ".join(f":{column}" for column in columns)
+    if updates:
+        assignments = ", ".join(f"{c} = excluded.{c}" for c in updates)
+        changed = " OR ".join(f"{table}.{c} IS DISTINCT FROM excluded.{c}" for c in updates)
+        sql = (f"INSERT INTO {table} ({column_sql}) VALUES ({placeholders}) "
+               f"ON CONFLICT ({key_sql}) DO UPDATE SET {assignments} "
+               f"WHERE {changed}")
+    else:
+        sql = (f"INSERT INTO {table} ({column_sql}) VALUES ({placeholders}) "
+               f"ON CONFLICT ({key_sql}) DO NOTHING")
+    # Normalise insertion order once so callers may construct equivalent
+    # dictionaries in different orders while the prepared statement remains
+    # one stable shape.
+    conn.executemany(sql, [{column: row[column] for column in columns} for row in rows])
+    return len(rows)
+
+
 def record_parse_failure(
     conn: Connection,
     module: str,

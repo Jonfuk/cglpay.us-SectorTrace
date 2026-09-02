@@ -1906,6 +1906,27 @@ def benchmark(
                      f"x{row['p50_ratio']}")
 
 
+@app.command("performance")
+def performance_suite(
+    suite: str = typer.Argument("all", help="Subsystem suite or all"),
+    output: str | None = typer.Option(None, "--output", help="Write a JSON report here"),
+) -> None:
+    """Run a named performance suite with deterministic output metadata."""
+    from pathlib import Path
+
+    from pipeline import performance as performance_module
+
+    configure_logging("performance")
+    report = performance_module.run(
+        get_settings(), suite, output=Path(output) if output else None)
+    ui.heading(f"performance — {suite}")
+    for name, result in report["suites"].items():
+        status = result.get("status", "measured")
+        ui.info(f"  {name:<12} {status:<28} {result['wall_seconds']:.3f}s")
+    if report.get("written_to"):
+        ui.success(f"recorded to {report['written_to']}")
+
+
 @app.command("coverage-report")
 def coverage_report(
     output: str = typer.Option(

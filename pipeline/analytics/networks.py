@@ -7,7 +7,9 @@ from typing import Any
 
 import networkx as nx
 
+from pipeline import db
 from pipeline.analytics.graph_builder import GraphSnapshot
+from pipeline.writer import BatchWriter
 
 ANALYSIS_VERSION = "1"
 
@@ -74,16 +76,22 @@ def persist_metrics(
     """Store derived values with enough metadata to reproduce their meaning."""
     calculated_at = _now()
     parameter_json = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
-    for metric in metrics:
-        conn.execute(
-            "INSERT INTO graph_metrics (entity_id, metric_name, metric_value, analysis_name, "
-            "analysis_version, graph_snapshot, calculated_at, parameters_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(entity_id, metric_name, analysis_name, analysis_version, graph_snapshot) "
-            "DO UPDATE SET metric_value = excluded.metric_value, calculated_at = excluded.calculated_at, "
-            "parameters_json = excluded.parameters_json",
-            (metric["entity_id"], metric["metric_name"], metric["metric_value"], analysis_name,
-             analysis_version, graph_snapshot, calculated_at, parameter_json),
-        )
-    conn.commit()
+    rows = [{"entity_id": metric["entity_id"],
+             "metric_name": metric["metric_name"],
+             "metric_value": metric["metric_value"],
+             "analysis_name": analysis_name,
+             "analysis_version": analysis_version,
+             "graph_snapshot": graph_snapshot,
+             "calculated_at": calculated_at,
+             "parameters_json": parameter_json} for metric in metrics]
+    writer = BatchWriter(
+        conn,
+        lambda batch: db.upsert_many(
+            conn, "graph_metrics", list(batch),
+            ["entity_id", "metric_name", "analysis_name", "analysis_version",
+             "graph_snapshot"]),
+        max_rows=1000,
+    )
+    writer.write_many(rows)
+    writer.close()
     return len(metrics)

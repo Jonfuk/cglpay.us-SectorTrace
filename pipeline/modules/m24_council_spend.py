@@ -60,7 +60,7 @@ from pipeline.http import RobotsDisallowed
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
 from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
-from pipeline.xlsx import XlsxError, iter_sheet, sheet_names
+from pipeline.xlsx import XlsxError, iter_sheet_stream, sheet_names
 
 log = structlog.get_logger()
 
@@ -271,7 +271,11 @@ def _parse_xlsx_ods(body: bytes, file_url: str, format_hint: str) -> tuple[list[
     """An XLSX or ODS spend file as line-item rows."""
     if format_hint == "xlsx":
         try:
-            sheets = {name: iter_sheet(body, name) for name in sheet_names(body)}
+            # Consume one sheet at a time. The streaming reader drops parsed
+            # XML elements as it goes, avoiding a second workbook-sized object
+            # before the spend rows are normalised.
+            sheets = {name: list(iter_sheet_stream(body, name))
+                      for name in sheet_names(body)}
         except (XlsxError, OSError, ValueError) as exc:
             return [], f"could not read the workbook as xlsx: {exc}"
         rows: list[list[str]] = []

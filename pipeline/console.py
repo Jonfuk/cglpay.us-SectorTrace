@@ -122,6 +122,16 @@ def console() -> Console:
     return _console
 
 
+def _layout_width() -> int:
+    """Return the caller's requested width when Rich exposes one.
+
+    On Windows, Rich's public ``width`` property may be clamped to the
+    detected legacy terminal width even when ``Console(width=...)`` was used.
+    Layout decisions should honor that explicit width.
+    """
+    return getattr(console(), "_width", None) or console().width
+
+
 def reset_console() -> None:
     """Drop the cached console. For tests, which change the environment."""
     global _console
@@ -219,7 +229,7 @@ class ThroughputColumn(ProgressColumn):
         # end-of-run summary either way.
         rates = f"net {compact_rate(NETWORK.rate())}"
         disk = f"dsk {compact_rate(DISK.rate())}"
-        if console().width >= self.TOTALS_MIN_WIDTH:
+        if _layout_width() >= self.TOTALS_MIN_WIDTH:
             rates += f" {compact_total(NETWORK.total)}"
             disk += f" {compact_total(DISK.total)}"
         return Text(f"{rates}  {disk}", style="pipeline.muted")
@@ -250,7 +260,7 @@ def _columns(show_rate: bool) -> list:
         ThroughputColumn(),
         TimeElapsedColumn(),
     ]
-    if show_rate and console().width >= REMAINING_MIN_WIDTH:
+    if show_rate and _layout_width() >= REMAINING_MIN_WIDTH:
         # Remaining-time estimates are honest for a fixed list of councils and
         # actively misleading for anything paced by an external API's
         # Retry-After — so they are the first thing dropped when the terminal

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipeline import catalog, db
+from pipeline import catalog, db, operational_snapshots
 from pipeline.web import queries
 
 # Authorities responsible for public health, and therefore the ones any
@@ -517,6 +517,43 @@ def health(conn: db.Connection, settings) -> dict:
         "graph": graph_status(conn),
         "documents": document_status(conn),
     }
+
+
+def cached_operational(conn: db.Connection, settings, key: str, compute) -> dict:
+    """Serve the latest successful expensive value, refreshing when stale.
+
+    A failed refresh never erases the last useful answer; it marks that answer
+    stale and exposes the refresh error for the operator UI.
+    """
+    max_age = getattr(settings, "operational_snapshot_max_age_seconds", 900)
+    current = operational_snapshots.load(conn, key, max_age_seconds=max_age)
+    if current is not None and not current["stale"]:
+        return {"value": current["payload"], "snapshot": current}
+    started = __import__("time").perf_counter()
+    try:
+        value = compute()
+        try:
+            operational_snapshots.save(
+                conn, key, value,
+                duration_ms=(__import__("time").perf_counter() - started) * 1000)
+            conn.commit()
+            snapshot = operational_snapshots.load(conn, key, max_age_seconds=max_age)
+        except db.Error:
+            # The current web read connection may be enforced query-only. The
+            # calculated value is still valid; persistence is an optimisation
+            # and cannot turn an otherwise healthy route into a 500.
+            conn.rollback()
+            snapshot = None
+        return {"value": value, "snapshot": snapshot}
+    except Exception as exc:
+        conn.rollback()
+        if current is not None:
+            operational_snapshots.record_refresh_failure(conn, key, str(exc))
+            conn.commit()
+            current["stale"] = True
+            current["refresh_error"] = str(exc)[:2000]
+            return {"value": current["payload"], "snapshot": current}
+        raise
 
 
 # --- parse failures ---------------------------------------------------------------

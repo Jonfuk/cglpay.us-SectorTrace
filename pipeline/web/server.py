@@ -32,6 +32,8 @@ import json
 import re
 import secrets
 import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -266,6 +268,66 @@ GZIP_TYPES = {
 }
 
 log = structlog.get_logger()
+
+
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server with bounded active work and queue admission.
+
+    ``ThreadingHTTPServer`` creates one thread for every accepted socket. A
+    slow client can therefore consume an unbounded amount of memory before
+    the application has had a chance to reject it. The executor keeps the
+    useful standard-library server while making concurrency an explicit
+    resource budget: ``workers`` run and ``queue_size`` wait; later requests
+    receive a retryable 503.
+    """
+
+    daemon_threads = True
+    block_on_close = True
+
+    def __init__(self, server_address, request_handler, *, workers: int,
+                 queue_size: int, **kwargs):
+        if workers < 1 or queue_size < 0:
+            raise ValueError("workers must be positive and queue_size non-negative")
+        self.web_workers = workers
+        self.web_queue_size = queue_size
+        self._admission = threading.BoundedSemaphore(workers + queue_size)
+        self._executor = ThreadPoolExecutor(max_workers=workers,
+                                             thread_name_prefix="web")
+        super().__init__(server_address, request_handler, **kwargs)
+
+    def process_request(self, request, client_address):  # noqa: N802
+        if not self._admission.acquire(blocking=False):
+            try:
+                request.settimeout(1.0)
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Content-Type: text/plain; charset=utf-8\r\n"
+                    b"Content-Length: 20\r\n"
+                    b"Retry-After: 1\r\n"
+                    b"Connection: close\r\n\r\n"
+                    b"server is busy\n")
+            except OSError:
+                pass
+            finally:
+                request.close()
+            log.warning("web.queue_rejected", client=client_address,
+                        workers=self.web_workers, queue_size=self.web_queue_size)
+            return
+        try:
+            self._executor.submit(self._run_request, request, client_address)
+        except RuntimeError:
+            self._admission.release()
+            request.close()
+
+    def _run_request(self, request, client_address) -> None:
+        try:
+            self.process_request_thread(request, client_address)
+        finally:
+            self._admission.release()
+
+    def server_close(self):  # noqa: N802
+        super().server_close()
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
 
 class ApiError(Exception):
@@ -889,6 +951,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/openapi.json":
             return self._send_json(openapi.document(), max_age=PUBLIC_MAX_AGE)
 
+        # Check the response cache before borrowing a database connection.
+        # A warm public response should consume neither a pool slot nor a
+        # SQLite read connection; the cache's single-flight owner opens one
+        # only for the miss.
+        if (path.startswith("/api/v1/") and
+                path not in {"/api/v1/export", "/api/v1/feed/changes.atom"}):
+            payload = self.cache.get_or_compute(
+                _cache_key(path, params),
+                _cache_ttl(path, self.settings),
+                lambda: self._get_public_uncached(path, params),
+            )
+            self._send_json(payload, max_age=PUBLIC_MAX_AGE)
+            return
+
         conn = queries.readonly_connection(self.settings)
         try:
             if path == "/api/v1/export":
@@ -909,25 +985,17 @@ class Handler(BaseHTTPRequestHandler):
                 from pipeline.web import analysis as analysis_admin
                 body, content_type = bundle(analysis_admin.report(conn, report_match.group(1)), _str(params, "format"))
                 return self._send(200, body.encode("utf-8"), content_type, max_age=0)
-            if path.startswith("/api/v1/"):
-                # The server-side twin of that max-age header: an in-process
-                # cache over the same derived payloads, so a warehouse hot with
-                # a page's worth of chart requests answers most of them without
-                # touching the aggregates again. Only /api/v1/* (public,
-                # read-only, guard_columns-checked, invalidated by a completed
-                # run); operator routes fall through and are recomputed every
-                # time, because the queue changes as you work on it. NullCache
-                # unless CACHE_ENABLED, so this is a no-op by default. The
-                # connection is still opened above -- the cache saves the query,
-                # not the connect, and moving the check earlier would tangle
-                # with the export and admin branches for a microsecond.
-                payload = self.cache.get_or_compute(
-                    _cache_key(path, params),
-                    _cache_ttl(path, self.settings),
-                    lambda: self._get(path, params, conn))
-            else:
-                payload = self._get(path, params, conn)
+            payload = self._get(path, params, conn)
             self._send_json(payload, max_age=max_age)
+        finally:
+            conn.close()
+
+    def _get_public_uncached(self, path: str,
+                             params: dict[str, list[str]]) -> Any:
+        """Compute one public response with a connection owned by the miss."""
+        conn = queries.readonly_connection(self.settings)
+        try:
+            return self._get(path, params, conn)
         finally:
             conn.close()
 
@@ -1256,13 +1324,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/freshness":
             # Its own route because it is seconds of table scans; see
             # health.freshness for why that is not fixed with an index.
-            return {"freshness": health.freshness(conn)}
+            cached = health.cached_operational(
+                conn, self.settings, "health.freshness", lambda: health.freshness(conn))
+            return {"freshness": cached["value"], "snapshot": cached["snapshot"]}
 
         if path == "/api/admin/storage":
             # And this one because it is seconds of stat calls over the raw
             # archive -- 8,502 files and 4.5 GB on the warehouse it was
             # measured against.
-            return {"storage": health.storage(self.settings)}
+            cached = health.cached_operational(
+                conn, self.settings, "health.storage",
+                lambda: health.storage(self.settings))
+            return {"storage": cached["value"], "snapshot": cached["snapshot"]}
 
         if path == "/api/admin/coverage":
             return health.coverage(conn, tier=_str(params, "tier") or "upper")
@@ -2610,17 +2683,18 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     # The registry is given a store, so the job list opens showing what this
     # warehouse has been asked to do rather than only what has happened since
     # the last restart. A run killed by a crash reappears as interrupted.
-    server = ThreadingHTTPServer(
+    server = BoundedHTTPServer(
         (host, port),
         partial(Handler, settings=settings,
                  jobs=JobRegistry(store=JobStore(settings),
                                    invalidate=cache.bump_version),
                  rate_limiter=rate_limiter,
-                 cache=cache))
+                 cache=cache),
+        workers=settings.web_workers,
+        queue_size=settings.web_queue_size)
     # Sockets held by request threads must not keep the process alive after
     # Ctrl-C; a review UI that needs killing twice is a review UI people leave
     # running by accident.
-    server.daemon_threads = True
     return server
 
 

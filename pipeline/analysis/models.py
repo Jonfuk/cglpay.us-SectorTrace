@@ -34,6 +34,23 @@ class AnalysisModelInvalidJSON(AnalysisModelUnavailable):
     """The model answered, but its response was not a complete JSON object."""
 
 
+def request_identity(*, role: str, system_prompt: str, prompt: str,
+                     model: str, fallback_models: list[str] | None = None,
+                     generation: dict[str, Any] | None = None,
+                     provider_policy: dict[str, Any] | None = None,
+                     schema: dict[str, Any] | None = None,
+                     cache_version: str = "1") -> str:
+    """Content address the exact model request, independent of a release id."""
+    payload = {
+        "role": role, "system": system_prompt, "prompt": prompt,
+        "model": model, "fallback_models": fallback_models or [],
+        "generation": generation or {}, "provider_policy": provider_policy or {},
+        "schema": schema or {}, "cache_version": cache_version,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
 class AnalysisModelClient:
     def __init__(self, settings: Any, *, release_id: str, run_id: str,
                  models: dict[str, str], conn,

@@ -146,10 +146,13 @@ class GraphStore:
 
     def upsert_relationships(self, rows: Iterable[dict]) -> int:
         items = list(rows)
+        grouped: dict[str, list[dict]] = {}
         for row in items:
             relationship_type = row["relationship_type"]
             if not _RELATIONSHIP_TYPE.fullmatch(relationship_type):
                 raise GraphStoreError(f"Unsafe graph relationship type {relationship_type!r}.")
+            grouped.setdefault(relationship_type, []).append(row)
+        for relationship_type, group in grouped.items():
             self._write(
                 f"UNWIND $rows AS row MATCH (a:Entity {{entity_id: row.subject_entity_id}}) "
                 f"MATCH (b:Entity {{entity_id: row.object_entity_id}}) "
@@ -158,7 +161,7 @@ class GraphStore:
                 "r.claim_id = row.claim_id, r.valid_from = row.valid_from, r.valid_to = row.valid_to, "
                 "r.confidence = row.confidence, r.derivation_type = row.derivation_type, "
                 "r.derivation_version = row.derivation_version, r.sectortrace_managed = true",
-                {"rows": [row]},
+                {"rows": group},
             )
         return len(items)
 

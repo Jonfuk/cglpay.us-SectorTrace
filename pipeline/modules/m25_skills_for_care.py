@@ -62,7 +62,7 @@ import structlog
 from pipeline import db
 from pipeline.http import PipelineHTTPClient
 from pipeline.registry import ModuleContext, register_module
-from pipeline.xlsx import XlsxError, iter_sheet, sheet_names
+from pipeline.xlsx import XlsxError, iter_sheet_stream, sheet_names
 
 log = structlog.get_logger()
 
@@ -290,7 +290,7 @@ def run(ctx: ModuleContext) -> None:
                 continue
 
             try:
-                sheets = {name: iter_sheet(result.body, name)
+                sheets = {name: list(iter_sheet_stream(result.body, name))
                           for name in sheet_names(result.body)}
             except (XlsxError, OSError, zipfile.BadZipFile) as exc:
                 db.record_parse_failure(

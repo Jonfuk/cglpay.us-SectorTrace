@@ -31,6 +31,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import Future
 from typing import Callable, Protocol, TypeVar
 
 import structlog
@@ -82,41 +83,74 @@ class InProcessCache:
         self._clock = clock
         self._lock = threading.Lock()
         self._version = 0
+        self._inflight: dict[str, Future[object]] = {}
+        self._metrics = {
+            "hits": 0, "misses": 0, "waiters": 0, "computes": 0,
+            "failures": 0, "evictions": 0,
+        }
         # versioned key -> (value, expiry). OrderedDict gives the LRU ordering:
         # move_to_end on use, popitem(last=False) drops the coldest.
         self._store: "OrderedDict[str, tuple[object, float]]" = OrderedDict()
 
     def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
         now = self._clock()
+        owner = False
         with self._lock:
             version = self._version
             vkey = f"{version}:{key}"
             hit = self._store.get(vkey)
             if hit is not None and hit[1] > now:
                 self._store.move_to_end(vkey)
+                self._metrics["hits"] += 1
                 return hit[0]  # type: ignore[return-value]
             # Present-but-expired is dropped here and rewritten below.
             self._store.pop(vkey, None)
 
-        # Compute OUTSIDE the lock: the query can take hundreds of milliseconds
-        # and must not block every other request thread while it runs. The cost
-        # is that two threads missing the same key at once both compute it -- a
-        # rare, bounded waste this version accepts rather than adding per-key
-        # locking. Both write the same value, so the result stays correct.
-        value = compute()
+            # A cache miss is allowed to run outside the lock, but only once
+            # per key.  Public pages commonly issue the same request from
+            # several components during startup; single-flight turns that
+            # burst into one database read instead of N identical reads.
+            future = self._inflight.get(vkey)
+            if future is None:
+                future = Future()
+                self._inflight[vkey] = future
+                owner = True
+                self._metrics["misses"] += 1
+                self._metrics["computes"] += 1
+            else:
+                self._metrics["waiters"] += 1
 
+        if not owner:
+            return future.result()  # type: ignore[return-value]
+
+        try:
+            # Compute OUTSIDE the lock: the query can take hundreds of
+            # milliseconds and must not block unrelated cache keys.
+            value = compute()
+            with self._lock:
+                # Only store if the version has not moved under us. If a run
+                # finished during the compute, this response is already stale.
+                if version == self._version:
+                    self._store[vkey] = (value, self._clock() + max(0.0, ttl))
+                    self._store.move_to_end(vkey)
+                    while len(self._store) > self._max:
+                        self._store.popitem(last=False)
+                        self._metrics["evictions"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_result(value)
+            return value
+        except BaseException as exc:
+            with self._lock:
+                self._metrics["failures"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_exception(exc)
+            raise
+
+    def stats(self) -> dict[str, int]:
+        """Return aggregated counters without exposing cached payloads."""
         with self._lock:
-            # Only store if the version has not moved under us. If a run
-            # finished during the compute, this response is already stale and
-            # belongs to no reader -- dropping it is cheaper than serving it,
-            # and keeps a slow compute from resurrecting a version everyone
-            # else has moved past.
-            if version == self._version:
-                self._store[vkey] = (value, self._clock() + ttl)
-                self._store.move_to_end(vkey)
-                while len(self._store) > self._max:
-                    self._store.popitem(last=False)
-        return value
+            return {**self._metrics, "entries": len(self._store),
+                    "inflight": len(self._inflight), "version": self._version}
 
     def bump_version(self) -> None:
         """A pipeline write happened: make every cached response unreachable.

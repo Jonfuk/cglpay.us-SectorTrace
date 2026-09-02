@@ -11,6 +11,24 @@ from pipeline.analysis.signals import Signal, new_signal
 
 _SENTENCE_RE = re.compile(r"[^.!?]+(?:[.!?]|$)", re.S)
 _CONTRADICTION_RE = re.compile(r"\b(?:not|no|without|never|did not|isn't|wasn't)\b", re.I)
+NARRATIVE_PREFILTER_VERSION = "lexical-v1-shadow"
+_PREFILTER_TERMS = frozenset({
+    "shortage", "vacancy", "vacancies", "workload", "pressure", "retention",
+    "recruitment", "recruit", "pay", "salary", "staffing", "workforce",
+    "capacity", "demand", "waiting", "backlog", "commission", "service",
+})
+
+
+def narrative_candidate_prefilter(text: str, *, enabled: bool = False) -> bool:
+    """Cheap deterministic candidate gate.
+
+    It is shadow-only by default: the model path remains the correctness
+    baseline until an adjudicated corpus proves recall for rare categories.
+    """
+    if not enabled:
+        return True
+    words = set(re.findall(r"[a-z][a-z-]{2,}", text.casefold()))
+    return bool(words & _PREFILTER_TERMS)
 
 
 @dataclass(frozen=True)

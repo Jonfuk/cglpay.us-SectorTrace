@@ -9,6 +9,19 @@ from pipeline.graph.store import PROJECTOR_VERSION, GraphStore
 
 SCHEMA_VERSION = "0050"
 
+_PROJECTED_COLUMNS = {
+    "entities": ("entity_id", "canonical_name", "entity_type", "status"),
+    "evidence_records": ("evidence_id", "source_system", "source_url",
+                          "retrieved_at", "payload_sha256", "raw_object_path"),
+    "graph_claims": ("claim_id", "predicate", "claim_text", "extraction_method",
+                      "confidence", "review_status", "evidence_id",
+                      "subject_entity_id"),
+    "entity_relationships": ("relationship_id", "subject_entity_id",
+                              "object_entity_id", "relationship_type", "predicate",
+                              "evidence_id", "claim_id", "valid_from", "valid_to",
+                              "confidence", "derivation_type", "derivation_version"),
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -92,14 +105,23 @@ class GraphProjector:
 
     def _project_table(self, table: str, upsert: Any) -> int:
         total = 0
-        offset = 0
+        key = _PROJECTED_COLUMNS[table][0]
+        columns = ", ".join(_PROJECTED_COLUMNS[table])
+        last_key = None
         while True:
-            rows = self.conn.execute(f"SELECT * FROM {table} LIMIT ? OFFSET ?",
-                                     (self.batch_size, offset)).fetchall()
+            if last_key is None:
+                sql = (f"SELECT {columns} FROM {table} "
+                       f"ORDER BY {key} LIMIT ?")
+                params = (self.batch_size,)
+            else:
+                sql = (f"SELECT {columns} FROM {table} WHERE {key} > ? "
+                       f"ORDER BY {key} LIMIT ?")
+                params = (last_key, self.batch_size)
+            rows = self.conn.execute(sql, params).fetchall()
             if not rows:
                 return total
             total += upsert([dict(row) for row in rows])
-            offset += len(rows)
+            last_key = rows[-1][key]
 
     def _sync_item(self, item: dict) -> None:
         operation = item["operation"]

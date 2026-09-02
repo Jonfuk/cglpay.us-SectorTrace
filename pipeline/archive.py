@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +35,10 @@ class Archive(Protocol):
     backend: str
     def lookup(self, source_system: str, sha256: str) -> ArchiveObject | None: ...
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str: ...
+    def put_file(self, source_system: str, sha256: str, content_type: str | None,
+                 path: Path) -> ArchiveObject: ...
+    def put_stream(self, source_system: str, sha256: str, content_type: str | None,
+                   stream) -> ArchiveObject: ...
     def read(self, logical_path: str) -> bytes: ...
     def inventory(self, verify_hashes: bool = False) -> dict: ...
     def verify(self) -> dict: ...
@@ -77,6 +83,45 @@ class FilesystemArchive:
         if hashlib.sha256(path.read_bytes()).hexdigest() != sha256:
             raise ArchiveError(f"filesystem archive verification failed for {logical}")
         return logical
+
+    def put_stream(self, source_system: str, sha256: str,
+                   content_type: str | None, stream) -> ArchiveObject:
+        """Spool, hash, and atomically install a body in one pass."""
+        logical = logical_path(source_system, sha256, content_type)
+        target = self.root / logical.removeprefix("data/raw/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temp:
+            temporary = Path(temp.name)
+            digest = hashlib.sha256()
+            size = 0
+            try:
+                while True:
+                    chunk = stream.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    size += len(chunk)
+                    temp.write(chunk)
+                temp.flush()
+                os.fsync(temp.fileno())
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        if digest.hexdigest() != sha256:
+            temporary.unlink(missing_ok=True)
+            raise ArchiveError("payload hash does not match archive key")
+        if not target.exists():
+            os.replace(temporary, target)
+            DISK.add(size)
+        else:
+            temporary.unlink(missing_ok=True)
+            size = target.stat().st_size
+        return ArchiveObject(logical, size, target.read_bytes)
+
+    def put_file(self, source_system: str, sha256: str,
+                 content_type: str | None, path: Path) -> ArchiveObject:
+        with Path(path).open("rb") as stream:
+            return self.put_stream(source_system, sha256, content_type, stream)
 
     def read(self, logical: str) -> bytes:
         if Path(logical).is_absolute():
@@ -159,6 +204,20 @@ class S3Archive:
         if checked is None or checked.read_bytes() != body:
             raise ArchiveError(f"S3 archive verification failed for {logical}")
         return logical
+
+    def put_stream(self, source_system: str, sha256: str,
+                   content_type: str | None, stream) -> ArchiveObject:
+        # S3-compatible clients differ in whether Body accepts a seekable
+        # stream. Buffer only for this backend's upload call, while the caller
+        # still avoids a separate archive lookup and receives the exact object.
+        body = stream.read()
+        logical = self.put(source_system, sha256, content_type, body)
+        return ArchiveObject(logical, len(body), lambda: self.read(logical))
+
+    def put_file(self, source_system: str, sha256: str,
+                 content_type: str | None, path: Path) -> ArchiveObject:
+        with Path(path).open("rb") as stream:
+            return self.put_stream(source_system, sha256, content_type, stream)
 
     def read(self, logical: str) -> bytes:
         key = self._key(logical)

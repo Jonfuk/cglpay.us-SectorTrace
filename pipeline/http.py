@@ -6,6 +6,7 @@ directly.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import mimetypes
 import re
@@ -27,7 +28,7 @@ from tenacity import (
 )
 
 from pipeline import db
-from pipeline.archive import get_archive
+from pipeline.archive import ArchiveObject, get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
 
@@ -453,6 +454,19 @@ class PipelineHTTPClient:
     def close(self) -> None:
         self._client.close()
 
+    def _archive_body(self, body: bytes, sha256: str,
+                      content_type: str | None) -> ArchiveObject:
+        """Store once and retain the exact archive result for this fetch."""
+        try:
+            return self.archive.put_stream(
+                self.source_system, sha256, content_type, io.BytesIO(body))
+        except AttributeError:
+            # Small test doubles and third-party adapters that still implement
+            # the original byte API remain compatible during the transition.
+            logical = self.archive.put(self.source_system, sha256, content_type, body)
+            return ArchiveObject(logical, len(body),
+                                 lambda: self.archive.read(logical))
+
     @retry(
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
@@ -550,24 +564,24 @@ class PipelineHTTPClient:
                 body = response.content
                 sha256 = hashlib.sha256(body).hexdigest() if body else ""
                 if archive and body:
-                    logical = self.archive.put(self.source_system, sha256,
-                                                response.headers.get("content-type"), body)
+                    archived = self._archive_body(
+                        body, sha256, response.headers.get("content-type"))
                     archived_path = (Path(self.settings.raw_archive_dir) /
-                                     logical.removeprefix("data/raw/")
+                                     archived.logical_path.removeprefix("data/raw/")
                                      if self.archive.backend == "filesystem"
-                                     else self.archive.lookup(self.source_system, sha256))
-                    archived_ref = logical
+                                     else archived)
+                    archived_ref = archived.logical_path
         else:
             body = response.content
             sha256 = hashlib.sha256(body).hexdigest() if body else ""
             if archive and body:
-                logical = self.archive.put(self.source_system, sha256,
-                                            response.headers.get("content-type"), body)
+                archived = self._archive_body(
+                    body, sha256, response.headers.get("content-type"))
                 archived_path = (Path(self.settings.raw_archive_dir) /
-                                 logical.removeprefix("data/raw/")
+                                 archived.logical_path.removeprefix("data/raw/")
                                  if self.archive.backend == "filesystem"
-                                 else self.archive.lookup(self.source_system, sha256))
-                archived_ref = logical
+                                 else archived)
+                archived_ref = archived.logical_path
 
         if self.conn is not None:
             entry = dict(
@@ -646,13 +660,13 @@ class PipelineHTTPClient:
         archived_path = None
         archived_ref = None
         if archive and body:
-            logical = self.archive.put(self.source_system, sha256,
-                                        response.headers.get("content-type"), body)
+            archived = self._archive_body(
+                body, sha256, response.headers.get("content-type"))
             archived_path = (Path(self.settings.raw_archive_dir) /
-                             logical.removeprefix("data/raw/")
+                             archived.logical_path.removeprefix("data/raw/")
                              if self.archive.backend == "filesystem"
-                             else self.archive.lookup(self.source_system, sha256))
-            archived_ref = logical
+                             else archived)
+            archived_ref = archived.logical_path
 
         return FetchResult(
             url=url,

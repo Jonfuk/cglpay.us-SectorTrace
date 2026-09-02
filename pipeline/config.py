@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     api_rate_limit_per_minute: float = 120.0
     api_rate_limit_burst: float = 40.0
 
+    # Keep request concurrency aligned with the database read pool.  The
+    # queue absorbs a normal page-load burst; it is not an unbounded backlog.
+    web_workers: int = 8
+    web_queue_size: int = 32
+
     # A short-lived, in-process cache over the public API's derived responses
     # (/api/v1/*). Optional and in-memory by deliberate choice (settled
     # decision 6): no external store, nothing to run, nothing to unplug. Off by
@@ -70,6 +75,19 @@ class Settings(BaseSettings):
     # long enough that the large GeoJSON is parsed once daily rather than every
     # few minutes. See pipeline/web/server.py `_cache_ttl`.
     cache_static_ttl_seconds: float = 86400.0
+
+    # Shared write-path controls. Individual modules may choose a smaller
+    # batch for a measured reason, but should not invent process-wide defaults.
+    batch_write_rows: int = 1000
+    batch_write_seconds: float = 5.0
+    http_cache_write_batch_size: int = 500
+    csv_parse_workers: int = 1
+    prediction_write_batch_size: int = 2000
+    nlp_accelerator: str = "auto"
+    failed_analysis_detail_retention_days: int = 7
+    operational_snapshot_max_age_seconds: int = 900
+    job_workers: int = 1
+    job_event_retention_lines: int = 4000
 
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural
@@ -647,6 +665,29 @@ class Settings(BaseSettings):
             raise ValueError("NEO4J_PASSWORD must be set when NEO4J_ENABLED=true.")
         if self.graph_batch_size < 1 or self.graph_max_nodes < 1 or self.graph_max_edges < 1:
             raise ValueError("Graph batch and safety limits must be positive integers.")
+        return self
+
+    @model_validator(mode="after")
+    def _performance_configuration(self) -> Settings:
+        positive = {
+            "WEB_WORKERS": self.web_workers,
+            "BATCH_WRITE_ROWS": self.batch_write_rows,
+            "HTTP_CACHE_WRITE_BATCH_SIZE": self.http_cache_write_batch_size,
+            "PREDICTION_WRITE_BATCH_SIZE": self.prediction_write_batch_size,
+            "FAILED_ANALYSIS_DETAIL_RETENTION_DAYS": self.failed_analysis_detail_retention_days,
+            "OPERATIONAL_SNAPSHOT_MAX_AGE_SECONDS": self.operational_snapshot_max_age_seconds,
+            "JOB_WORKERS": self.job_workers,
+            "JOB_EVENT_RETENTION_LINES": self.job_event_retention_lines,
+        }
+        if any(value < 1 for value in positive.values()):
+            bad = next(name for name, value in positive.items() if value < 1)
+            raise ValueError(f"{bad} must be a positive integer")
+        if self.web_queue_size < 0 or self.batch_write_seconds <= 0:
+            raise ValueError("WEB_QUEUE_SIZE must be non-negative and BATCH_WRITE_SECONDS must be positive")
+        if self.csv_parse_workers < 1:
+            raise ValueError("CSV_PARSE_WORKERS must be a positive integer")
+        if self.nlp_accelerator not in {"auto", "python", "mojo"}:
+            raise ValueError("NLP_ACCELERATOR must be auto, python or mojo")
         return self
 
     @model_validator(mode="after")

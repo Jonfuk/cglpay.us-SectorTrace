@@ -430,20 +430,50 @@ class AnalysisWorker:
             run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
             if run is None:
                 return
-            rows = [dict(row) for row in conn.execute(
-                "SELECT * FROM automated_signals WHERE release_id = ? ORDER BY created_at",
-                (run["release_id"],)).fetchall()]
+            # The old implementation materialised every signal and compared
+            # every pair. Join on the indexed identity keys first, keep a
+            # stable left/right domain ordering, and let the existing contract
+            # perform the final eligibility checks.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_automated_signals_link_candidates "
+                "ON automated_signals(release_id, subject_type, subject_id, domain_id, period_end)")
+            if db.backend_of(conn) == "sqlite":
+                date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
+                               "AND ABS(julianday(l.period_end) - julianday(r.period_end)) <= 365")
+            else:
+                date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
+                               "AND ABS(EXTRACT(EPOCH FROM (l.period_end::date - "
+                               "r.period_end::date))) <= 365 * 86400")
+            rows = conn.execute(
+                "SELECT l.*, r.signal_id AS _right_signal_id, r.domain_id AS _right_domain_id, "
+                "r.taxonomy_namespace AS _right_taxonomy_namespace, r.signal_type AS _right_signal_type, "
+                "r.subject_type AS _right_subject_type, r.subject_id AS _right_subject_id, "
+                "r.direction AS _right_direction, r.assertion_status AS _right_assertion_status, "
+                "r.period_start AS _right_period_start, r.period_end AS _right_period_end, "
+                "r.evidence_refs_json AS _right_evidence_refs_json, "
+                "r.derivation_method AS _right_derivation_method, "
+                "r.confidence_contract_json AS _right_confidence_contract_json "
+                "FROM automated_signals l JOIN automated_signals r ON "
+                "l.release_id = r.release_id AND l.subject_type = r.subject_type "
+                "AND l.subject_id = r.subject_id AND l.domain_id < r.domain_id "
+                f"AND {date_clause} WHERE l.release_id = ? ORDER BY l.signal_id, r.signal_id",
+                (run["release_id"],)).fetchall()
             self._update_run(conn, run_id, current_stage="connecting")
-            for index, left in enumerate(rows):
-                for right in rows[index + 1:]:
-                    if left["domain_id"] == right["domain_id"]:
-                        continue
-                    link = link_signals(
-                        left, right, left_spec=domains.get_domain(left["domain_id"]),
-                        right_spec=domains.get_domain(right["domain_id"]),
-                        relationship_type="narrative_structured_alignment", window_days=365)
-                    if link:
-                        save_link(conn, link)
+            for raw in rows:
+                source = dict(raw)
+                right = {key.removeprefix("_right_"): value for key, value in source.items()
+                         if key.startswith("_right_")}
+                left = {key: value for key, value in source.items()
+                        if not key.startswith("_right_")}
+                # The aliases above carry all fields needed by link_signals;
+                # keep the conversion explicit so duplicate selected names
+                # cannot be interpreted differently by SQLite and PostgreSQL.
+                link = link_signals(
+                    left, right, left_spec=domains.get_domain(left["domain_id"]),
+                    right_spec=domains.get_domain(right["domain_id"]),
+                    relationship_type="narrative_structured_alignment", window_days=365)
+                if link:
+                    save_link(conn, link)
             conn.commit()
         finally:
             conn.close()
@@ -506,18 +536,35 @@ class AnalysisWorker:
             if run is None:
                 raise KeyError(run_id)
             source_marks = ", ".join("?" for _ in spec.source_tables)
-            rows = conn.execute(
-                "SELECT de.document_element_id, d.document_id, d.source_key, de.text "
-                "FROM document_elements de "
-                "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-                "JOIN document_records d ON d.document_id = dv.document_id "
-                f"WHERE dv.is_active = 1 AND de.text IS NOT NULL AND TRIM(de.text) <> '' "
-                f"AND d.source_table IN ({source_marks}) ORDER BY d.document_id, de.sequence",
-                tuple(spec.source_tables)).fetchall()
-            for start in range(0, len(rows), self.batch_size):
+            # Keyset pagination keeps the database result set bounded and does
+            # not get slower as an overnight run advances through millions of
+            # elements. The element id is a deterministic tie-breaker for
+            # malformed source sequences.
+            last_document = None
+            last_sequence = None
+            last_element = None
+            while True:
                 if self._cancelled(run_id):
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
-                batch = rows[start:start + self.batch_size]
+                where = (
+                    "dv.is_active = 1 AND de.text IS NOT NULL AND TRIM(de.text) <> '' "
+                    f"AND d.source_table IN ({source_marks})")
+                params: list[Any] = list(spec.source_tables)
+                if last_document is not None:
+                    where += (" AND (d.document_id > ? OR "
+                              "(d.document_id = ? AND (de.sequence > ? OR "
+                              "(de.sequence = ? AND de.document_element_id > ?))))")
+                    params.extend([last_document, last_document, last_sequence,
+                                   last_sequence, last_element])
+                batch = conn.execute(
+                    "SELECT de.document_element_id, d.document_id, d.source_key, "
+                    "de.sequence, de.text FROM document_elements de "
+                    "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+                    "JOIN document_records d ON d.document_id = dv.document_id "
+                    f"WHERE {where} ORDER BY d.document_id, de.sequence, "
+                    "de.document_element_id LIMIT ?", (*params, self.batch_size)).fetchall()
+                if not batch:
+                    break
                 for row in batch:
                     text = str(row["text"] or "").strip()
                     passages.append({"text": text, "document_id": row["document_id"],
@@ -531,18 +578,17 @@ class AnalysisWorker:
                         "FROM analysis_domain_runs WHERE run_id = ? AND domain_id = ? "
                         "ON CONFLICT (domain_run_id, source_table, source_record_id) DO UPDATE SET "
                         "feature_json = excluded.feature_json, status = excluded.status",
-                        (f"window-{uuid.uuid4()}", domain_id, row["document_element_id"],
-                         row["document_id"], json.dumps({"text_length": len(text)}), run_id, domain_id))
+                         (f"window-{uuid.uuid4()}", domain_id, row["document_element_id"],
+                          row["document_id"], json.dumps({"text_length": len(text)}), run_id, domain_id))
                 processed += len(batch)
                 self._update_run(conn, run_id, current_domain=domain_id, current_stage="windowing")
                 self._update_domain_progress(conn, run_id, domain_id, processed, 0)
                 conn.commit()
                 self._heartbeat("running")
-
-            # The raw database rows are no longer needed once the model input
-            # passages have been assembled. Release that duplicate list before
-            # discovery builds its bounded theme summaries.
-            del rows
+                tail = batch[-1]
+                last_document = tail["document_id"]
+                last_sequence = tail["sequence"]
+                last_element = tail["document_element_id"]
 
             # Do not hold the database write slot while the in-memory discovery
             # pass scans a large domain. The heartbeat uses another connection
