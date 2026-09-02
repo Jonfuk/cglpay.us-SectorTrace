@@ -304,10 +304,12 @@ def with_schema(url: str, schema: str) -> str:
     No space after `-c`. `urlencode` renders one as `+`, and libpq then reads
     the parameter as `+search_path` and refuses the connection outright —
     which at least fails loudly, unlike most ways of getting this wrong.
+    `public` follows the scratch schema so extension objects installed in the
+    database-wide extension schema, including `gin_trgm_ops`, remain visible.
     """
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query))
-    query["options"] = f"-csearch_path={schema}"
+    query["options"] = f"-csearch_path={schema},public"
     return urlunsplit((parts.scheme, parts.netloc, parts.path,
                         urlencode(query), parts.fragment))
 

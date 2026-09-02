@@ -1,6 +1,8 @@
 """The PostgreSQL mirror's source snapshot contract."""
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 try:
@@ -51,3 +53,10 @@ def test_repeatable_read_starts_a_read_only_snapshot():
         "read",
         "commit",
     ]
+
+
+def test_scratch_schema_keeps_database_extensions_visible():
+    url = pg.with_schema("postgresql://localhost/warehouse", "bench_123")
+    options = parse_qs(urlsplit(url).query)["options"][0]
+
+    assert options == "-csearch_path=bench_123,public"
