@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import shutil
-import sqlite3
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +11,136 @@ from pipeline import db
 from pipeline.config import Settings
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
+POSTGRES_MIGRATIONS_DIR = MIGRATIONS_DIR / "postgres"
+
+# The offline suite runs on PostgreSQL (performance.md Phase 1 — PostgreSQL is
+# the only application database). It reaches it through POSTGRES_TEST_URL, and
+# deliberately not DATABASE_URL: keeping the two apart is what stops an
+# ordinary `pytest` run from ever touching the working warehouse. The variable
+# and the reasoning predate this change — tests/test_postgres_live.py has read
+# it for the live suite all along — so the whole suite now shares it.
+#
+# A run needs its own database because the suite truncates between every test.
+# Point it at the local dev container (deploy/docker-compose.postgres.yml) or a
+# throwaway database on a shared server; never at the collection box's
+# warehouse.
+POSTGRES_TEST_URL = (os.environ.get("POSTGRES_TEST_URL") or "").strip() or None
+# Optional: a second role on the same test database for the read path. Left
+# unset, reads use the owner role, which is what the suite did for its whole
+# SQLite history — so nothing depends on it being present.
+POSTGRES_TEST_RO_URL = (os.environ.get("POSTGRES_TEST_RO_URL") or "").strip() or None
+
+
+def _worker_schema() -> str:
+    """A schema name unique to this xdist worker.
+
+    Isolation between parallel workers is by schema, not by database, because
+    the test role has no CREATEDB (see pipeline/pg.py) and one migrated schema
+    per worker costs the 94-migration build once rather than per test. Within a
+    worker, tests are isolated from each other by truncation, not by a fresh
+    schema — no migration in this project seeds data, so a truncated schema is
+    byte-for-byte a freshly migrated one.
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"pgtest_{worker}"
+
+
+@pytest.fixture(scope="session")
+def _pg_warehouse() -> SimpleNamespace:
+    """One migrated PostgreSQL schema for this worker, for the whole session.
+
+    Built once and kept: the per-test `settings`/`conn` fixtures scope onto it
+    and the truncation fixture empties it between tests. Dropped at session end.
+
+    Errors rather than skips when POSTGRES_TEST_URL is unset: PostgreSQL is the
+    only backend now, so a suite that cannot reach one has not run — silently
+    skipping every test would report green on a run that measured nothing,
+    which is the failure the live suite's `_configured_url` guard already warns
+    against.
+    """
+    if POSTGRES_TEST_URL is None:
+        raise RuntimeError(
+            "POSTGRES_TEST_URL is not set. The offline suite runs on PostgreSQL "
+            "(performance.md Phase 1). Start deploy/docker-compose.postgres.yml "
+            "and set POSTGRES_TEST_URL to it — e.g. "
+            "postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace"
+        )
+
+    from pipeline import pg
+
+    schema = _worker_schema()
+    quoted = '"' + schema.replace('"', '""') + '"'
+    admin = pg.connect(POSTGRES_TEST_URL, application_name="sectortrace-tests")
+    try:
+        # DROP first: a schema left behind by a crashed previous run would
+        # otherwise fail CREATE, and re-migrating onto stale objects hides the
+        # break rather than surfacing it.
+        admin.execute(f"DROP SCHEMA IF EXISTS {quoted} CASCADE")
+        admin.execute(f"CREATE SCHEMA {quoted}")
+        admin.commit()
+
+        url = pg.with_schema(POSTGRES_TEST_URL, schema)
+        ro_url = pg.with_schema(POSTGRES_TEST_RO_URL, schema) if POSTGRES_TEST_RO_URL else None
+        conn = pg.connect(url, application_name="sectortrace-tests")
+        try:
+            # ro_url passed so apply_migrations performs the reader grant the
+            # way production does — see scratch_schema below for why the grant
+            # belongs to the migration and not to the harness.
+            settings = Settings(
+                contact_email="test@example.com",
+                database_url=POSTGRES_TEST_URL, database_ro_url=POSTGRES_TEST_RO_URL,
+                _env_file=None) if ro_url else None
+            db.apply_migrations(conn, POSTGRES_MIGRATIONS_DIR, settings=settings)
+            conn.commit()
+        finally:
+            conn.close()
+
+        yield SimpleNamespace(base_url=POSTGRES_TEST_URL, base_ro_url=POSTGRES_TEST_RO_URL,
+                              schema=schema, url=url, ro_url=ro_url)
+    finally:
+        try:
+            admin.execute(f"DROP SCHEMA IF EXISTS {quoted} CASCADE")
+            admin.commit()
+        finally:
+            admin.close()
+
+
+@pytest.fixture(autouse=True)
+def _empty_warehouse_between_tests(_pg_warehouse, request):
+    """Truncate every table before each test so state cannot leak.
+
+    Cheaper than a fresh schema per test by two orders of magnitude, and exact:
+    no migration seeds data, so an empty migrated schema is what a test that
+    wants "a fresh warehouse" means. `schema_migrations` is the one exception —
+    it records what has been applied and must survive.
+
+    Applied to tests that touch the database and harmless to those that do not.
+    A test that manages its own scratch_schema is unaffected: this truncates the
+    worker's shared schema, which those tests never write to.
+
+    TRUNCATE, not DELETE: it resets identity sequences (so ids are stable
+    between tests) and does not fire the row triggers behind settled decision 4
+    — those are INSERT/UPDATE triggers, not TRUNCATE triggers. CASCADE handles
+    the foreign-key graph in one statement.
+    """
+    from pipeline import pg
+
+    warehouse = _pg_warehouse
+    conn = pg.connect(warehouse.url, application_name="sectortrace-tests")
+    try:
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = ? "
+            "AND tablename <> 'schema_migrations'", (warehouse.schema,)).fetchall()
+        names = [r["tablename"] for r in rows]
+        if names:
+            from pipeline.catalog import quote
+
+            targets = ", ".join(f"{quote(warehouse.schema)}.{quote(n)}" for n in names)
+            conn.execute(f"TRUNCATE {targets} RESTART IDENTITY CASCADE")
+            conn.commit()
+    finally:
+        conn.close()
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -24,35 +153,6 @@ def _reset_host_clock():
     HOST_CLOCK.reset()
     yield
     HOST_CLOCK.reset()
-
-
-@pytest.fixture(autouse=True)
-def _no_test_inherits_a_held_write_slot():
-    """The write slot is process-wide by design, so one abandoned write
-    transaction is every later test's problem.
-
-    A test that raises part-way through a write leaves its connection holding
-    the slot. `WriteSerialisedConnection.__del__` now hands it back when that
-    connection is collected, which covers the ordinary case promptly — but
-    collection is not scheduled, and a connection caught in a reference cycle
-    comes back on some later gc pass rather than at the end of the test that
-    dropped it.
-
-    That is the shape of failure this exists to stop: `tests/test_evidence_graph.py`
-    inserted ten values into a twelve-column `evidence_records` after migration
-    0054 extended it, died mid-transaction, and every subsequent test that
-    wrote failed with "the same thread already holds it on another connection"
-    — 261 failures and 365 errors, all of them naming a thread rather than the
-    one broken INSERT. Each module still passed when run alone, which is why
-    it went unnoticed.
-
-    A safety net, not a detector: it makes the leak stop at the test that
-    caused it. `tests/test_db_concurrency.py` is where the release itself is
-    pinned.
-    """
-    db.WRITE_SLOT.reset()
-    yield
-    db.WRITE_SLOT.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -76,30 +176,25 @@ def _contact_email_is_always_set(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _the_suite_never_finds_a_postgresql_warehouse(monkeypatch):
-    """`DATABASE_URL` is unset for every test, whatever `.env` says.
+def _the_suite_reaches_only_the_test_warehouse(_pg_warehouse, monkeypatch):
+    """Every settings-resolving code path lands on this worker's test schema.
 
-    Same hazard as `_contact_email_is_always_set` above and the same fix, for
-    a setting where getting it wrong costs more. Not every code path takes its
-    settings from a fixture — `db.get_connection()` and
-    `queries.readonly_connection()` both fall back to `get_settings()`, which
-    reads the environment and `.env`. On a developer's machine with a
-    PostgreSQL URL configured, those paths would leave the offline suite and
-    open a socket to a real warehouse, and the tests that write would write to
-    it.
+    The inverse of the fixture this replaces. Under SQLite the suite forced
+    `DATABASE_URL` empty so no code path could reach a real PostgreSQL
+    warehouse; PostgreSQL is now the only backend, so the hazard is the
+    opposite one — a code path resolving `get_settings()` would read the
+    operator's `.env` DATABASE_URL and open the working warehouse. Both
+    variables are pinned to the schema-scoped test URL instead, so
+    `db.get_connection()` and `queries.readonly_connection()` — which fall back
+    to `get_settings()` — reach the schema this session owns and truncates, and
+    nothing else.
 
-    Set to empty rather than deleted, because deleting the variable would not
-    help: the value comes from the `.env` *file*, and an environment variable
-    is what takes precedence over it. The empty string reads as unset (see
-    `Settings._usable_database_url`), which is what puts every test back on
-    SQLite.
-
-    A test that wants PostgreSQL sets its own URL and says so —
-    `tests/test_postgres_live.py` reads `POSTGRES_TEST_URL`, a different
-    variable entirely, for exactly this reason.
+    Set via the environment so it survives a bare `Settings(_env_file=None)`
+    built deep in the code; the `settings` fixture below carries the same URLs
+    for the code that does take its settings from a fixture.
     """
-    monkeypatch.setenv("DATABASE_URL", "")
-    monkeypatch.setenv("DATABASE_RO_URL", "")
+    monkeypatch.setenv("DATABASE_URL", _pg_warehouse.url)
+    monkeypatch.setenv("DATABASE_RO_URL", _pg_warehouse.ro_url or "")
     yield
 
 
@@ -250,7 +345,7 @@ def scratch_schema(url: str, ro_url: str | None = None):
             from pipeline.config import Settings
 
             db.apply_migrations(
-                conn, MIGRATIONS_DIR / "postgres",
+                conn, POSTGRES_MIGRATIONS_DIR,
                 settings=Settings(contact_email="test@example.com",
                                    database_url=url, database_ro_url=ro_url,
                                    _env_file=None) if ro_url else None)
@@ -269,25 +364,26 @@ def scratch_schema(url: str, ro_url: str | None = None):
 
 
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
+def settings(tmp_path: Path, _pg_warehouse) -> Settings:
+    """Test settings pointed at this worker's PostgreSQL schema.
+
+    Every *writable filesystem* path still points into tmp — a default that
+    reaches back into the repo is how the suite ended up depositing its own
+    output next to the operator's, three times (logs/, data/backups/,
+    data/derived/). The database is the worker's schema-scoped test URL, shared
+    across the session and emptied between tests by
+    `_empty_warehouse_between_tests`.
+    """
     return Settings(
         contact_email="test@example.com",
-        database_path=tmp_path / "warehouse.db",
+        database_url=_pg_warehouse.url,
+        database_ro_url=_pg_warehouse.ro_url,
         raw_archive_dir=tmp_path / "raw",
-        migrations_dir=Path(__file__).resolve().parent.parent / "pipeline" / "migrations",
+        migrations_dir=MIGRATIONS_DIR,
         logs_dir=tmp_path / "logs",
         export_output_dir=tmp_path / "exports" / "output",
-        # Every writable path this fixture hands out points into tmp. A
-        # default that reaches back into the repo is how the suite ends up
-        # depositing its own output next to the operator's — which it has now
-        # done three times: once into logs/, once into data/backups/, and
-        # once into data/derived/ before this line existed.
         backup_dir=tmp_path / "backups",
         derived_archive_dir=tmp_path / "derived",
-        # A mirror's own two: which snapshot is in place, and the snapshots
-        # on their way in. Pointed into tmp for the same reason as the rest —
-        # `pipeline mirror` writes both, and a default reaching back into the
-        # repo is exactly the mistake the comment above records three of.
         mirror_state_dir=tmp_path / "mirror-state",
         mirror_inbox_dir=tmp_path / "mirror-inbox",
         verified_websites_path=tmp_path / "verified_websites.json",
@@ -304,38 +400,16 @@ def settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def conn(settings: Settings, _schema_template: Path) -> sqlite3.Connection:
-    """A migrated warehouse, copied rather than built.
+def conn(settings: Settings):
+    """A connection to this worker's migrated warehouse schema.
 
-    Applying the migrations costs 0.31s and the suite did it once per test, so
-    several hundred tests were each paying to build the same 30-migration
-    schema from scratch. The template is built once per session and copied,
-    which is a file copy of well under a megabyte.
-
-    The copy is a real file on disk, not a shared connection: tests still get
-    their own warehouse, and one that writes cannot be seen by another.
+    Emptied before the test by `_empty_warehouse_between_tests`, so it opens on
+    a clean migrated schema. A real connection, not a transaction wrapper:
+    tests that commit, that open a second connection, or that exercise the
+    write path see exactly what production sees.
     """
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(_schema_template, settings.database_path)
-    connection = db.get_connection(settings)
-    yield connection
-    connection.close()
-
-
-@pytest.fixture(scope="session")
-def _schema_template(tmp_path_factory) -> Path:
-    """Every migration applied once, as a file to copy from."""
-    path = tmp_path_factory.mktemp("schema") / "template.db"
-    settings = Settings(contact_email="test@example.com", database_path=path,
-                         migrations_dir=MIGRATIONS_DIR, _env_file=None)
     connection = db.get_connection(settings)
     try:
-        db.apply_migrations(connection, MIGRATIONS_DIR)
-        connection.commit()
-        # Fold the WAL back into the database file before copying it. A copy
-        # taken with pages still in the sidecar is a copy missing tables, and
-        # it would be missing whichever ones the last migrations added.
-        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        yield connection
     finally:
         connection.close()
-    return path
