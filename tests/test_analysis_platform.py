@@ -74,6 +74,21 @@ def test_discovery_preserves_outliers_and_recurrence_bar():
     assert themes[0]["passages"]
 
 
+def test_discovery_can_bound_evidence_without_losing_counts_or_progress():
+    passages = [{"text": "common phrase", "document_id": f"d{index}",
+                 "subject_id": f"s{index}"} for index in range(40)]
+    progress = []
+    themes = discover_themes(
+        passages, max_evidence_per_theme=3, max_evidence_total=3,
+        progress_callback=progress.append, progress_interval_seconds=0.1)
+
+    assert themes[0]["passage_count"] == 40
+    assert themes[0]["document_count"] == 40
+    assert themes[0]["subject_count"] == 40
+    assert len(themes[0]["passages"]) == 3
+    assert progress[-1] == 40
+
+
 def test_structured_comparison_and_anomaly_guards():
     previous = Observation("metric", "r1", "authority", "a1", "vacancies", 10, "count", "2024", "2024")
     current = Observation("metric", "r2", "authority", "a1", "vacancies", 15, "count", "2025", "2025")

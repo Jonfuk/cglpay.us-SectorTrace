@@ -58,6 +58,10 @@ from pipeline.analysis.structured import (
 
 log = structlog.get_logger()
 
+_THEME_EVIDENCE_PER_THEME = 25
+_THEME_EVIDENCE_TOTAL = 5_000
+_THEME_WRITE_BATCH_SIZE = 100
+
 
 def _retry_at(seconds: float) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=max(0.0, float(seconds)))).isoformat()
@@ -535,17 +539,33 @@ class AnalysisWorker:
                 conn.commit()
                 self._heartbeat("running")
 
+            # The raw database rows are no longer needed once the model input
+            # passages have been assembled. Release that duplicate list before
+            # discovery builds its bounded theme summaries.
+            del rows
+
+            # Do not hold the database write slot while the in-memory discovery
+            # pass scans a large domain. The heartbeat uses another connection
+            # and must be able to record liveness during this CPU-bound stage.
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="discovering")
-            themes = discover_themes(passages)
+            conn.commit()
+            themes = discover_themes(
+                passages,
+                max_evidence_per_theme=_THEME_EVIDENCE_PER_THEME,
+                max_evidence_total=_THEME_EVIDENCE_TOTAL,
+                progress_callback=lambda _processed: self._heartbeat("running"),
+            )
             written = 0
-            for theme in themes:
+            for topic_number, theme in enumerate(themes):
                 if self._cancelled(run_id):
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
-                theme["passages"] = theme.get("passages", [])[:25]
                 record_theme(conn, release_id=run["release_id"], domain_id=domain_id, theme=theme)
                 record_topic(conn, release_id=run["release_id"], domain_id=domain_id,
-                             topic_number=themes.index(theme), theme=theme)
+                             topic_number=topic_number, theme=theme)
                 written += 1
+                if (topic_number + 1) % _THEME_WRITE_BATCH_SIZE == 0:
+                    conn.commit()
+                    self._heartbeat("running")
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
             # Model calls use private connections so four passages can run in
             # parallel; release this connection's write transaction before
