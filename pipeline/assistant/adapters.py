@@ -31,8 +31,13 @@ from pipeline.assistant.runtime import (
     AssistantUnavailable,
     require_enabled,
     resolved_api_key,
-    resolved_lfm_model,
-    resolved_needle_model,
+    resolved_lfm_models,
+    resolved_needle_models,
+)
+from pipeline.assistant.transport import (
+    TransportTelemetry,
+    provider_preferences,
+    run_with_resilience,
 )
 
 _DEFAULT_MAX_TOKENS = 1024
@@ -53,10 +58,14 @@ class _OpenAICompatAdapter:
 
     name = "openai-compat"
 
-    def __init__(self, *, base_url: str, model: str,
-                 api_key: str = "", json_response: bool = False) -> None:
+    def __init__(self, *, base_url: str, models: tuple[str, ...],
+                 api_key: str = "", json_response: bool = False,
+                 settings: Any = None) -> None:
         self.base_url = base_url
-        self.model = model
+        self.models = models
+        self.model = models[0] if models else ""
+        self.settings = settings
+        self.last_telemetry: dict[str, Any] = {}
         self._api_key = api_key or _PLACEHOLDER_KEY
         # Ask the API to constrain the reply to a JSON object. Only the router
         # leg sets this (BETA-114 follow-up): its prompt demands bare JSON and
@@ -78,11 +87,17 @@ class _OpenAICompatAdapter:
                 f"no model configured for {self.name} — set "
                 "ASSISTANT_NEEDLE_MODEL (router) / ASSISTANT_LFM_MODEL "
                 "(answerer) to OpenRouter slugs")
-        return OpenAI(base_url=self.base_url, api_key=self._api_key)
+        return OpenAI(
+            base_url=self.base_url,
+            api_key=self._api_key,
+            max_retries=0,
+            timeout=max(1.0, float(getattr(self.settings, "assistant_request_timeout_seconds", 60.0))),
+        )
 
     def generate(self, prompt: str, *, system: str | None = None,
                  max_tokens: int = _DEFAULT_MAX_TOKENS,
                  temperature: float = 0.0, timeout: float | None = None) -> str:
+        self.last_telemetry = {}
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -96,15 +111,34 @@ class _OpenAICompatAdapter:
         kwargs: dict[str, Any] = {
             "model": self.model, "messages": messages,
             "max_tokens": max_tokens, "temperature": temperature}
+        # OpenRouter's OpenAI-compatible API accepts fallback model IDs in
+        # `extra_body`; `model` remains the primary model for the SDK.
+        extra_body: dict[str, Any] = {}
+        if "openrouter.ai" in (self.base_url or "").lower():
+            if len(self.models) > 1:
+                extra_body["models"] = list(self.models[1:])
+            provider = provider_preferences(self.settings, base_url=self.base_url)
+            if provider:
+                extra_body["provider"] = provider
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         if self._json_response:
             kwargs["response_format"] = {"type": "json_object"}
+        telemetry = TransportTelemetry()
         try:
-            resp = client.chat.completions.create(**kwargs)
+            resp = run_with_resilience(
+                lambda: client.chat.completions.create(**kwargs),
+                settings=self.settings, circuit_key=f"{self.base_url}|{self.model}",
+                base_url=self.base_url, telemetry=telemetry,
+                deadline_seconds=timeout)
+            self.last_telemetry = telemetry.as_dict()
         except AssistantUnavailable:
             raise
         except Exception as exc:  # connection refused / model not pulled / timeout
+            self.last_telemetry = telemetry.as_dict()
             raise AssistantUnavailable(
-                f"{self.model} at {self.base_url} did not respond: "
+                f"{self.model} at {self.base_url} did not respond "
+                f"after {telemetry.attempts} attempt(s): "
                 f"{type(exc).__name__}: {exc}") from exc
         try:
             return resp.choices[0].message.content or ""
@@ -119,8 +153,8 @@ class LFMOllamaAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_ollama_url", ""),
-            model=resolved_lfm_model(settings),
-            api_key=resolved_api_key(settings))
+            models=resolved_lfm_models(settings),
+            api_key=resolved_api_key(settings), settings=settings)
 
 
 class NeedleAdapter(_OpenAICompatAdapter):
@@ -129,8 +163,9 @@ class NeedleAdapter(_OpenAICompatAdapter):
     def __init__(self, settings: Any) -> None:
         super().__init__(
             base_url=getattr(settings, "assistant_needle_url", ""),
-            model=resolved_needle_model(settings),
+            models=resolved_needle_models(settings),
             api_key=resolved_api_key(settings),
+            settings=settings,
             json_response=getattr(settings, "assistant_router_json_mode", True))
 
 

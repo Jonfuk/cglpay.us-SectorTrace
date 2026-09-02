@@ -102,12 +102,21 @@ def ask(conn, settings, question: str, *, source_system: str | None = None,
 
     def _record(outcome: str, *, decision=None, envelope=None, grounded=None,
                 error_class: str | None = None) -> str | None:
+        router_transport = dict(getattr(needle_adapter, "last_telemetry", {}) or {})
+        answerer_transport = dict(getattr(lfm_adapter, "last_telemetry", {}) or {})
+        ledger_timings = {
+            **timings,
+            "transport": {
+                "router": router_transport,
+                "answerer": answerer_transport,
+            },
+        }
         return ledger.record(
             conn,
             question=question, filters=filters, outcome=outcome,
-            needle_model=resolved_needle_model(settings),
+            needle_model=router_transport.get("actual_model") or resolved_needle_model(settings),
             needle_endpoint=getattr(settings, "assistant_needle_url", None),
-            lfm_model=resolved_lfm_model(settings),
+            lfm_model=answerer_transport.get("actual_model") or resolved_lfm_model(settings),
             lfm_quant=resolved_lfm_quant(settings),
             lfm_endpoint=getattr(settings, "assistant_ollama_url", None),
             router_prompt_sha256=routing.router_prompt_sha256(),
@@ -119,13 +128,22 @@ def ask(conn, settings, question: str, *, source_system: str | None = None,
             if envelope else None,
             answer=getattr(grounded, "answer", None),
             citation_ids=getattr(grounded, "cited_ids", None),
-            timings=timings, error_class=error_class)
+            timings=ledger_timings, error_class=error_class)
 
     try:
         require_enabled(settings)
     except AssistantUnavailable as exc:
         return _payload(outcome="unavailable", settings=settings, filters=filters,
                         timings=timings, run_id=None, detail=str(exc))
+
+    # Construct adapters here so their transport telemetry remains available
+    # to the immutable ledger even when routing or grounding fails.
+    if needle_adapter is None:
+        from pipeline.assistant.adapters import NeedleAdapter
+        needle_adapter = NeedleAdapter(settings)
+    if lfm_adapter is None:
+        from pipeline.assistant.adapters import LFMOllamaAdapter
+        lfm_adapter = LFMOllamaAdapter(settings)
 
     # --- route ---------------------------------------------------------------
     try:
@@ -197,7 +215,8 @@ def ask(conn, settings, question: str, *, source_system: str | None = None,
     answer_started = time.perf_counter()
     try:
         grounded = grounding.answer(question, envelope, settings=settings,
-                                    conn=conn, adapter=lfm_adapter)
+                                    conn=conn, adapter=lfm_adapter,
+                                    timeout=max(1.0, remaining))
     except AssistantUnavailable as exc:
         timings["answer_ms"] = round((time.perf_counter() - answer_started) * 1000)
         timings["total_ms"] = _elapsed_ms()

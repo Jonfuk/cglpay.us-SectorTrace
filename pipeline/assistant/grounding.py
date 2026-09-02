@@ -145,7 +145,8 @@ def _resolve(conn, envelope: dict, cited: list[str]) -> dict[str, dict]:
 
 
 def answer(question: str, tool_envelope: dict, *, settings: Any,
-           conn: Any = None, adapter: Any = None) -> GroundedAnswer:
+           conn: Any = None, adapter: Any = None,
+           timeout: float | None = None) -> GroundedAnswer:
     """Ground one answer on one tool result, or abstain.
 
     `adapter` is any object with `generate(prompt, *, system, max_tokens,
@@ -164,7 +165,8 @@ def answer(question: str, tool_envelope: dict, *, settings: Any,
     # the orchestrator records "unavailable". No answer is shown.
     raw = adapter.generate(
         _envelope_for_model(question, tool_envelope),
-        system=ANSWER_SYSTEM_PROMPT, max_tokens=_MAX_ANSWER_TOKENS)
+        system=ANSWER_SYSTEM_PROMPT, max_tokens=_MAX_ANSWER_TOKENS,
+        timeout=timeout)
     text = (raw or "").strip()
 
     if not text:

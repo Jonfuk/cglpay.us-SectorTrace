@@ -12,7 +12,11 @@ from pipeline.analysis.graph import (
     queue_release_projection,
 )
 from pipeline.analysis.linking import link_signals
-from pipeline.analysis.models import AnalysisModelClient, AnalysisModelInvalidJSON, AnalysisModelUnavailable
+from pipeline.analysis.models import (
+    AnalysisModelClient,
+    AnalysisModelInvalidJSON,
+    AnalysisModelUnavailable,
+)
 from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
 from pipeline.analysis.operations import decide_proposal, detect_drift, save_proposal
 from pipeline.analysis.prevalence import diagnostics
@@ -169,6 +173,22 @@ def test_model_unavailability_is_recorded(conn, settings, monkeypatch):
     assert row["status"] == "unavailable"
     assert row["model_id"] == "test/model"
     assert row["error_detail"] == "analysis model support requires the assistant extra"
+
+
+def test_analysis_release_captures_model_fallback_order(conn, settings, monkeypatch):
+    monkeypatch.setattr(settings, "assistant_needle_model", "x/scout", raising=False)
+    monkeypatch.setattr(settings, "assistant_needle_fallback_models",
+                        "x/scout-backup,x/scout-last", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_model", "x/extractor", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_fallback_models",
+                        "x/extractor-backup,x/extractor-last", raising=False)
+
+    release = create_release(conn, settings, domains=["da"])
+
+    assert release["models"]["scout"] == "x/scout"
+    assert release["model_fallbacks"]["scout"] == ["x/scout-backup", "x/scout-last"]
+    assert release["model_fallbacks"]["extractor"] == [
+        "x/extractor-backup", "x/extractor-last"]
 
 
 def test_invalid_json_is_retried_once(conn, settings):

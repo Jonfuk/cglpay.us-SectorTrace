@@ -55,7 +55,33 @@ turns into a clarification, never a crash and never an execution.
    ASSISTANT_API_KEY=sk-or-...        # or reuse OPENROUTER_API_KEY
    ASSISTANT_NEEDLE_MODEL=<slug>      # the router leg — a cheap/fast model
    ASSISTANT_LFM_MODEL=<slug>         # the answerer leg — a stronger model
+   ASSISTANT_NEEDLE_FALLBACK_MODELS=<slug>,<slug>
+   ASSISTANT_LFM_FALLBACK_MODELS=<slug>,<slug>
+   ASSISTANT_PROVIDER_SORT=latency
+   ASSISTANT_MAX_CONCURRENCY=8
+   ASSISTANT_MAX_RETRIES=2
    ```
+
+   Fallback values are comma- or newline-separated OpenRouter model slugs.
+   The primary model is tried first; OpenRouter then tries the fallbacks on
+   rate limiting, provider downtime, moderation refusal or another model
+   error. The fallback chain is captured in each new analysis release manifest
+   so a release remains reproducible. Existing deployments with only the two
+   primary variables continue to work unchanged.
+
+   `ASSISTANT_PROVIDER_SORT=latency` asks OpenRouter to prefer the lowest
+   observed provider latency while retaining provider fallback. Leave it blank
+   to retain OpenRouter's normal price/uptime balancing. `ASSISTANT_MAX_CONCURRENCY`
+   caps in-flight requests per worker process; retries use exponential backoff
+   and honour `Retry-After`. Repeated transient failures open a short local
+   circuit so a failing endpoint is not hammered.
+
+   For analysis releases that use dedicated `CLAIM_SIGNAL_*_MODEL` settings,
+   use the matching `CLAIM_SIGNAL_SCOUT_FALLBACK_MODELS`,
+   `CLAIM_SIGNAL_EXTRACTOR_FALLBACK_MODELS` and
+   `CLAIM_SIGNAL_REFLECTION_FALLBACK_MODELS` variables. When the scout returns
+   no candidate, the extractor call is skipped; accepted candidates still
+   require the original independent extractor agreement.
 
    `assistant_ollama_url` / `assistant_needle_url` already default to
    `https://openrouter.ai/api/v1`; point them at a self-hosted

@@ -13,8 +13,8 @@ import multiprocessing
 import os
 import threading
 import time
-from concurrent.futures import ProcessPoolExecutor
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -25,7 +25,11 @@ from pipeline.analysis import domains
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
 from pipeline.analysis.graph import project_release, signal_store_from_settings
 from pipeline.analysis.linking import link_signals, save_link
-from pipeline.analysis.models import AnalysisModelClient, AnalysisModelInvalidJSON, AnalysisModelUnavailable
+from pipeline.analysis.models import (
+    AnalysisModelClient,
+    AnalysisModelInvalidJSON,
+    AnalysisModelUnavailable,
+)
 from pipeline.analysis.narrative import (
     candidate_from_payload,
     candidate_to_signal,
@@ -49,7 +53,6 @@ from pipeline.analysis.structured import (
     observations_for_domain,
     structured_signal,
 )
-
 
 log = structlog.get_logger()
 
@@ -489,7 +492,8 @@ class AnalysisWorker:
         manifest = load_release(conn, release_id) or {}
         models = manifest.get("models", {})
         client = self.model_client_factory(
-            self.settings, release_id=release_id, run_id=run_id, models=models, conn=conn)
+            self.settings, release_id=release_id, run_id=run_id, models=models,
+            fallback_models=manifest.get("model_fallbacks", {}), conn=conn)
         model_unavailable = False
         for passage in passages:
             if self._cancelled(run_id):
@@ -500,8 +504,19 @@ class AnalysisWorker:
             try:
                 first = self._model_call_with_json_retry(client, prompt, role="scout", domain_id=domain_id,
                                                          window_id=passage["evidence_ref"], run_id=run_id)
+                first_candidate = candidate_from_payload(
+                    first, namespace=spec.taxonomy_namespace,
+                    subject_type=passage["subject_type"],
+                    subject_id=str(passage["subject_id"]),
+                    evidence_ref=passage["evidence_ref"], model_output=first)
+                # A null/invalid scout result cannot become an accepted signal,
+                # so there is nothing for the independent extractor to verify.
+                # Positive candidates still receive the original dual-model
+                # agreement check.
+                if first_candidate is None and getattr(self.settings, "claim_signal_skip_extractor_on_null", True):
+                    continue
                 second = self._model_call_with_json_retry(client, prompt, role="extractor", domain_id=domain_id,
-                                                          window_id=passage["evidence_ref"], run_id=run_id)
+                                                         window_id=passage["evidence_ref"], run_id=run_id)
             except CostCeilingExceeded:
                 raise
             except AnalysisModelInvalidJSON as exc:
@@ -513,10 +528,7 @@ class AnalysisWorker:
                             window_id=passage["evidence_ref"], error=str(exc))
                 model_unavailable = True
                 break
-            candidate = candidate_from_payload(
-                first, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
-                subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
-                model_output=first)
+            candidate = first_candidate
             second_candidate = candidate_from_payload(
                 second, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
                 subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],

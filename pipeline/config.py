@@ -318,8 +318,34 @@ class Settings(BaseSettings):
     # for `assistant_lfm_model` (grounding). `assistant_lfm_quant` is only a
     # ledger annotation now (OpenRouter serves its own quantisation).
     assistant_lfm_model: str = ""
+    # Comma- or newline-separated OpenRouter fallback slugs, tried in order
+    # after ASSISTANT_LFM_MODEL. The primary remains the value recorded by the
+    # existing assistant ledger fields.
+    assistant_lfm_fallback_models: str = ""
     assistant_lfm_quant: str = ""
     assistant_needle_model: str = ""
+    # Comma- or newline-separated OpenRouter fallback slugs, tried in order
+    # after ASSISTANT_NEEDLE_MODEL.
+    assistant_needle_fallback_models: str = ""
+
+    # OpenRouter request resilience. These apply per process; multiple worker
+    # processes should each be configured conservatively for the provider.
+    assistant_max_concurrency: int = 8
+    assistant_max_retries: int = 2
+    assistant_retry_base_seconds: float = 0.5
+    assistant_retry_max_seconds: float = 8.0
+    assistant_circuit_breaker_failures: int = 3
+    assistant_circuit_breaker_cooldown_seconds: float = 60.0
+    assistant_request_timeout_seconds: float = 60.0
+
+    # Optional OpenRouter provider routing. Blank sort/order/ignore preserves
+    # OpenRouter's normal load balancing. `latency` and `throughput` are useful
+    # for high-volume runs; provider slugs are comma-separated.
+    assistant_provider_sort: str = ""
+    assistant_provider_order: str = ""
+    assistant_provider_ignore: str = ""
+    assistant_provider_allow_fallbacks: bool = True
+    assistant_provider_require_parameters: bool = True
 
     # Send `response_format={"type":"json_object"}` on the router call. The
     # router prompt already demands a bare JSON object, but a small model
@@ -343,8 +369,12 @@ class Settings(BaseSettings):
     # intentionally inherit the assistant choices when unset, while retaining
     # the analysis-specific names needed for release provenance.
     claim_signal_scout_model: str = ""
+    claim_signal_scout_fallback_models: str = ""
     claim_signal_extractor_model: str = ""
+    claim_signal_extractor_fallback_models: str = ""
     claim_signal_reflection_model: str = ""
+    claim_signal_reflection_fallback_models: str = ""
+    claim_signal_skip_extractor_on_null: bool = True
     analysis_cost_ceiling_micros: int = 0
 
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"

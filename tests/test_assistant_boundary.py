@@ -144,6 +144,34 @@ def test_only_the_router_leg_asks_for_json_object_mode(settings, monkeypatch) ->
     assert "response_format" not in oc.create_kwargs
 
 
+def test_openrouter_fallback_models_are_sent_in_priority_order(settings, monkeypatch) -> None:
+    from pipeline.assistant.adapters import NeedleAdapter
+
+    monkeypatch.setattr(settings, "assistant_needle_model", "x/primary", raising=False)
+    monkeypatch.setattr(settings, "assistant_needle_fallback_models",
+                        "x/backup, x/last", raising=False)
+    adapter, rc = NeedleAdapter(settings), _RecordingClient()
+    monkeypatch.setattr(adapter, "_client", lambda: rc)
+
+    adapter.generate("q")
+
+    assert rc.create_kwargs["model"] == "x/primary"
+    assert rc.create_kwargs["extra_body"] == {
+        "models": ["x/backup", "x/last"],
+        "provider": {"allow_fallbacks": True, "require_parameters": True},
+    }
+
+
+def test_duplicate_or_blank_fallback_models_are_removed(settings, monkeypatch) -> None:
+    from pipeline.assistant.runtime import resolved_needle_models
+
+    monkeypatch.setattr(settings, "assistant_needle_model", "x/primary", raising=False)
+    monkeypatch.setattr(settings, "assistant_needle_fallback_models",
+                        "x/primary, ,x/backup\nx/backup", raising=False)
+
+    assert resolved_needle_models(settings) == ("x/primary", "x/backup")
+
+
 def test_get_adapter_refuses_while_the_layer_is_disabled(settings) -> None:
     from pipeline.assistant import AssistantUnavailable, get_adapter
 

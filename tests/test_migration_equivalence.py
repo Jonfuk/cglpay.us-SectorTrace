@@ -188,7 +188,8 @@ class TestTheTreesMatch:
         # exported, not portal-reachable, no graph_claims write. Two indexes
         # plus a partial UNIQUE index (one selected head per category).
         # TEXT/INTEGER/REAL -> text/bigint/double precision only.
-        assert len(list(MIGRATIONS.glob("*.sql"))) == 91
+        # 92 adds transport diagnostics to analysis model calls.
+        assert len(list(MIGRATIONS.glob("*.sql"))) == 92
 
     @pytest.mark.parametrize("kind", ["tables", "views", "indexes", "triggers"])
     def test_same_objects_declared(self, kind):

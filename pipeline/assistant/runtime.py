@@ -38,12 +38,61 @@ def resolved_lfm_model(settings: Any) -> str:
     return getattr(settings, "assistant_lfm_model", "") or LFM_MODEL
 
 
+def _model_list(value: Any) -> tuple[str, ...]:
+    """Parse a comma/newline separated fallback setting safely."""
+    if not value:
+        return ()
+    if isinstance(value, str):
+        values = value.replace("\n", ",").split(",")
+    else:
+        values = value
+    return tuple(str(item).strip() for item in values if str(item).strip())
+
+
+def _model_chain(primary: str, fallbacks: Any) -> tuple[str, ...]:
+    """Return a de-duplicated primary-plus-fallback model chain."""
+    chain = (primary,) + _model_list(fallbacks)
+    return tuple(dict.fromkeys(model for model in chain if model))
+
+
+def resolved_lfm_models(settings: Any) -> tuple[str, ...]:
+    return _model_chain(
+        resolved_lfm_model(settings),
+        getattr(settings, "assistant_lfm_fallback_models", ""),
+    )
+
+
 def resolved_lfm_quant(settings: Any) -> str:
     return getattr(settings, "assistant_lfm_quant", "") or LFM_QUANT
 
 
 def resolved_needle_model(settings: Any) -> str:
     return getattr(settings, "assistant_needle_model", "") or NEEDLE_MODEL
+
+
+def resolved_needle_models(settings: Any) -> tuple[str, ...]:
+    return _model_chain(
+        resolved_needle_model(settings),
+        getattr(settings, "assistant_needle_fallback_models", ""),
+    )
+
+
+def resolved_claim_models(settings: Any, role: str) -> tuple[str, ...]:
+    """Resolve role-specific analysis models without changing assistant roles."""
+    primary_name = {
+        "scout": "claim_signal_scout_model",
+        "extractor": "claim_signal_extractor_model",
+        "reflection": "claim_signal_reflection_model",
+    }.get(role)
+    fallback_name = {
+        "scout": "claim_signal_scout_fallback_models",
+        "extractor": "claim_signal_extractor_fallback_models",
+        "reflection": "claim_signal_reflection_fallback_models",
+    }.get(role)
+    if not primary_name or not fallback_name:
+        return ()
+    primary = getattr(settings, primary_name, "") or ""
+    return _model_chain(primary, getattr(settings, fallback_name, ""))
 
 
 def resolved_api_key(settings: Any) -> str:
