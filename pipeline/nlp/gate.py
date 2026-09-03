@@ -119,27 +119,45 @@ MIN_CATEGORIES_READY = 3   # of len(GATE_CATEGORIES). Was 5. After D-08's
 
 _NEGATIVE_STATUSES = frozenset({"NEGATED", "HISTORICAL", "THIRD_PARTY", "UNKNOWN"})
 
-_DECIDED_SQL = """
-SELECT d.claim_candidate_id, d.decision, d.decided_by, d.corrected_predicate,
+_DECIDED_PAGE_SQL = """
+SELECT d.id AS decision_id,d.claim_candidate_id,d.decision,d.decided_by,d.decided_at,
+       d.corrected_predicate,
        c.predicate, c.assertion_status, c.subject_hint,
        e.source_system, dr.source_key,
        substr(COALESCE(dr.published_at, e.retrieved_at, ''), 1, 4) AS year,
-       dem.entity_id AS subject_entity_id
+       subject.entity_id AS subject_entity_id
 FROM claim_candidate_decisions d
 JOIN document_claim_candidates c ON c.claim_candidate_id = d.claim_candidate_id
 JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id
 JOIN document_versions v ON v.document_version_id = dc.document_version_id
 JOIN document_records dr ON dr.document_id = v.document_id
 JOIN evidence_records e ON e.evidence_id = dr.evidence_id
-LEFT JOIN document_concept_mentions m
-       ON m.document_concept_mention_id = c.subject_mention_id
-LEFT JOIN document_entity_mentions dem
-       ON dem.document_element_id = m.document_element_id
-      AND dem.start_offset = m.element_char_start
-      AND dem.end_offset = m.element_char_end
-      AND dem.matched_text = m.span_text
-ORDER BY d.decided_at
+LEFT JOIN LATERAL (
+    SELECT dem.entity_id
+    FROM document_concept_mentions m
+    JOIN document_entity_mentions dem
+      ON dem.document_element_id = m.document_element_id
+     AND dem.start_offset = m.element_char_start
+     AND dem.end_offset = m.element_char_end
+     AND dem.matched_text = m.span_text
+    WHERE m.document_concept_mention_id = c.subject_mention_id
+    ORDER BY dem.document_entity_mention_id
+    LIMIT 1
+) subject ON true
+WHERE d.id > %s
+ORDER BY d.id
+LIMIT %s
 """
+
+
+def _decided_pages(conn, page_size: int = 2000):
+    after = 0
+    while True:
+        page = conn.execute(_DECIDED_PAGE_SQL, (after, page_size)).fetchall()
+        if not page:
+            return
+        yield page
+        after = page[-1]["decision_id"]
 
 
 def _label_for(row, predicate: str) -> str | None:
@@ -172,13 +190,17 @@ def _provider_key(row) -> str:
 
 
 def _inter_reviewer(rows: list, min_double_reviewed: int) -> dict:
-    by_candidate: dict[str, dict[str, str]] = {}
+    by_candidate: dict[str, dict[str, tuple[tuple[str, int], str]]] = {}
     for row in rows:
-        by_candidate.setdefault(row["claim_candidate_id"], {})[row["decided_by"]] = row["decision"]
+        decisions = by_candidate.setdefault(row["claim_candidate_id"], {})
+        key = (str(row["decided_at"] or ""), int(row["decision_id"]))
+        prior = decisions.get(row["decided_by"])
+        if prior is None or key > prior[0]:
+            decisions[row["decided_by"]] = (key, row["decision"])
     doubled = [v for v in by_candidate.values() if len(v) >= 2]
     if not doubled:
         return {"double_reviewed": 0, "agreement": None, "assessed": False}
-    agreed = sum(1 for v in doubled if len(set(v.values())) == 1)
+    agreed = sum(1 for v in doubled if len({item[1] for item in v.values()}) == 1)
     return {
         "double_reviewed": len(doubled),
         "agreement": round(agreed / len(doubled), 4),
@@ -194,7 +216,7 @@ def check(conn, *, min_per_class: int = MIN_PER_CLASS,
           min_double_reviewed: int = MIN_DOUBLE_REVIEWED,
           min_categories_ready: int = MIN_CATEGORIES_READY,
           agreement_floor: float = AGREEMENT_FLOOR) -> dict:
-    rows = conn.execute(_DECIDED_SQL).fetchall()
+    rows = [row for page in _decided_pages(conn) for row in page]
     inter = _inter_reviewer(rows, min_double_reviewed)
 
     categories: dict[str, dict] = {}

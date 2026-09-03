@@ -75,18 +75,19 @@ model) into `document_embeddings`. Two embedders and no third path:
   present only with the `nlp` extra, first-use download, Railway-excluded.
   Its resolved hub revision SHA is recorded on the run and the registry row.
 
-The stage is resume-safe (`LEFT JOIN document_embeddings … IS NULL`): a
-re-run fills gaps and recomputes nothing.
+The stage is resume-safe through the versioned stage ledger: an identical
+chunk/model/revision/configuration tuple is a no-op, while a changed tuple or
+explicit `--force` rewrites only the affected bounded page.
 
 **Hybrid search.** `pipeline/nlp/semantic_search.py`, surfaced at
-`/api/admin/search?mode=keyword|semantic|hybrid` (operator-only;
-`/api/v1/*` is untouched) and `pipeline nlp search`. `keyword` is the
-existing full-text index lifted from the matching *element* to its
-containing *chunk*; `semantic` is exact Python-side cosine over
-`document_embeddings`; `hybrid` (the default) fuses the two ranked lists by
-Reciprocal Rank Fusion (k=60) and degrades to keyword-only when no
-embeddings exist. Metadata filters (`source_system`, published-date range)
-pre-filter the candidate set in every mode.
+`/api/admin/search?mode=keyword|fuzzy|semantic|hybrid` (operator-only;
+`/api/v1/*` is untouched) and `pipeline nlp search`. PostgreSQL full-text,
+`pg_trgm`, and pgvector/HNSW are three separate candidate queries. `hybrid`
+(the default) fuses their rank positions by Reciprocal Rank Fusion (`k=60`),
+then breaks exact ties by stable chunk id. Candidate-path rank, cosine and
+RRF values are retrieval diagnostics only: none is evidence quality, source
+authority, corroboration, or probability of truth. Metadata filters
+(`source_system`, published-date range) apply inside every candidate query.
 
 **Retrieval eval.** `pipeline/nlp/eval.py` + `pipeline nlp eval-retrieval`
 score a mode against a human-marked query set
@@ -106,25 +107,97 @@ uv run pipeline nlp search --mode hybrid "services struggling to recruit enough 
 uv run pipeline nlp eval-retrieval --mode hybrid
 ```
 
-`nlp_runs` and `nlp_model_registry` carry the provenance. Migration `0065`
-is structurally identical in both dialect trees — the embedding column is a
-dialect-neutral little-endian float32 blob in each, so exact cosine is
-computed in Python.
+`nlp_runs`, `nlp_model_registry`, and migration `0096`'s stage ledger carry
+the processing provenance. `PostgresEmbeddingRepository` is the only active
+vector persistence/read boundary; classifiers, verification and retrieval do
+not select vector columns themselves. pgvector/HNSW is the sole semantic
+search implementation. There is no Python corpus sweep and no Mojo semantic
+kernel. Migration `0098` stops new duplicate writes. Its nullable legacy
+recovery column remains until the maintenance-window command creates and
+validates a compact replacement, rebuilds its lookup/HNSW indexes, checks
+float32 and result parity, and performs a short swap after a verified backup
+restore.
 
-**The pgvector migration shipped (`0071`).** The gate was "only if exact
-search is too slow", and on the live mirror it is: at **167,779** embeddings
-one `--mode semantic` query took **~30 s** — `_semantic_ranked` pulls every
-row for the model and scores each with a per-element Python loop, and it
-grows linearly. `0071` adds `document_embeddings.embedding_vec`, a pgvector
-`vector(384)` copy of the bytea, with an HNSW index; `_semantic_ranked` gets
-a PostgreSQL-with-`vector` branch that orders by `<=>` against the index and
-returns only `depth` rows. Everything else is unchanged: the bytea stays the
-source of truth and the only thing SQLite (and a Postgres server without the
-extension) holds, the exact Python path is the fallback, and
-`embedding_vec` is filled from the bytea by
-`pipeline nlp backfill-vectors` (run once automatically when `0071` first
-applies). A model of a different width is a new migration — which is already
-how a model change is handled, gated on the retrieval eval.
+## Phase 3 incremental and temporal controls
+
+Every chunking, label, span, context, relation, resolution, and embedding
+input is keyed in `nlp_stage_state` by its stable identity, input/dependency
+hashes, processor version, model/ontology version and configuration hash.
+Inputs are read in bounded stable-key pages and ledger state is bulk-loaded
+once per page. Only changed inputs are rewritten; unresolved entity mentions
+are deliberately reconsidered, and `--force` explicitly rebuilds the scoped
+stage. Per-input savepoints prevent a broken item from rolling back earlier
+committed pages, while `nlp_stage_failures` and `nlp_stage_checkpoints`
+attribute failure and the last committed input key. Claim prediction streams
+one 2,000-vector page per head into one atomic `executemany` call. Training
+decisions, classifier split lookups, and review-queue candidates also use
+stable keyset pages; review promotion resolves subject mentions and graph-pair
+existence in the page query rather than issuing per-candidate lookups.
+
+Ontology aliases are compiled once into a versioned token trie and processed
+as text batches. `NLP_ACCELERATOR=auto|python|mojo` selects the packed UTF-8
+ABI: `auto` logs one diagnostic then falls back, `python` is authoritative on
+all platforms, and forced `mojo` fails if a compatible ABI-v1 Linux extension
+is absent. Mojo receives packed text and offsets and may return packed concept
+ids/spans/counts/ordinals; Python retains loading, sentence splitting,
+provenance, orchestration, and persistence.
+
+Migration `0102` adds separately queryable source/document/element/table/entity/
+claim observations and change events. Unknown source-valid/effective dates
+remain NULL. A removed passage means only that deterministic parsing did not
+find it in the newer source version; it is explicitly not evidence that the
+underlying fact ended. Authority, extraction quality, corroboration, temporal
+completeness, and review state are independent quality assertions—there is no
+composite score or arithmetic between them.
+
+Archived byte revisions retain distinct immutable evidence and document IDs.
+When two revisions share the same source-system/table/key identity, parsing the
+new revision makes the prior `document_version` historical (`is_active=0`)
+without deleting it; live NLP and retrieval explicitly join only the current
+version.
+
+### Semantic parity and latency
+
+`pipeline nlp benchmark-semantic` embeds the committed retrieval query set,
+runs a forced exact PostgreSQL pgvector scan as the reference, then times the
+HNSW query after an explicit warm-up. The report contains exact result IDs,
+maximum score delta, vector count, model identity, repetitions and local
+min/p50/p95/max timings. It exits non-zero if IDs/order differ or any score
+delta exceeds `1e-6`; the timings are observations from that run, never
+hard-coded production claims.
+
+```bash
+uv run pipeline nlp benchmark-semantic \
+  --queries tests/fixtures/nlp/retrieval_queries.json \
+  --model stub --repetitions 7 --output semantic-benchmark.json
+```
+
+### Single-copy embedding maintenance runbook
+
+1. Pause embedding, NLP and analysis writers and create the normal verified
+   PostgreSQL snapshot.
+2. Restore it into an isolated PostgreSQL 18 database with
+   `pipeline restore SNAPSHOT --receipt restore-receipt.json`. The receipt
+   binds the restored row/table counts and target to the snapshot SHA-256.
+3. Against the production database, run `pipeline nlp compact-embeddings
+   --backup-archive SNAPSHOT --restore-receipt restore-receipt.json --dry-run`.
+   This creates, copies, indexes and parity-checks the replacement, then rolls
+   the transaction back without swapping tables.
+4. Repeat without `--dry-run`. An advisory lock prevents concurrent cutovers;
+   after the short exclusive lock, a bidirectional row/vector comparison
+   refuses the swap if writers changed the source table. Resume writers only
+   after the audit row reports `complete`.
+
+The compact table and ordinary PostgreSQL backup each contain one pgvector
+value. No second embedding representation is added to the backup format.
+
+The optional Mojo module follows [Mojo's documented pre-built Python extension
+boundary](https://mojolang.org/docs/manual/python/mojo-from-python/)
+(`mojo build ... --emit shared-lib`). CI always exercises Python
+fallback and invokes `scripts/build_mojo_nlp.py --if-available`; the build
+script refuses non-Linux/x86-64 hosts. The compiled smoke boundary remains
+parity-disabled, so even a successful build cannot accelerate ontology or
+context work until exact packed-output parity is implemented and approved.
 
 ## What ships now (tranche 034B) — the ontology
 

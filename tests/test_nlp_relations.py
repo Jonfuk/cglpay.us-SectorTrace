@@ -160,7 +160,7 @@ def test_run_is_idempotent(conn, settings):
     n1 = conn.execute("SELECT COUNT(*) FROM document_claim_candidates").fetchone().values().__iter__().__next__()
     again = relations.run(conn)
     n2 = conn.execute("SELECT COUNT(*) FROM document_claim_candidates").fetchone().values().__iter__().__next__()
-    assert first["candidates"] == again["candidates"] and n1 == n2
+    assert first["candidates"] > 0 and again["candidates"] == 0 and n1 == n2
 
 
 def test_dry_run_writes_nothing(conn, settings):

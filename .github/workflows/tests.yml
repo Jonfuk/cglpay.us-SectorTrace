@@ -50,6 +50,11 @@ jobs:
       - name: Lint
         run: uv run ruff check pipeline tests
 
+      - name: Check Python fallback and optional Mojo boundary
+        run: |
+          NLP_ACCELERATOR=auto uv run python -c "from pipeline.nlp.accelerator import select; select('auto')"
+          uv run python scripts/build_mojo_nlp.py --if-available
+
       - name: Validate the beta work queue
         # BETA-038: structural check on beta.md's machine-readable queue —
         # unknown states, heading/prefix mismatches, duplicate IDs, more than

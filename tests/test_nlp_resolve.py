@@ -94,6 +94,26 @@ def test_resolution_is_idempotent(conn, settings):
     assert n1 == n2 == 1
 
 
+def test_resolved_inputs_noop_on_unrelated_registry_change_and_force_rebuilds(conn, settings):
+    _prepare(conn, settings, entities=[
+        ("provider:turning_point", "PROVIDER", "Turning Point"),
+        ("provider:change_grow_live", "PROVIDER", "Change Grow Live"),
+        ("provider:phoenix_futures", "PROVIDER", "Phoenix Futures"),
+    ])
+    first = resolve.run(conn, batch_size=1)
+    assert first["candidates"] == 3
+    second = resolve.run(conn, batch_size=1)
+    assert second["candidates"] == 0 and second["skipped_unchanged"] == 3
+
+    _seed_entity(conn, "provider:unrelated", "PROVIDER", "Unrelated Provider")
+    conn.commit()
+    unchanged = resolve.run(conn, batch_size=1)
+    assert unchanged["candidates"] == 0 and unchanged["skipped_unchanged"] == 3
+
+    forced = resolve.run(conn, force=True, batch_size=1)
+    assert forced["candidates"] == 3
+
+
 def test_commissioner_span_resolves_to_a_local_authority(conn, settings):
     elements = [
         ParsedElement("HEADING", 1, text="Commissioning", page_number=1, heading_level=1),

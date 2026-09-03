@@ -1,6 +1,6 @@
 """Hybrid retrieval over `document_chunks` -- an `/api/admin/*` finding aid.
 
-Three modes:
+Three independent candidate paths:
 
 * ``keyword`` -- the PostgreSQL ``tsvector`` full-text index over
   ``document_elements``, lifted from the matching *element* up to its
@@ -8,7 +8,8 @@ Three modes:
 * ``semantic`` -- cosine of the query embedding against ``document_embeddings``
   for one model, ordered in the database against the pgvector/HNSW index
   (migration 0071).
-* ``hybrid`` -- Reciprocal Rank Fusion (k=60) of the two ranked lists. The
+* ``fuzzy`` -- PostgreSQL pg_trgm over chunk text.
+* ``hybrid`` -- Reciprocal Rank Fusion (k=60) of all three ranked lists. The
   default: keyword catches the literal term, semantic catches the paraphrase,
   and "services struggling to recruit enough workers" needs both.
 
@@ -22,8 +23,9 @@ from dataclasses import dataclass
 
 from pipeline.config import get_settings
 from pipeline.nlp import embeddings
+from pipeline.nlp.embedding_repository import PostgresEmbeddingRepository
 
-MODES = ("keyword", "semantic", "hybrid")
+MODES = ("keyword", "fuzzy", "semantic", "hybrid")
 
 # RRF's rank offset. 60 is the value from the paper everyone cites (Cormack et
 # al., 2009) and the one Elasticsearch/OpenSearch default to; it damps the
@@ -33,7 +35,7 @@ _RRF_K = 60
 
 # How deep each mode ranks before fusion and truncation to `limit`. Wide
 # enough that a chunk ranked outside one list can still be rescued by the
-# other; bounded so semantic stays a single in-memory cosine sweep.
+# other; bounded so each PostgreSQL candidate query and the fusion stay small.
 _CANDIDATE_DEPTH = 200
 
 _SNIPPET_MAX = 320
@@ -109,43 +111,35 @@ def _element_to_chunk_sql(placeholders: str, filter_sql: str) -> str:
 
 
 def _keyword_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]:
-    """Chunk ids best-match first, from the tsvector full-text index."""
+    """Chunk ids best-match first, from the chunk tsvector GIN index."""
     filter_sql, filter_params = filters.sql()
-    # Pull more matched elements than chunks wanted: several elements can land
-    # in one chunk, and a filter can drop some entirely.
-    element_cap = depth * 5
-
-    hits = conn.execute(
-        "SELECT de.document_element_id AS eid, "
-        "ts_rank_cd(to_tsvector('simple', COALESCE(de.text, '')), "
-        "           plainto_tsquery('simple', %s)) AS rank "
-        "FROM document_elements de "
-        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-        "WHERE dv.is_active = 1 "
-        "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', %s) "
-        "ORDER BY rank DESC LIMIT %s",
-        (query, query, element_cap)).fetchall()
-
-    if not hits:
-        return []
-    # ts_rank is larger-is-better and was ordered DESC, so the fetch order is
-    # already best-first; first-seen wins.
-    order = {row["eid"]: i for i, row in enumerate(hits)}
-    eids = list(order)
-    placeholders = ",".join("%s" for _ in eids)
     rows = conn.execute(
-        _element_to_chunk_sql(placeholders, filter_sql),
-        [*eids, *filter_params]).fetchall()
+        "SELECT dc.document_chunk_id AS cid,"
+        "ts_rank_cd(to_tsvector('simple',dc.text),plainto_tsquery('simple',%s)) AS rank "
+        "FROM document_chunks dc "
+        "JOIN document_versions dv ON dv.document_version_id=dc.document_version_id AND dv.is_active=1 "
+        "JOIN document_records d ON d.document_id=dv.document_id "
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id "
+        "WHERE dc.superseded=0 AND to_tsvector('simple',dc.text) "
+        "@@ plainto_tsquery('simple',%s)" + filter_sql +
+        " ORDER BY rank DESC,dc.document_chunk_id LIMIT %s",
+        [query, query, *filter_params, depth]).fetchall()
+    return [row["cid"] for row in rows]
 
-    best: dict[str, int] = {}
-    for row in rows:
-        pos = order.get(row["eid"])
-        if pos is None:
-            continue
-        cid = row["cid"]
-        if cid not in best or pos < best[cid]:
-            best[cid] = pos
-    return [cid for cid, _ in sorted(best.items(), key=lambda kv: kv[1])][:depth]
+
+def _fuzzy_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]:
+    """A distinct pg_trgm candidate path; similarity is retrieval-only."""
+    filter_sql, filter_params = filters.sql()
+    rows = conn.execute(
+        "SELECT dc.document_chunk_id AS cid,similarity(dc.text,%s) AS rank "
+        "FROM document_chunks dc "
+        "JOIN document_versions dv ON dv.document_version_id=dc.document_version_id AND dv.is_active=1 "
+        "JOIN document_records d ON d.document_id=dv.document_id "
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id "
+        "WHERE dc.superseded=0 AND dc.text OPERATOR(public.%%) %s" + filter_sql +
+        " ORDER BY rank DESC,dc.document_chunk_id LIMIT %s",
+        [query, query, *filter_params, depth]).fetchall()
+    return [row["cid"] for row in rows]
 
 
 # --- semantic: query embedding vs document_embeddings ---------------------
@@ -167,27 +161,15 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
     # (migration 0071), and take only `depth` rows. The former exact path that
     # pulled every embedding for the model and scored each in a Python loop
     # (~30 s per query at 167k embeddings) is gone with the SQLite backend.
-    literal = embeddings.vec_literal(query_vec)
-    rows = conn.execute(
-        "SELECT em.document_chunk_id AS cid, "
-        "1 - (em.embedding_vec OPERATOR(public.<=>) %s::public.vector) AS score "
-        "FROM document_embeddings em "
-        "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
-        "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
-        "JOIN document_records d ON d.document_id = dv.document_id "
-        "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE em.model_key = %s AND em.embedding_vec IS NOT NULL" + filter_sql
-        + " ORDER BY em.embedding_vec OPERATOR(public.<=>) %s::public.vector LIMIT %s",
-        [literal, model_key, *filter_params, literal, depth]).fetchall()
+    repository = PostgresEmbeddingRepository(conn)
+    rows = repository.semantic_candidates(
+        query_vector=query_vec, model_key=model_key, filter_sql=filter_sql,
+        filter_params=filter_params, depth=depth)
     if rows:
-        return model_key, [(row["cid"], float(row["score"])) for row in rows], None
-    backfilled = conn.execute(
-        "SELECT COUNT(*) AS count FROM document_embeddings "
-        "WHERE model_key = %s AND embedding_vec IS NOT NULL", (model_key,)).fetchone()["count"]
+        return model_key, rows, None
+    backfilled = repository.count(model_key)
     if backfilled == 0:
-        total = conn.execute(
-            "SELECT COUNT(*) AS count FROM document_embeddings WHERE model_key = %s",
-            (model_key,)).fetchone()["count"]
+        total = repository.count_all(model_key)
         note = (f"no embeddings for model {model_key!r} -- run `pipeline nlp embed`"
                 if total == 0
                 else "pgvector is installed but embedding_vec is empty -- "
@@ -198,23 +180,27 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
 
 # --- fusion --------------------------------------------------------------
 
-def _rrf(keyword_hits: list[str],
+def _rrf(keyword_hits: list[str], fuzzy_hits: list[str],
          semantic_hits: list[tuple[str, float]]) -> list[tuple[str, dict]]:
     scores: dict[str, dict] = {}
     for rank, cid in enumerate(keyword_hits, 1):
         meta = scores.setdefault(cid, {"rrf": 0.0})
         meta["keyword_rank"] = rank
         meta["rrf"] += 1.0 / (_RRF_K + rank)
+    for rank, cid in enumerate(fuzzy_hits, 1):
+        meta = scores.setdefault(cid, {"rrf": 0.0})
+        meta["fuzzy_rank"] = rank
+        meta["rrf"] += 1.0 / (_RRF_K + rank)
     for rank, (cid, cos) in enumerate(semantic_hits, 1):
         meta = scores.setdefault(cid, {"rrf": 0.0})
         meta["semantic_rank"] = rank
         meta["cosine"] = round(cos, 6)
         meta["rrf"] += 1.0 / (_RRF_K + rank)
-    ordered = sorted(scores.items(),
-                     key=lambda kv: (kv[1]["rrf"], -min(
-                         kv[1].get("keyword_rank", 1e9),
-                         kv[1].get("semantic_rank", 1e9))),
-                     reverse=True)
+    ordered = sorted(scores.items(), key=lambda kv: (
+        -kv[1]["rrf"],
+        min(kv[1].get("keyword_rank", 10**9), kv[1].get("fuzzy_rank", 10**9),
+            kv[1].get("semantic_rank", 10**9)),
+        kv[0]))
     return [(cid, {**meta, "rrf": round(meta["rrf"], 6)}) for cid, meta in ordered]
 
 
@@ -281,11 +267,14 @@ def search(conn, query: str, *, mode: str = "hybrid", limit: int = 20,
 
     notes: list[str] = []
     keyword_hits: list[str] = []
+    fuzzy_hits: list[str] = []
     semantic_hits: list[tuple[str, float]] = []
     model_key: str | None = None
 
     if mode in ("keyword", "hybrid"):
         keyword_hits = _keyword_ranked(conn, query, filters, _CANDIDATE_DEPTH)
+    if mode in ("fuzzy", "hybrid"):
+        fuzzy_hits = _fuzzy_ranked(conn, query, filters, _CANDIDATE_DEPTH)
     if mode in ("semantic", "hybrid"):
         model_key, semantic_hits, note = _semantic_ranked(
             conn, query, filters, _CANDIDATE_DEPTH, model)
@@ -294,13 +283,15 @@ def search(conn, query: str, *, mode: str = "hybrid", limit: int = 20,
 
     if mode == "keyword":
         ranked = [(cid, {"keyword_rank": i + 1}) for i, cid in enumerate(keyword_hits)]
+    elif mode == "fuzzy":
+        ranked = [(cid, {"fuzzy_rank": i + 1}) for i, cid in enumerate(fuzzy_hits)]
     elif mode == "semantic":
         ranked = [(cid, {"semantic_rank": i + 1, "cosine": round(score, 6)})
                   for i, (cid, score) in enumerate(semantic_hits)]
     else:
-        ranked = _rrf(keyword_hits, semantic_hits)
-        if not semantic_hits and keyword_hits:
-            notes.append("hybrid degraded to keyword-only (no semantic results)")
+        ranked = _rrf(keyword_hits, fuzzy_hits, semantic_hits)
+        if not semantic_hits and (keyword_hits or fuzzy_hits):
+            notes.append("hybrid degraded to keyword-only/fuzzy retrieval (no semantic candidates)")
 
     results = _hydrate(conn, ranked[:limit])
     return {

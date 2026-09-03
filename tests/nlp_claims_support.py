@@ -11,22 +11,22 @@ and one decision per candidate (`approved` + `AFFIRMED` for a positive,
 from __future__ import annotations
 
 import random
-import struct
 
+from pipeline.nlp.embedding_repository import vector_literal
 from pipeline.nlp.gate import GATE_CATEGORIES
 
 _NOW = "2026-08-31T12:00:00+00:00"
 STUB_MODEL_KEY = "embed:stub"
-_DIM = 16
+_DIM = 384
 
 
-def _vec(rng: random.Random, label: int, separable: bool) -> bytes:
+def _vec(rng: random.Random, label: int, separable: bool) -> list[float]:
     if separable:
         centre = 1.0 if label == 1 else -1.0
         values = [centre + rng.gauss(0, 0.25) for _ in range(_DIM)]
     else:
         values = [rng.gauss(0, 1.0) for _ in range(_DIM)]
-    return struct.pack("<%df" % _DIM, *values)
+    return values
 
 
 def _ensure_registry(conn) -> None:
@@ -76,8 +76,9 @@ def seed_labelled(conn, category: str, *, n_pos: int, n_neg: int,
         if embed:
             conn.execute(
                 "INSERT INTO document_embeddings (document_chunk_id, model_key, "
-                "dimension, embedding, created_at) VALUES (%s, %s, %s, %s, %s)",
-                (chunk, STUB_MODEL_KEY, _DIM, _vec(rng, label, separable), _NOW))
+                "dimension, embedding_vec, created_at) VALUES (%s, %s, %s, %s::public.vector, %s)",
+                (chunk, STUB_MODEL_KEY, _DIM,
+                 vector_literal(_vec(rng, label, separable)), _NOW))
 
         cand = f"cand-{category}-{seed}-{i}"
         conn.execute(
@@ -133,8 +134,8 @@ def seed_unlabelled_chunks(conn, tag: str, *, n: int, separable_label: int | Non
             values = [centre + rng.gauss(0, 0.25) for _ in range(_DIM)]
         conn.execute(
             "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
-            "embedding, created_at) VALUES (%s, %s, %s, %s, %s)",
-            (chunk, STUB_MODEL_KEY, _DIM, struct.pack("<%df" % _DIM, *values), _NOW))
+            "embedding_vec, created_at) VALUES (%s, %s, %s, %s::public.vector, %s)",
+            (chunk, STUB_MODEL_KEY, _DIM, vector_literal(values), _NOW))
         ids.append(chunk)
     conn.commit()
     return ids

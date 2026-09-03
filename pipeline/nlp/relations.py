@@ -18,13 +18,15 @@ reviewer and is never multiplied into a figure. Promotion into `review_queue`
 is a separate policy (`pipeline/nlp/promote.py`); only a person's decision
 produces a `graph_claims` draft.
 """
+
 from __future__ import annotations
 
 import hashlib
 import re
 
+from pipeline import evidence_state
 from pipeline.nlp import ontology as ontology_mod
-from pipeline.nlp import runs
+from pipeline.nlp import runs, stage_state
 from pipeline.nlp.context import CueTagger, split_sentences
 
 STAGE = "relations"
@@ -82,11 +84,15 @@ _SUBJECT_FALLBACK_LABELS: dict[str, frozenset[str]] = {
 _ANAPHORIC_SUBJECTS = frozenset({"service", "workforce"})
 _ANAPHOR = re.compile(
     r"\b(the (service|provider|team|scheme|contract|partnership)|our (service|staff|team)|"
-    r"\bstaff\b|the workforce|the (?:local )?authority)\b", re.IGNORECASE)
+    r"\bstaff\b|the workforce|the (?:local )?authority)\b",
+    re.IGNORECASE,
+)
 
 _LITERAL_PATTERNS = {
-    "money": re.compile(r"£\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:m|bn|k|million|billion))?"
-                        r"|\b\d[\d,]*(?:\.\d+)?\s?per cent\b|\b\d[\d,]*(?:\.\d+)?%"),
+    "money": re.compile(
+        r"£\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:m|bn|k|million|billion))?"
+        r"|\b\d[\d,]*(?:\.\d+)?\s?per cent\b|\b\d[\d,]*(?:\.\d+)?%"
+    ),
     "count": re.compile(r"\b\d[\d,]*(?:\.\d+)?%?\b"),
     "date": re.compile(r"\bQ[1-4]\s?(?:19|20)\d{2}\b|\b(?:19|20)\d{2}(?:[/-]\d{2})?\b"),
 }
@@ -111,11 +117,19 @@ def _extract_literal(sentence: str, kind: str, near: int) -> str | None:
 
 
 class _SentenceSpan:
-    __slots__ = ("mention_id", "label", "concept_id", "start", "end",
-                 "assertion_status", "assertion_confidence")
+    __slots__ = (
+        "mention_id",
+        "label",
+        "concept_id",
+        "start",
+        "end",
+        "assertion_status",
+        "assertion_confidence",
+    )
 
-    def __init__(self, mention_id, label, concept_id, start, end,
-                 assertion_status, assertion_confidence):
+    def __init__(
+        self, mention_id, label, concept_id, start, end, assertion_status, assertion_confidence
+    ):
         self.mention_id = mention_id
         self.label = label
         self.concept_id = concept_id
@@ -126,13 +140,33 @@ class _SentenceSpan:
 
 
 class CandidateTriple:
-    __slots__ = ("subject_mention_id", "subject_hint", "predicate",
-                 "object_concept_id", "object_literal", "assertion_status",
-                 "assertion_confidence", "score", "trigger_start", "trigger_end")
+    __slots__ = (
+        "subject_mention_id",
+        "subject_hint",
+        "predicate",
+        "object_concept_id",
+        "object_literal",
+        "assertion_status",
+        "assertion_confidence",
+        "score",
+        "trigger_start",
+        "trigger_end",
+    )
 
-    def __init__(self, *, subject_mention_id, subject_hint, predicate,
-                 object_concept_id, object_literal, assertion_status,
-                 assertion_confidence, score, trigger_start, trigger_end):
+    def __init__(
+        self,
+        *,
+        subject_mention_id,
+        subject_hint,
+        predicate,
+        object_concept_id,
+        object_literal,
+        assertion_status,
+        assertion_confidence,
+        score,
+        trigger_start,
+        trigger_end,
+    ):
         self.subject_mention_id = subject_mention_id
         self.subject_hint = subject_hint
         self.predicate = predicate
@@ -157,12 +191,14 @@ def _find_subject(rel, spans: list[_SentenceSpan], before: int):
     """The closest acceptable subject span for `rel`: the predicate's own
     subject label first, then the documented fallbacks. None if neither is in
     the sentence."""
-    return (_closest(spans, _SUBJECT_LABELS.get(rel.subject, frozenset()), before)
-            or _closest(spans, _SUBJECT_FALLBACK_LABELS.get(rel.subject, frozenset()), before))
+    return _closest(spans, _SUBJECT_LABELS.get(rel.subject, frozenset()), before) or _closest(
+        spans, _SUBJECT_FALLBACK_LABELS.get(rel.subject, frozenset()), before
+    )
 
 
-def assemble(onto: ontology_mod.Ontology, sentence: str,
-             spans: list[_SentenceSpan]) -> list[CandidateTriple]:
+def assemble(
+    onto: ontology_mod.Ontology, sentence: str, spans: list[_SentenceSpan]
+) -> list[CandidateTriple]:
     tagger = CueTagger()
     out: list[CandidateTriple] = []
     made: set[tuple] = set()
@@ -182,9 +218,16 @@ def assemble(onto: ontology_mod.Ontology, sentence: str,
         object_penalty = 1.0
         if rel.object.startswith("concept:"):
             category = rel.object.split(":", 1)[1]
-            obj = next((s for s in onto.match_spans(sentence)
-                        if category in (onto.concept(s.concept_id).categories if onto.concept(s.concept_id) else ())
-                        and not (trigger_start <= s.char_start < trigger_end)), None)
+            obj = next(
+                (
+                    s
+                    for s in onto.match_spans(sentence)
+                    if category
+                    in (onto.concept(s.concept_id).categories if onto.concept(s.concept_id) else ())
+                    and not (trigger_start <= s.char_start < trigger_end)
+                ),
+                None,
+            )
             if obj is None:
                 return
             object_concept_id = obj.concept_id
@@ -205,18 +248,29 @@ def assemble(onto: ontology_mod.Ontology, sentence: str,
 
         anchor = subject.end if subject is not None else trigger_start
         gap = abs(trigger_start - anchor)
-        key = (subject.mention_id if subject else subject_hint, predicate,
-               object_concept_id, object_literal)
+        key = (
+            subject.mention_id if subject else subject_hint,
+            predicate,
+            object_concept_id,
+            object_literal,
+        )
         if key in made:
             return
         made.add(key)
-        out.append(CandidateTriple(
-            subject_mention_id=subject.mention_id if subject else None,
-            subject_hint=subject_hint, predicate=predicate,
-            object_concept_id=object_concept_id, object_literal=object_literal,
-            assertion_status=status, assertion_confidence=confidence,
-            score=round(_score(pattern_strength, gap, confidence) * object_penalty, 4),
-            trigger_start=trigger_start, trigger_end=trigger_end))
+        out.append(
+            CandidateTriple(
+                subject_mention_id=subject.mention_id if subject else None,
+                subject_hint=subject_hint,
+                predicate=predicate,
+                object_concept_id=object_concept_id,
+                object_literal=object_literal,
+                assertion_status=status,
+                assertion_confidence=confidence,
+                score=round(_score(pattern_strength, gap, confidence) * object_penalty, 4),
+                trigger_start=trigger_start,
+                trigger_end=trigger_end,
+            )
+        )
 
     # 1) controlled concept -> predicate
     for cspan in onto.match_spans(sentence):
@@ -237,6 +291,7 @@ def assemble(onto: ontology_mod.Ontology, sentence: str,
 
 # --- the stage -----------------------------------------------------
 
+
 def _candidate_id(chunk_id, subject_mention_id, predicate, obj, char_start, char_end) -> str:
     seed = f"{chunk_id}|{subject_mention_id}|{predicate}|{obj}|{char_start}|{char_end}|{EXTRACTOR}"
     return "cc-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -250,11 +305,18 @@ def _chunk_spans(conn, chunk_id: str) -> list:
         "LEFT JOIN document_assertions a ON a.concept_mention_id = m.document_concept_mention_id "
         "  AND a.superseded = 0 "
         "WHERE m.document_chunk_id = %s AND m.superseded = 0 ORDER BY m.char_start",
-        (chunk_id,)).fetchall()
+        (chunk_id,),
+    ).fetchall()
 
 
 def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
     spans = _chunk_spans(conn, chunk_row["document_chunk_id"])
+    prior_rows = conn.execute(
+        "SELECT claim_candidate_id,predicate,object_concept_id,object_literal,evidence_span "
+        "FROM document_claim_candidates WHERE document_chunk_id=%s AND relation_extractor=%s "
+        "AND superseded=0 ORDER BY claim_candidate_id",
+        (chunk_row["document_chunk_id"], EXTRACTOR),
+    ).fetchall()
     # Rebuild this chunk's candidates from scratch. `_candidate_id` does not
     # encode the extractor version, so deleting only the *current* version
     # left prior-version rows in place, and the `ON CONFLICT DO NOTHING`
@@ -268,83 +330,244 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
         "WHERE document_chunk_id = %s AND relation_extractor = %s "
         "AND claim_candidate_id NOT IN "
         "  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
-        (chunk_row["document_chunk_id"], EXTRACTOR))
+        (chunk_row["document_chunk_id"], EXTRACTOR),
+    )
     text = chunk_row["text"] or ""
     now = runs.utcnow()
-    written = 0
+    values = []
     for sentence, offset in split_sentences(text):
         in_sentence = [
-            _SentenceSpan(s["mid"], s["label"], s["concept_id"],
-                          s["char_start"] - offset, s["char_end"] - offset,
-                          s["assertion_status"], s["detector_confidence"])
+            _SentenceSpan(
+                s["mid"],
+                s["label"],
+                s["concept_id"],
+                s["char_start"] - offset,
+                s["char_end"] - offset,
+                s["assertion_status"],
+                s["detector_confidence"],
+            )
             for s in spans
-            if offset <= s["char_start"] and s["char_end"] <= offset + len(sentence)]
+            if offset <= s["char_start"] and s["char_end"] <= offset + len(sentence)
+        ]
         for triple in assemble(onto, sentence, in_sentence):
             obj = triple.object_concept_id or triple.object_literal
-            cid = _candidate_id(chunk_row["document_chunk_id"], triple.subject_mention_id,
-                                triple.predicate, obj, offset, offset + len(sentence))
-            cur = conn.execute(
-                "INSERT INTO document_claim_candidates (claim_candidate_id, document_chunk_id, "
-                "subject_mention_id, subject_hint, predicate, object_concept_id, object_literal, "
-                "assertion_status, relation_extractor, relation_extractor_version, relation_score, "
-                "evidence_span, char_start, char_end, status, superseded, nlp_run_id, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new', 0, %s, %s) "
-                "ON CONFLICT DO NOTHING",
-                (cid, chunk_row["document_chunk_id"], triple.subject_mention_id,
-                 triple.subject_hint, triple.predicate, triple.object_concept_id,
-                 triple.object_literal, triple.assertion_status, EXTRACTOR, version,
-                 triple.score, sentence, offset, offset + len(sentence), nlp_run_id, now))
-            # count real inserts, not attempts -- a collision with a decided
-            # candidate is a no-op and must not inflate the total.
-            written += 1 if (cur.rowcount or 0) > 0 else 0
-    return written
+            cid = _candidate_id(
+                chunk_row["document_chunk_id"],
+                triple.subject_mention_id,
+                triple.predicate,
+                obj,
+                offset,
+                offset + len(sentence),
+            )
+            values.append(
+                (
+                    cid,
+                    chunk_row["document_chunk_id"],
+                    triple.subject_mention_id,
+                    triple.subject_hint,
+                    triple.predicate,
+                    triple.object_concept_id,
+                    triple.object_literal,
+                    triple.assertion_status,
+                    EXTRACTOR,
+                    version,
+                    triple.score,
+                    sentence,
+                    offset,
+                    offset + len(sentence),
+                    nlp_run_id,
+                    now,
+                )
+            )
+    before = conn.execute(
+        "SELECT COUNT(*) AS count FROM document_claim_candidates WHERE document_chunk_id=%s",
+        (chunk_row["document_chunk_id"],),
+    ).fetchone()["count"]
+    conn.executemany(
+        "INSERT INTO document_claim_candidates (claim_candidate_id, document_chunk_id, "
+        "subject_mention_id, subject_hint, predicate, object_concept_id, object_literal, "
+        "assertion_status, relation_extractor, relation_extractor_version, relation_score, "
+        "evidence_span, char_start, char_end, status, superseded, nlp_run_id, created_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new', 0, %s, %s) "
+        "ON CONFLICT DO NOTHING",
+        values,
+    )
+    after = conn.execute(
+        "SELECT COUNT(*) AS count FROM document_claim_candidates WHERE document_chunk_id=%s",
+        (chunk_row["document_chunk_id"],),
+    ).fetchone()["count"]
+    current_rows = conn.execute(
+        "SELECT claim_candidate_id,predicate,object_concept_id,object_literal,evidence_span "
+        "FROM document_claim_candidates WHERE document_chunk_id=%s AND relation_extractor=%s "
+        "AND superseded=0 ORDER BY claim_candidate_id",
+        (chunk_row["document_chunk_id"], EXTRACTOR),
+    ).fetchall()
+    current_ids = {row["claim_candidate_id"] for row in current_rows}
+    for row in current_rows:
+        evidence_state.observe(
+            conn,
+            layer="claim_candidate",
+            identity=row["claim_candidate_id"],
+            evidence_hash=stage_state.content_hash(dict(row)),
+            provenance={
+                "document_chunk_id": chunk_row["document_chunk_id"],
+                "nlp_run_id": nlp_run_id,
+                "finding_aid_not_evidence": True,
+            },
+        )
+    for row in prior_rows:
+        if row["claim_candidate_id"] not in current_ids:
+            evidence_state.observe(
+                conn,
+                layer="claim_candidate",
+                identity=row["claim_candidate_id"],
+                evidence_hash=stage_state.content_hash(dict(row)),
+                explicit_state="removed",
+                provenance={
+                    "document_chunk_id": chunk_row["document_chunk_id"],
+                    "nlp_run_id": nlp_run_id,
+                    "meaning": "candidate absent after deterministic re-extraction; not proof the fact ended",
+                },
+            )
+    return max(0, int(after) - int(before))
 
 
-def _live_chunks(conn, source_system, limit):
+def _live_chunks_page(conn, source_system, *, after: str | None, page_size: int):
     sql = (
-        "SELECT dc.document_chunk_id, dc.text FROM document_chunks dc "
+        "SELECT dc.document_chunk_id,dc.text,dc.text_sha256,"
+        "string_agg(m.document_concept_mention_id || ':' || COALESCE(m.concept_id,'') || ':' || "
+        "COALESCE(a.assertion_status,'') || ':' || COALESCE(a.sentence_sha256,''),'|' "
+        "ORDER BY m.document_concept_mention_id) AS relation_dependency_input "
+        "FROM document_chunks dc "
         "JOIN document_concept_mentions m ON m.document_chunk_id = dc.document_chunk_id "
         "  AND m.superseded = 0 "
-        "JOIN document_versions v ON v.document_version_id = dc.document_version_id "
+        "JOIN document_versions v ON v.document_version_id = dc.document_version_id AND v.is_active = 1 "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE dc.superseded = 0")
+        "LEFT JOIN document_assertions a ON a.concept_mention_id=m.document_concept_mention_id "
+        "AND a.superseded=0 "
+        "WHERE dc.superseded = 0"
+    )
     params: list = []
     if source_system:
         sql += " AND e.source_system = %s"
         params.append(source_system)
-    sql += " GROUP BY dc.document_chunk_id ORDER BY MIN(dc.created_at), dc.document_chunk_id"
-    if limit:
-        sql += " LIMIT %s"
-        params.append(limit)
+    if after is not None:
+        sql += " AND dc.document_chunk_id > %s"
+        params.append(after)
+    sql += " GROUP BY dc.document_chunk_id,dc.text,dc.text_sha256 "
+    sql += "ORDER BY dc.document_chunk_id LIMIT %s"
+    params.append(page_size)
     return conn.execute(sql, params).fetchall()
 
 
-def run(conn, *, source_system: str | None = None, limit: int | None = None,
-        dry_run: bool = False) -> dict:
+def run(
+    conn,
+    *,
+    source_system: str | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+    batch_size: int = 200,
+) -> dict:
     """Assemble machine claim candidates for every chunk that has spans.
     Bounded by `limit`; safe to repeat. Fetches nothing."""
     onto = ontology_mod.default()
     version = f"{EXTRACTOR}-1@{onto.version[:14]}"
-    config = {"extractor": EXTRACTOR, "version": version, "ontology_version": onto.version,
-              "source_system": source_system, "limit": limit}
-    run_id = runs.start_run(conn, STAGE, config=config, ontology_version=onto.version,
-                            input_scope={"source_system": source_system, "limit": limit})
-    chunks = _live_chunks(conn, source_system, limit)
+    config = {
+        "extractor": EXTRACTOR,
+        "version": version,
+        "ontology_version": onto.version,
+        "source_system": source_system,
+        "limit": limit,
+    }
+    run_id = runs.start_run(
+        conn,
+        STAGE,
+        config=config,
+        ontology_version=onto.version,
+        input_scope={"source_system": source_system, "limit": limit},
+    )
+    rule_hash = stage_state.combined_hash(onto.version, version)
+    state_config = {"relation_extractor": EXTRACTOR, "rule_hash": rule_hash}
     written = 0
+    processed = 0
+    scanned = 0
+    skipped = 0
+    after_key = None
+    batch_ordinal = 0
     try:
-        for chunk_row in chunks:
-            written += relations_for_chunk(conn, onto, chunk_row, run_id, version)
+        while limit is None or scanned < limit:
+            size = min(max(1, batch_size), limit - scanned) if limit is not None else max(1, batch_size)
+            page = _live_chunks_page(conn, source_system, after=after_key, page_size=size)
+            if not page:
+                break
+            after_key = page[-1]["document_chunk_id"]
+            scanned += len(page)
+            dependencies = {row["document_chunk_id"]: stage_state.combined_hash(
+                row["text_sha256"], row["relation_dependency_input"], rule_hash)
+                for row in page}
+            pending = stage_state.pending_identities(
+                conn, "relations", [(row["document_chunk_id"], row["text_sha256"],
+                                     dependencies[row["document_chunk_id"]]) for row in page],
+                processor_version=version, model_or_ontology_version=onto.version,
+                configuration=state_config, force=force)
+            skipped += len(page) - len(pending)
+            for chunk_row in page:
+                chunk_id = chunk_row["document_chunk_id"]
+                if chunk_id not in pending:
+                    continue
+                try:
+                    with conn.raw.transaction():
+                        count = relations_for_chunk(conn, onto, chunk_row, run_id, version)
+                        output = conn.execute(
+                            "SELECT claim_candidate_id,predicate,object_concept_id,"
+                            "object_literal,assertion_status FROM document_claim_candidates "
+                            "WHERE document_chunk_id=%s AND superseded=0 "
+                            "ORDER BY claim_candidate_id", (chunk_id,)).fetchall()
+                        stage_state.mark_complete(
+                            conn, "relations", chunk_id, chunk_row["text_sha256"],
+                            processor_version=version,
+                            model_or_ontology_version=onto.version,
+                            configuration=state_config, dependency_hash=dependencies[chunk_id],
+                            output=[dict(row) for row in output], run_id=run_id)
+                        written += count
+                        processed += 1
+                except Exception as input_exc:
+                    stage_state.mark_failed(
+                        conn, "relations", chunk_id, chunk_row["text_sha256"],
+                        processor_version=version, error=input_exc, run_id=run_id,
+                        model_or_ontology_version=onto.version, configuration=state_config,
+                        dependency_hash=dependencies[chunk_id])
+                    raise
+            if not dry_run:
+                stage_state.checkpoint(
+                    conn, run_id=run_id, stage="relations", batch_ordinal=batch_ordinal,
+                    last_input_identity=after_key, rows_processed=scanned, rows_written=written)
+                conn.commit()
+            batch_ordinal += 1
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
-        runs.finish_run(conn, run_id, status="failed", rows_processed=len(chunks),
-                        rows_written=written, error=f"{type(exc).__name__}: {exc}")
+        runs.finish_run(
+            conn,
+            run_id,
+            status="failed",
+            rows_processed=processed,
+            rows_written=written,
+            error=f"{type(exc).__name__}: {exc}",
+        )
         if not dry_run:
             conn.commit()
         raise
-    runs.finish_run(conn, run_id, status="ok", rows_processed=len(chunks), rows_written=written)
+    runs.finish_run(conn, run_id, status="ok", rows_processed=processed, rows_written=written)
     if dry_run:
         conn.rollback()
     else:
         conn.commit()
-    return {"run_id": run_id, "extractor_version": version, "chunks": len(chunks),
-            "candidates": written, "dry_run": dry_run}
+    return {
+        "run_id": run_id,
+        "extractor_version": version,
+        "chunks": processed,
+        "candidates": written,
+        "skipped_unchanged": skipped,
+        "dry_run": dry_run,
+    }

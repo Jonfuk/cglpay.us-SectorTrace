@@ -34,7 +34,7 @@ import re
 from dataclasses import dataclass
 
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
-from pipeline.nlp import models, runs
+from pipeline.nlp import models, runs, stage_state
 from pipeline.nlp import ontology as ontology_mod
 
 STAGE = "spans"
@@ -232,36 +232,36 @@ def extract_chunk(conn, extractor, chunk_row, nlp_run_id: str | None) -> int:
         (chunk_row["document_chunk_id"], extractor.name, extractor.version))
 
     now = runs.utcnow()
-    written = 0
+    values = []
     for span in extractor.extract(chunk_row["text"] or ""):
         element_id, el_start, el_end = _locate(span.char_start, span.char_end, offsets)
-        conn.execute(
-            "INSERT INTO document_concept_mentions (document_concept_mention_id, document_chunk_id, "
-            "document_element_id, label, concept_id, span_text, char_start, char_end, "
-            "element_char_start, element_char_end, extractor_name, extractor_version, "
-            "extraction_score, superseded, nlp_run_id, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s) "
-            "ON CONFLICT(document_chunk_id, extractor_name, extractor_version, char_start, char_end, label) "
-            "DO UPDATE SET span_text=excluded.span_text, concept_id=excluded.concept_id, "
-            "document_element_id=excluded.document_element_id, "
-            "element_char_start=excluded.element_char_start, element_char_end=excluded.element_char_end, "
-            "extraction_score=excluded.extraction_score, superseded=0, "
-            "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at",
-            (_mention_id(chunk_row["document_chunk_id"], extractor.name, extractor.version,
-                         span.char_start, span.char_end, span.label),
-             chunk_row["document_chunk_id"], element_id, span.label, span.concept_id,
-             span.text, span.char_start, span.char_end, el_start, el_end,
-             extractor.name, extractor.version, span.score, nlp_run_id, now))
-        written += 1
-    return written
+        values.append((_mention_id(chunk_row["document_chunk_id"], extractor.name, extractor.version,
+                                   span.char_start, span.char_end, span.label),
+                       chunk_row["document_chunk_id"], element_id, span.label, span.concept_id,
+                       span.text, span.char_start, span.char_end, el_start, el_end,
+                       extractor.name, extractor.version, span.score, nlp_run_id, now))
+    conn.executemany(
+        "INSERT INTO document_concept_mentions (document_concept_mention_id, document_chunk_id, "
+        "document_element_id, label, concept_id, span_text, char_start, char_end, "
+        "element_char_start, element_char_end, extractor_name, extractor_version, "
+        "extraction_score, superseded, nlp_run_id, created_at) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s) "
+        "ON CONFLICT(document_chunk_id,extractor_name,extractor_version,char_start,char_end,label) "
+        "DO UPDATE SET span_text=excluded.span_text,concept_id=excluded.concept_id,"
+        "document_element_id=excluded.document_element_id,"
+        "element_char_start=excluded.element_char_start,element_char_end=excluded.element_char_end,"
+        "extraction_score=excluded.extraction_score,superseded=0,"
+        "nlp_run_id=excluded.nlp_run_id,created_at=excluded.created_at", values)
+    return len(values)
 
 
-def _live_chunks(conn, source_system: str | None, limit: int | None) -> list:
+def _live_chunks_page(conn, source_system: str | None, *, after: str | None,
+                      page_size: int) -> list:
     sql = (
-        "SELECT dc.document_chunk_id, dc.document_version_id, dc.text, "
+        "SELECT dc.document_chunk_id, dc.document_version_id, dc.text, dc.text_sha256, "
         "dc.element_start_id, dc.element_end_id "
         "FROM document_chunks dc "
-        "JOIN document_versions v ON v.document_version_id = dc.document_version_id "
+        "JOIN document_versions v ON v.document_version_id = dc.document_version_id AND v.is_active = 1 "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
         "WHERE dc.superseded = 0")
@@ -269,15 +269,17 @@ def _live_chunks(conn, source_system: str | None, limit: int | None) -> list:
     if source_system:
         sql += " AND e.source_system = %s"
         params.append(source_system)
-    sql += " ORDER BY dc.created_at, dc.document_chunk_id"
-    if limit:
-        sql += " LIMIT %s"
-        params.append(limit)
+    if after is not None:
+        sql += " AND dc.document_chunk_id > %s"
+        params.append(after)
+    sql += " ORDER BY dc.document_chunk_id LIMIT %s"
+    params.append(page_size)
     return conn.execute(sql, params).fetchall()
 
 
 def run(conn, *, extractor: str | None = None, source_system: str | None = None,
-        limit: int | None = None, dry_run: bool = False) -> dict:
+        limit: int | None = None, dry_run: bool = False, force: bool = False,
+        batch_size: int = 200) -> dict:
     """Extract entity spans from every live chunk (optionally scoped by source
     system) into `document_concept_mentions`. Bounded by `limit`; safe to
     repeat. Offline by default (`extractor='stub'`)."""
@@ -288,21 +290,75 @@ def run(conn, *, extractor: str | None = None, source_system: str | None = None,
     run_id = runs.start_run(conn, STAGE, config=config, model_key=ex.name,
                             model_revision=getattr(ex, "_revision", None),
                             input_scope={"source_system": source_system, "limit": limit})
-    chunks = _live_chunks(conn, source_system, limit)
+    state_config = {"extractor_name": ex.name, "extractor_version": ex.version}
     written = 0
+    processed = 0
+    scanned = 0
+    skipped = 0
+    after_key = None
+    batch_ordinal = 0
     try:
-        for chunk_row in chunks:
-            written += extract_chunk(conn, ex, chunk_row, run_id)
+        while limit is None or scanned < limit:
+            size = min(max(1, batch_size), limit - scanned) if limit is not None else max(1, batch_size)
+            page = _live_chunks_page(conn, source_system, after=after_key, page_size=size)
+            if not page:
+                break
+            after_key = page[-1]["document_chunk_id"]
+            scanned += len(page)
+            dependencies = {row["document_chunk_id"]: stage_state.combined_hash(
+                row["text_sha256"], ex.name, ex.version) for row in page}
+            pending = stage_state.pending_identities(
+                conn, "spans", [(row["document_chunk_id"], row["text_sha256"],
+                                 dependencies[row["document_chunk_id"]]) for row in page],
+                processor_version=ex.version,
+                model_or_ontology_version=getattr(ex, "_revision", None),
+                configuration=state_config, force=force)
+            skipped += len(page) - len(pending)
+            for chunk_row in page:
+                chunk_id = chunk_row["document_chunk_id"]
+                if chunk_id not in pending:
+                    continue
+                try:
+                    with conn.raw.transaction():
+                        count = extract_chunk(conn, ex, chunk_row, run_id)
+                        output = conn.execute(
+                            "SELECT document_concept_mention_id,label,concept_id,char_start,char_end "
+                            "FROM document_concept_mentions WHERE document_chunk_id=%s "
+                            "AND superseded=0 ORDER BY char_start,char_end,label",
+                            (chunk_id,)).fetchall()
+                        stage_state.invalidate_downstream(conn, "spans", chunk_id)
+                        stage_state.mark_complete(
+                            conn, "spans", chunk_id, chunk_row["text_sha256"],
+                            processor_version=ex.version,
+                            model_or_ontology_version=getattr(ex, "_revision", None),
+                            configuration=state_config, dependency_hash=dependencies[chunk_id],
+                            output=[dict(row) for row in output], run_id=run_id)
+                        written += count
+                        processed += 1
+                except Exception as input_exc:
+                    stage_state.mark_failed(
+                        conn, "spans", chunk_id, chunk_row["text_sha256"],
+                        processor_version=ex.version, error=input_exc, run_id=run_id,
+                        model_or_ontology_version=getattr(ex, "_revision", None),
+                        configuration=state_config, dependency_hash=dependencies[chunk_id])
+                    raise
+            if not dry_run:
+                stage_state.checkpoint(
+                    conn, run_id=run_id, stage="spans", batch_ordinal=batch_ordinal,
+                    last_input_identity=after_key, rows_processed=scanned, rows_written=written)
+                conn.commit()
+            batch_ordinal += 1
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
-        runs.finish_run(conn, run_id, status="failed", rows_processed=len(chunks),
+        runs.finish_run(conn, run_id, status="failed", rows_processed=processed,
                         rows_written=written, error=f"{type(exc).__name__}: {exc}")
         if not dry_run:
             conn.commit()
         raise
-    runs.finish_run(conn, run_id, status="ok", rows_processed=len(chunks), rows_written=written)
+    runs.finish_run(conn, run_id, status="ok", rows_processed=processed, rows_written=written)
     if dry_run:
         conn.rollback()
     else:
         conn.commit()
     return {"run_id": run_id, "extractor": ex.name, "extractor_version": ex.version,
-            "chunks": len(chunks), "mentions": written, "dry_run": dry_run}
+            "chunks": processed, "mentions": written,
+            "skipped_unchanged": skipped, "dry_run": dry_run}

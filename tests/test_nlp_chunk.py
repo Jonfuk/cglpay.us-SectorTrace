@@ -109,7 +109,8 @@ def test_run_writes_chunks_a_run_row_and_is_idempotent(conn, settings):
 
     first_ids = [r["document_chunk_id"] for r in rows]
     again = nlp_chunk.run(conn, source_system="committee_papers")
-    assert again["chunks"] == result["chunks"]
+    assert again["chunks"] == 0
+    assert again["skipped_unchanged"] == 1
     second_ids = [r["document_chunk_id"] for r in conn.execute(
         "SELECT document_chunk_id FROM document_chunks WHERE document_version_id=%s ORDER BY chunk_index",
         (version_id,)).fetchall()]
@@ -130,3 +131,25 @@ def test_source_system_filter_scopes_the_run(conn, settings):
     _seed_version(conn, settings, _ELEMENTS, evidence_id="ev-b", source_system="cdp_documents")
     result = nlp_chunk.run(conn, source_system="cdp_documents")
     assert result["versions"] == 1
+
+
+def test_keyset_pages_checkpoint_noops_and_force(conn, settings):
+    for suffix in ("a", "b", "c"):
+        _seed_version(conn, settings, _ELEMENTS, evidence_id=f"ev-keyset-{suffix}")
+    first = nlp_chunk.run(conn, batch_size=1)
+    checkpoints = conn.execute(
+        "SELECT last_input_identity,rows_processed FROM nlp_stage_checkpoints "
+        "WHERE run_id=%s ORDER BY batch_ordinal", (first["run_id"],)).fetchall()
+    assert len(checkpoints) == 3
+    assert [row["rows_processed"] for row in checkpoints] == [1, 2, 3]
+    assert [row["last_input_identity"] for row in checkpoints] == sorted(
+        row["last_input_identity"] for row in checkpoints)
+
+    noop = nlp_chunk.run(conn, batch_size=1)
+    assert noop["versions"] == 0 and noop["skipped_unchanged"] == 3
+    assert conn.execute(
+        "SELECT COUNT(*) AS count FROM nlp_stage_checkpoints WHERE run_id=%s",
+        (noop["run_id"],)).fetchone()["count"] == 3
+
+    forced = nlp_chunk.run(conn, batch_size=2, force=True)
+    assert forced["versions"] == 3 and forced["chunks"] >= 3

@@ -15,8 +15,9 @@ import pytest
 from pipeline.documents import repository
 from pipeline.documents.models import EvidenceReference, ParsedDocument, ParsedElement
 from pipeline.nlp import chunk as nlp_chunk
-from pipeline.nlp import embeddings, semantic_search
+from pipeline.nlp import embeddings, semantic_benchmark, semantic_search
 from pipeline.nlp import eval as nlp_eval
+from pipeline.nlp.embedding_repository import PostgresEmbeddingRepository
 
 
 def _seed(conn, settings, evidence_id, source_system, heading, *paragraphs):
@@ -49,9 +50,8 @@ _UNRELATED = ("The committee noted the car park resurfacing programme and the "
 
 @pytest.fixture
 def corpus(conn, settings, monkeypatch):
-    # The production stub is intentionally 256-wide, while migration 0071's
-    # canonical pgvector column is 384-wide.  Use a compatible temporary width
-    # here so this fixture exercises the required PostgreSQL ranking path.
+    # Pin the fixture explicitly to the canonical width so it exercises the
+    # sole PostgreSQL pgvector path even if a test mutates the class constant.
     monkeypatch.setattr(embeddings, "STUB_DIMENSION", embeddings.VECTOR_COLUMN_DIM)
     monkeypatch.setattr(embeddings.StubEmbedder, "dimension", embeddings.VECTOR_COLUMN_DIM)
     _seed(conn, settings, "evrec", "committee_paper_promotion", "Workforce", _RECRUIT)
@@ -82,6 +82,47 @@ def test_semantic_mode_ranks_by_cosine(corpus):
     assert out["results"]
     assert "Recruitment and retention" in out["results"][0]["text"]
     assert out["results"][0]["score"]["cosine"] >= out["results"][-1]["score"]["cosine"]
+
+
+def test_fuzzy_mode_is_a_separate_stable_trigram_path(corpus):
+    typo = "Recruitment and retenton of drug and alcohol key workers is the single biggest risk"
+    first = semantic_search.search(corpus, typo, mode="fuzzy", limit=5)
+    second = semantic_search.search(corpus, typo, mode="fuzzy", limit=5)
+    assert [row["document_chunk_id"] for row in first["results"]] == [
+        row["document_chunk_id"] for row in second["results"]]
+    assert first["results"] and "Recruitment and retention" in first["results"][0]["text"]
+    assert set(first["results"][0]["score"]) == {"fuzzy_rank"}
+
+
+def test_hnsw_ids_order_and_scores_match_exact_pgvector(corpus):
+    vector = embeddings.StubEmbedder().encode([
+        "recruitment retention key workers vacancies"])[0]
+    repository = PostgresEmbeddingRepository(corpus)
+    indexed = repository.semantic_candidates(
+        query_vector=vector, model_key="embed:stub", filter_sql="", filter_params=[], depth=10)
+    exact = repository.semantic_candidates(
+        query_vector=vector, model_key="embed:stub", filter_sql="", filter_params=[], depth=10,
+        exact_baseline=True)
+    assert [row[0] for row in indexed] == [row[0] for row in exact]
+    assert len(indexed) == len(exact)
+    assert all(abs(left[1] - right[1]) <= 1e-6 for left, right in zip(indexed, exact))
+
+
+def test_semantic_benchmark_reports_reproducible_parity_without_claiming_latency(
+        corpus, tmp_path):
+    queries = tmp_path / "queries.json"
+    queries.write_text(json.dumps({"queries": [
+        {"id": "workforce", "query": "recruitment retention key workers vacancies"},
+        {"id": "finance", "query": "public health grant reduction budget savings"},
+    ]}))
+    report = semantic_benchmark.run(
+        corpus, queries_path=queries, model="stub", depth=5, warmups=0, repetitions=2)
+    assert report["all_parity"] is True
+    assert report["score_tolerance"] == 1e-6
+    assert [case["id"] for case in report["cases"]] == ["workforce", "finance"]
+    assert all(case["parity"] and case["max_score_delta"] <= 1e-6
+               for case in report["cases"])
+    assert "local to this run" in report["caveat"]
 
 
 def test_hybrid_fuses_both_lists(corpus):
