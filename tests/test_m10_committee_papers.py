@@ -440,7 +440,9 @@ def test_the_matched_text_goes_only_to_the_restricted_table(conn, settings, http
     assert snippets
     assert any("Presented by" in (s["snippet_text"] or "") for s in snippets)
 
-    columns = {r["name"] for r in conn.execute("PRAGMA table_info(committee_paper_candidates)")}
+    columns = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'committee_paper_candidates'")}
     assert "snippet" not in columns and "snippet_text" not in columns
 
 
