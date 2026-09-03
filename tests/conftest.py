@@ -112,11 +112,17 @@ def _pg_warehouse() -> SimpleNamespace:
                 _env_file=None) if ro_url else None
             db.apply_migrations(conn, POSTGRES_MIGRATIONS_DIR, settings=settings)
             conn.commit()
+            tables = tuple(
+                row["tablename"]
+                for row in conn.execute(
+                    "SELECT tablename FROM pg_tables "
+                    "WHERE schemaname = current_schema() ORDER BY tablename")
+            )
         finally:
             conn.close()
 
         yield SimpleNamespace(base_url=POSTGRES_TEST_URL, base_ro_url=POSTGRES_TEST_RO_URL,
-                              schema=schema, url=url, ro_url=ro_url)
+                              schema=schema, url=url, ro_url=ro_url, tables=tables)
     finally:
         try:
             admin.execute(f"DROP SCHEMA IF EXISTS {quoted} CASCADE")
@@ -161,6 +167,37 @@ def _empty_warehouse_between_tests(_pg_warehouse, request):
     finally:
         conn.close()
     yield
+
+    # SQLite's old file-per-test fixture restored tables that a test dropped
+    # while exercising graceful degradation. The shared PostgreSQL schema
+    # keeps that speed advantage, but must restore DDL mutations before the
+    # next test. Rebuild only when a table disappeared; ordinary tests still
+    # pay only the TRUNCATE above.
+    check = pg.connect(warehouse.url, application_name="sectortrace-tests")
+    try:
+        present = {
+            row["tablename"] for row in check.execute(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = current_schema()")
+        }
+    finally:
+        check.close()
+    missing = set(warehouse.tables) - present
+    if missing:
+        admin = pg.connect(warehouse.base_url, application_name="sectortrace-tests")
+        try:
+            quoted = '"' + warehouse.schema.replace('"', '""') + '"'
+            admin.execute(f"DROP SCHEMA IF EXISTS {quoted} CASCADE")
+            admin.execute(f"CREATE SCHEMA {quoted}")
+            admin.commit()
+            rebuilt = pg.connect(warehouse.url, application_name="sectortrace-tests")
+            try:
+                db.apply_migrations(rebuilt, POSTGRES_MIGRATIONS_DIR)
+                rebuilt.commit()
+            finally:
+                rebuilt.close()
+        finally:
+            admin.close()
 
 
 @pytest.fixture(autouse=True)
