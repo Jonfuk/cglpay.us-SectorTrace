@@ -73,19 +73,26 @@ CDN).
 
 ## Frontend performance budgets (Phase 6)
 
-Tracked as gates, tuned as routes are ported and code-split. Current foundation
-measurements (gzip) are recorded so regressions are visible:
+Enforced by `npm run budgets` (`scripts/check-budgets.mjs`), which measures the
+built output and exits non-zero on any violation. "Shared JS" is measured
+precisely as the chunks the entry `index.html` loads — what every route pays on
+first load — not the sum of all chunks. Current measured values (gzip):
 
-| Budget | Limit | Public foundation (gzip) |
-|---|---|---|
-| Shared JS (Nuxt/Vue/routing) | ≤ 120 KiB | ~135 KiB — **over**, untuned (full Nuxt UI, no route chunks yet) |
-| Shared CSS (Tailwind/Nuxt UI) | ≤ 50 KiB | ~25 KiB — within |
-| Overview route JS+CSS before data | ≤ 375 KiB | within |
-| Admin initial route JS+CSS | ≤ 200 KiB | within |
+| Budget | Limit | Measured | Status |
+|---|---|---|---|
+| Public shared JS (Nuxt/Vue/routing) | ≤ 120 KiB | ~115 KiB | ✅ |
+| Public shared CSS (Tailwind/Nuxt UI) | ≤ 50 KiB | ~25 KiB | ✅ |
+| Public overview route JS+CSS before data | ≤ 375 KiB | ~141 KiB | ✅ |
+| Admin initial route JS+CSS | ≤ 200 KiB | ~158 KiB | ✅ |
 
-The shared-JS overage is expected before tree-shaking, modular Nuxt UI imports,
-and route-level dynamic imports land. It is not yet met and is not claimed to
-be.
+The public app drops Nuxt UI's `<UApp>` overlay/toast host (it uses none), which
+keeps the shared chunk under budget; the admin app keeps `<UApp>` for toasts and
+still fits its larger 200 KiB budget. The gate also enforces two structural
+rules: the **public bundle contains no admin code** (`/api/admin/`, `useAdminApi`,
+the write methods), and no specialist library (MapLibre/PMTiles/Tabulator/ECharts)
+appears yet — a boundary that tightens to per-route once those routes land.
+
+Run `npm run verify` to build both apps and check budgets in one step.
 
 ## Deployment and the cutover seam
 

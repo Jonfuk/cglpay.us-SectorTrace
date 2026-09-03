@@ -1,0 +1,65 @@
+name: frontend
+
+# Phase 6 frontend gate: typecheck, build, and enforce the compressed-size and
+# isolation budgets for the two Nuxt applications. Node is a build-time
+# dependency only — nothing here runs in the production Python image.
+#
+# Path-filtered to frontend changes so the Python suite (tests.yml) stays the
+# gate for the backend and this only runs when the frontend actually changes.
+on:
+  push:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this job reads the code, builds it, and writes nothing back.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # Pinned by tag and managed by Dependabot alongside the other actions in
+      # this repo (see tests.yml); Dependabot rewrites it to a commit SHA.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Reproducible installs from each app's committed lockfile. The two apps
+      # have independent dependency graphs, so each installs on its own.
+      - name: Install (public)
+        working-directory: frontend/public
+        run: npm ci --no-audit --no-fund
+
+      - name: Install (admin)
+        working-directory: frontend/admin
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build both apps
+        working-directory: frontend
+        run: npm run build
+
+      # The compressed-size budgets and the structural isolation rules
+      # (public bundle carries no admin code; no specialist library on the wrong
+      # route). Exits non-zero on any violation.
+      - name: Budget + isolation gate
+        working-directory: frontend
+        run: npm run budgets
