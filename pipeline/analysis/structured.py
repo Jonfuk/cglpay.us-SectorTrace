@@ -55,19 +55,17 @@ _TABLE_ADAPTERS: dict[str, dict[str, Any]] = {
 
 
 def _columns(conn, table: str) -> set[str]:
-    try:
-        return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    except Exception:
-        # PostgreSQL deliberately has no PRAGMA. On a write connection the
-        # failed probe aborts the transaction, so clear it before using cursor
-        # descriptions as the portable schema probe.
-        conn.rollback()
-        try:
-            cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
-        except Exception:
-            conn.rollback()
-            raise
-        return {str(item[0]) for item in (getattr(cursor, "description", None) or [])}
+    # PostgreSQL is the only application backend. Query its catalog directly:
+    # probing with SQLite's former PRAGMA would abort a write transaction and
+    # silently roll back observations inserted by the caller before analysis.
+    return {
+        str(row["column_name"])
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ?",
+            (table,),
+        ).fetchall()
+    }
 
 
 def _row_id(row: Any, columns: set[str], table: str, index: int) -> str:
@@ -88,8 +86,7 @@ def observations_from_table(conn, table: str) -> list[Observation]:
         rows = conn.execute(f"SELECT * FROM {table}").fetchall()
     except Exception:
         # Keep the worker's write connection usable after an unavailable or
-        # reshaped source table. SQLite tolerates the failed read; PostgreSQL
-        # requires the transaction to be rolled back before the next write.
+        # reshaped source table.
         conn.rollback()
         return []
     required = {mapping["subject_id"], mapping["period"]}

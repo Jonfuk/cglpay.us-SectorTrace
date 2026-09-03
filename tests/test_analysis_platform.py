@@ -113,29 +113,25 @@ def test_parallel_structured_comparisons_match_serial_results():
     assert sorted(map(signature, parallel)) == sorted(map(signature, serial))
 
 
-def test_postgres_schema_probe_rolls_back_failed_pragma():
+def test_postgres_schema_probe_uses_information_schema():
     class Cursor:
-        description = [("supplier_id",), ("date_start",)]
+        def fetchall(self):
+            return [{"column_name": "supplier_id"}, {"column_name": "date_start"}]
 
     class PostgresLikeConnection:
         def __init__(self):
-            self.failed = False
-            self.rollback_count = 0
+            self.sql = None
+            self.parameters = None
 
-        def execute(self, sql):
-            if sql.startswith("PRAGMA"):
-                self.failed = True
-                raise RuntimeError("syntax error at PRAGMA")
-            if self.failed and self.rollback_count == 0:
-                raise RuntimeError("current transaction is aborted")
+        def execute(self, sql, parameters):
+            self.sql = sql
+            self.parameters = parameters
             return Cursor()
-
-        def rollback(self):
-            self.rollback_count += 1
 
     conn = PostgresLikeConnection()
     assert structured_analysis._columns(conn, "contracts") == {"supplier_id", "date_start"}
-    assert conn.rollback_count == 1
+    assert "information_schema.columns" in conn.sql
+    assert conn.parameters == ("contracts",)
 
 
 def test_categorical_transitions_keep_states_and_do_not_calculate():
