@@ -1,5 +1,11 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
-import type { MetaResponse, SummaryResponse } from '~/types/api'
+import type {
+  ContractsResponse,
+  MetaResponse,
+  PayResponse,
+  ProviderRow,
+  SummaryResponse,
+} from '~/types/api'
 
 // The typed public API client. It sits over the low-level same-origin
 // Transport (dedup + cancellation) and exposes evidence-shaped, typed calls.
@@ -29,6 +35,12 @@ export interface PublicApi {
   meta(options?: TransportOptions): Promise<MetaResponse>
   /** `/api/v1/summary` — landing-page figures with their caveats. */
   summary(options?: TransportOptions): Promise<SummaryResponse>
+  /** `/api/v1/pay` — separate pay-evidence arrays with caveats. */
+  pay(options?: TransportOptions): Promise<PayResponse>
+  /** `/api/v1/contracts` — procurement notices and rollups. */
+  contracts(options?: TransportOptions): Promise<ContractsResponse>
+  /** `/api/v1/providers` — every provider with comparable counts. */
+  providers(options?: TransportOptions): Promise<ProviderRow[]>
 }
 
 export function usePublicApi(): PublicApi {
@@ -40,5 +52,8 @@ export function usePublicApi(): PublicApi {
     get,
     meta: (options) => get<MetaResponse>('/meta', options),
     summary: (options) => get<SummaryResponse>('/summary', options),
+    pay: (options) => get<PayResponse>('/pay', options),
+    contracts: (options) => get<ContractsResponse>('/contracts', options),
+    providers: (options) => get<ProviderRow[]>('/providers', options),
   }
 }

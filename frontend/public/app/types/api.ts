@@ -77,6 +77,64 @@ export interface SummaryResponse {
   [key: string]: unknown
 }
 
+/** A contract notice row (`/api/v1/contracts` → `notices[]`). Carries its own
+ *  provenance columns. Only the rendered columns are named; the rest survive on
+ *  the index signature. */
+export interface ContractNotice {
+  notice_id: string | null
+  title: string | null
+  buyer_name: string | null
+  supplier_name_raw: string | null
+  value_core: number | null
+  currency: string | null
+  date_published: string | null
+  date_end: string | null
+  procedure_type: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+/** `/api/v1/contracts`. Rich payload; the route consumes `notices` and the
+ *  caveats, with the rest available on the index signature. */
+export interface ContractsResponse {
+  notices: ContractNotice[]
+  page?: { limit: number; offset: number; returned: number; [k: string]: unknown }
+  caveats?: Record<string, string | null>
+  [key: string]: unknown
+}
+
+/** A statutory pay-rate row (`/api/v1/pay` → `statutory_pay_rates[]`). */
+export interface StatutoryPayRate {
+  period_label: string | null
+  effective_from: string | null
+  band_label: string | null
+  band_role: string | null
+  amount: number | null
+  value_text: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+/** `/api/v1/pay` — the most caveat-heavy payload. Evidence layers stay separate
+ *  arrays and are never combined into a rate; the route renders them as such. */
+export interface PayResponse {
+  statutory_pay_rates?: StatutoryPayRate[]
+  nhs_job_adverts?: Array<Record<string, unknown>>
+  living_wage_accreditations?: Array<Record<string, unknown>>
+  gender_pay_gap_reports?: Array<Record<string, unknown>>
+  caveats?: Record<string, string | null>
+  [key: string]: unknown
+}
+
+/** A provider row (`/api/v1/providers`). */
+export interface ProviderRow {
+  provider_key: string | null
+  canonical_name: string | null
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */
