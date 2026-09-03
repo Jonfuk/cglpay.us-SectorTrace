@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
 
+    # Phase 6 frontend cutover seam. When true (SERVE_NUXT=true) AND the built
+    # Nuxt static output is present, the server serves the two Nuxt applications
+    # — public at `/`, admin at `/admin` — from `nuxt_dist_dir` instead of the
+    # legacy hand-written portals. Off by default: the legacy portals under
+    # `pipeline/web/static/**` remain the served frontends and the parity oracles
+    # until a coordinated cutover flips this. Node never runs in the serving
+    # process; the assets are built in a separate Docker stage and copied in.
+    # `/api/**` is never intercepted by the Nuxt seam, so the API is unaffected
+    # by this flag.
+    serve_nuxt: bool = False
+    # Where the built Nuxt output lives in the image: a directory holding two
+    # subdirectories, `public/` and `admin/`, each a Nuxt `generate` output.
+    # Unset defaults (in pipeline/web/nuxt_assets.py) to the location the Docker
+    # build stage copies them to.
+    nuxt_dist_dir: Path | None = None
+
     # Release identity, surfaced read-only at GET /api/v1/meta and in the
     # portal footer (BETA-039). A beta is not auditable if a reviewer cannot
     # tell which build, schema and optional capabilities they are exercising.

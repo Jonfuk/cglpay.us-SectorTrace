@@ -91,3 +91,7 @@ nlp-cache/
 # The documentation site is built, never committed. `uv run mkdocs build`
 # writes it; CI builds it with --strict and keeps nothing.
 /site/
+
+# Phase 6: built Nuxt assets are generated in the Docker frontend stage and
+# copied into the runtime image; never committed here.
+pipeline/web/static_nuxt/

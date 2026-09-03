@@ -57,6 +57,7 @@ from pipeline.web import (
     degrade,
     health,
     name_matches,
+    nuxt_assets,
     openapi,
     public_export,
     public_queries,
@@ -253,6 +254,54 @@ def content_security_policy(path: str) -> str:
     script = ["script-src 'self'"]
     if path.startswith("/admin"):
         script.extend(inline_script_hashes(STATIC_DIR / "index.html"))
+    return "; ".join((*_CSP_COMMON, " ".join(script)))
+
+
+# A Nuxt entry document carries inline scripts the legacy pages do not: an
+# importmap and the client bootstrap, alongside the external module scripts under
+# `_nuxt/` (covered by 'self') and a `type="application/json"` data island (not
+# executed, so not policed by script-src). We hash the executable inline scripts
+# from the exact bytes being served, the same technique the admin theme script
+# uses, so the policy stays strict — no 'unsafe-inline' — and follows the build.
+_NUXT_SCRIPT_RE = re.compile(rb"<script\b([^>]*)>(.*?)</script>", re.S)
+_NUXT_SRC_RE = re.compile(rb"""\bsrc\s*=""", re.I)
+_NUXT_TYPE_RE = re.compile(rb"""\btype\s*=\s*['"]?([^'"\s>]+)""", re.I)
+# Inline <script type=...> values that are DATA, not executed code, and so are
+# not governed by script-src.
+_NUXT_DATA_SCRIPT_TYPES = frozenset(
+    {b"application/json", b"application/ld+json", b"speculationrules"})
+
+
+def nuxt_inline_script_hashes(html: bytes) -> tuple[str, ...]:
+    """CSP hashes for every executable inline <script> in a served Nuxt page.
+
+    External scripts (those with a `src`) are covered by 'self'; data islands
+    (`application/json` and friends) are not executed and so are skipped.
+    Everything else — the bootstrap and the importmap — is hashed from the
+    newline-normalised body, because that is what the browser hashes.
+    """
+    import base64
+    import hashlib
+
+    hashes: list[str] = []
+    for attrs, body in _NUXT_SCRIPT_RE.findall(html):
+        if _NUXT_SRC_RE.search(attrs):
+            continue
+        type_match = _NUXT_TYPE_RE.search(attrs)
+        if type_match and type_match.group(1).lower() in _NUXT_DATA_SCRIPT_TYPES:
+            continue
+        normalised = body.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        digest = base64.b64encode(hashlib.sha256(normalised).digest()).decode()
+        hashes.append(f"'sha256-{digest}'")
+    return tuple(hashes)
+
+
+def nuxt_content_security_policy(html: bytes) -> str:
+    """The policy for a served Nuxt HTML entry document. Strict script-src of
+    'self' plus the hashes of the page's own inline scripts; the shared
+    directives are otherwise identical to the legacy pages (style-src keeps
+    'unsafe-inline' for Nuxt UI's runtime styles, as the legacy CSP does)."""
+    script = ["script-src 'self'", *nuxt_inline_script_hashes(html)]
     return "; ".join((*_CSP_COMMON, " ".join(script)))
 
 # Below this a response is not worth compressing: the CPU and the round trip
@@ -552,7 +601,7 @@ class Handler(BaseHTTPRequestHandler):
     def _accepts_gzip(self) -> bool:
         return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
 
-    def _send_security_headers(self) -> None:
+    def _send_security_headers(self, csp: str | None = None) -> None:
         """The same four on every response this server sends.
 
         On every response rather than only on HTML, because a policy that
@@ -565,7 +614,8 @@ class Handler(BaseHTTPRequestHandler):
         """
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy",
-                          content_security_policy(urlparse(self.path).path))
+                          csp if csp is not None
+                          else content_security_policy(urlparse(self.path).path))
         # Redundant beside frame-ancestors for any browser from the last few
         # years, and free for anything older.
         self.send_header("X-Frame-Options", "DENY")
@@ -573,7 +623,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, body: bytes, content_type: str,
                max_age: int | None = None, etag: str | None = None,
-               extra_headers: dict[str, str] | None = None) -> None:
+               extra_headers: dict[str, str] | None = None,
+               cache_control: str | None = None,
+               csp: str | None = None) -> None:
         self._responded = True
 
         # Compressed above a threshold, and only for things that compress. The
@@ -613,7 +665,12 @@ class Handler(BaseHTTPRequestHandler):
         # module runs — and they are the only things large enough to be worth
         # a round trip. `private` because this server has no authentication
         # and nothing it serves should be held by a shared proxy.
-        if max_age:
+        if cache_control is not None:
+            # An explicit policy the caller computed (the Nuxt asset seam sends
+            # `immutable` for content-hashed assets and `no-cache` for HTML
+            # entry points). Overrides the max_age-derived default below.
+            self.send_header("Cache-Control", cache_control)
+        elif max_age:
             self.send_header("Cache-Control", f"max-age={max_age}, private")
         else:
             self.send_header("Cache-Control", "no-store")
@@ -622,7 +679,7 @@ class Handler(BaseHTTPRequestHandler):
         # The API is same-origin only. No CORS headers are ever sent, so a
         # cross-origin page cannot read a reply even if it manages to send a
         # request.
-        self._send_security_headers()
+        self._send_security_headers(csp)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -740,6 +797,19 @@ class Handler(BaseHTTPRequestHandler):
                 # database query failure reported by the application APIs.
                 return self._send(200, b"ok\n", "text/plain; charset=utf-8",
                                   max_age=0)
+            # Phase 6 cutover seam: when SERVE_NUXT is on and the built output is
+            # present, the two Nuxt apps answer the frontend paths (public at /,
+            # admin at /admin) instead of the legacy portals. Checked before the
+            # legacy STATIC_FILES whitelist so it takes precedence when active,
+            # and it never claims /api (nuxt_assets.resolve returns None there),
+            # so the API is unaffected. Inert (returns None → falls through to
+            # the legacy dispatch) when the flag is off or no build is present.
+            if self.command in ("GET", "HEAD"):
+                assets = nuxt_assets.for_settings(self.settings)
+                if assets is not None:
+                    served = assets.resolve(path)
+                    if served is not None:
+                        return self._serve_nuxt(served)
             if path in STATIC_FILES and self.command in ("GET", "HEAD"):
                 return self._serve_static(path)
             # /api/v1/* only: the public, unauthenticated API a scraper can
@@ -894,6 +964,48 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._send(200, file_path.read_bytes(), content_type, max_age=cache, etag=etag)
+
+    def _serve_nuxt(self, served: "nuxt_assets.Served") -> None:
+        """Send one resolved Nuxt file with its cache policy.
+
+        Content-hashed assets under `_nuxt/` are immutable for a year — their
+        name changes when their bytes do, so a client never needs to revalidate.
+        HTML entry points are `no-cache`, so a redeploy of the same URL is
+        picked up on the next navigation. Both support conditional requests via
+        a weak mtime/size ETag, exactly as `_serve_static` does.
+        """
+        file_path = served.path
+        if not file_path.is_file():  # pragma: no cover - resolve already checked
+            raise ApiError("Missing Nuxt asset", status=500)
+
+        body = file_path.read_bytes()
+        stat = file_path.stat()
+        etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+        cache_control = (
+            f"public, max-age={served.max_age}, immutable"
+            if served.immutable
+            else "no-cache"
+        )
+        # An HTML entry document needs a CSP that admits its own inline scripts
+        # (importmap + bootstrap); hashed assets keep the default policy. The CSP
+        # is computed from the exact bytes served, so it always matches the page.
+        csp = (nuxt_content_security_policy(body)
+               if served.content_type == HTML else None)
+
+        if self._matches_etag(etag):
+            self._responded = True
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("Vary", "Accept-Encoding")
+            self._send_security_headers(csp)
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            return
+
+        self._send(200, body, served.content_type,
+                   etag=etag, cache_control=cache_control, csp=csp)
 
     def _matches_etag(self, etag: str) -> bool:
         """Whether the client already holds this version.

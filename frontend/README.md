@@ -87,6 +87,32 @@ The shared-JS overage is expected before tree-shaking, modular Nuxt UI imports,
 and route-level dynamic imports land. It is not yet met and is not claimed to
 be.
 
+## Deployment and the cutover seam
+
+The two apps ship in the production image but do **not** serve traffic until a
+flag flips — so the image is cutover-ready while the legacy portals keep serving.
+
+- **Build:** the Docker `frontend` stage (`node:22`) runs `npm ci` + `npm run
+  build` per app and the runtime stage copies the two `.output/public` trees
+  into `pipeline/web/static_nuxt/{public,admin}`. Node never enters the runtime
+  image — only the static files cross the stage boundary.
+- **Serve (gated):** set `SERVE_NUXT=true` and, when the built assets are
+  present, the Python server serves the Nuxt apps — public at `/`, admin at
+  `/admin` — via `pipeline/web/nuxt_assets.py`. Off by default: the legacy
+  portals under `pipeline/web/static/**` serve, and remain the parity oracles.
+- **Never intercepted:** `/api` and `/api/**` always go to the Python API,
+  regardless of the flag. The seam only ever answers frontend paths.
+- **Cache policy:** content-hashed `_nuxt/**` assets are served `immutable`,
+  one year; HTML entry points are `no-cache`. SPA deep links fall back to the
+  app's `200.html`; a missing asset is a real 404, never the shell.
+- **CSP:** Nuxt entry documents get a policy that hashes their own inline
+  scripts (importmap + bootstrap) — strict `script-src 'self'` plus those
+  hashes, no `'unsafe-inline'` for scripts — computed from the exact bytes
+  served. `pipeline/web/static_nuxt/` is gitignored (built in Docker).
+
+The flag is the cutover switch: flip it once the parity, budget, and browser
+gates pass. `tests/test_nuxt_assets.py` pins the resolver, cache policy, and CSP.
+
 ## Status
 
 This is the **foundation** stage: workspace, two isolated apps, typed
