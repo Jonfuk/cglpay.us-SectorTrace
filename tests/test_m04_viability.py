@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline import providers
+from pipeline import catalog, providers
 from pipeline.modules import m04_companies as ch
 from pipeline.registry import ModuleContext
 
@@ -168,7 +168,7 @@ def test_practitioners_go_only_to_the_restricted_table(httpx_mock, settings, con
         "SELECT practitioner_name FROM restricted_company_insolvency_practitioners")]
     assert names, "the fixture names practitioners on both cases"
 
-    columns = {r["name"] for r in conn.execute("PRAGMA table_info(company_insolvency_cases)")}
+    columns = {r["name"] for r in catalog.columns_of(conn, "company_insolvency_cases")}
     assert not {"practitioner_name", "practitioners"} & columns
 
 
@@ -183,8 +183,8 @@ def test_a_practitioners_firm_address_is_not_stored_at_all(httpx_mock, settings,
 
     _run(conn, settings)
 
-    columns = {r["name"] for r in conn.execute(
-        "PRAGMA table_info(restricted_company_insolvency_practitioners)")}
+    columns = {r["name"] for r in catalog.columns_of(
+        conn, "restricted_company_insolvency_practitioners")}
     assert not any("address" in column for column in columns)
 
 
@@ -283,7 +283,7 @@ def test_the_viability_view_names_nobody(conn):
     """It joins tables that hold practitioners and officers. It must not carry
     either into something exportable.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(v_provider_viability)")]
+    columns = [r["name"] for r in catalog.columns_of(conn, "v_provider_viability")]
     for column in columns:
         assert "name" not in column or column in ("company_name",), column
 
