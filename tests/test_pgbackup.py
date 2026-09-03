@@ -221,18 +221,19 @@ class TestTheBackendDecidesNotTheFile:
         with pytest.raises(backup.BackupError, match="not a postgres backup"):
             backup.restore(file, settings)
 
-    def test_a_postgres_snapshot_is_not_restored_into_sqlite(self, tmp_path):
+    def test_an_invalid_postgres_archive_is_rejected_before_restore(self, tmp_path):
         settings = Settings(contact_email="t@example.com",
-                             database_path=tmp_path / "warehouse.db",
+                             database_url="postgresql://u:p@lan:5432/sectortrace",
                              _env_file=None)
         file = tmp_path / "warehouse-20260815T010101Z.sql.gz"
         file.write_bytes(b"x")
 
-        with pytest.raises(backup.BackupError, match="not a sqlite backup"):
+        with pytest.raises(backup.BackupError, match="gzip"):
             backup.restore(file, settings)
 
     def test_a_postgres_dump_needs_a_postgres_url(self, tmp_path):
         settings = Settings(contact_email="t@example.com",
+                             database_url=None,
                              database_path=tmp_path / "warehouse.db",
                              _env_file=None)
 
