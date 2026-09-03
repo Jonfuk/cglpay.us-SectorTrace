@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import platform
-import sqlite3
 import statistics
 import subprocess
 import time
@@ -442,14 +441,8 @@ def _environment(conn, settings: Settings) -> dict:
     # and the absolute path are not, and `redacted_database_url` redacts the
     # password only. A benchmark is not a reason to publish where the server
     # lives or whose home directory the warehouse is in.
-    if backend == "postgres":
-        info["server"] = conn.execute("SHOW server_version").fetchone()[0]
-        info["target"] = conn.execute("SELECT current_database()").fetchone()[0]
-    else:
-        info["server"] = f"sqlite {sqlite3.sqlite_version}"
-        info["target"] = settings.database_path.name
-        if settings.database_path.is_file():
-            info["bytes"] = settings.database_path.stat().st_size
+    info["server"] = conn.execute("SHOW server_version").fetchone()[0]
+    info["target"] = conn.execute("SELECT current_database()").fetchone()[0]
     return info
 
 
@@ -490,10 +483,9 @@ def benchmark(settings: Settings | None = None, *, reads: bool = True,
     """Measure the configured backend and write the result to JSON.
 
     Reads run against the working warehouse, because the point is the real
-    data. Writes do not: they go to a scratch database — a temporary file on
-    SQLite, a temporary schema on PostgreSQL — because a benchmark that
-    inserted two thousand rows into the warehouse would leave it no longer
-    equal to the other one, which is the property everything here rests on.
+    data. Writes do not: they go to a temporary PostgreSQL schema because a
+    benchmark that inserted two thousand rows into the warehouse would leave
+    it no longer equal to the baseline it is meant to measure.
     """
     settings = settings or get_settings()
     report: dict = {}
@@ -528,29 +520,12 @@ class Scratch:
 
 @contextmanager
 def scratch_warehouse(settings: Settings):
-    """One of those, on the configured backend, thrown away afterwards.
+    """Create a temporary PostgreSQL schema and remove it after measurement.
 
-    A temporary file on SQLite; a temporary schema on PostgreSQL, because that
-    server holds one database and `sectortrace_app` cannot create another. The
-    settings come back with it so that `write_contention` — which opens its
-    own connections, one per writer thread — reaches the same scratch
+    The settings come back with that schema so `write_contention`, whose
+    worker threads open their own connections, reaches the same scratch
     warehouse rather than the real one.
     """
-    if settings.database_backend != "postgres":
-        import shutil
-        import tempfile
-
-        base = Path(tempfile.mkdtemp(prefix="sectortrace-bench-"))
-        scoped = settings.model_copy(update={"database_path": base / "warehouse.db"})
-        conn = db.get_connection(scoped)
-        try:
-            db.apply_migrations(conn, db.migrations_dir_for(scoped))
-            conn.commit()
-            yield Scratch(settings=scoped, conn=conn)
-        finally:
-            conn.close()
-            shutil.rmtree(base, ignore_errors=True)
-        return
 
     from uuid import uuid4
 
