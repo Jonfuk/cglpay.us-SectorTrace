@@ -177,6 +177,7 @@ class PostgresConnection:
         # then returns it instead of dropping it. See `connect_pooled`.
         self._pool = pool
         self._total_changes = 0
+        self._trace_callback = None
         # Set by runner.py so a stuck writer can be named. Under SQLite it
         # also labelled the write-slot holder; there is no slot here, but it
         # is still what `application_name` reports to `pg_stat_activity`, so
@@ -202,8 +203,20 @@ class PostgresConnection:
     def execute(self, sql: str, parameters: Sequence[Any] | Mapping[str, Any] = ()):
         translated, params = to_psycopg(sql, parameters)
         cursor = self._live().execute(translated, params)
+        if self._trace_callback is not None:
+            self._trace_callback(sql)
         self._count(sql, cursor)
         return cursor
+
+    def set_trace_callback(self, callback) -> None:
+        """Record statements executed through this compatibility wrapper.
+
+        SQLite exposes this hook on its connection object and the catalog
+        performance tests use it to assert round-trip counts. Keeping the
+        equivalent at the wrapper boundary makes the same assertion meaningful
+        now that PostgreSQL is the only application backend.
+        """
+        self._trace_callback = callback
 
     def executemany(self, sql: str, seq_of_parameters):
         rows = list(seq_of_parameters)
