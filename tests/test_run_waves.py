@@ -239,7 +239,7 @@ def test_row_counts_are_attributed_to_the_module_that_wrote_them(prepared, monke
             for i in range(rows):
                 ctx.conn.execute(
                     "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
-                    "VALUES (?,?,?,?)", (label, "t", str(i), "2026-01-01"))
+                    "VALUES (%s,%s,%s,%s)", (label, "t", str(i), "2026-01-01"))
         return module
 
     summary = _run_waves([["a_three", "a_seven"]], jobs=2, settings=prepared,
@@ -454,7 +454,7 @@ def test_a_parallel_wave_of_writing_modules_all_commit(tmp_path, monkeypatch):
             time.sleep(hold)
             ctx.conn.execute(
                 "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
-                "VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
+                "VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                 (name, "wave", name, "2026-01-01"))
         return module
 

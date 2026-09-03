@@ -138,7 +138,7 @@ def test_a_restore_brings_the_rows_back(warehouse, settings):
 
     conn = db.get_connection(settings)
     try:
-        assert conn.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__() == 1
     finally:
         conn.close()
     assert result["rows"] > 0

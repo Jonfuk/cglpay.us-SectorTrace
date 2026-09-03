@@ -28,7 +28,7 @@ def _conn(tmp_path: Path):
     ]:
         conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
                      "canonical_name_normalized, status, created_at, updated_at) "
-                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                      (entity_id, entity_type, name, name.lower(), "active", "now", "now"))
     for number, authority, provider in [
         (1, "council-a", "provider-1"), (2, "council-b", "provider-1"),
@@ -38,7 +38,7 @@ def _conn(tmp_path: Path):
             "INSERT INTO entity_relationships (relationship_id, subject_entity_id, predicate, "
             "object_entity_id, relationship_type, evidence_id, claim_id, valid_from, valid_to, "
             "confidence, derivation_type, derivation_version, created_at, updated_at) "
-            "VALUES (?, ?, 'COMMISSIONS', ?, 'COMMISSIONS', "
+            "VALUES (%s, %s, 'COMMISSIONS', %s, 'COMMISSIONS', "
             "NULL, NULL, NULL, NULL, 1.0, 'SOURCE_FACT', '1', 'now', 'now')",
             (f"relationship-{number}", authority, provider))
     conn.commit()
@@ -56,7 +56,7 @@ def test_commissioner_provider_metrics_are_deterministic_and_persisted(tmp_path)
     assert {row["entity_id"] for row in provider_metrics} == {"provider-1", "provider-2"}
     assert persist_metrics(conn, metrics, analysis_name="test", graph_snapshot="fixture",
                            parameters=snapshot.parameters) == len(metrics)
-    assert conn.execute("SELECT COUNT(*) FROM graph_metrics").fetchone()[0] == len(metrics)
+    assert conn.execute("SELECT COUNT(*) FROM graph_metrics").fetchone().values().__iter__().__next__() == len(metrics)
     conn.close()
 
 

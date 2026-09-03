@@ -125,7 +125,7 @@ def build_chunks(elements: list) -> list[dict]:
 def _elements(conn, document_version_id: str) -> list:
     return conn.execute(
         "SELECT document_element_id, element_type, page_number, heading_level, text "
-        "FROM document_elements WHERE document_version_id=? ORDER BY sequence",
+        "FROM document_elements WHERE document_version_id=%s ORDER BY sequence",
         (document_version_id,)).fetchall()
 
 
@@ -143,7 +143,7 @@ def chunk_version(conn, document_version_id: str, nlp_run_id: str | None = None)
             "chunker_version, chunk_index, text, text_sha256, token_estimate, page_start, page_end, "
             "element_start_id, element_end_id, preceding_heading_element_id, char_start, char_end, "
             "superseded, nlp_run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s) "
             "ON CONFLICT(document_version_id, chunker_name, chunker_version, chunk_index) DO UPDATE SET "
             "document_chunk_id=excluded.document_chunk_id, text=excluded.text, "
             "text_sha256=excluded.text_sha256, token_estimate=excluded.token_estimate, "
@@ -158,7 +158,7 @@ def chunk_version(conn, document_version_id: str, nlp_run_id: str | None = None)
              chunk["preceding_heading_element_id"], chunk["char_start"], chunk["char_end"],
              nlp_run_id, now))
     conn.execute(
-        "UPDATE document_chunks SET superseded=1 WHERE document_version_id=? AND chunker_version<>?",
+        "UPDATE document_chunks SET superseded=1 WHERE document_version_id=%s AND chunker_version<>%s",
         (document_version_id, CHUNKER_VERSION))
     return len(chunks)
 
@@ -171,11 +171,11 @@ def _active_versions(conn, source_system: str | None, limit: int | None) -> list
         "WHERE v.is_active = 1")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " ORDER BY v.created_at"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return [row["document_version_id"] for row in conn.execute(sql, params).fetchall()]
 

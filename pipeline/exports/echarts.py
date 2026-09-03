@@ -25,7 +25,7 @@ def _series_meta(conn: sqlite3.Connection, tables: list[str], caveats: list[str]
     for table in tables:
         try:
             row = conn.execute(
-                f"SELECT GROUP_CONCAT(DISTINCT source_system) AS s, MAX(retrieved_at) AS r "
+                f"SELECT string_agg(DISTINCT source_system, ',') AS s, MAX(retrieved_at) AS r "
                 f"FROM {table}").fetchone()
             if row["s"]:
                 sources.update(row["s"].split(","))
@@ -116,7 +116,7 @@ def build_workforce_census_series(conn: sqlite3.Connection) -> list[dict]:
     for metric, unit in (("vacancy_rate", "percent"), ("turnover_rate", "percent")):
         cursor = conn.execute("""
             SELECT census_year, value FROM workforce_census_metrics
-             WHERE metric = ? AND workforce_segment = 'delivery'
+             WHERE metric = %s AND workforce_segment = 'delivery'
              ORDER BY census_year
         """, (metric,))
         rows = cursor.fetchall()

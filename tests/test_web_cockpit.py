@@ -43,7 +43,7 @@ def test_review_pressure_reflects_the_pending_queue(conn: sqlite3.Connection, se
     for i in range(3):
         conn.execute(
             "INSERT INTO review_queue (module, item_type, raw_value, status, "
-            " created_at) VALUES ('m10_committee_papers', 'url', ?, 'pending', "
+            " created_at) VALUES ('m10_committee_papers', 'url', %s, 'pending', "
             " '2026-01-01T00:00:00Z')", (f"https://x/{i}",))
     conn.commit()
 

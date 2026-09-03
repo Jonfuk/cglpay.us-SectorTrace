@@ -69,7 +69,7 @@ def save_link(conn, link: dict[str, Any]) -> None:
     conn.execute(
         "INSERT INTO cross_source_signal_links (link_id, release_id, left_signal_id, right_signal_id, "
         "relationship_type, subject_type, subject_id, period_start, period_end, join_reason_json, "
-        "explanation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "explanation, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (left_signal_id, right_signal_id, relationship_type) DO NOTHING",
         (link["link_id"], link["release_id"], link["left_signal_id"], link["right_signal_id"],
          link["relationship_type"], link["subject_type"], link["subject_id"],
@@ -81,20 +81,20 @@ def list_links(conn, *, release_id: str | None = None, subject_id: str | None = 
                relationship_type: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     where, params = [], []
     if release_id:
-        where.append("release_id = ?")
+        where.append("release_id = %s")
         params.append(release_id)
     if subject_id:
-        where.append("subject_id = ?")
+        where.append("subject_id = %s")
         params.append(subject_id)
     if relationship_type:
         if relationship_type not in RELATIONSHIP_TYPES:
             raise ValueError("unknown relationship type")
-        where.append("relationship_type = ?")
+        where.append("relationship_type = %s")
         params.append(relationship_type)
     params.append(max(1, min(int(limit), 500)))
     sql = "SELECT * FROM cross_source_signal_links"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY created_at DESC LIMIT ?"
+    sql += " ORDER BY created_at DESC LIMIT %s"
     rows = conn.execute(sql, params).fetchall()
     return [{**dict(row), "join_reason": json.loads(row["join_reason_json"])} for row in rows]

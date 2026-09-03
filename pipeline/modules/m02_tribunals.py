@@ -462,7 +462,7 @@ def _search_decisions(client: PipelineHTTPClient, query: str, limit: int | None)
 
 def _region_for_prefix(conn, office_prefix: str) -> str | None:
     row = conn.execute(
-        "SELECT region FROM tribunal_office_regions WHERE office_prefix = ?", (office_prefix,)
+        "SELECT region FROM tribunal_office_regions WHERE office_prefix = %s", (office_prefix,)
     ).fetchone()
     return row["region"] if row else None
 

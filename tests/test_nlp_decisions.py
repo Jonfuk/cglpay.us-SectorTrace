@@ -42,11 +42,11 @@ def test_approved_marks_the_candidate_accepted_and_records_a_row(conn, settings)
 
     row = conn.execute(
         "SELECT decision, decided_by, graph_claim_id FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id=?", (cand["claim_candidate_id"],)).fetchone()
+        "WHERE claim_candidate_id=%s", (cand["claim_candidate_id"],)).fetchone()
     assert row["decision"] == "approved" and row["decided_by"] == "Reviewer A"
     assert row["graph_claim_id"] is None   # no draft written
     assert conn.execute(
-        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id=?",
+        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id=%s",
         (cand["claim_candidate_id"],)).fetchone()["status"] == "accepted"
 
 
@@ -71,7 +71,7 @@ def test_corrected_needs_a_correction_and_validates_it(conn, settings):
     assert result["status"] == "accepted"
     row = conn.execute(
         "SELECT corrected_predicate, reason_code FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id=?", (cand["claim_candidate_id"],)).fetchone()
+        "WHERE claim_candidate_id=%s", (cand["claim_candidate_id"],)).fetchone()
     assert row["corrected_predicate"] == "workforce.has_retention_pressure"
 
 

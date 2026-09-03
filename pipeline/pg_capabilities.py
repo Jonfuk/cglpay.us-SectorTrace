@@ -82,7 +82,7 @@ def _installed_extensions(conn: db.Connection) -> dict[str, dict]:
     """`name -> {available, installed, version}` for the warehouse's
     extensions. `pg_available_extensions` is readable by any role."""
     names = db.WAREHOUSE_EXTENSIONS
-    placeholders = ",".join("?" for _ in names)
+    placeholders = ",".join("%s" for _ in names)
     rows = conn.execute(
         f"SELECT e.name, e.default_version, i.extversion AS installed_version "
         f"FROM pg_available_extensions e "
@@ -102,7 +102,7 @@ def _installed_extensions(conn: db.Connection) -> dict[str, dict]:
 
 
 def _index_defs(conn: db.Connection, names: tuple[str, ...]) -> dict[str, str]:
-    placeholders = ",".join("?" for _ in names)
+    placeholders = ",".join("%s" for _ in names)
     rows = conn.execute(
         f"SELECT indexname, indexdef FROM pg_indexes "
         f"WHERE schemaname = current_schema() AND indexname IN ({placeholders})",
@@ -113,8 +113,8 @@ def _index_defs(conn: db.Connection, names: tuple[str, ...]) -> dict[str, str]:
 def _has_column(conn: db.Connection, table: str, column: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM information_schema.columns "
-        "WHERE table_schema = current_schema() AND table_name = ? "
-        "AND column_name = ?", (table, column)).fetchone() is not None
+        "WHERE table_schema = current_schema() AND table_name = %s "
+        "AND column_name = %s", (table, column)).fetchone() is not None
 
 
 def report(conn: db.Connection) -> dict:

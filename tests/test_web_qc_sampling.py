@@ -21,7 +21,7 @@ def _seed_rq(conn, n=40):
     for i in range(n):
         conn.execute(
             "INSERT INTO review_queue (module, item_type, raw_value, status, "
-            " created_at, resolved_at) VALUES (?, ?, ?, 'confirmed', "
+            " created_at, resolved_at) VALUES (%s, %s, %s, 'confirmed', "
             " '2026-06-01T00:00:00Z', '2026-06-02T00:00:00Z')",
             ("m01" if i % 2 else "m10", "buyer" if i % 3 else "url", f"v{i}"))
     # one unresolved item that must never be sampled
@@ -55,11 +55,11 @@ def test_the_manifest_is_written_once(conn: sqlite3.Connection) -> None:
     _seed_rq(conn)
     a = qc_sampling.draw(conn, seed="s", source="review_queue", size=5)
     qc_sampling.draw(conn, seed="s", source="review_queue", size=5)  # re-draw
-    n = conn.execute("SELECT COUNT(*) FROM qc_samples WHERE sample_id = ?",
-                     (a["sample_id"],)).fetchone()[0]
+    n = conn.execute("SELECT COUNT(*) FROM qc_samples WHERE sample_id = %s",
+                     (a["sample_id"],)).fetchone().values().__iter__().__next__()
     assert n == 1
     row = conn.execute("SELECT seed, method, population_size FROM qc_samples "
-                       "WHERE sample_id = ?", (a["sample_id"],)).fetchone()
+                       "WHERE sample_id = %s", (a["sample_id"],)).fetchone()
     assert row["seed"] == "s" and row["method"] == "random" and row["population_size"] == 40
 
 
@@ -96,7 +96,7 @@ def test_alias_decisions_is_a_valid_source(conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT INTO alias_decisions (decision_id, unmatched_name, "
             " target_scheme, status, decided_by, decided_at) VALUES "
-            "(?, ?, 'buyer', 'accepted', 'r', '2026-07-01T00:00:00Z')",
+            "(%s, %s, 'buyer', 'accepted', 'r', '2026-07-01T00:00:00Z')",
             (f"d{i}", f"Name {i}"))
     conn.commit()
     s = qc_sampling.draw(conn, seed="s", source="alias_decisions", size=3)

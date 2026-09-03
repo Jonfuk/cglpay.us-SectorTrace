@@ -21,7 +21,7 @@ _MIN_GROUP = 5
 
 def _since_clause(column: str, since: str | None) -> tuple[str, tuple]:
     if since:
-        return f" WHERE {column} >= ?", (since,)
+        return f" WHERE {column} >= %s", (since,)
     return "", ()
 
 
@@ -71,13 +71,19 @@ def analytics(conn: sqlite3.Connection, *, since: str | None = None,
     age = _rows(conn, f"""
         SELECT bucket, COUNT(*) AS n FROM (
             SELECT CASE
-                     WHEN julianday(resolved_at) - julianday(created_at) < 1 THEN '<1 day'
-                     WHEN julianday(resolved_at) - julianday(created_at) < 7 THEN '1-7 days'
-                     WHEN julianday(resolved_at) - julianday(created_at) < 30 THEN '7-30 days'
+                     WHEN EXTRACT(EPOCH FROM (
+                         resolved_at::timestamptz - created_at::timestamptz
+                     )) / 86400 < 1 THEN '<1 day'
+                     WHEN EXTRACT(EPOCH FROM (
+                         resolved_at::timestamptz - created_at::timestamptz
+                     )) / 86400 < 7 THEN '1-7 days'
+                     WHEN EXTRACT(EPOCH FROM (
+                         resolved_at::timestamptz - created_at::timestamptz
+                     )) / 86400 < 30 THEN '7-30 days'
                      ELSE '30+ days'
                    END AS bucket
             FROM review_queue
-            WHERE resolved_at IS NOT NULL{' AND created_at >= ?' if since else ''})
+            WHERE resolved_at IS NOT NULL{' AND created_at >= %s' if since else ''})
         GROUP BY bucket""", rq_p)
     age_order = {"<1 day": 0, "1-7 days": 1, "7-30 days": 2, "30+ days": 3}
     age_rows = sorted(age, key=lambda r: age_order.get(r["bucket"], 9))

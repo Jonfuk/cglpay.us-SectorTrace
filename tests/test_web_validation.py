@@ -68,7 +68,7 @@ def test_parse_failures_become_rules_with_shape_only_examples(
         "INSERT INTO parse_failures (module, source_url, field_name, "
         " raw_fragment, reason, created_at) VALUES "
         "('m02_tribunals', 'https://www.gov.uk/a/b?token=secret', "
-        " 'claimant', ?, 'name not in expected position', '2026-08-20T00:00:00Z')",
+        " 'claimant', %s, 'name not in expected position', '2026-08-20T00:00:00Z')",
         (fragment,))
     conn.commit()
 
@@ -99,7 +99,7 @@ def test_review_queue_becomes_a_gate_rule(conn: sqlite3.Connection) -> None:
                            ("GAMMA", "confirmed")]:
         conn.execute(
             "INSERT INTO review_queue (module, item_type, raw_value, status, "
-            " created_at) VALUES ('m01_procurement', 'buyer_name', ?, ?, "
+            " created_at) VALUES ('m01_procurement', 'buyer_name', %s, %s, "
             " '2026-08-01T00:00:00Z')", (value, status))
     conn.commit()
     rule = _rule(validation.rules(conn), "review:m01_procurement:buyer_name")

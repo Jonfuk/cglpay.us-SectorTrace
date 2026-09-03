@@ -67,21 +67,21 @@ def test_meta_shape_is_stable(conn: sqlite3.Connection, settings: Settings):
     meta = public_queries.meta(conn, settings)
     assert set(meta) == EXPECTED_TOP_LEVEL
     assert meta["service"] == "sectortrace"
-    assert meta["backend"] == "sqlite"
+    assert meta["backend"] == "postgres"
     assert set(meta["schema"]) == {"latest_migration", "applied_count", "migrated_at"}
     assert meta["schema"]["applied_count"] > 0
     assert meta["schema"]["latest_migration"].endswith(".sql")
     assert set(meta["data"]) == {"last_fetch_at", "per_source", "last_run"}
     assert meta["data"]["per_source"] == "/api/v1/freshness"
     assert set(meta["capabilities"]) == EXPECTED_CAPABILITIES
-    # SQLite reports no PostgreSQL extensions.
-    assert meta["capabilities"]["postgres_extensions"] == {}
+    assert set(meta["capabilities"]["postgres_extensions"]) >= {
+        "vector", "pg_trgm", "postgis"}
 
 
-def test_meta_reflects_settings(conn: sqlite3.Connection, tmp_path):
+def test_meta_reflects_settings(conn: sqlite3.Connection, settings: Settings):
     tuned = Settings(
         contact_email="test@example.com",
-        database_path=tmp_path / "warehouse.db",
+        database_url=settings.database_url,
         environment="beta",
         git_revision="0123456789abcdef",
         build_time="2026-08-29T00:00:00Z",
@@ -110,10 +110,10 @@ def test_meta_revision_falls_back_to_the_checkout(conn: sqlite3.Connection, sett
 
 
 def test_meta_is_idempotent(conn: sqlite3.Connection, settings: Settings):
-    before = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+    before = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone().values().__iter__().__next__()
     first = public_queries.meta(conn, settings)
     second = public_queries.meta(conn, settings)
-    after = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+    after = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone().values().__iter__().__next__()
     assert first == second
     assert before == after
 

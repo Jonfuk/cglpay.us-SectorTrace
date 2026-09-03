@@ -82,13 +82,13 @@ def create_release(conn, settings: Any, *, domains: list[str] | None = None,
     manifest = release_manifest(settings, domains=domains, config=config)
     conn.execute(
         "INSERT INTO analysis_releases (release_id, status, manifest_json, manifest_sha256, "
-        "code_commit, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "code_commit, created_at) VALUES (%s, %s, %s, %s, %s, %s)",
         (manifest["release_id"], manifest["status"], json.dumps(manifest, sort_keys=True),
          manifest["manifest_sha256"], manifest["code_commit"], manifest["created_at"]))
     return manifest
 
 
 def load_release(conn, release_id: str) -> dict | None:
-    row = conn.execute("SELECT manifest_json FROM analysis_releases WHERE release_id = ?",
+    row = conn.execute("SELECT manifest_json FROM analysis_releases WHERE release_id = %s",
                        (release_id,)).fetchone()
-    return json.loads(row[0]) if row else None
+    return json.loads(row["manifest_json"]) if row else None

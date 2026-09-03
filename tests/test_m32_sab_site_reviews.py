@@ -27,7 +27,7 @@ def _add_board(conn, name, url, nation="England"):
     conn.execute(
         "INSERT INTO safeguarding_adults_boards (name, nation, website_url, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, 'https://dir', '2026-01-01T00:00:00Z', 200, 'test', 'h')",
+        "VALUES (%s, %s, %s, 'https://dir', '2026-01-01T00:00:00Z', 200, 'test', 'h')",
         (name, nation, url))
     conn.commit()
 
@@ -215,7 +215,7 @@ def test_run_skips_a_byte_identical_library_document(httpx_mock, settings, conn,
         "http_status, source_system, payload_sha256) VALUES "
         "('https://nationalnetwork.org.uk/x.pdf', '.pdf', 2021, "
         "'Camden Safeguarding Adults Board', 1, 'national_library', 'https://x', "
-        "'2026-01-01T00:00:00Z', 200, 'national_sar_library', ?)", (sha,))
+        "'2026-01-01T00:00:00Z', 200, 'national_sar_library', %s)", (sha,))
     conn.commit()
     _mock_board_site(httpx_mock, links_html=(
         '<a href="/d/Camden SAR Matthew.pdf">Safeguarding Adults Review: Matthew</a>'))

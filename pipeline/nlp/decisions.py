@@ -71,7 +71,7 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
 
     candidate = conn.execute(
         "SELECT claim_candidate_id, status FROM document_claim_candidates "
-        "WHERE claim_candidate_id = ? AND superseded = 0", (claim_candidate_id,)).fetchone()
+        "WHERE claim_candidate_id = %s AND superseded = 0", (claim_candidate_id,)).fetchone()
     if candidate is None:
         raise ClaimDecisionError(f"no live claim candidate {claim_candidate_id!r}.")
 
@@ -95,7 +95,7 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
         raise ClaimDecisionError(
             f"corrected_object_concept_id {corrected_object_concept_id!r} is not a concept id.")
     if corrected_subject_mention_id and conn.execute(
-            "SELECT 1 FROM document_concept_mentions WHERE document_concept_mention_id = ?",
+            "SELECT 1 FROM document_concept_mentions WHERE document_concept_mention_id = %s",
             (corrected_subject_mention_id,)).fetchone() is None:
         raise ClaimDecisionError(
             f"corrected_subject_mention_id {corrected_subject_mention_id!r} does not exist.")
@@ -107,13 +107,13 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
         "INSERT INTO claim_candidate_decisions (claim_candidate_id, review_queue_id, decision, "
         "decided_by, reason_code, corrected_subject_mention_id, corrected_predicate, "
         "corrected_object_concept_id, corrected_object_literal, graph_claim_id, note, decided_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?) RETURNING id",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s) RETURNING id",
         (claim_candidate_id, review_queue_id, decision, decided_by, reason_code,
          corrected_subject_mention_id, corrected_predicate, corrected_object_concept_id,
-         corrected_object_literal, note, now)).fetchone()[0]
+        corrected_object_literal, note, now)).fetchone()["id"]
     new_status = _STATUS_AFTER[decision]
     conn.execute(
-        "UPDATE document_claim_candidates SET status = ? WHERE claim_candidate_id = ?",
+        "UPDATE document_claim_candidates SET status = %s WHERE claim_candidate_id = %s",
         (new_status, claim_candidate_id))
     if commit:
         conn.commit()
@@ -123,7 +123,7 @@ def decide(conn, claim_candidate_id: str, decision: str, decided_by: str, *,
 
 def history(conn, claim_candidate_id: str) -> list[dict]:
     return [dict(row) for row in conn.execute(
-        "SELECT * FROM claim_candidate_decisions WHERE claim_candidate_id = ? "
+        "SELECT * FROM claim_candidate_decisions WHERE claim_candidate_id = %s "
         "ORDER BY decided_at", (claim_candidate_id,)).fetchall()]
 
 

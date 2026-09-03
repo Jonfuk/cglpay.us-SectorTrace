@@ -45,14 +45,14 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, region, active_from, "
             " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'county', 'West Midlands', '2021-04-01', '2024', '2026', "
+            "VALUES (%s, %s, 'county', 'West Midlands', '2021-04-01', '2024', '2026', "
             " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
             (ons_code, name))
         conn.execute(
             "INSERT INTO public_health_grants (ons_code, financial_year, grant_type, "
             " allocation_status, unit, amount, source_column_header, source_document, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, '2024-25', 'allocation', 'confirmed', 'gbp', ?, 'alloc', "
+            "VALUES (%s, '2024-25', 'allocation', 'confirmed', 'gbp', %s, 'alloc', "
             " 'alloc.xlsx', 'https://gov.example/g', '2026-08-01T00:00:00Z', 200, "
             " 'dhsc', 'y')",
             (ons_code, 8_000_000 if ons_code == BIRMINGHAM else 4_000_000))
@@ -61,8 +61,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " section, line_number, column_label, amounts_multiplier, amount, "
             " value_text, source_document, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, '2024-25', 'transpblopr', 'Public Health', '271', "
-            " 'Public health (operational)', 1000, ?, '9000', 'b.xlsx', "
+            "VALUES (%s, '2024-25', 'transpblopr', 'Public Health', '271', "
+            " 'Public health (operational)', 1000, %s, '9000', 'b.xlsx', "
             " 'https://gov.example/b', '2026-08-01T00:00:00Z', 200, 'mhclg', 'z')",
             (ons_code, 9_000_000 if ons_code == BIRMINGHAM else 5_000_000))
 
@@ -78,8 +78,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " time_period, area_name, ons_code, area_level, value, lower_ci_95, "
             " upper_ci_95, time_period_sortable, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (92454, ?, 102, '2024-25', 'Birmingham', ?, 'local_authority', "
-            " ?, ?, ?, '2024-25', 'https://fingertips.example/v', "
+            "VALUES (92454, %s, 102, '2024-25', 'Birmingham', %s, 'local_authority', "
+            " %s, %s, %s, '2024-25', 'https://fingertips.example/v', "
             " '2026-08-01T00:00:00Z', 200, 'ohid', 'f')",
             (ons_code, ons_code, value, lower, upper))
     conn.execute(
@@ -96,8 +96,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'A Council', ?, 'Supplier Ltd', 'Treatment services', "
-            " ?, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
+            "VALUES (%s, %s, 'A Council', %s, 'Supplier Ltd', 'Treatment services', "
+            " %s, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
             " '2026-08-01T00:00:00Z', 200, 'find_a_tender', 'abc123')",
             (f"n-{ons_code}", f"ocds-{ons_code}", ons_code, value))
 
@@ -105,12 +105,12 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
                               ("turning_point", "Turning Point", 0)]:
         conn.execute(
             "INSERT INTO providers (provider_key, canonical_name, is_target, notes) "
-            "VALUES (?, ?, ?, 'Campaign subject.')",
+            "VALUES (%s, %s, %s, 'Campaign subject.')",
             (key, name, target))
         conn.execute(
             "INSERT INTO provider_identifiers (provider_key, scheme, identifier, "
             " role, status) "
-            "VALUES (?, 'charity_number', ?, 'registered charity', 'verified')",
+            "VALUES (%s, 'charity_number', %s, 'registered charity', 'verified')",
             (key, "1000001" if key == "change_grow_live" else "1000002"))
         for year_end, income, expenditure in [("2023-03-31", 20_000_000, 19_000_000),
                                               ("2024-03-31", 21_000_000, 20_500_000)]:
@@ -118,13 +118,13 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
                 "INSERT INTO charity_financials (charity_number, financial_year_end, "
                 " total_income, total_expenditure, source_url, retrieved_at, "
                 " http_status, source_system, payload_sha256) "
-                "VALUES (?, ?, ?, ?, 'https://ccew.example/f', "
+                "VALUES (%s, %s, %s, %s, 'https://ccew.example/f', "
                 " '2026-08-01T00:00:00Z', 200, 'ccew', 'p')",
                 ("1000001" if key == "change_grow_live" else "1000002",
                  year_end, income, expenditure))
         conn.execute(
             "INSERT INTO supplier_aliases (alias_raw, supplier_key, canonical_name) "
-            "VALUES (?, ?, ?)", (f"{name} (alias)", key, name))
+            "VALUES (%s, %s, %s)", (f"{name} (alias)", key, name))
 
     conn.commit()
     return conn

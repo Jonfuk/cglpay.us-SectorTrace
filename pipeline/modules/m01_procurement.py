@@ -979,10 +979,10 @@ def _check_kaggle_against_other_channels(conn, module_name: str, ocid: str) -> N
     since the Kaggle file carries no currency column at all.
     """
     kaggle_row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = %s AND source_system = %s",
         (ocid, SOURCE_CF_KAGGLE)).fetchone()
     others = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE ocid = ? AND source_system != ?",
+        "SELECT * FROM procurement_channel_sightings WHERE ocid = %s AND source_system != %s",
         (ocid, SOURCE_CF_KAGGLE)).fetchall()
 
     if not others:
@@ -1172,7 +1172,7 @@ def backfill_channel_sightings(conn) -> int:
         "SELECT notice_id, source_system, MIN(ocid), MIN(buyer_name), MIN(title), "
         "       MIN(cpv_codes), MIN(date_published), MIN(source_url), MIN(retrieved_at), "
         "       MIN(http_status), MIN(payload_sha256) "
-        "FROM contracts WHERE source_system IN (?, ?, ?) "
+        "FROM contracts WHERE source_system IN (%s, %s, %s) "
         "GROUP BY notice_id, source_system "
         "ON CONFLICT (notice_id, source_system) DO NOTHING",
         (SOURCE_FTS, SOURCE_CF, SOURCE_CF_CSV),

@@ -1,19 +1,8 @@
-"""The PostgreSQL backend: connections that answer to the same API as the
-SQLite ones.
+"""The PostgreSQL backend used by the application.
 
-`pipeline/db.py` stays the single database module and dispatches to this one
-when `DATABASE_URL` is set. Nothing outside `db.py` should import from here —
-call sites keep calling `db.get_connection()` and keep writing `?`/`:name`
-SQL, and the difference arrives underneath them.
-
-Three things in here are not obvious, and each of them is a bug that was
-reasoned about rather than met:
-
-**Rows answer to both protocols.** `sqlite3.Row` supports `row["column"]` and
-`row[0]` and `dict(row)`, and this codebase uses all three — 16 call sites do
-`fetchone()[0]`, `web/jobs.py` builds a `Job` from `row[0], row[1], row[2]`,
-and 28 places call `dict(row)`. psycopg ships `dict_row` (no positional
-access) and `tuple_row` (no names), and neither is a drop-in. `Row` below is.
+`pipeline/db.py` stays the single database module and dispatches to this one.
+Nothing outside `db.py` should import from here — call sites use psycopg's
+native `%s` and `%(name)s` parameter styles directly.
 
 **Read connections run in autocommit.** In PostgreSQL a failed statement
 aborts the whole transaction, so every later statement on that connection
@@ -24,8 +13,6 @@ first failure would truncate the panel silently rather than skip one table.
 Autocommit makes each read its own transaction, which is what that loop
 already assumes. Write connections keep real transactions — the per-unit
 commit discipline depends on them.
-
-**Statements are translated, not rewritten.** See `pipeline/sqldialect.py`.
 
 **Read connections come from a pool; write connections do not.** Phase 1 left
 pooling out on the grounds that it changes when connections are handed out and
@@ -53,8 +40,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
-
-from pipeline.sqldialect import to_psycopg
+from psycopg.rows import dict_row
 
 # Statements that do not write, for the `total_changes` accounting in `_count`
 # below. This lived in `pipeline/db.py` beside the SQLite write slot, which
@@ -84,89 +70,12 @@ def _is_write(sql: str) -> bool:
 READ_STATEMENT_TIMEOUT_MS = 20_000
 
 
-class Row:
-    """A result row addressable by name and by position.
-
-    Matches `sqlite3.Row` where the codebase depends on it:
-
-      * `row["name"]` and `row[0]` both work, as does `row[1:3]`;
-      * iterating yields **values**, not column names, so `tuple(row)` and
-        `list(row)` are the values — this is why it does not register as a
-        `Mapping`, whose iteration protocol yields keys;
-      * `keys()` returns the column names, which is what makes `dict(row)`
-        work;
-      * a duplicated column name resolves to the leftmost column, as SQLite
-        does — `SELECT a.id, b.id` is answerable by position and ambiguous by
-        name on both engines, and picking the same one matters more than
-        picking the right one.
-    """
-
-    __slots__ = ("_names", "_index", "_values")
-
-    def __init__(self, names: tuple[str, ...], index: Mapping[str, int],
-                 values: tuple[Any, ...]) -> None:
-        self._names = names
-        self._index = index
-        self._values = values
-
-    def __getitem__(self, key):
-        if isinstance(key, str):
-            try:
-                return self._values[self._index[key]]
-            except KeyError:
-                raise IndexError(f"no column named {key!r}") from None
-        return self._values[key]
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self) -> int:
-        return len(self._values)
-
-    def keys(self) -> list[str]:
-        return list(self._names)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Row):
-            return self._names == other._names and self._values == other._values
-        if isinstance(other, tuple):
-            return self._values == other
-        return NotImplemented
-
-    def __hash__(self) -> int:
-        return hash((self._names, self._values))
-
-    def __repr__(self) -> str:
-        pairs = ", ".join(f"{n}={v!r}" for n, v in zip(self._names, self._values))
-        return f"Row({pairs})"
-
-
-def row_factory(cursor):
-    """psycopg row factory producing `Row`. Set once on the connection."""
-    description = cursor.description
-    if description is None:
-        # A statement with no result set (DDL, or an INSERT with no
-        # RETURNING). psycopg still asks for a maker; it is never called.
-        return lambda values: values
-
-    names = tuple(d.name for d in description)
-    index: dict[str, int] = {}
-    for position, name in enumerate(names):
-        index.setdefault(name, position)
-
-    def make(values):
-        return Row(names, index, tuple(values))
-
-    return make
-
-
 class PostgresConnection:
-    """A psycopg connection wearing the parts of `sqlite3.Connection` that
-    this codebase calls.
+    """A small application connection facade over psycopg.
 
     Deliberately a wrapper and not a subclass: psycopg's `Connection` is not
-    designed to be subclassed for this, and the wrapper is where statement
-    translation and the write counter live.
+    designed to be subclassed for this, and the wrapper is where the write
+    counter and application lifecycle semantics live.
     """
 
     def __init__(self, conn: psycopg.Connection, *, readonly: bool = False,
@@ -183,11 +92,10 @@ class PostgresConnection:
         # is still what `application_name` reports to `pg_stat_activity`, so
         # an operator looking at the server sees which module is writing.
         self.write_label: str | None = None
-        # Assigned by call sites that were written against sqlite3
-        # (`conn.row_factory = sqlite3.Row`). The factory is fixed at connect
-        # time; accepting the attribute keeps those lines working rather than
-        # requiring every one of them to learn which backend it is on.
-        self.row_factory = None
+        # Retained as a harmless compatibility attribute for callers that set
+        # it while constructing a connection. Result rows are always created
+        # by psycopg's named `dict_row` factory at connect time.
+        self.row_factory = dict_row
 
     # --- statement execution -------------------------------------------------
 
@@ -201,8 +109,7 @@ class PostgresConnection:
         return self._conn
 
     def execute(self, sql: str, parameters: Sequence[Any] | Mapping[str, Any] = ()):
-        translated, params = to_psycopg(sql, parameters)
-        cursor = self._live().execute(translated, params)
+        cursor = self._live().execute(sql, parameters or None)
         if self._trace_callback is not None:
             self._trace_callback(sql)
         self._count(sql, cursor)
@@ -211,10 +118,9 @@ class PostgresConnection:
     def set_trace_callback(self, callback) -> None:
         """Record statements executed through this compatibility wrapper.
 
-        SQLite exposes this hook on its connection object and the catalog
-        performance tests use it to assert round-trip counts. Keeping the
-        equivalent at the wrapper boundary makes the same assertion meaningful
-        now that PostgreSQL is the only application backend.
+        The catalog performance tests use this to assert round-trip counts.
+        Keeping it at the wrapper boundary makes the assertion independent of
+        psycopg cursor details.
         """
         self._trace_callback = callback
 
@@ -222,11 +128,8 @@ class PostgresConnection:
         rows = list(seq_of_parameters)
         if not rows:
             return self._conn.cursor()
-        # Every row binds the same statement, so the translation is done once
-        # against the first row purely to learn the parameter style.
-        translated, _ = to_psycopg(sql, rows[0])
         cursor = self._conn.cursor()
-        cursor.executemany(translated, rows)
+        cursor.executemany(sql, rows)
         self._count(sql, cursor)
         return cursor
 
@@ -249,7 +152,7 @@ class PostgresConnection:
         return self._conn.cursor()
 
     def _count(self, sql: str, cursor) -> None:
-        """Maintain the equivalent of `sqlite3.Connection.total_changes`.
+        """Maintain the write count used by runner diagnostics.
 
         `runner.py` reports it per module and `--dry-run` accounting depends
         on it. psycopg reports `rowcount` for SELECT as well, so only
@@ -273,8 +176,8 @@ class PostgresConnection:
     def close(self) -> None:
         """Close, or give back — and either way, only once.
 
-        Idempotent because the callers were written against `sqlite3`, where
-        closing twice is legal and harmless. Returning a pooled connection
+        Idempotent because closing twice is legal and harmless. Returning a
+        pooled connection
         twice is not: the second `putconn` puts a connection into the pool
         that another request is already using, and the failure surfaces later
         as two requests interleaving statements on one connection.
@@ -291,9 +194,9 @@ class PostgresConnection:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> bool:
-        # Matching sqlite3: commit on a clean exit, roll back on an exception,
-        # and never swallow it. psycopg's own `with` block closes the
-        # connection as well, which is not what any caller here expects.
+        # Commit on a clean exit, roll back on an exception, and never swallow
+        # it. psycopg's own `with` block closes the connection as well, which
+        # is not what any caller here expects.
         if exc_type is None:
             self.commit()
         else:
@@ -357,7 +260,7 @@ def connect(url: str, *, readonly: bool = False,
     conn = psycopg.connect(
         url,
         autocommit=readonly,
-        row_factory=row_factory,
+        row_factory=dict_row,
         application_name=application_name,
     )
     try:
@@ -446,7 +349,7 @@ def read_pool(url: str, *, application_name: str, statement_timeout_ms: int):
             min_size=POOL_MIN_SIZE,
             max_size=POOL_MAX_SIZE,
             timeout=POOL_TIMEOUT_SECONDS,
-            kwargs={"autocommit": True, "row_factory": row_factory,
+        kwargs={"autocommit": True, "row_factory": dict_row,
                      "application_name": application_name},
             configure=configure,
             check=ConnectionPool.check_connection,

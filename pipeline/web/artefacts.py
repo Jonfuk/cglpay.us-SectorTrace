@@ -133,11 +133,11 @@ def listing(settings) -> dict:
 # leaving the reader to assume a completeness this does not have.
 
 ACTIVITY_SOURCES: tuple[tuple[str, str, str], ...] = (
-    ("http_cache", "SELECT MAX(updated_at) FROM http_cache",
+    ("http_cache", "SELECT MAX(updated_at) AS stamp FROM http_cache",
       "a source was last fetched"),
-    ("module_cursors", "SELECT MAX(updated_at) FROM module_cursors",
+    ("module_cursors", "SELECT MAX(updated_at) AS stamp FROM module_cursors",
       "a module last recorded its position"),
-    ("job_runs", "SELECT MAX(finished_at) FROM job_runs",
+    ("job_runs", "SELECT MAX(finished_at) AS stamp FROM job_runs",
       "a run started from this UI last finished"),
 )
 
@@ -158,7 +158,7 @@ def pipeline_last_active(conn) -> dict:
     newest: tuple = ()
     for source, sql, phrase in ACTIVITY_SOURCES:
         try:
-            stamp = conn.execute(sql).fetchone()[0]
+            stamp = conn.execute(sql).fetchone()["stamp"]
         except Exception:  # pragma: no cover - a warehouse without the table
             continue
         parsed = _parse(stamp)

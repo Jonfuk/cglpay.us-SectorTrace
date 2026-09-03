@@ -66,7 +66,7 @@ def _population(conn, source: str, filters: dict, stratify_by: str | None):
         col = spec["filters"].get(name)
         if not col:
             raise QueryError(f"{source} cannot be filtered by {name!r}")
-        where.append(f"{col} = ?")
+        where.append(f"{col} = %s")
         params.append(value)
     strat_col = None
     if stratify_by:
@@ -109,7 +109,7 @@ def _hydrate(conn, source: str, ids: list) -> list[dict]:
         return []
     spec = _SOURCES[source]
     cols = ", ".join(spec["display"])
-    placeholders = ",".join("?" * len(ids))
+    placeholders = ",".join("%s" for _ in ids)
     rows = {str(r[spec["id"]]): r for r in _rows(
         conn, f"SELECT {cols} FROM {source} WHERE {spec['id']} IN ({placeholders})",
         tuple(ids))}
@@ -132,7 +132,7 @@ def draw(conn: sqlite3.Connection, *, seed: str, source: str, size: int = 25,
     stratify_by = stratify_by if method == "stratified" else None
 
     sample_id = _sample_id(seed, source, method, stratify_by, size, filters)
-    existing = _one(conn, "SELECT * FROM qc_samples WHERE sample_id = ?",
+    existing = _one(conn, "SELECT * FROM qc_samples WHERE sample_id = %s",
                     (sample_id,))
     if existing:
         return _manifest(conn, existing)
@@ -143,13 +143,13 @@ def draw(conn: sqlite3.Connection, *, seed: str, source: str, size: int = 25,
     conn.execute(
         "INSERT INTO qc_samples (sample_id, seed, source, method, stratify_by, "
         " population_filter, population_size, sample_size, record_ids, "
-        " created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (sample_id, seed, source, method, stratify_by,
          json.dumps(filters or {}, sort_keys=True), len(rows), len(ids),
          json.dumps([str(i) for i in ids]), created_by or None, _now()))
     conn.commit()
     return _manifest(conn,
-                     _one(conn, "SELECT * FROM qc_samples WHERE sample_id = ?",
+                     _one(conn, "SELECT * FROM qc_samples WHERE sample_id = %s",
                           (sample_id,)))
 
 
@@ -157,7 +157,7 @@ def _manifest(conn: sqlite3.Connection, row: dict) -> dict:
     ids = json.loads(row["record_ids"])
     findings = _rows(conn,
                      "SELECT finding_id, record_ref, verdict, note, created_by, "
-                     "created_at FROM qc_sample_findings WHERE sample_id = ? "
+                     "created_at FROM qc_sample_findings WHERE sample_id = %s "
                      "ORDER BY created_at", (row["sample_id"],))
     verdicts: dict[str, int] = {}
     for f in findings:
@@ -183,7 +183,7 @@ def _manifest(conn: sqlite3.Connection, row: dict) -> dict:
 
 def get(conn: sqlite3.Connection, sample_id: str) -> dict:
     _public(["qc_samples", "qc_sample_findings"])
-    row = _one(conn, "SELECT * FROM qc_samples WHERE sample_id = ?", (sample_id,))
+    row = _one(conn, "SELECT * FROM qc_samples WHERE sample_id = %s", (sample_id,))
     if not row:
         raise QueryError(f"No sample {sample_id!r}.")
     return _manifest(conn, row)
@@ -194,7 +194,7 @@ def list_samples(conn: sqlite3.Connection, limit: int = 25) -> dict:
     rows = _rows(conn,
                  "SELECT sample_id, seed, source, method, sample_size, "
                  "population_size, created_at, created_by FROM qc_samples "
-                 "ORDER BY created_at DESC LIMIT ?", (max(1, min(int(limit), 100)),))
+                 "ORDER BY created_at DESC LIMIT %s", (max(1, min(int(limit), 100)),))
     return {"samples": rows}
 
 
@@ -202,7 +202,7 @@ def record_finding(conn: sqlite3.Connection, *, sample_id: str, record_ref: str,
                    verdict: str, note: str | None = None,
                    created_by: str | None = None) -> dict:
     _public(["qc_samples", "qc_sample_findings"])
-    sample = _one(conn, "SELECT record_ids FROM qc_samples WHERE sample_id = ?",
+    sample = _one(conn, "SELECT record_ids FROM qc_samples WHERE sample_id = %s",
                   (sample_id,))
     if not sample:
         raise QueryError(f"No sample {sample_id!r}.")
@@ -214,7 +214,7 @@ def record_finding(conn: sqlite3.Connection, *, sample_id: str, record_ref: str,
     now = _now()
     conn.execute(
         "INSERT INTO qc_sample_findings (finding_id, sample_id, record_ref, "
-        " verdict, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " verdict, note, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
         (finding_id, sample_id, str(record_ref), verdict,
          (note or None), (created_by or None), now))
     conn.commit()

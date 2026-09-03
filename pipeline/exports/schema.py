@@ -50,7 +50,7 @@ TABS: list[TabSpec] = [
         sql="""
             SELECT a.ons_code, a.name, a.type, a.region, a.parent_code,
                    a.active_from, a.active_to,
-                   (SELECT GROUP_CONCAT(s.successor_code, ', ')
+                   (SELECT string_agg(s.successor_code, ', ')
                       FROM authority_successors s
                      WHERE s.predecessor_code = a.ons_code) AS successor_codes
               FROM authorities a
@@ -122,7 +122,7 @@ TABS: list[TabSpec] = [
                    c.company_number, c.company_name, c.company_status, c.company_type,
                    c.date_of_creation, c.match_basis,
                    v.officers_total, v.officers_active, v.officers_resigned,
-                   (SELECT GROUP_CONCAT(n.previous_name, ' | ')
+                   (SELECT string_agg(n.previous_name, ' | ')
                       FROM company_previous_names n
                      WHERE n.company_number = c.company_number) AS previous_names
               FROM providers p
@@ -226,11 +226,11 @@ TABS: list[TabSpec] = [
         sql="""
             SELECT r.report_ref, r.report_date, r.coroner_name, r.coroner_area,
                    r.categories, r.report_url,
-                   (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
+                   (SELECT string_agg(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM pfd_concern_terms t WHERE t.report_ref = r.report_ref) AS concern_terms,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM pfd_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM pfd_provider_mentions m
                      WHERE m.report_ref = r.report_ref AND m.mention_type = 'recipient') AS provider_recipients,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM pfd_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM pfd_provider_mentions m
                      WHERE m.report_ref = r.report_ref AND m.mention_type = 'body_text') AS provider_mentions,
                    r.matters_of_concern
               FROM pfd_reports r
@@ -296,9 +296,9 @@ TABS: list[TabSpec] = [
         sql="""
             SELECT d.document_url, d.document_ext, d.discovered_via, d.library_year,
                    d.sab_name, d.sab_name_source, d.has_body_text,
-                   (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
+                   (SELECT string_agg(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM sar_concern_terms t WHERE t.document_url = d.document_url) AS concern_terms,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM sar_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM sar_provider_mentions m
                      WHERE m.document_url = d.document_url) AS provider_mentions
               FROM sar_documents d
              ORDER BY d.library_year DESC NULLS LAST

@@ -66,13 +66,13 @@ class Filters:
         clauses: list[str] = []
         params: list = []
         if self.source_system:
-            clauses.append(f"{evidence}.source_system = ?")
+            clauses.append(f"{evidence}.source_system = %s")
             params.append(self.source_system)
         if self.date_from:
-            clauses.append(f"{doc}.published_at >= ?")
+            clauses.append(f"{doc}.published_at >= %s")
             params.append(self.date_from)
         if self.date_to:
-            clauses.append(f"{doc}.published_at <= ?")
+            clauses.append(f"{doc}.published_at <= %s")
             params.append(self.date_to)
         return (" AND " + " AND ".join(clauses) if clauses else ""), params
 
@@ -118,12 +118,12 @@ def _keyword_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]
     hits = conn.execute(
         "SELECT de.document_element_id AS eid, "
         "ts_rank_cd(to_tsvector('simple', COALESCE(de.text, '')), "
-        "           plainto_tsquery('simple', ?)) AS rank "
+        "           plainto_tsquery('simple', %s)) AS rank "
         "FROM document_elements de "
         "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
         "WHERE dv.is_active = 1 "
-        "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
-        "ORDER BY rank DESC LIMIT ?",
+        "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', %s) "
+        "ORDER BY rank DESC LIMIT %s",
         (query, query, element_cap)).fetchall()
 
     if not hits:
@@ -132,7 +132,7 @@ def _keyword_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]
     # already best-first; first-seen wins.
     order = {row["eid"]: i for i, row in enumerate(hits)}
     eids = list(order)
-    placeholders = ",".join("?" for _ in eids)
+    placeholders = ",".join("%s" for _ in eids)
     rows = conn.execute(
         _element_to_chunk_sql(placeholders, filter_sql),
         [*eids, *filter_params]).fetchall()
@@ -170,24 +170,24 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
     literal = embeddings.vec_literal(query_vec)
     rows = conn.execute(
         "SELECT em.document_chunk_id AS cid, "
-        "1 - (em.embedding_vec OPERATOR(public.<=>) ?::public.vector) AS score "
+        "1 - (em.embedding_vec OPERATOR(public.<=>) %s::public.vector) AS score "
         "FROM document_embeddings em "
         "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
         "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
         "JOIN document_records d ON d.document_id = dv.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE em.model_key = ? AND em.embedding_vec IS NOT NULL" + filter_sql
-        + " ORDER BY em.embedding_vec OPERATOR(public.<=>) ?::public.vector LIMIT ?",
+        "WHERE em.model_key = %s AND em.embedding_vec IS NOT NULL" + filter_sql
+        + " ORDER BY em.embedding_vec OPERATOR(public.<=>) %s::public.vector LIMIT %s",
         [literal, model_key, *filter_params, literal, depth]).fetchall()
     if rows:
         return model_key, [(row["cid"], float(row["score"])) for row in rows], None
     backfilled = conn.execute(
-        "SELECT COUNT(*) FROM document_embeddings "
-        "WHERE model_key = ? AND embedding_vec IS NOT NULL", (model_key,)).fetchone()[0]
+        "SELECT COUNT(*) AS count FROM document_embeddings "
+        "WHERE model_key = %s AND embedding_vec IS NOT NULL", (model_key,)).fetchone()["count"]
     if backfilled == 0:
         total = conn.execute(
-            "SELECT COUNT(*) FROM document_embeddings WHERE model_key = ?",
-            (model_key,)).fetchone()[0]
+            "SELECT COUNT(*) AS count FROM document_embeddings WHERE model_key = %s",
+            (model_key,)).fetchone()["count"]
         note = (f"no embeddings for model {model_key!r} -- run `pipeline nlp embed`"
                 if total == 0
                 else "pgvector is installed but embedding_vec is empty -- "
@@ -224,7 +224,7 @@ def _hydrate(conn, ranked: list[tuple[str, dict]]) -> list[dict]:
     if not ranked:
         return []
     ids = [cid for cid, _ in ranked]
-    placeholders = ",".join("?" for _ in ids)
+    placeholders = ",".join("%s" for _ in ids)
     rows = {row["document_chunk_id"]: row for row in conn.execute(
         "SELECT dc.document_chunk_id, dc.text, dc.page_start, dc.page_end, "
         "dc.token_estimate, dc.char_start, dc.char_end, dc.preceding_heading_element_id, "

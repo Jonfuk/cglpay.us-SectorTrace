@@ -36,7 +36,7 @@ def queued(conn: sqlite3.Connection) -> sqlite3.Connection:
 
 def item_for(conn: sqlite3.Connection, item_type: str) -> int:
     return conn.execute(
-        "SELECT id FROM review_queue WHERE item_type = ?", (item_type,)).fetchone()["id"]
+        "SELECT id FROM review_queue WHERE item_type = %s", (item_type,)).fetchone()["id"]
 
 
 @pytest.fixture
@@ -95,12 +95,12 @@ def test_resolving_stores_the_url_and_approves_the_item(queued, answering):
     assert row["verified_by"] == "Jon"
     assert row["review_item_id"] == item_id
 
-    item = queued.execute("SELECT * FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+    item = queued.execute("SELECT * FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     assert item["status"] == "approved"
 
     # The decision records what was actually done, not just "approved".
     decision = queued.execute(
-        "SELECT * FROM review_decisions WHERE review_item_id = ?", (item_id,)).fetchone()
+        "SELECT * FROM review_decisions WHERE review_item_id = %s", (item_id,)).fetchone()
     assert "democracy.barnet.gov.uk" in decision["note"]
     assert decision["decided_by"] == "Jon"
 
@@ -186,9 +186,9 @@ def test_a_url_that_does_not_answer_is_not_stored(queued, monkeypatch):
     with pytest.raises(resolve.ResolveError, match="did not answer"):
         resolve.resolve_authority_url(queued, item_id, "https://nope.example", resolved_by="Jon")
 
-    assert queued.execute("SELECT COUNT(*) FROM authority_url_overrides").fetchone()[0] == 0
+    assert queued.execute("SELECT COUNT(*) FROM authority_url_overrides").fetchone().values().__iter__().__next__() == 0
     assert queued.execute(
-        "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()[0] == "pending"
+        "SELECT status FROM review_queue WHERE id = %s", (item_id,)).fetchone().values().__iter__().__next__() == "pending"
 
 
 def test_robots_disallowed_is_reported_rather_than_ignored(queued, monkeypatch):

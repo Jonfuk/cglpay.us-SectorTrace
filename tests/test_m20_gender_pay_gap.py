@@ -74,7 +74,7 @@ def _add_company_number(conn, provider_key: str, number: str) -> None:
     # and still inserts the numbers a test invents.
     conn.execute(
         "INSERT INTO provider_identifiers (provider_key, scheme, identifier, "
-        "status, role, discovered_by) VALUES (?, 'company_number', ?, "
+        "status, role, discovered_by) VALUES (%s, 'company_number', %s, "
         "'unverified', 'test', 'm04') ON CONFLICT DO NOTHING",
         (provider_key, providers.normalise_identifier("company_number", number)))
 

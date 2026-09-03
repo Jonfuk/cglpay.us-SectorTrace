@@ -53,7 +53,7 @@ def _seed(conn, settings):
     nlp_context.run(conn)
     relations.run(conn)
     return conn.execute(
-        "SELECT claim_candidate_id FROM document_claim_candidates LIMIT 1").fetchone()[0]
+        "SELECT claim_candidate_id FROM document_claim_candidates LIMIT 1").fetchone().values().__iter__().__next__()
 
 
 @pytest.fixture

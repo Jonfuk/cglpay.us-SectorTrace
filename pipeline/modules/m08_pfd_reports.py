@@ -342,7 +342,7 @@ def redact_known_names_across_reports(conn) -> int:
             if name in cleaned:
                 cleaned = cleaned.replace(name, "[name redacted]")
         if cleaned != original:
-            conn.execute("UPDATE pfd_reports SET matters_of_concern = ? WHERE report_ref = ?",
+            conn.execute("UPDATE pfd_reports SET matters_of_concern = %s WHERE report_ref = %s",
                           (cleaned, row["report_ref"]))
             redacted_rows += 1
     return redacted_rows
@@ -453,7 +453,7 @@ def _already_has_concerns(conn, report_ref: str) -> bool:
     contents are already in the warehouse.
     """
     row = conn.execute(
-        "SELECT 1 FROM pfd_reports WHERE report_ref = ? "
+        "SELECT 1 FROM pfd_reports WHERE report_ref = %s "
         "AND matters_of_concern IS NOT NULL AND TRIM(matters_of_concern) <> ''",
         (report_ref,)).fetchone()
     return row is not None

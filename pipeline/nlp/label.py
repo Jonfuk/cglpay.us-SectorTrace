@@ -61,7 +61,7 @@ def _live_chunk_elements(conn, document_version_id: str) -> list[str]:
         "JOIN document_elements e ON e.document_element_id = dc.element_end_id "
         "JOIN document_elements de ON de.document_version_id = dc.document_version_id "
         "  AND de.sequence BETWEEN s.sequence AND e.sequence "
-        "WHERE dc.document_version_id = ? AND dc.superseded = 0 "
+        "WHERE dc.document_version_id = %s AND dc.superseded = 0 "
         "ORDER BY de.sequence",
         (document_version_id,)).fetchall()
     return [row["eid"] for row in rows]
@@ -75,11 +75,11 @@ def label_version(conn, onto: ontology_mod.Ontology, document_version_id: str,
     element_ids = _live_chunk_elements(conn, document_version_id)
     if not element_ids:
         return 0
-    placeholders = ",".join("?" for _ in element_ids)
+    placeholders = ",".join("%s" for _ in element_ids)
     # Clear only this stage's own prior output for these elements. keyword_v1
     # rows carry UPPERCASE bucket topics and are never in this set.
     conn.execute(
-        f"DELETE FROM document_topics WHERE match_method = ? "
+        f"DELETE FROM document_topics WHERE match_method = %s "
         f"AND document_element_id IN ({placeholders})",
         [MATCH_METHOD, *element_ids])
 
@@ -98,7 +98,7 @@ def label_version(conn, onto: ontology_mod.Ontology, document_version_id: str,
             # did collide.
             conn.execute(
                 "INSERT INTO document_topics (document_element_id, topic, match_count, match_method) "
-                "VALUES (?, ?, ?, ?) "
+                "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT(document_element_id, topic) DO UPDATE SET match_count = excluded.match_count "
                 "WHERE document_topics.match_method = excluded.match_method",
                 (element_id, topic, count, MATCH_METHOD))
@@ -117,11 +117,11 @@ def _versions_with_live_chunks(conn, source_system: str | None,
         "WHERE dc.superseded = 0")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " GROUP BY dc.document_version_id ORDER BY created"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return [row["vid"] for row in conn.execute(sql, params).fetchall()]
 

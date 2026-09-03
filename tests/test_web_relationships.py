@@ -40,8 +40,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, active_from, "
             " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'county', '2021-04-01', '2024', '2026', "
-            " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', ?)",
+            "VALUES (%s, %s, 'county', '2021-04-01', '2024', '2026', "
+            " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', %s)",
             (ons_code, name, f"authority-hash-{ons_code}"))
     conn.execute("INSERT INTO providers (provider_key, canonical_name, is_target, notes) "
                  "VALUES ('change-grow-live', 'Change Grow Live', 1, NULL)")
@@ -51,7 +51,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO contracts (notice_id, supplier_id, ocid, buyer_ons_code, "
         " supplier_name_raw, date_start, date_end, source_url, retrieved_at, "
         " http_status, source_system, payload_sha256) "
-        "VALUES ('notice-1', 'supplier-1', 'ocid-1', ?, 'Change Grow Live Ltd', "
+        "VALUES ('notice-1', 'supplier-1', 'ocid-1', %s, 'Change Grow Live Ltd', "
         " '2024-01-01', '2025-01-01', 'https://find-a-tender.example/n', "
         " '2026-08-01T00:00:00Z', 200, 'fts', 'contract-hash')",
         (BIRMINGHAM,))
@@ -170,7 +170,7 @@ def test_extracted_claim_relationships_are_excluded(warehouse, settings):
         "INSERT INTO entity_relationships (relationship_id, subject_entity_id, "
         " predicate, object_entity_id, relationship_type, "
         " confidence, derivation_type, created_at, updated_at) "
-        "VALUES ('rel:2', ?, 'AWARDED_TO', 'provider:unverified-lead', "
+        "VALUES ('rel:2', %s, 'AWARDED_TO', 'provider:unverified-lead', "
         " 'AWARDED_TO', 0.4, 'EXTRACTED_CLAIM', 'now', 'now')",
         (f"authority:{BIRMINGHAM}",))
     warehouse.commit()
@@ -191,12 +191,12 @@ def test_survives_a_warehouse_that_predates_the_graph_tables(conn, settings):
         "INSERT INTO authorities (ons_code, name, type, active_from, "
         " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
         " http_status, source_system, payload_sha256) "
-        "VALUES (?, 'Birmingham', 'county', '2021-04-01', '2024', '2026', "
+        "VALUES (%s, 'Birmingham', 'county', '2021-04-01', '2024', '2026', "
         " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
         (BIRMINGHAM,))
     for table in ("entity_relationships", "graph_claims", "entity_aliases",
                   "entity_identifiers", "evidence_records", "entities"):
-        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"DROP TABLE {table} CASCADE")
     conn.commit()
 
     ro = queries.readonly_connection(settings)
@@ -231,7 +231,7 @@ def timeline_client(warehouse, settings):
         " supplier_name_raw, title, value_core, currency, date_start, date_end, "
         " date_published, source_url, retrieved_at, http_status, source_system, "
         " payload_sha256) "
-        "VALUES ('notice-2', 'supplier-1', 'ocid-2', ?, 'Change Grow Live Ltd', "
+        "VALUES ('notice-2', 'supplier-1', 'ocid-2', %s, 'Change Grow Live Ltd', "
         " 'Adult treatment and recovery service', 2500000, 'GBP', '2022-01-01', "
         " '2023-12-31', '2021-11-15', 'https://find-a-tender.example/n2', "
         " '2026-08-02T00:00:00Z', 200, 'fts', 'contract-hash-2')",
@@ -305,7 +305,7 @@ def test_relationship_detail_rejects_a_non_awarded_edge(warehouse, settings):
         "INSERT INTO entity_relationships (relationship_id, subject_entity_id, "
         " predicate, object_entity_id, relationship_type, confidence, "
         " derivation_type, created_at, updated_at) "
-        "VALUES (?, 'provider:change-grow-live', 'REGISTERED_AS', "
+        "VALUES (%s, 'provider:change-grow-live', 'REGISTERED_AS', "
         " 'company:00000009', 'REGISTERED_AS', 1.0, 'SOURCE_FACT', 'now', 'now')",
         (edge_id,))
     warehouse.commit()

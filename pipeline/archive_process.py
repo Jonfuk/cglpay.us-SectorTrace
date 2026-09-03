@@ -112,7 +112,7 @@ def _upsert_object(conn, object_id: str, source: str, sha: str, logical: str,
     conn.execute(
         "INSERT INTO archive_objects "
         "(object_id, source_system, payload_sha256, logical_path, mime_type, size_bytes, first_seen_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (object_id) DO UPDATE SET last_seen_at = excluded.last_seen_at, "
         "mime_type = excluded.mime_type, size_bytes = excluded.size_bytes",
         (object_id, source, sha, logical, mime_type, size, now, now),
@@ -151,7 +151,7 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
     conn.execute(
         "INSERT INTO archive_extraction_runs "
         "(run_id, started_at, status, extractor_name, extractor_version, object_count) "
-        "VALUES (?, ?, 'running', ?, ?, ?)",
+        "VALUES (%s, %s, 'running', %s, %s, %s)",
         (run_id, started, extractor_name, extractor_version, len(candidates)),
     )
     conn.commit()
@@ -171,7 +171,7 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
             _upsert_object(conn, object_id, source, sha, logical, mime_type, len(body), now)
             existing = conn.execute(
                 "SELECT extraction_id FROM archive_extractions "
-                "WHERE object_id = ? AND extractor_name = ? AND extractor_version = ?",
+                "WHERE object_id = %s AND extractor_name = %s AND extractor_version = %s",
                 (object_id, extractor_name, extractor_version),
             ).fetchone()
             if existing is not None and not force:
@@ -192,9 +192,9 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
                 storage_path = destination.relative_to(Path(settings.raw_archive_dir).parent).as_posix()
                 text_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
             evidence = conn.execute(
-                "SELECT evidence_id FROM evidence_records WHERE payload_sha256 = ? "
+                "SELECT evidence_id FROM evidence_records WHERE payload_sha256 = %s "
                 "ORDER BY evidence_id LIMIT 1", (sha,)).fetchone()
-            evidence_id = evidence[0] if evidence else None
+            evidence_id = evidence["evidence_id"] if evidence else None
             extraction_id = hashlib.sha256(
                 f"{object_id}|{extractor_name}|{extractor_version}".encode()).hexdigest()
             conn.execute(
@@ -202,7 +202,7 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
                 "(extraction_id, run_id, object_id, evidence_id, extractor_name, extractor_version, "
                 "parser_name, parser_version, status, text_storage_path, text_sha256, character_count, "
                 "metadata_json, error_detail, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, %s) "
                 "ON CONFLICT (object_id, extractor_name, extractor_version) DO UPDATE SET "
                 "extraction_id = excluded.extraction_id, run_id = excluded.run_id, evidence_id = excluded.evidence_id, "
                 "parser_name = excluded.parser_name, parser_version = excluded.parser_version, status = excluded.status, "
@@ -219,25 +219,26 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
             counts["failed"] += 1
             conn.execute("INSERT INTO archive_objects "
                          "(object_id, source_system, payload_sha256, logical_path, mime_type, size_bytes, first_seen_at, last_seen_at) "
-                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
                          "ON CONFLICT (object_id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
                          (object_id, source, sha, logical, mime_type, int(row.get("bytes", 0)), now, now))
             extraction_id = hashlib.sha256(
                 f"{object_id}|{extractor_name}|{extractor_version}".encode()).hexdigest()
             evidence = conn.execute(
-                "SELECT evidence_id FROM evidence_records WHERE payload_sha256 = ? "
+                "SELECT evidence_id FROM evidence_records WHERE payload_sha256 = %s "
                 "ORDER BY evidence_id LIMIT 1", (sha,)).fetchone()
             conn.execute(
                 "INSERT INTO archive_extractions "
                 "(extraction_id, run_id, object_id, evidence_id, extractor_name, extractor_version, "
                 "parser_name, parser_version, status, character_count, metadata_json, error_detail, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'error', ?, 'failed', 0, ?, ?, ?) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'error', %s, 'failed', 0, %s, %s, %s) "
                 "ON CONFLICT (object_id, extractor_name, extractor_version) DO UPDATE SET "
                 "extraction_id = excluded.extraction_id, run_id = excluded.run_id, evidence_id = excluded.evidence_id, "
                 "parser_name = excluded.parser_name, parser_version = excluded.parser_version, status = excluded.status, "
                 "text_storage_path = NULL, text_sha256 = NULL, character_count = 0, "
                 "metadata_json = excluded.metadata_json, error_detail = excluded.error_detail, created_at = excluded.created_at",
-                (extraction_id, run_id, object_id, evidence[0] if evidence else None,
+                (extraction_id, run_id, object_id,
+                 evidence["evidence_id"] if evidence else None,
                  extractor_name, extractor_version, PARSER_VERSION,
                  json.dumps({"logical_path": logical}, sort_keys=True), str(exc)[:2000], now),
             )
@@ -248,8 +249,8 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
 
     completed = _now()
     conn.execute(
-        "UPDATE archive_extraction_runs SET completed_at = ?, status = ?, processed_count = ?, "
-        "skipped_count = ?, failed_count = ? WHERE run_id = ?",
+        "UPDATE archive_extraction_runs SET completed_at = %s, status = %s, processed_count = %s, "
+        "skipped_count = %s, failed_count = %s WHERE run_id = %s",
         (completed, "failed" if counts["failed"] else "completed", counts["processed"],
          counts["skipped"], counts["failed"], run_id),
     )

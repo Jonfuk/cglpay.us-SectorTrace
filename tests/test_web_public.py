@@ -48,8 +48,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'Birmingham City Council', 'E08000025', ?, "
-            " 'Treatment services', ?, 'GBP', '2026-03-01', 'open', 0, "
+            "VALUES (%s, %s, 'Birmingham City Council', 'E08000025', %s, "
+            " 'Treatment services', %s, 'GBP', '2026-03-01', 'open', 0, "
             " 'https://find.example/n', '2026-08-01T00:00:00Z', 200, "
             " 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", supplier, value))
@@ -582,7 +582,7 @@ def _seed_cqc_location(warehouse, location_id, **overrides):
         **overrides,
     }
     columns = ", ".join(row)
-    placeholders = ", ".join(f":{c}" for c in row)
+    placeholders = ", ".join(f"%({c})s" for c in row)
     warehouse.execute(f"INSERT INTO cqc_locations ({columns}) VALUES ({placeholders})", row)
     warehouse.commit()
 

@@ -13,7 +13,7 @@ def test_process_archive_extracts_and_is_idempotent(conn, settings):
     conn.execute(
         "INSERT INTO evidence_records "
         "(evidence_id, source_system, source_url, retrieved_at, payload_sha256, raw_object_path, mime_type, content_length, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         ("ev-1", "council_papers", "https://example.test/paper", "2026-01-01T00:00:00+00:00",
          sha, logical, "text/html", len(html), "2026-01-01T00:00:00+00:00"),
     )
@@ -50,4 +50,4 @@ def test_process_archive_records_json_as_derived_text(conn, settings):
     assert row["status"] == "extracted"
     assert row["parser_name"] == "json"
     assert row["character_count"] > 0
-    assert conn.execute("SELECT COUNT(*) FROM graph_claims").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM graph_claims").fetchone().values().__iter__().__next__() == 0

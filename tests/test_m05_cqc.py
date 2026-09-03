@@ -46,7 +46,7 @@ def _seed_authority(conn, ons_code: str, name: str) -> None:
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'metropolitan_district', '2020-01-01', 'x', 'x', 'https://example.com', "
+        "VALUES (%s, %s, 'metropolitan_district', '2020-01-01', 'x', 'x', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')",
         (ons_code, name))
 
@@ -57,7 +57,7 @@ def _seed_cqc_provider(conn, provider_id: str = "1-125892604") -> None:
     conn.execute(
         "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, 'change_grow_live', 'Change, Grow, Live', 'https://example.com', "
+        "VALUES (%s, 'change_grow_live', 'Change, Grow, Live', 'https://example.com', "
         "'2026-01-01T00:00:00Z', 200, 'test', 'abc') "
         "ON CONFLICT (provider_id) DO NOTHING",
         (provider_id,))
@@ -216,7 +216,7 @@ def test_registered_manager_names_go_only_to_restricted_table(conn):
     assert contact["person_role"] == "Registered Manager"
 
     public_blob = " ".join(
-        str(v) for v in tuple(conn.execute("SELECT * FROM cqc_locations").fetchone())
+        str(v) for v in conn.execute("SELECT * FROM cqc_locations").fetchone().values()
         if v is not None)
     assert "Roe" not in public_blob
     assert "Alex" not in public_blob

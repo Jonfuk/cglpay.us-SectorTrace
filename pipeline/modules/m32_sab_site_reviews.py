@@ -348,7 +348,7 @@ def run(ctx: ModuleContext) -> None:
     if ctx.limit:
         boards = boards[:ctx.limit]
 
-    existing_sha = {row[0] for row in conn.execute(
+    existing_sha = {row["payload_sha256"] for row in conn.execute(
         "SELECT payload_sha256 FROM sar_documents").fetchall()}
 
     ingested = candidates = 0
@@ -523,5 +523,5 @@ def run(ctx: ModuleContext) -> None:
 
 def _already_ingested(conn, document_url: str) -> bool:
     return conn.execute(
-        "SELECT 1 FROM sar_documents WHERE document_url = ?", (document_url,)
+        "SELECT 1 FROM sar_documents WHERE document_url = %s", (document_url,)
     ).fetchone() is not None

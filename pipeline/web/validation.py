@@ -20,7 +20,6 @@ import re
 from datetime import date, timedelta
 from urllib.parse import urlsplit
 
-from pipeline import db
 from pipeline.validation_rules import (
     EXAMPLE_REDACTION,
     PURPOSE_BY_KIND,
@@ -86,7 +85,7 @@ def _schema_rules(conn) -> list[dict]:
             row["column_name"]
             for row in conn.execute(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = current_schema() AND table_name = ? "
+                "WHERE table_schema = current_schema() AND table_name = %s "
                 "AND is_nullable = 'NO'", (table,))
         }
         enforced = [name for name in provenance if name in notnull]
@@ -142,7 +141,7 @@ def _schema_rules(conn) -> list[dict]:
 def _parse_rules(conn, since: str) -> list[dict]:
     rows = conn.execute(
         "SELECT module, field_name, COUNT(*) AS total, "
-        "  SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS recent, "
+        "  SUM(CASE WHEN created_at >= %s THEN 1 ELSE 0 END) AS recent, "
         "  MIN(created_at) AS first_seen, MAX(created_at) AS last_seen "
         "FROM parse_failures GROUP BY module, field_name "
         "ORDER BY total DESC, module, field_name", (since,)).fetchall()
@@ -152,7 +151,7 @@ def _parse_rules(conn, since: str) -> list[dict]:
         rid = f"parse:{module}:{field or '—'}"
         reasons = [r["reason"] for r in conn.execute(
             "SELECT DISTINCT reason FROM parse_failures "
-            "WHERE module = ? AND field_name IS NOT DISTINCT FROM ? AND reason IS NOT NULL "
+            "WHERE module = %s AND field_name IS NOT DISTINCT FROM %s AND reason IS NOT NULL "
             "ORDER BY reason LIMIT 8", (module, field)).fetchall()]
         examples = [{
             "field": ex["field_name"],
@@ -163,8 +162,8 @@ def _parse_rules(conn, since: str) -> list[dict]:
             "chars": len(ex["raw_fragment"] or ""),
         } for ex in conn.execute(
             "SELECT field_name, reason, source_url, raw_fragment, created_at "
-            "FROM parse_failures WHERE module = ? AND field_name IS NOT DISTINCT FROM ? "
-            "ORDER BY created_at DESC LIMIT ?",
+            "FROM parse_failures WHERE module = %s AND field_name IS NOT DISTINCT FROM %s "
+            "ORDER BY created_at DESC LIMIT %s",
             (module, field, _EXAMPLES_PER_RULE)).fetchall()]
         out.append({
             "id": rid, "kind": "parse_failure",
@@ -184,7 +183,7 @@ def _review_rules(conn, since: str) -> list[dict]:
         "SELECT module, item_type, "
         "  SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, "
         "  SUM(CASE WHEN status <> 'pending' THEN 1 ELSE 0 END) AS resolved, "
-        "  SUM(CASE WHEN resolved_at >= ? THEN 1 ELSE 0 END) AS resolved_recent, "
+        "  SUM(CASE WHEN resolved_at >= %s THEN 1 ELSE 0 END) AS resolved_recent, "
         "  COUNT(*) AS total "
         "FROM review_queue GROUP BY module, item_type "
         "ORDER BY pending DESC, module, item_type", (since,)).fetchall()
@@ -221,7 +220,7 @@ def rules(conn, *, today: str | None = None) -> dict:
     return {
         "as_of": as_of.isoformat(),
         "window_days": _WINDOW_DAYS,
-        "backend": db.backend_of(conn),
+        "backend": "postgres",
         "schema_rules": schema,
         "observed_rules": [*parse, *review],
         "counts": {"by_kind": by_kind},

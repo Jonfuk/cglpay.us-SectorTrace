@@ -22,7 +22,7 @@ from pipeline.web.server import build_server
 def _add(conn, *, module, item_type, raw_value, context=None, status="pending"):
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, "
-        "status, created_at) VALUES (?, ?, ?, ?, ?, '2026-08-20T00:00:00Z')",
+        "status, created_at) VALUES (%s, %s, %s, %s, %s, '2026-08-20T00:00:00Z')",
         (module, item_type, raw_value,
          json.dumps(context) if context is not None else "{}", status))
 

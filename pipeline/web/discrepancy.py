@@ -27,32 +27,32 @@ _PROVIDER_CHECKS = (
     {"id": "legal_name", "label": "Provider / employer name", "sources": (
         {"source": "SectorTrace canonical",
          "sql": "SELECT canonical_name AS value, NULL AS as_of, NULL AS source_url "
-                "FROM providers WHERE provider_key = ?"},
+                "FROM providers WHERE provider_key = %s"},
         {"source": "Companies House",
          "sql": "SELECT DISTINCT company_name AS value, retrieved_at AS as_of, "
-                "source_url FROM companies WHERE provider_key = ? "
+                "source_url FROM companies WHERE provider_key = %s "
                 "AND company_name IS NOT NULL"},
         {"source": "CQC provider register",
          "sql": "SELECT DISTINCT provider_name AS value, retrieved_at AS as_of, "
-                "source_url FROM cqc_providers WHERE provider_key = ? "
+                "source_url FROM cqc_providers WHERE provider_key = %s "
                 "AND provider_name IS NOT NULL"},
         {"source": "Gender pay gap filing",
          "sql": "SELECT DISTINCT employer_name AS value, retrieved_at AS as_of, "
-                "source_url FROM gender_pay_gap_reports WHERE provider_key = ? "
+                "source_url FROM gender_pay_gap_reports WHERE provider_key = %s "
                 "AND employer_name IS NOT NULL"},
     )},
     {"id": "company_number", "label": "Company number", "sources": (
         {"source": "SectorTrace identifier register",
          "sql": "SELECT DISTINCT identifier AS value, NULL AS as_of, "
                 "NULL AS source_url FROM provider_identifiers "
-                "WHERE provider_key = ? AND scheme = 'company_number'"},
+                "WHERE provider_key = %s AND scheme = 'company_number'"},
         {"source": "Companies House",
          "sql": "SELECT DISTINCT company_number AS value, retrieved_at AS as_of, "
-                "source_url FROM companies WHERE provider_key = ? "
+                "source_url FROM companies WHERE provider_key = %s "
                 "AND company_number IS NOT NULL"},
         {"source": "Gender pay gap filing",
          "sql": "SELECT DISTINCT company_number AS value, retrieved_at AS as_of, "
-                "source_url FROM gender_pay_gap_reports WHERE provider_key = ? "
+                "source_url FROM gender_pay_gap_reports WHERE provider_key = %s "
                 "AND company_number IS NOT NULL"},
     )},
 )
@@ -61,16 +61,16 @@ _AUTHORITY_CHECKS = (
     {"id": "authority_name", "label": "Authority name", "sources": (
         {"source": "ONS geography",
          "sql": "SELECT name AS value, retrieved_at AS as_of, source_url "
-                "FROM authorities WHERE ons_code = ?"},
+                "FROM authorities WHERE ons_code = %s"},
         {"source": "Procurement notices (buyer)",
          "sql": "SELECT DISTINCT buyer_name AS value, MAX(retrieved_at) AS as_of, "
                 "MIN(source_url) AS source_url FROM contracts "
-                "WHERE buyer_ons_code = ? AND buyer_name IS NOT NULL "
+                "WHERE buyer_ons_code = %s AND buyer_name IS NOT NULL "
                 "GROUP BY buyer_name"},
         {"source": "NDTMS statistics",
          "sql": "SELECT DISTINCT area_name_raw AS value, MAX(retrieved_at) AS as_of, "
                 "MIN(source_url) AS source_url FROM ndtms_la_statistics "
-                "WHERE ons_code = ? AND area_name_raw IS NOT NULL "
+                "WHERE ons_code = %s AND area_name_raw IS NOT NULL "
                 "GROUP BY area_name_raw"},
     )},
 )
@@ -110,7 +110,7 @@ def _cqc_rating_rows(conn: sqlite3.Connection, provider_key: str) -> list[dict]:
         SELECT location_id, location_name, overall_rating, overall_rating_date,
                bulk_overall_rating, bulk_overall_rating_date, source_url, retrieved_at
         FROM cqc_locations
-        WHERE provider_key = ? AND overall_rating IS NOT NULL
+        WHERE provider_key = %s AND overall_rating IS NOT NULL
           AND bulk_overall_rating IS NOT NULL
           AND overall_rating <> bulk_overall_rating""", (provider_key,)):
         out.append({
@@ -134,14 +134,14 @@ def check(conn: sqlite3.Connection, *, provider_key: str | None = None,
         raise QueryError("give exactly one of provider_key or ons_code")
 
     if provider_key:
-        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = ?",
+        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = %s",
                    (provider_key,))
         if not row:
             raise QueryError(f"No provider {provider_key!r}.")
         entity = {"kind": "provider", "id": provider_key, "name": row["canonical_name"]}
         checks_def, ident = _PROVIDER_CHECKS, provider_key
     else:
-        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = ?", (ons_code,))
+        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = %s", (ons_code,))
         if not row:
             raise QueryError(f"No authority {ons_code!r}.")
         entity = {"kind": "authority", "id": ons_code, "name": row["name"]}

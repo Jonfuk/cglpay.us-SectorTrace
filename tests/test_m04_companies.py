@@ -225,7 +225,7 @@ def test_officers_go_only_to_the_restricted_table(httpx_mock, settings, conn):
 
     # the public companies row must not contain any officer name
     company_blob = " ".join(
-        str(v) for v in tuple(conn.execute("SELECT * FROM companies").fetchone()) if v is not None)
+        str(v) for v in conn.execute("SELECT * FROM companies").fetchone().values() if v is not None)
     assert "A Person" not in company_blob
     assert "B Person" not in company_blob
 
@@ -397,7 +397,7 @@ def test_psc_edges_are_stored_with_names_only_in_the_restricted_table(
         "right-to-appoint-and-remove-directors"
     assert individual["notifiable"] == 1
     # the public row carries no name, no date of birth, no nationality
-    public_blob = " ".join(str(v) for v in tuple(individual) if v is not None)
+    public_blob = " ".join(str(v) for v in individual.values() if v is not None)
     assert "SOMEONE" not in public_blob and "1980" not in public_blob
 
     restricted = conn.execute(

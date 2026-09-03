@@ -76,11 +76,11 @@ def _scoped_mentions(conn, source_system: str | None, limit: int | None) -> list
         "AND m.document_element_id IS NOT NULL")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " ORDER BY m.document_concept_mention_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 
@@ -95,7 +95,7 @@ def _local_authority_index(conn) -> dict[str, str]:
 
 def _provider_entity_exists(conn, entity_id: str) -> bool:
     return conn.execute(
-        "SELECT 1 FROM entities WHERE entity_id = ? AND entity_type = 'PROVIDER'",
+        "SELECT 1 FROM entities WHERE entity_id = %s AND entity_type = 'PROVIDER'",
         (entity_id,)).fetchone() is not None
 
 
@@ -120,9 +120,9 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
         # below is idempotent, so splitting it across statements is harmless.
         for start in range(0, len(element_ids), _DELETE_BATCH):
             batch = element_ids[start:start + _DELETE_BATCH]
-            placeholders = ",".join("?" for _ in batch)
+            placeholders = ",".join("%s" for _ in batch)
             conn.execute(
-                f"DELETE FROM document_entity_mentions WHERE match_method LIKE '%+alias' "
+                f"DELETE FROM document_entity_mentions WHERE match_method LIKE '%%+alias' "
                 f"AND document_element_id IN ({placeholders})", batch)
 
         for m in mentions:
@@ -142,7 +142,7 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
             conn.execute(
                 "INSERT INTO document_entity_mentions (document_entity_mention_id, "
                 "document_element_id, entity_id, matched_text, match_method, start_offset, end_offset) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT(document_entity_mention_id) DO NOTHING",
                 (_mention_id(m["document_element_id"], entity_id, m["element_char_start"],
                              m["element_char_end"], method),

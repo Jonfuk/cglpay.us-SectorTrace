@@ -52,13 +52,13 @@ def compute(conn) -> dict:
     missing_refs = 0
     if catalog.object_type(conn, "evidence_records"):
         missing_refs = conn.execute(
-            "SELECT COUNT(DISTINCT e.payload_sha256) FROM evidence_records e "
+            "SELECT COUNT(DISTINCT e.payload_sha256) AS count FROM evidence_records e "
             "WHERE e.payload_sha256 IS NOT NULL AND e.payload_sha256 NOT IN "
-            "(SELECT payload_sha256 FROM archive_objects)").fetchone()[0]
+            "(SELECT payload_sha256 FROM archive_objects)").fetchone()["count"]
 
     duplicate_hashes = conn.execute(
-        "SELECT COUNT(*) FROM (SELECT payload_sha256 FROM archive_objects "
-        "GROUP BY payload_sha256 HAVING COUNT(*) > 1)").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM (SELECT payload_sha256 FROM archive_objects "
+        "GROUP BY payload_sha256 HAVING COUNT(*) > 1) AS duplicate_groups").fetchone()["count"]
 
     # A deterministic sample — the objects with the lexicographically smallest
     # hashes — so the same warehouse produces the same sample and a value that
@@ -70,7 +70,7 @@ def compute(conn) -> dict:
          "logical_path": row["logical_path"]}
         for row in conn.execute(
             "SELECT payload_sha256, source_system, size_bytes, logical_path "
-            "FROM archive_objects ORDER BY payload_sha256 LIMIT ?", (_SAMPLE_SIZE,))
+            "FROM archive_objects ORDER BY payload_sha256 LIMIT %s", (_SAMPLE_SIZE,))
     ]
 
     return {
@@ -92,7 +92,7 @@ def record(conn, settings) -> dict:
     conn.execute(
         "INSERT INTO archive_audits (audit_id, run_at, object_count, "
         " total_bytes, by_source_json, missing_refs, duplicate_hashes, "
-        " sample_json, git_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " sample_json, git_revision) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (audit_id, run_at, metrics["object_count"], metrics["total_bytes"],
          json.dumps(metrics["by_source"], sort_keys=True), metrics["missing_refs"],
          metrics["duplicate_hashes"], json.dumps(metrics["sample"]), revision))
@@ -108,7 +108,7 @@ def history(conn, limit: int = 30) -> list[dict]:
     rows = [dict(r) for r in conn.execute(
         "SELECT audit_id, run_at, object_count, total_bytes, by_source_json, "
         "missing_refs, duplicate_hashes, sample_json, git_revision "
-        "FROM archive_audits ORDER BY run_at DESC LIMIT ?", (limit,)).fetchall()]
+        "FROM archive_audits ORDER BY run_at DESC LIMIT %s", (limit,)).fetchall()]
     for row in rows:
         for raw_key, out_key in (("by_source_json", "by_source"),
                                   ("sample_json", "sample")):

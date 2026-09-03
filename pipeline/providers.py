@@ -688,7 +688,7 @@ def record_discovered_identifier(
 
     identifier = normalise_identifier(scheme, identifier)
     existing = conn.execute(
-        "SELECT status FROM provider_identifiers WHERE provider_key = ? AND scheme = ? AND identifier = ?",
+        "SELECT status FROM provider_identifiers WHERE provider_key = %s AND scheme = %s AND identifier = %s",
         (provider_key, scheme, identifier),
     ).fetchone()
     if existing and existing["status"] == "verified":

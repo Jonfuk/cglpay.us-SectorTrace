@@ -43,7 +43,7 @@ FROM claim_candidate_decisions d
 JOIN document_claim_candidates c ON c.claim_candidate_id = d.claim_candidate_id
 JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id
 LEFT JOIN document_embeddings em
-       ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = ?
+       ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = %s
 ORDER BY d.decided_at, d.id
 """
 
@@ -126,7 +126,7 @@ SELECT dc.document_chunk_id AS document_chunk_id,
        em.embedding         AS embedding
 FROM document_chunks dc
 JOIN document_embeddings em
-  ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = ?
+  ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = %s
 WHERE dc.superseded = 0
 ORDER BY dc.document_chunk_id
 """

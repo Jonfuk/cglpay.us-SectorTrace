@@ -81,7 +81,7 @@ def _add_authority(conn, ons_code: str, name: str, kind: str = "unitary") -> Non
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, '2020-01-01', 'x', 'x', 'https://example.com', "
+        "VALUES (%s, %s, %s, '2020-01-01', 'x', 'x', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (ons_code, name, kind))
 
 
@@ -176,7 +176,7 @@ def _add_successor(conn, predecessor: str, successor: str, overlap: float) -> No
         "INSERT INTO authority_successors (predecessor_code, successor_code, "
         "overlap_fraction, method, transition_from_vintage, transition_to_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, 'geometry_overlap', 'A', 'B', 'https://example.com', "
+        "VALUES (%s, %s, %s, 'geometry_overlap', 'A', 'B', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (predecessor, successor, overlap))
 
 

@@ -130,9 +130,9 @@ def test_suggest_honours_limit_and_records_a_run(conn):
     out = review_suggest.suggest(conn, rows, models=["m/x"], api_key="k",
                                  rate=0, limit=2, ask=_ask("reject"))
     assert out["asked"] == 2 and out["rejected"] == 2
-    row = conn.execute("SELECT stage, model_key, status FROM nlp_runs WHERE run_id = ?",
+    row = conn.execute("SELECT stage, model_key, status FROM nlp_runs WHERE run_id = %s",
                        (out["run_id"],)).fetchone()
-    assert tuple(row) == ("review_suggest", "m/x", "ok")
+    assert (row["stage"], row["model_key"], row["status"]) == ("review_suggest", "m/x", "ok")
 
 
 # --- ensemble --------------------------------------------------------

@@ -96,7 +96,7 @@ def coverage(conn: db.Connection, tier: str = "upper") -> dict:
         raise queries.QueryError(f"tier must be 'upper' or 'all', got {tier!r}.")
 
     if tier == "upper":
-        placeholders = ", ".join("?" for _ in UPPER_TIER)
+        placeholders = ", ".join("%s" for _ in UPPER_TIER)
         authorities = conn.execute(
             f"SELECT ons_code, name, type, region FROM authorities "
             f"WHERE type IN ({placeholders}) ORDER BY region, name", UPPER_TIER).fetchall()
@@ -204,7 +204,7 @@ def extensions(conn: db.Connection) -> list[dict]:
     so this needs none of the privilege `_postgres_integrity` goes without.
     """
     names = db.WAREHOUSE_EXTENSIONS
-    placeholders = ",".join("?" for _ in names)
+    placeholders = ",".join("%s" for _ in names)
     seen = {
         row["name"]: row for row in conn.execute(
             f"SELECT e.name, e.default_version, i.extversion AS installed_version "
@@ -289,8 +289,8 @@ def graph_status(conn: db.Connection) -> dict:
         "relationship_count, claim_count, error_detail "
         "FROM graph_projection_runs ORDER BY started_at DESC LIMIT 1").fetchone()
     pending = conn.execute(
-        "SELECT COUNT(*) FROM graph_projection_queue "
-        "WHERE processed_at IS NULL").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM graph_projection_queue "
+        "WHERE processed_at IS NULL").fetchone()["count"]
     return {
         "last_run": dict(last_run) if last_run else None,
         "pending_queue": int(pending),
@@ -315,14 +315,14 @@ def document_status(conn: db.Connection) -> dict:
         return {"registered": 0, "parsed": 0, "failed": 0, "documents": 0}
 
     registered = conn.execute(
-        "SELECT COUNT(*) FROM document_processing_states").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM document_processing_states").fetchone()["count"]
     parsed = conn.execute(
-        "SELECT COUNT(*) FROM document_processing_states "
-        "WHERE parse_status = 'SUCCESS'").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM document_processing_states "
+        "WHERE parse_status = 'SUCCESS'").fetchone()["count"]
     failed = conn.execute(
-        "SELECT COUNT(*) FROM document_processing_states "
-        "WHERE parse_status = 'FAILED'").fetchone()[0]
-    documents = conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM document_processing_states "
+        "WHERE parse_status = 'FAILED'").fetchone()["count"]
+    documents = conn.execute("SELECT COUNT(*) AS count FROM document_records").fetchone()["count"]
     return {"registered": int(registered), "parsed": int(parsed),
             "failed": int(failed), "documents": int(documents)}
 
@@ -531,18 +531,18 @@ def failures(conn: db.Connection, module: str | None = None,
     where = []
     params: list = []
     if module:
-        where.append("module = ?")
+        where.append("module = %s")
         params.append(module)
     if search:
-        where.append("(reason LIKE ? ESCAPE '\\' OR raw_fragment LIKE ? ESCAPE '\\' "
-                      "OR field_name LIKE ? ESCAPE '\\' OR source_url LIKE ? ESCAPE '\\')")
+        where.append("(reason LIKE %s ESCAPE '\\' OR raw_fragment LIKE %s ESCAPE '\\' "
+                      "OR field_name LIKE %s ESCAPE '\\' OR source_url LIKE %s ESCAPE '\\')")
         params.extend([f"%{queries.escape_like(search)}%"] * 4)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     limit = max(1, min(limit, queries.MAX_PAGE_SIZE))
 
     total = conn.execute(
-        f"SELECT COUNT(*) FROM parse_failures {clause}", params).fetchone()[0]
+        f"SELECT COUNT(*) AS count FROM parse_failures {clause}", params).fetchone()["count"]
 
     groups = [dict(row) for row in conn.execute(
         f"SELECT module, field_name, reason, COUNT(*) AS n, "
@@ -553,7 +553,7 @@ def failures(conn: db.Connection, module: str | None = None,
     rows = [dict(row) for row in conn.execute(
         f"SELECT id, module, field_name, reason, raw_fragment, source_url, created_at "
         f"FROM parse_failures {clause} ORDER BY created_at DESC, id DESC "
-        f"LIMIT ? OFFSET ?", [*params, limit, offset])]
+        f"LIMIT %s OFFSET %s", [*params, limit, offset])]
 
     modules = [row["module"] for row in conn.execute(
         "SELECT module, COUNT(*) AS n FROM parse_failures "
@@ -616,8 +616,8 @@ def _postgres_integrity(conn) -> list[dict]:
     def columns_of(table: str, numbers) -> list[str]:
         rows = conn.execute(
             "SELECT a.attname AS name FROM pg_attribute a "
-            "WHERE a.attrelid = to_regclass(?) AND a.attnum = ANY(?) "
-            "ORDER BY array_position(?, a.attnum)",
+            "WHERE a.attrelid = to_regclass(%s) AND a.attnum = ANY(%s) "
+            "ORDER BY array_position(%s, a.attnum)",
             (table, list(numbers), list(numbers))).fetchall()
         return [r["name"] for r in rows]
 
@@ -646,10 +646,10 @@ def _postgres_integrity(conn) -> list[dict]:
             f"p.{catalog.quote(p)} = c.{catalog.quote(c)}"
             for p, c in zip(parent_columns, child_columns))
         count = conn.execute(
-            f"SELECT COUNT(*) FROM {catalog.quote(row['child'])} c "
+            f"SELECT COUNT(*) AS count FROM {catalog.quote(row['child'])} c "
             f"WHERE {present} AND NOT EXISTS ("
             f"  SELECT 1 FROM {catalog.quote(row['parent'])} p WHERE {joined})"
-        ).fetchone()[0]
+        ).fetchone()["count"]
         swept += 1
         if count:
             violations.append({"table": row["child"], "parent": row["parent"],

@@ -231,7 +231,7 @@ def _scope_version_ids(conn, source_system: str | None) -> set[str] | None:
         "SELECT v.document_version_id FROM document_versions v "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE v.is_active = 1 AND e.source_system = ?", (source_system,)).fetchall()
+        "WHERE v.is_active = 1 AND e.source_system = %s", (source_system,)).fetchall()
     return {row["document_version_id"] for row in rows}
 
 
@@ -243,18 +243,18 @@ def _pending_chunks(conn, model_key: str, version_ids: set[str] | None,
     sql = (
         "SELECT dc.document_chunk_id, dc.text FROM document_chunks dc "
         "LEFT JOIN document_embeddings em ON em.document_chunk_id = dc.document_chunk_id "
-        "AND em.model_key = ? "
+        "AND em.model_key = %s "
         "WHERE dc.superseded = 0 AND em.document_chunk_id IS NULL")
     params: list = [model_key]
     if version_ids is not None:
         if not version_ids:
             return []
-        placeholders = ",".join("?" for _ in version_ids)
+        placeholders = ",".join("%s" for _ in version_ids)
         sql += f" AND dc.document_version_id IN ({placeholders})"
         params.extend(sorted(version_ids))
     sql += " ORDER BY dc.created_at, dc.document_chunk_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 
@@ -291,7 +291,7 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
         insert_sql = (
             "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
             "embedding, embedding_vec, nlp_run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?::public.vector, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s::public.vector, %s, %s) "
             "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
             "dimension=excluded.dimension, embedding=excluded.embedding, "
             "embedding_vec=excluded.embedding_vec, "
@@ -299,7 +299,7 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
     else:
         insert_sql = (
             "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
-            "embedding, nlp_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "embedding, nlp_run_id, created_at) VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
             "dimension=excluded.dimension, embedding=excluded.embedding, "
             "nlp_run_id=excluded.nlp_run_id, created_at=excluded.created_at")
@@ -348,7 +348,7 @@ def _set_vector_search_path(conn) -> None:
     if not extension:
         return
     conn.execute(
-        "SELECT set_config('search_path', ?, true)",
+        "SELECT set_config('search_path', %s, true)",
         (f"{extension['application_schema']},"
          f"{extension['vector_schema']},pg_catalog",))
 
@@ -399,10 +399,10 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
             f"embedding_vec public.vector({VECTOR_COLUMN_DIM})")
 
     sql = ("SELECT document_chunk_id, model_key, embedding FROM document_embeddings "
-           "WHERE embedding_vec IS NULL AND dimension = ?")
+           "WHERE embedding_vec IS NULL AND dimension = %s")
     params: list = [VECTOR_COLUMN_DIM]
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     pending = conn.execute(sql, params).fetchall()
 
@@ -425,8 +425,8 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         chunk = pending[start:start + max(1, batch_size)]
         _set_vector_search_path(conn)
         conn.executemany(
-            "UPDATE document_embeddings SET embedding_vec = ?::public.vector "
-            "WHERE document_chunk_id = ? AND model_key = ?",
+            "UPDATE document_embeddings SET embedding_vec = %s::public.vector "
+            "WHERE document_chunk_id = %s AND model_key = %s",
             [(vec_literal(unpack(r["embedding"])), r["document_chunk_id"], r["model_key"])
              for r in chunk])
         conn.commit()

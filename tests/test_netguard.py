@@ -235,6 +235,6 @@ def test_promotion_refuses_a_candidate_pointing_inward(settings, conn):
                          promoted_by="Jon", fields={"document_type": "strategy"},
                          settings=settings, resolver=_private)
 
-    assert conn.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 0
     assert conn.execute(
-        "SELECT COUNT(*) FROM evidence_promotions").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM evidence_promotions").fetchone().values().__iter__().__next__() == 0

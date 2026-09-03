@@ -48,15 +48,15 @@ def diary(conn: sqlite3.Connection, *, provider_key: str | None = None,
     if provider_key:
         where.append(
             "c.supplier_name_raw IN (SELECT alias_raw FROM supplier_aliases "
-            "WHERE supplier_key = ?)")
+            "WHERE supplier_key = %s)")
         params.append(provider_key)
         scope = {"kind": "provider", "id": provider_key}
     if buyer_ons_code:
-        where.append("c.buyer_ons_code = ?")
+        where.append("c.buyer_ons_code = %s")
         params.append(buyer_ons_code)
         scope = scope or {"kind": "authority", "id": buyer_ons_code}
     if ocid:
-        where.append("c.ocid = ?")
+        where.append("c.ocid = %s")
         params.append(ocid)
         scope = scope or {"kind": "ocid", "id": ocid}
     if not (provider_key or buyer_ons_code or ocid):

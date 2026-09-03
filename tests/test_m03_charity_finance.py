@@ -241,7 +241,7 @@ def _insert_extract(conn, **overrides):
     }
     row.update(overrides)
     cols = ", ".join(row)
-    placeholders = ", ".join(f":{c}" for c in row)
+    placeholders = ", ".join(f"%({c})s" for c in row)
     conn.execute(f"INSERT INTO charity_accounts_extracts ({cols}) VALUES ({placeholders})", row)
 
 

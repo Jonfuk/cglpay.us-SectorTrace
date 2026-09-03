@@ -58,8 +58,8 @@ _SOURCE_BLOCKED: dict[str, str] = {
 def _pending_by_module(conn) -> dict[str, int]:
     if not catalog.object_type(conn, "review_queue"):
         return {}
-    return {row[0]: row[1] for row in conn.execute(
-        "SELECT module, COUNT(*) FROM review_queue WHERE status = 'pending' "
+    return {row["module"]: row["count"] for row in conn.execute(
+        "SELECT module, COUNT(*) AS count FROM review_queue WHERE status = 'pending' "
         "AND module IS NOT NULL GROUP BY module")}
 
 

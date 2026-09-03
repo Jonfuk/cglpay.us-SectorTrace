@@ -29,7 +29,7 @@ def save(conn, key: str, payload: Any, *, source_version: str | None = None,
     conn.execute(
         "INSERT INTO operational_snapshots "
         "(snapshot_key, payload_json, captured_at, duration_ms, source_version, stale, refresh_error) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (snapshot_key) DO UPDATE SET "
         "payload_json = excluded.payload_json, captured_at = excluded.captured_at, "
         "duration_ms = excluded.duration_ms, source_version = excluded.source_version, "
@@ -43,8 +43,8 @@ def record_refresh_failure(conn, key: str, error: str) -> None:
     """Keep the last successful payload while marking its refresh as stale."""
     _ensure_table(conn)
     conn.execute(
-        "UPDATE operational_snapshots SET stale = 1, refresh_error = ? "
-        "WHERE snapshot_key = ?", (error[:2000], key))
+        "UPDATE operational_snapshots SET stale = 1, refresh_error = %s "
+        "WHERE snapshot_key = %s", (error[:2000], key))
 
 
 def load(conn, key: str, *, max_age_seconds: int | float | None = None,
@@ -58,7 +58,7 @@ def load(conn, key: str, *, max_age_seconds: int | float | None = None,
         return None
     row = conn.execute(
         "SELECT snapshot_key, payload_json, captured_at, duration_ms, source_version, "
-        "stale, refresh_error FROM operational_snapshots WHERE snapshot_key = ?", (key,)
+        "stale, refresh_error FROM operational_snapshots WHERE snapshot_key = %s", (key,)
     ).fetchone()
     if row is None:
         return None

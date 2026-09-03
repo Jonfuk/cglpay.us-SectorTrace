@@ -106,7 +106,7 @@ def test_run_commits_module_writes(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output or repr(result.exception)
 
     conn = db.get_connection(settings)
-    count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone().values().__iter__().__next__()
     conn.close()
     assert count == 1
 
@@ -124,7 +124,7 @@ def test_run_dry_run_rolls_back(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output or repr(result.exception)
 
     conn = db.get_connection(settings)
-    count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM cli_test_rows").fetchone().values().__iter__().__next__()
     conn.close()
     assert count == 0
 

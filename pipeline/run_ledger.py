@@ -78,7 +78,7 @@ def start(settings, *, origin: str, module_selector: str, dry_run: bool,
             conn.execute(
                 "INSERT INTO run_ledger (run_id, origin, revision, environment, "
                 " parent_run_id, module_selector, dry_run, started_at, status, "
-                " modules_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?)",
+                " modules_total) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'running', %s)",
                 (run_id, origin, git_revision(settings),
                  getattr(settings, "environment", None), parent_run_id,
                  module_selector, 1 if dry_run else 0, _now(), modules_total))
@@ -109,9 +109,9 @@ def finish(settings, run_id: str | None, summary: list[dict]) -> None:
         conn = db.get_connection(settings)
         try:
             conn.execute(
-                "UPDATE run_ledger SET finished_at = ?, status = ?, "
-                " modules_ok = ?, modules_failed = ?, results_json = ? "
-                "WHERE run_id = ?",
+                "UPDATE run_ledger SET finished_at = %s, status = %s, "
+                " modules_ok = %s, modules_failed = %s, results_json = %s "
+                "WHERE run_id = %s",
                 (_now(), status, ok, failed, json.dumps(results), run_id))
             conn.commit()
         finally:
@@ -141,14 +141,14 @@ def recent(conn, limit: int = 20) -> list[dict]:
     """The most recent ledger rows, newest first, results parsed."""
     rows = [dict(r) for r in conn.execute(
         f"SELECT {_LEDGER_COLUMNS} FROM run_ledger "
-        "ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()]
+        "ORDER BY started_at DESC LIMIT %s", (limit,)).fetchall()]
     return [_hydrate(row) for row in rows]
 
 
 def one(conn, run_id: str) -> dict | None:
     """One ledger row by id, results parsed, or None."""
     row = conn.execute(
-        f"SELECT {_LEDGER_COLUMNS} FROM run_ledger WHERE run_id = ?",
+        f"SELECT {_LEDGER_COLUMNS} FROM run_ledger WHERE run_id = %s",
         (run_id,)).fetchone()
     return _hydrate(dict(row)) if row else None
 

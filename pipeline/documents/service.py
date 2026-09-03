@@ -152,7 +152,7 @@ class DocumentService:
         started = repository.utcnow()
         self.conn.execute(
             "INSERT INTO document_parse_runs (document_parse_run_id, document_id, parser_name, parser_version, "
-            "config_hash, started_at, status) VALUES (?, ?, ?, ?, ?, ?, 'RUNNING')",
+            "config_hash, started_at, status) VALUES (%s, %s, %s, %s, %s, %s, 'RUNNING')",
             (run_id, document_id, parser.name, parser.version, config_hash, started))
         tick = time.monotonic()
         try:
@@ -165,18 +165,18 @@ class DocumentService:
             # so .get("title") is simply None there.
             repository.refresh_display_title(self.conn, document_id, source_title=title,
                                              pdf_title=inspection.metadata.get("title"))
-            self.conn.execute("UPDATE document_processing_states SET ocr_status=? WHERE evidence_id=?",
+            self.conn.execute("UPDATE document_processing_states SET ocr_status=%s WHERE evidence_id=%s",
                               (ocr_status, reference.evidence_id))
             self.conn.execute(
-                "UPDATE document_parse_runs SET completed_at=?, status='SUCCESS', elapsed_ms=?, warning_count=? "
-                "WHERE document_parse_run_id=?",
+                "UPDATE document_parse_runs SET completed_at=%s, status='SUCCESS', elapsed_ms=%s, warning_count=%s "
+                "WHERE document_parse_run_id=%s",
                 (repository.utcnow(), int((time.monotonic() - tick) * 1000), len(warnings), run_id))
             return {"status": "SUCCESS", "document_id": document_id, "document_version_id": version_id,
                     "evidence_id": reference.evidence_id, "quality_status": quality_status,
                     "parser": parser.name, "ocr_status": ocr_status}
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
-            self.conn.execute("UPDATE document_parse_runs SET completed_at=?, status='FAILED', error=? "
-                              "WHERE document_parse_run_id=?", (repository.utcnow(), error, run_id))
+            self.conn.execute("UPDATE document_parse_runs SET completed_at=%s, status='FAILED', error=%s "
+                              "WHERE document_parse_run_id=%s", (repository.utcnow(), error, run_id))
             repository.mark_attempt(self.conn, reference.evidence_id, inspection.status, ocr_status, error)
             raise

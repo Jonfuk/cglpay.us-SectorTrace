@@ -43,7 +43,7 @@ def seeded(conn):
             "INSERT INTO cdp_document_candidates (authority_ons_code, candidate_url, "
             "title, document_type_guess, confidence, discovered_at, discovery_method, "
             "verified, rejected, source_url, retrieved_at, http_status, source_system, "
-            "payload_sha256) VALUES ('E10000016', ?, ?, 'strategy', 0.5, "
+            "payload_sha256) VALUES ('E10000016', %s, %s, 'strategy', 0.5, "
             "'2026-08-01T00:00:00Z', 'link', 0, 0, 'https://kent.gov.uk/list', "
             "'2026-08-01T00:00:00Z', 200, 'm09', 'listing-hash')",
             (f"https://kent.gov.uk/doc{i}.pdf", f"Kent document {i}"))

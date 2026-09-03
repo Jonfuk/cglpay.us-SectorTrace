@@ -335,7 +335,7 @@ def write_throughput(conn, rows: int = 2_000) -> dict:
         commit_samples.append(time.perf_counter() - commit_started)
     elapsed = time.perf_counter() - started
 
-    conn.execute("DELETE FROM parse_failures WHERE module = ?", (module,))
+    conn.execute("DELETE FROM parse_failures WHERE module = %s", (module,))
     conn.commit()
 
     return {"rows": rows, "seconds": round(elapsed, 3),
@@ -377,7 +377,7 @@ def _concurrent_writers(settings: Settings, writers: int, rows_each: int) -> dic
     cleanup = db.get_connection(settings)
     try:
         for index in range(writers):
-            cleanup.execute("DELETE FROM parse_failures WHERE module = ?",
+            cleanup.execute("DELETE FROM parse_failures WHERE module = %s",
                              (f"__contention_{index}__",))
         cleanup.commit()
     finally:
@@ -428,9 +428,8 @@ def write_contention(settings: Settings, counts=(1, 2, 4, 8),
 
 
 def _environment(conn, settings: Settings) -> dict:
-    backend = db.backend_of(conn)
     info = {
-        "backend": backend,
+        "backend": "postgres",
         "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -441,8 +440,8 @@ def _environment(conn, settings: Settings) -> dict:
     # and the absolute path are not, and `redacted_database_url` redacts the
     # password only. A benchmark is not a reason to publish where the server
     # lives or whose home directory the warehouse is in.
-    info["server"] = conn.execute("SHOW server_version").fetchone()[0]
-    info["target"] = conn.execute("SELECT current_database()").fetchone()[0]
+    info["server"] = conn.execute("SHOW server_version").fetchone()["server_version"]
+    info["target"] = conn.execute("SELECT current_database() AS database_name").fetchone()["database_name"]
     return info
 
 
@@ -474,7 +473,7 @@ def table_sizes(conn) -> dict[str, int]:
     for table in wanted:
         if table in present:
             sizes[table] = conn.execute(
-                f"SELECT COUNT(*) FROM {catalog.quote(table)}").fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {catalog.quote(table)}").fetchone()["n"]
     return sizes
 
 

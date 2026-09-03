@@ -155,7 +155,7 @@ def _empty_warehouse_between_tests(_pg_warehouse, request):
     conn = pg.connect(warehouse.url, application_name="sectortrace-tests")
     try:
         rows = conn.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname = ? "
+            "SELECT tablename FROM pg_tables WHERE schemaname = %s "
             "AND tablename <> 'schema_migrations'", (warehouse.schema,)).fetchall()
         names = [r["tablename"] for r in rows]
         if names:

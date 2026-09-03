@@ -42,22 +42,22 @@ def _stored(conn: sqlite3.Connection, document_id: str) -> dict:
         JOIN document_versions v ON v.document_id = d.document_id
                                  AND v.is_active = 1
         JOIN evidence_records e ON e.evidence_id = d.evidence_id
-        WHERE d.document_id = ?""", (document_id,))
+        WHERE d.document_id = %s""", (document_id,))
     if not doc:
         raise QueryError(f"No document {document_id!r} with an active version.")
     elements = _rows(conn,
                      "SELECT sequence, element_type, text FROM document_elements "
-                     "WHERE document_version_id = ? ORDER BY sequence",
+                     "WHERE document_version_id = %s ORDER BY sequence",
                      (doc["document_version_id"],))
     tables = _rows(conn,
                    "SELECT de.sequence, dt.row_count, dt.column_count "
                    "FROM document_tables dt "
                    "JOIN document_elements de "
                    "  ON de.document_element_id = dt.document_element_id "
-                   "WHERE de.document_version_id = ? ORDER BY de.sequence",
+                   "WHERE de.document_version_id = %s ORDER BY de.sequence",
                    (doc["document_version_id"],))
     q = _one(conn, "SELECT warnings_json FROM document_quality "
-                   "WHERE document_version_id = ?", (doc["document_version_id"],))
+                   "WHERE document_version_id = %s", (doc["document_version_id"],))
     try:
         warnings = json.loads(q["warnings_json"]) if q and q["warnings_json"] else []
     except (TypeError, ValueError):

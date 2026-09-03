@@ -517,7 +517,7 @@ def _already_processed(conn, document_url: str) -> bool:
     reason: existing but empty is not the same as done.
     """
     row = conn.execute(
-        "SELECT has_body_text, document_ext FROM sar_documents WHERE document_url = ?",
+        "SELECT has_body_text, document_ext FROM sar_documents WHERE document_url = %s",
         (document_url,)).fetchone()
     if row is None:
         return False
@@ -694,7 +694,7 @@ def _reresolve_missing_sab_names(ctx: ModuleContext, sab_index: dict[str, str]) 
         if not name:
             continue
         conn.execute(
-            "UPDATE sar_documents SET sab_name = ?, sab_name_source = ? WHERE document_url = ?",
+            "UPDATE sar_documents SET sab_name = %s, sab_name_source = %s WHERE document_url = %s",
             (name, source, row["document_url"]))
         healed += 1
     if healed and not ctx.dry_run:

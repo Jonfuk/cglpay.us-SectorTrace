@@ -254,14 +254,14 @@ def test_no_public_pfd_column_carries_the_deceased_name(conn):
     conn.execute(
         "INSERT INTO pfd_reports (report_ref, report_url, coroner_name, matters_of_concern, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES ('R9', 'u', 'Sam Casey', ?, 'u', 't', 200, 's', 'h')", (matters,))
-    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) VALUES ('R9', ?)",
+        "VALUES ('R9', 'u', 'Sam Casey', %s, 'u', 't', 200, 's', 'h')", (matters,))
+    conn.execute("INSERT INTO restricted_pfd_persons (report_ref, deceased_name) VALUES ('R9', %s)",
                   (name,))
     conn.execute("INSERT INTO restricted_pfd_report_text (report_ref, body_text) "
-                  "VALUES ('R9', ?)", (f"{name} died on a ward.",))
+                  "VALUES ('R9', %s)", (f"{name} died on a ward.",))
 
     row = conn.execute("SELECT * FROM pfd_reports WHERE report_ref='R9'").fetchone()
-    blob = " ".join(str(v) for v in tuple(row) if v is not None)
+    blob = " ".join(str(v) for v in row.values() if v is not None)
     assert "Alex Roe" not in blob
     assert "Roe" not in blob
     # the restricted copies still hold it, which is the point
@@ -352,6 +352,6 @@ def test_recipient_and_body_mentions_are_distinct_rows(conn):
     for mention_type in ("recipient", "body_text"):
         conn.execute(
             "INSERT INTO pfd_provider_mentions (report_ref, provider_key, mention_type, matched_name) "
-            "VALUES ('R1', 'change_grow_live', ?, 'Change Grow Live')", (mention_type,))
+            "VALUES ('R1', 'change_grow_live', %s, 'Change Grow Live')", (mention_type,))
     rows = conn.execute("SELECT mention_type FROM pfd_provider_mentions ORDER BY mention_type").fetchall()
     assert [r["mention_type"] for r in rows] == ["body_text", "recipient"]

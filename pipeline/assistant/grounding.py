@@ -96,7 +96,7 @@ def _resolve_search_citations(conn, envelope: dict,
     payload_hashes: dict[str, str] = {}
     ids = [c for c in cited if c in rows]
     if conn is not None and ids:
-        placeholders = ",".join("?" for _ in ids)
+        placeholders = ",".join("%s" for _ in ids)
         try:
             for row in conn.execute(
                     "SELECT dc.document_chunk_id AS cid, e.payload_sha256 AS sha "

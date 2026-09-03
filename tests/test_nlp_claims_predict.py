@@ -37,7 +37,7 @@ def test_selected_head_scores_the_whole_embedded_population(conn, tmp_path):
 def test_zero_selected_heads_is_a_logged_noop(conn):
     result = claims_predict.predict(conn, embedder_model_key=STUB_MODEL_KEY)
     assert result == {"heads": 0, "predictions": 0, "run_id": None}
-    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_quarantined_head_writes_no_predictions(conn, tmp_path):
@@ -53,14 +53,14 @@ def test_artifact_hash_mismatch_refuses_the_run(conn, tmp_path):
     artifact.write_text(artifact.read_text() + " ")     # one byte, hash no longer matches
     with pytest.raises(claims_predict.ArtifactMismatch, match="SHA-256"):
         claims_predict.predict(conn, embedder_model_key=STUB_MODEL_KEY)
-    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_dry_run_scores_but_writes_nothing(conn, tmp_path):
     _train(conn, tmp_path)
     result = claims_predict.predict(conn, embedder_model_key=STUB_MODEL_KEY, dry_run=True)
     assert result["predictions"] == 50 and result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_claim_predictions").fetchone().values().__iter__().__next__() == 0
 
 
 # --- the fence ------------------------------------------------------------

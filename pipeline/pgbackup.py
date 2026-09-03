@@ -126,13 +126,10 @@ def _connect_for_snapshot(settings: Settings):
     depend on this module being correct.
     """
     import psycopg
+    from psycopg.rows import dict_row
 
-    from pipeline import pg
-
-    # The project's own row factory, because `catalog` addresses rows by name
-    # and psycopg's default hands back plain tuples.
     conn = psycopg.connect(settings.database_url,
-                            row_factory=pg.row_factory,
+                           row_factory=dict_row,
                             application_name="sectortrace-backup")
     try:
         conn.read_only = True
@@ -144,11 +141,11 @@ def _connect_for_snapshot(settings: Settings):
 
 
 def _server_version(conn) -> str:
-    return conn.execute("SELECT version()").fetchone()[0]
+    return conn.execute("SELECT version() AS version").fetchone()["version"]
 
 
 def _applied_migrations(conn) -> list[str]:
-    return [row[0] for row in conn.execute(
+    return [row["filename"] for row in conn.execute(
         "SELECT filename FROM schema_migrations ORDER BY filename")]
 
 
@@ -310,7 +307,7 @@ def _write_archive(conn, path: Path, settings: Settings,
             # A difference here means the stream and the count disagree about
             # one instant, which is a fault in this module and not a race.
             expected = conn.execute(
-                f"SELECT COUNT(*) FROM {catalog.quote(table)}").fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {catalog.quote(table)}").fetchone()["n"]
             if rows != expected:
                 raise BackupError(
                     f"{table}: the snapshot holds {expected:,} rows and "
@@ -332,10 +329,8 @@ class _ConnAdapter:
     """A raw psycopg connection wearing the methods `catalog` and `pgschema`
     call on a warehouse connection.
 
-    Those helpers dispatch on `db.backend_of`, which asks whether the object is
-    a `sqlite3.Connection` — anything else is PostgreSQL — and then execute
-    `?`-style SQL. A raw psycopg connection fails on the placeholders, so the
-    snapshot connection is wrapped rather than opened through
+    Those helpers execute PostgreSQL-native `%s`-style SQL. The snapshot
+    connection is wrapped rather than opened through
     `pipeline.pg.connect`: this one needs `read_only` and an isolation level
     set before the first statement, which is not what `pg.connect` builds.
     """
@@ -346,10 +341,7 @@ class _ConnAdapter:
         self._conn = conn
 
     def execute(self, sql, parameters=()):
-        from pipeline.sqldialect import to_psycopg
-
-        translated, params = to_psycopg(sql, parameters)
-        return self._conn.execute(translated, params)
+        return self._conn.execute(sql, parameters or None)
 
     def close(self) -> None:
         self._conn.close()
@@ -517,7 +509,7 @@ def restore(archive: Path, settings: Settings | None = None,
         occupied = {}
         for table in tables:
             count = target.execute(
-                f"SELECT COUNT(*) FROM {catalog.quote(table)}").fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {catalog.quote(table)}").fetchone()["n"]
             if count:
                 occupied[table] = count
         superseded = None

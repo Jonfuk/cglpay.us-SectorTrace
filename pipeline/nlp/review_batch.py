@@ -101,7 +101,7 @@ JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id
 JOIN document_versions v ON v.document_version_id = dc.document_version_id
 JOIN document_records dr ON dr.document_id = v.document_id
 JOIN evidence_records e ON e.evidence_id = dr.evidence_id
-WHERE c.superseded = 0 AND c.status = ? AND c.predicate = ?
+WHERE c.superseded = 0 AND c.status = %s AND c.predicate = %s
 """
 
 
@@ -247,11 +247,11 @@ def sheet_rows(conn, *, predicate: str, status: str = "queued",
     sql = _SHEET_SQL
     params: list = [status, predicate]
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " ORDER BY c.relation_score DESC, c.claim_candidate_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(int(limit))
     raw = conn.execute(sql, params).fetchall()
 
@@ -392,7 +392,7 @@ def _targets(row: dict) -> list[str]:
 def _already_decided_by(conn, candidate_id: str, decided_by: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ? AND decided_by = ? LIMIT 1",
+        "WHERE claim_candidate_id = %s AND decided_by = %s LIMIT 1",
         (candidate_id, decided_by)).fetchone() is not None
 
 

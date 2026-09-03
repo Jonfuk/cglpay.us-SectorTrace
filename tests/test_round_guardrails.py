@@ -132,7 +132,7 @@ def test_the_relationship_timeline_is_capped():
     """The drawer shows one relationship's history, not a stream. The query
     carries a LIMIT and the payload a `truncated` flag."""
     source = __import__("inspect").getsource(public_queries.relationship_detail)
-    assert "LIMIT :cap" in source
+    assert "LIMIT %(cap)s" in source
     assert '"truncated": truncated' in source
 
 

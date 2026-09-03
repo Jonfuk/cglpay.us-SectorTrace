@@ -117,7 +117,7 @@ def record(conn, *, question: str, filters: dict,
         "outcome": outcome,
         "error_class": error_class,
     }
-    placeholders = ", ".join("?" for _ in _COLUMNS)
+    placeholders = ", ".join("%s" for _ in _COLUMNS)
     try:
         conn.execute(
             f"INSERT INTO assistant_runs ({', '.join(_COLUMNS)}) "
@@ -149,7 +149,7 @@ def _hydrate(row: dict) -> dict:
 def one(conn, run_id: str) -> dict | None:
     """One run row by id, JSON columns parsed, or None."""
     row = conn.execute(
-        f"SELECT {', '.join(_COLUMNS)} FROM assistant_runs WHERE run_id = ?",
+        f"SELECT {', '.join(_COLUMNS)} FROM assistant_runs WHERE run_id = %s",
         (run_id,)).fetchone()
     return _hydrate(dict(row)) if row else None
 
@@ -159,5 +159,5 @@ def recent(conn, limit: int = 20) -> list[dict]:
     limit = max(1, min(int(limit), 200))
     rows = conn.execute(
         f"SELECT {', '.join(_COLUMNS)} FROM assistant_runs "
-        "ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        "ORDER BY created_at DESC LIMIT %s", (limit,)).fetchall()
     return [_hydrate(dict(r)) for r in rows]

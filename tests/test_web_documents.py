@@ -76,8 +76,8 @@ def test_document_search_surfaces_the_derived_title_and_its_basis(conn, settings
         title="a3f91c2b8e4d5f6071829304a5b6c7d8.pdf")
     document_id = repository.stable_id("document", "ev-derived")
     conn.execute(
-        "UPDATE document_records SET display_title=?, title_basis='filename' "
-        "WHERE document_id=?", ("Kent recruitment plan 2026", document_id))
+        "UPDATE document_records SET display_title=%s, title_basis='filename' "
+        "WHERE document_id=%s", ("Kent recruitment plan 2026", document_id))
     conn.commit()
 
     row = public_queries.document_search(conn, query="recruitment")["results"][0]
@@ -320,7 +320,7 @@ def test_document_search_quoted_phrase_anchors_the_snippet(conn, settings):
 
 
 def _publish(conn, evidence_id: str, published_at: str) -> None:
-    conn.execute("UPDATE document_records SET published_at = ? WHERE evidence_id = ?",
+    conn.execute("UPDATE document_records SET published_at = %s WHERE evidence_id = %s",
                  (published_at, evidence_id))
     conn.commit()
 
@@ -425,7 +425,7 @@ def test_document_search_since_retrieved_at_filters_on_collection_time(conn, set
         conn, settings, evidence_id="ev-stale",
         source_system="committee_paper_promotion", document_type="COMMITTEE_PAPER",
         text="Budget matters, collected long ago.")
-    conn.execute("UPDATE evidence_records SET retrieved_at = ? WHERE evidence_id = ?",
+    conn.execute("UPDATE evidence_records SET retrieved_at = %s WHERE evidence_id = %s",
                  ("2026-01-01T00:00:00+00:00", "ev-stale"))
     conn.commit()
 
@@ -476,7 +476,7 @@ def _elements(conn, document_id):
         "SELECT de.document_element_id, de.sequence, de.text "
         "FROM document_elements de "
         "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-        "WHERE dv.document_id = ? AND dv.is_active = 1 ORDER BY de.sequence",
+        "WHERE dv.document_id = %s AND dv.is_active = 1 ORDER BY de.sequence",
         (document_id,))]
 
 

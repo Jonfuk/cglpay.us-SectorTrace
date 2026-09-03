@@ -72,7 +72,7 @@ def audit_counts(conn, module: str) -> dict[str, int]:
     def count(table: str) -> int:
         try:
             return conn.execute(
-                f"SELECT COUNT(*) FROM {table} WHERE module = ?", (module,)).fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {table} WHERE module = %s", (module,)).fetchone()["n"]
         except Exception:
             return 0
 

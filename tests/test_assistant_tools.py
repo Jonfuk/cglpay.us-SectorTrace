@@ -55,9 +55,9 @@ def test_each_tool_returns_the_standard_envelope(conn, settings, name, args):
     assert isinstance(env["result_ids"], list)
     assert "data" in env
     # read-only: the warehouse row counts are untouched
-    before = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+    before = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone().values().__iter__().__next__()
     tools.run_tool(name, args, conn, settings)
-    after = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
+    after = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone().values().__iter__().__next__()
     assert before == after
 
 

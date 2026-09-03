@@ -19,7 +19,7 @@ def _authority(conn, ons_code, name, kind="unitary", active_to=None):
         "INSERT INTO authorities (ons_code, name, type, active_from, "
         " active_to, first_seen_vintage, last_seen_vintage, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, '2021-04-01', ?, '2024', '2026', 'https://ons.example', "
+        "VALUES (%s, %s, %s, '2021-04-01', %s, '2024', '2026', 'https://ons.example', "
         " '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
         (ons_code, name, kind, active_to))
 
@@ -27,9 +27,9 @@ def _authority(conn, ons_code, name, kind="unitary", active_to=None):
 def _queue_item(conn, item_type, raw_value):
     cur = conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
-        "VALUES ('m01_procurement', ?, ?, '2026-08-01T00:00:00Z') RETURNING id",
+        "VALUES ('m01_procurement', %s, %s, '2026-08-01T00:00:00Z') RETURNING id",
         (item_type, raw_value))
-    return cur.fetchone()[0]
+    return cur.fetchone().values().__iter__().__next__()
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def test_unknown_item_type_is_answered_not_errored(warehouse):
     item_id = _queue_item(warehouse, "unmatched_buyer_name", "x")
     # Rewrite to a type with no reference set.
     warehouse.execute("UPDATE review_queue SET item_type = 'pfd_concerns_in_pdf_only' "
-                       "WHERE id = ?", (item_id,))
+                       "WHERE id = %s", (item_id,))
     warehouse.commit()
     result = name_matches.suggestions(warehouse, item_id)
     assert result["matches"] == []
@@ -100,7 +100,7 @@ def test_missing_item_raises(warehouse):
 
 def test_nothing_is_written(warehouse):
     item_id = _queue_item(warehouse, "unmatched_buyer_name", "Birmingham")
-    before = warehouse.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]
+    before = warehouse.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__()
     name_matches.suggestions(warehouse, item_id)
-    after = warehouse.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]
+    after = warehouse.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__()
     assert before == after

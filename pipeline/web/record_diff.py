@@ -66,7 +66,7 @@ def _contract_row(conn: sqlite3.Connection, notice_id: str) -> dict | None:
         " buyer_ons_code, value_core, value_max, currency, date_published, "
         " date_start, date_end, procedure_type, cpv_codes, psr_basis, "
         " psr_direct_award_option, source_url, retrieved_at "
-        "FROM contracts WHERE notice_id = ? "
+        "FROM contracts WHERE notice_id = %s "
         "ORDER BY supplier_id LIMIT 1",
         (notice_id,)) or None
 
@@ -80,7 +80,7 @@ def ocds_diff(conn: sqlite3.Connection, *, a=None, b=None, ocid=None) -> dict:
         recent = _rows(
             conn,
             "SELECT DISTINCT notice_id, date_published FROM contracts "
-            "WHERE ocid = ? ORDER BY date_published DESC, notice_id DESC "
+            "WHERE ocid = %s ORDER BY date_published DESC, notice_id DESC "
             "LIMIT 2", (ocid,))
         if len(recent) < 2:
             raise QueryError(f"OCID {ocid!r} has fewer than two notices to compare.")
@@ -124,7 +124,7 @@ def _version_row(conn: sqlite3.Connection, version_id: str) -> dict | None:
         "FROM document_versions v "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE v.document_version_id = ?",
+        "WHERE v.document_version_id = %s",
         (version_id,)) or None
 
 
@@ -141,9 +141,9 @@ def document_version_diff(conn: sqlite3.Connection, *,
             "SELECT v.document_version_id FROM document_versions v "
             "JOIN document_records d ON d.document_id = v.document_id "
             "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            "WHERE v.document_id = ? AND e.source_system IN (%s) "
+            "WHERE v.document_id = %s AND e.source_system IN ({source_marks}) "
             "ORDER BY v.created_at DESC LIMIT 2"
-            % ",".join("?" * len(DOCUMENT_SEARCH_SOURCES)),
+            .format(source_marks=", ".join("%s" for _ in DOCUMENT_SEARCH_SOURCES)),
             (document_id, *DOCUMENT_SEARCH_SOURCES))
         if len(recent) < 2:
             raise QueryError(
@@ -168,8 +168,8 @@ def document_version_diff(conn: sqlite3.Connection, *,
         return {r["sequence"]: r for r in _rows(
             conn,
             "SELECT sequence, element_type, text, text_sha256 "
-            "FROM document_elements WHERE document_version_id = ? "
-            "ORDER BY sequence LIMIT ?",
+            "FROM document_elements WHERE document_version_id = %s "
+            "ORDER BY sequence LIMIT %s",
             (version_id, _TEXT_ELEMENTS_MAX + 1))}
 
     ea, eb = _elements(a), _elements(b)

@@ -82,19 +82,19 @@ def listing(conn: sqlite3.Connection, year: int | None = None,
     elif status == "rejected":
         where.append("rejected = 1")
     if year:
-        where.append("census_year = ?")
+        where.append("census_year = %s")
         params.append(int(year))
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     total = conn.execute(
-        f"SELECT COUNT(*) FROM workforce_census_metrics {clause}",
-        params).fetchone()[0]
+        f"SELECT COUNT(*) AS count FROM workforce_census_metrics {clause}",
+        params).fetchone()["count"]
 
     limit = max(1, min(int(limit), PAGE))
     rows = conn.execute(
         f"SELECT * FROM workforce_census_metrics {clause} "
         "ORDER BY census_year DESC, source_page, metric, workforce_segment "
-        "LIMIT ? OFFSET ?", [*params, limit, max(0, int(offset))])
+        "LIMIT %s OFFSET %s", [*params, limit, max(0, int(offset))])
 
     decisions = _decisions_by_key(conn)
     items = []
@@ -165,7 +165,7 @@ def page_text(conn: sqlite3.Connection, year: int, page: int) -> dict:
         "SELECT census_year, page_number, page_text, source_url, retrieved_at, "
         "       payload_sha256 "
         "FROM workforce_census_page_text "
-        "WHERE census_year = ? AND page_number = ?",
+        "WHERE census_year = %s AND page_number = %s",
         (int(year), int(page))).fetchone()
     if row is None:
         raise VerificationError(
@@ -176,7 +176,7 @@ def page_text(conn: sqlite3.Connection, year: int, page: int) -> dict:
     metrics = [dict(m) for m in conn.execute(
         "SELECT metric, workforce_segment, value, unit, verified, rejected "
         "FROM workforce_census_metrics "
-        "WHERE census_year = ? AND source_page = ? "
+        "WHERE census_year = %s AND source_page = %s "
         "ORDER BY metric, workforce_segment", (int(year), int(page)))]
 
     return {**dict(row), "metrics_on_page": metrics}

@@ -35,12 +35,12 @@ dependencies = [
     # test to fall back to. `psycopg[binary]` avoids a libpq build step on
     # Windows, where development happens; a deployment that would rather link
     # the system libpq installs plain `psycopg` itself, and nothing here
-    # depends on which. The Python `pgvector` adapter is deliberately NOT added
-    # yet: nothing imports it (embeddings.py sends vectors as pgvector's text
-    # form on purpose), and it arrives with the Phase 3 single-copy embedding
-    # repository that will actually consume it.
+    # depends on which. The Python adapter remains available with the core
+    # PostgreSQL set even while embeddings.py uses pgvector's text form; Phase
+    # 3 may use it for typed vector parameters.
     "psycopg[binary]>=3.1",
     "psycopg_pool>=3.2",
+    "pgvector>=0.3",
 ]
 
 [project.scripts]
@@ -108,16 +108,6 @@ ocr = [
     "onnxruntime>=1.16,<1.20",
     "pypdfium2>=4.0",
 ]
-
-# The PostgreSQL driver moved to the core `dependencies` above when PostgreSQL
-# became the only application database (performance.md Phase 1). This extra is
-# retained, empty, purely as a transitional alias: `--extra postgres` still
-# appears in start.sh, both Dockerfiles, deploy/document-batch-all.sh and the
-# CI workflow, and an unknown extra is an error in `uv sync`. Those callers are
-# updated — and this stanza removed — in the clean-break step that also deletes
-# the SQLite runtime, so the two changes land together rather than leaving a
-# window where a deployment command names an extra that does not exist.
-postgres = []
 
 storage = [
     "boto3>=1.34",

@@ -25,7 +25,7 @@ def _seed_authority(conn, ons_code: str, name: str) -> None:
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', '2020-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "VALUES (%s, %s, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', '2020-01-01T00:00:00Z', 200, 'test', 'abc')",
         (ons_code, name),
     )
 
@@ -244,7 +244,7 @@ def test_process_release_against_real_fts_fixture(conn):
     written = proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
     assert written == 1
 
-    row = conn.execute("SELECT * FROM contracts WHERE notice_id = ?", (release["id"],)).fetchone()
+    row = conn.execute("SELECT * FROM contracts WHERE notice_id = %s", (release["id"],)).fetchone()
     assert row["buyer_ons_code"] == "E06000061"
     assert row["supplier_name_raw"] == "H2S Cars Ltd"
     assert row["value_core"] == 90000
@@ -453,7 +453,7 @@ def test_run_end_to_end(httpx_mock, settings, conn):
     ctx = ModuleContext(conn=conn, settings=settings, since="2026-08-01", dry_run=False, limit=None)
     proc.run(ctx)
 
-    row = conn.execute("SELECT * FROM contracts WHERE notice_id = ?", (release["id"],)).fetchone()
+    row = conn.execute("SELECT * FROM contracts WHERE notice_id = %s", (release["id"],)).fetchone()
     assert row is not None
     assert row["buyer_ons_code"] == "E06000061"
     assert db.get_cursor(conn, "m01_procurement:fts").startswith("DONE:")
@@ -575,13 +575,13 @@ def test_process_csv_release_row_records_amount_parse_failure(conn):
 
     # The release is still kept -- that is the point of NULL over discarding.
     assert written == 1
-    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = %s",
                            (row["releases/0/id"],)).fetchone()
     assert stored["value_core"] is None
     assert stored["buyer_ons_code"] == "E06000061"
 
     failure = conn.execute(
-        "SELECT * FROM parse_failures WHERE module = ? AND field_name = ?",
+        "SELECT * FROM parse_failures WHERE module = %s AND field_name = %s",
         ("m01_procurement", "tender/value/amount")).fetchone()
     assert failure is not None
     assert failure["raw_fragment"] == "United Kingdom"
@@ -643,7 +643,7 @@ def test_process_csv_release_row_matches_and_persists(conn):
         conn, "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), proc._build_authority_lookup(conn))
     assert written == 1
 
-    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = %s",
                            (row["releases/0/id"],)).fetchone()
     assert stored["buyer_ons_code"] == "E06000061"
     assert stored["source_system"] == proc.SOURCE_CF_CSV
@@ -739,7 +739,7 @@ def test_walk_and_process_csv_archive_end_to_end(httpx_mock, settings, conn):
 
     assert matched == 1
     row = conn.execute(
-        "SELECT * FROM contracts WHERE notice_id = ?",
+        "SELECT * FROM contracts WHERE notice_id = %s",
         ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",)).fetchone()
     assert row["buyer_ons_code"] == "E06000061"
     assert row["source_system"] == proc.SOURCE_CF_CSV
@@ -788,7 +788,7 @@ def test_walk_and_process_csv_archive_skips_robots_disallowed_file(httpx_mock, s
 
     assert matched == 1
     row = conn.execute(
-        "SELECT * FROM contracts WHERE notice_id = ?",
+        "SELECT * FROM contracts WHERE notice_id = %s",
         ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298467",)).fetchone()
     assert row is not None
     review_row = conn.execute(
@@ -816,7 +816,7 @@ def test_process_release_records_a_channel_sighting(conn):
     proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
 
     row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = %s AND source_system = %s",
         (release["id"], proc.SOURCE_FTS)).fetchone()
     assert row is not None
     assert row["buyer_name"] == "West Northamptonshire Council"
@@ -1090,14 +1090,14 @@ def test_backfill_channel_sightings_derives_rows_from_existing_contracts(conn):
     # Simulate the pre-existing state: a contracts row with no sighting row,
     # as if it had been written before procurement_channel_sightings existed.
     proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
     assert conn.execute("SELECT * FROM procurement_channel_sightings").fetchone() is None
 
     inserted = proc.backfill_channel_sightings(conn)
     assert inserted == 1
 
     row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = %s AND source_system = %s",
         (release["id"], proc.SOURCE_FTS)).fetchone()
     assert row is not None
     assert row["ocid"] == release["ocid"]
@@ -1116,7 +1116,7 @@ def test_backfill_channel_sightings_is_idempotent(conn):
         payload_sha256 = "deadbeef"
 
     proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
 
     first = proc.backfill_channel_sightings(conn)
     second = proc.backfill_channel_sightings(conn)
@@ -1143,7 +1143,7 @@ def test_backfill_then_kaggle_check_reports_no_coverage_gap(conn):
     # to exercise.
     release["tender"]["title"] = "Substance misuse treatment and recovery service recommissioning"
     proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
     proc.backfill_channel_sightings(conn)
 
     row = {"ocid": release["ocid"], "tender_title": release["tender"]["title"], "buyer": "West Northamptonshire Council"}

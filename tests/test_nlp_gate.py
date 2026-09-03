@@ -12,7 +12,7 @@ def _seed_entity(conn, entity_id, name):
     from pipeline.graph.backfill import _normalise
     conn.execute(
         "INSERT INTO entities (entity_id, entity_type, canonical_name, canonical_name_normalized, "
-        "status, created_at, updated_at) VALUES (?, 'PROVIDER', ?, ?, 'active', ?, ?) "
+        "status, created_at, updated_at) VALUES (%s, 'PROVIDER', %s, %s, 'active', %s, %s) "
         "ON CONFLICT(entity_id) DO NOTHING",
         (entity_id, name, _normalise(name), "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"))
 
@@ -28,7 +28,7 @@ def _doc(conn, settings, evidence_id, source_system, provider_name, published_ye
     repository.upsert_evidence(conn, source)
     document_id = repository.upsert_document(
         conn, source, "COMMITTEE_PAPER", "fixture", 1.0, "paper.pdf", "application/pdf", 3, "Paper")
-    conn.execute("UPDATE document_records SET published_at = ? WHERE document_id = ?",
+    conn.execute("UPDATE document_records SET published_at = %s WHERE document_id = %s",
                  (f"{published_year}-06-01", document_id))
     parsed = ParsedDocument("fixture", "1", [
         ParsedElement("HEADING", 1, text="Finance", page_number=1, heading_level=1),
@@ -46,7 +46,7 @@ def _funding_candidate(conn, evidence_id):
         "JOIN document_versions v ON v.document_version_id = dc.document_version_id "
         "JOIN document_records d ON d.document_id = v.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE c.predicate = 'finance.has_funding_reduction' AND e.evidence_id = ?",
+        "WHERE c.predicate = 'finance.has_funding_reduction' AND e.evidence_id = %s",
         (evidence_id,)).fetchone()
 
 

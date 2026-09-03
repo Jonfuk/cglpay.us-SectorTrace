@@ -51,8 +51,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO contracts (notice_id, ocid, buyer_name, buyer_ons_code, "
         " supplier_name_raw, title, value_core, currency, date_published, "
         " procedure_type, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES (?, ?, ?, 'E08000025', 'A Supplier Ltd', "
-        " 'Treatment services', 1000, 'GBP', ?, 'open', "
+        " payload_sha256) VALUES (%s, %s, %s, 'E08000025', 'A Supplier Ltd', "
+        " 'Treatment services', 1000, 'GBP', %s, 'open', "
         " 'https://find.example/api?cursor=x', '2026-08-01T00:00:00Z', 200, "
         " 'find_a_tender', 'abc123')",
         [(f"n{i:05d}", f"ocds-{i}",
@@ -63,8 +63,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO pfd_reports (report_ref, report_date, coroner_area, "
         " categories, report_url, matters_of_concern, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '2026-01-15', 'Birmingham and Solihull', 'Alcohol, drug "
-        " and medication related deaths', ?, 'A concern.', "
+        "VALUES (%s, '2026-01-15', 'Birmingham and Solihull', 'Alcohol, drug "
+        " and medication related deaths', %s, 'A concern.', "
         " 'https://judiciary.uk/reports', '2026-08-01T00:00:00Z', 200, "
         " 'judiciary_uk', 'pfd1')",
         [(f"2026-{i:04d}", f"https://judiciary.uk/reports/2026-{i:04d}/")

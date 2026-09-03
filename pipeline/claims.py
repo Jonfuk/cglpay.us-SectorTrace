@@ -95,7 +95,7 @@ def _resolve_document(conn: sqlite3.Connection, table: str, columns: dict,
     """
     authority_col, url_col = columns["authority"], columns["url"]
     row = conn.execute(
-        f"SELECT * FROM {table} WHERE {authority_col} = ? AND {url_col} = ?",
+        f"SELECT * FROM {table} WHERE {authority_col} = %s AND {url_col} = %s",
         parts[:2]).fetchone()
     if row is None:
         return None
@@ -173,7 +173,7 @@ def _resolve_pay_row(conn: sqlite3.Connection, table: str, columns: dict,
     for column in (columns["key1"], columns.get("key2"), columns.get("key3")):
         if column is None:
             continue
-        where.append(f"{column} = ?")
+        where.append(f"{column} = %s")
         params.append(parts[len(params)])
     if len(params) != len(where) or not where:
         return None
@@ -193,9 +193,9 @@ def _resolve_pay_row(conn: sqlite3.Connection, table: str, columns: dict,
 
 def _resolve_ashe(conn: sqlite3.Connection, parts: list[str]) -> dict | None:
     row = conn.execute(
-        "SELECT * FROM ons_ashe_observations WHERE dataset_id = ? "
-        "AND dimension_kind = ? AND dimension_code = ? AND geography_code = ? "
-        "AND time = ? LIMIT 1", parts[:5]).fetchone()
+        "SELECT * FROM ons_ashe_observations WHERE dataset_id = %s "
+        "AND dimension_kind = %s AND dimension_code = %s AND geography_code = %s "
+        "AND time = %s LIMIT 1", parts[:5]).fetchone()
     if row is None:
         return None
     row = dict(row)
@@ -363,11 +363,11 @@ def search_citable(conn: sqlite3.Connection, table: str, term: str,
     if not term:
         return []
 
-    searches = " OR ".join(f"{column} LIKE ?" for column in spec["search_columns"])
+    searches = " OR ".join(f"{column} LIKE %s" for column in spec["search_columns"])
     params = [f"%{term}%"] * len(spec["search_columns"])
     rows = conn.execute(
         f"SELECT * FROM {table} WHERE ({searches}) "
-        f"ORDER BY {spec['search_columns'][0]} LIMIT ?",
+        f"ORDER BY {spec['search_columns'][0]} LIMIT %s",
         [*params, max(1, min(int(limit), 50))]).fetchall()
 
     out = []
@@ -419,8 +419,8 @@ def create(conn: sqlite3.Connection, claim_text: str, created_by: str,
     # absent on the psycopg cursor the PostgreSQL wrapper hands back.
     claim_id = int(conn.execute(
         "INSERT INTO claims (claim_text, status, caveats, created_by, "
-        "created_at, note) VALUES (?, 'draft', ?, ?, ?, ?) RETURNING id",
-        (claim_text, caveats, created_by.strip(), now, note)).fetchone()[0])
+        "created_at, note) VALUES (%s, 'draft', %s, %s, %s, %s) RETURNING id",
+        (claim_text, caveats, created_by.strip(), now, note)).fetchone()["id"])
     conn.commit()
     log.info("claims.created", claim_id=claim_id, by=created_by.strip())
     return get(conn, claim_id)
@@ -429,7 +429,7 @@ def create(conn: sqlite3.Connection, claim_text: str, created_by: str,
 def get(conn: sqlite3.Connection, claim_id: int) -> dict:
     """One claim with its citations and decisions, for the UI and the portal."""
     row = conn.execute(
-        "SELECT * FROM claims WHERE id = ?", (int(claim_id),)).fetchone()
+        "SELECT * FROM claims WHERE id = %s", (int(claim_id),)).fetchone()
     if row is None:
         raise ClaimError(f"No claim {claim_id}.")
     return _claim_payload(conn, dict(row))
@@ -437,11 +437,11 @@ def get(conn: sqlite3.Connection, claim_id: int) -> dict:
 
 def _claim_payload(conn: sqlite3.Connection, claim: dict) -> dict:
     citations = [dict(row) for row in conn.execute(
-        "SELECT * FROM claim_citations WHERE claim_id = ? ORDER BY id",
+        "SELECT * FROM claim_citations WHERE claim_id = %s ORDER BY id",
         (claim["id"],))]
     decisions = [dict(row) for row in conn.execute(
         "SELECT id, claim_id, decision, decided_by, decided_at, note "
-        "FROM claim_verifications WHERE claim_id = ? ORDER BY id",
+        "FROM claim_verifications WHERE claim_id = %s ORDER BY id",
         (claim["id"],))]
     return {
         "id": claim["id"],
@@ -484,8 +484,8 @@ def update_text(conn: sqlite3.Connection, claim_id: int, claim_text: str,
     if note and len(note) > MAX_NOTE_LENGTH:
         raise ClaimError(f"Note is too long ({MAX_NOTE_LENGTH} characters "
                          "maximum).")
-    conn.execute("UPDATE claims SET claim_text = ?, caveats = ?, note = ? "
-                 "WHERE id = ?", (claim_text, caveats, note, claim_id))
+    conn.execute("UPDATE claims SET claim_text = %s, caveats = %s, note = %s "
+                 "WHERE id = %s", (claim_text, caveats, note, claim_id))
     conn.commit()
     log.info("claims.edited", claim_id=claim_id)
     return get(conn, claim_id)
@@ -537,7 +537,7 @@ def cite(conn: sqlite3.Connection, claim_id: int, evidence_table: str,
     try:
         conn.execute(
             "INSERT INTO claim_citations (claim_id, evidence_table, "
-            "evidence_key, cited_by, cited_at, note) VALUES (?, ?, ?, ?, ?, ?)",
+            "evidence_key, cited_by, cited_at, note) VALUES (%s, %s, %s, %s, %s, %s)",
             (claim_id, evidence_table, evidence_key, cited_by.strip(), now, note))
         conn.commit()
     except db.IntegrityError:
@@ -556,8 +556,8 @@ def uncite(conn: sqlite3.Connection, claim_id: int, evidence_table: str,
             f"This claim is {claim['status']}, which means it was reviewed. "
             "Reset it before changing what supports it.")
     conn.execute(
-        "DELETE FROM claim_citations WHERE claim_id = ? AND evidence_table = ? "
-        "AND evidence_key = ?", (claim_id, evidence_table, evidence_key))
+        "DELETE FROM claim_citations WHERE claim_id = %s AND evidence_table = %s "
+        "AND evidence_key = %s", (claim_id, evidence_table, evidence_key))
     conn.commit()
     log.info("claims.uncited", claim_id=claim_id, table=evidence_table)
     return get(conn, claim_id)
@@ -605,10 +605,10 @@ def decide(conn: sqlite3.Connection, claim_id: int, decision: str,
     try:
         conn.execute(
             "INSERT INTO claim_verifications (claim_id, decision, decided_by, "
-            "decided_at, note) VALUES (?, ?, ?, ?, ?)",
+            "decided_at, note) VALUES (%s, %s, %s, %s, %s)",
             (claim_id, decision, decided_by.strip(), now, note))
         conn.execute(
-            "UPDATE claims SET status = ? WHERE id = ?", (decision, claim_id))
+            "UPDATE claims SET status = %s WHERE id = %s", (decision, claim_id))
         conn.commit()
     except db.IntegrityError:
         conn.rollback()
@@ -628,7 +628,7 @@ def reset(conn: sqlite3.Connection, claim_id: int) -> dict:
     claim = get(conn, claim_id)
     if claim["status"] == "draft":
         raise ClaimError("This claim is already a draft.")
-    conn.execute("UPDATE claims SET status = 'draft' WHERE id = ?", (claim_id,))
+    conn.execute("UPDATE claims SET status = 'draft' WHERE id = %s", (claim_id,))
     conn.commit()
     log.info("claims.reset", claim_id=claim_id)
     return get(conn, claim_id)
@@ -646,12 +646,12 @@ def listing(conn: sqlite3.Connection, status: str = "all", offset: int = 0,
             f"{', '.join(STATUSES)} or all.")
     where, params = "", []
     if status != "all":
-        where, params = " WHERE status = ?", [status]
-    total = conn.execute(f"SELECT COUNT(*) FROM claims{where}",
-                          params).fetchone()[0]
+        where, params = " WHERE status = %s", [status]
+    total = conn.execute(f"SELECT COUNT(*) AS total FROM claims{where}",
+                          params).fetchone()["total"]
     limit = max(1, min(int(limit), 100))
     rows = conn.execute(
-        f"SELECT id FROM claims{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        f"SELECT id FROM claims{where} ORDER BY id DESC LIMIT %s OFFSET %s",
         [*params, limit, max(0, int(offset))])
     items = [get(conn, row["id"]) for row in rows]
     return {"status": status, "total": total, "offset": offset,
@@ -682,5 +682,5 @@ def history(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
         "       v.note, c.claim_text AS claim_text "
         "FROM claim_verifications v "
         "LEFT JOIN claims c ON c.id = v.claim_id "
-        "ORDER BY v.id DESC LIMIT ?", (max(1, int(limit)),)).fetchall()
+        "ORDER BY v.id DESC LIMIT %s", (max(1, int(limit)),)).fetchall()
     return [dict(row) for row in rows]

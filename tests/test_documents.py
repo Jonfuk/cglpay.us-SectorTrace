@@ -48,7 +48,7 @@ def test_canonical_parse_keeps_page_provenance_and_is_searchable(conn, settings)
         conn, document_id, parsed, "config", None, "GOOD", {"total_characters": 72}, [], settings)
 
     element = conn.execute(
-        "SELECT parent_element_id, page_number FROM document_elements WHERE document_version_id=? AND sequence=2",
+        "SELECT parent_element_id, page_number FROM document_elements WHERE document_version_id=%s AND sequence=2",
         (version_id,)).fetchone()
     assert element["parent_element_id"]
     assert element["page_number"] == 1
@@ -63,7 +63,7 @@ def test_canonical_parse_keeps_page_provenance_and_is_searchable(conn, settings)
             "source_url": "https://example.test/document",
         }
     ]
-    assert conn.execute("SELECT match_count FROM document_topics WHERE topic='WORKFORCE'").fetchone()[0] == 1
+    assert conn.execute("SELECT match_count FROM document_topics WHERE topic='WORKFORCE'").fetchone().values().__iter__().__next__() == 1
 
 
 def test_same_parser_configuration_is_idempotent(conn, settings):
@@ -75,7 +75,7 @@ def test_same_parser_configuration_is_idempotent(conn, settings):
     first = repository.persist_parse(conn, document_id, parsed, "config", None, "GOOD", {}, [], settings)
     second = repository.persist_parse(conn, document_id, parsed, "config", None, "GOOD", {}, [], settings)
     assert first == second
-    assert conn.execute("SELECT COUNT(*) FROM document_versions").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM document_versions").fetchone().values().__iter__().__next__() == 1
 
 
 def test_ocr_routing_uses_the_configured_transparent_thresholds(settings):
@@ -92,7 +92,7 @@ def test_document_candidates_exclude_evidence_without_a_raw_archive_path(conn):
     repository.upsert_evidence(conn, source)
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, "
-        "payload_sha256, raw_object_path, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)",
+        "payload_sha256, raw_object_path, created_at) VALUES (%s, %s, %s, %s, %s, NULL, %s)",
         ("evidence-not-a-document", "find_a_tender", "https://example.test/notice",
          "2026-08-20T00:00:00+00:00", "b" * 64, repository.utcnow()),
     )
@@ -142,20 +142,20 @@ def test_legacy_bridge_requires_a_real_archived_document(conn, settings):
     raw_path = archive.put("committee_papers", digest, "application/pdf", body)
     conn.execute(
         "INSERT INTO evidence_promotions (candidate_table, candidate_url, target_table, target_key, promoted_by, "
-        "promoted_at, candidate_context_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "promoted_at, candidate_context_json) VALUES (%s, %s, %s, %s, %s, %s, %s)",
         ("committee_paper_candidates", "https://example.test/paper.pdf", "committee_papers",
          "E06000001|https://example.test/paper.pdf", "test", "2026-08-19T00:00:00+00:00", "{}"),
     )
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         ("E06000001", "Fixture Council", "unitary", "2020-01-01", "2020", "2020",
          "https://example.test/authority", "2026-08-19T00:00:00+00:00", 200, "fixture", digest),
     )
     conn.execute(
         "INSERT INTO committee_papers (authority_ons_code, document_url, report_title, archived_path, source_url, "
-        "retrieved_at, http_status, source_system, payload_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "retrieved_at, http_status, source_system, payload_sha256) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         ("E06000001", "https://example.test/paper.pdf", "Agenda report", raw_path,
          "https://example.test/paper.pdf", "2026-08-19T00:00:00+00:00", 200,
          "committee_papers", digest),
@@ -264,16 +264,17 @@ def test_unchanged_version_restores_completed_processing_state(conn):
     repository.mark_attempt(conn, reference.evidence_id, "NORMAL", "OCR_NOT_REQUIRED")
     repository.mark_unchanged(conn, reference.evidence_id, "OCR_NOT_REQUIRED")
     row = conn.execute(
-        "SELECT parse_status, ocr_status, last_error FROM document_processing_states WHERE evidence_id=?",
+        "SELECT parse_status, ocr_status, last_error FROM document_processing_states WHERE evidence_id=%s",
         (reference.evidence_id,)).fetchone()
-    assert tuple(row) == ("SUCCESS", "OCR_NOT_REQUIRED", None)
+    assert (row["parse_status"], row["ocr_status"], row["last_error"]) == (
+        "SUCCESS", "OCR_NOT_REQUIRED", None)
 
 
 def test_default_batch_selection_skips_successful_documents(conn):
     source = reference()
     repository.upsert_evidence(conn, source)
     assert len(_document_candidates(conn, None, "fixture", None, None, 25, pending_only=True)) == 1
-    conn.execute("UPDATE document_processing_states SET parse_status='SUCCESS' WHERE evidence_id=?",
+    conn.execute("UPDATE document_processing_states SET parse_status='SUCCESS' WHERE evidence_id=%s",
                  (source.evidence_id,))
     assert _document_candidates(conn, None, "fixture", None, None, 25, pending_only=True) == []
 
@@ -321,7 +322,7 @@ def test_msword_document_is_skipped_not_raised_without_antiword(conn, settings, 
     assert result["status"] == "SKIPPED_UNSUPPORTED_FORMAT"
     assert "antiword" in result["error"]
     row = conn.execute(
-        "SELECT parse_status, last_error FROM document_processing_states WHERE evidence_id=?",
+        "SELECT parse_status, last_error FROM document_processing_states WHERE evidence_id=%s",
         (doc_reference.evidence_id,)).fetchone()
     assert row["parse_status"] == "FAILED"
     assert "antiword" in row["last_error"]
@@ -410,7 +411,7 @@ def test_refresh_display_title_prefers_the_source_label(conn, settings):
 
     assert (display, basis) == ("Kent Substance Misuse JSNA 2024", "source_label")
     row = conn.execute("SELECT display_title, title_basis FROM document_records "
-                       "WHERE document_id=?", (document_id,)).fetchone()
+                       "WHERE document_id=%s", (document_id,)).fetchone()
     assert row["display_title"] == "Kent Substance Misuse JSNA 2024"
     assert row["title_basis"] == "source_label"
 
@@ -442,7 +443,7 @@ def test_processing_a_document_names_it_from_its_heading(conn, settings):
 
     row = conn.execute(
         "SELECT display_title, title_basis FROM document_records d "
-        "JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE e.evidence_id=?",
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE e.evidence_id=%s",
         (doc_reference.evidence_id,)).fetchone()
     assert row["display_title"] == "Adult Treatment Plan 2026"
     assert row["title_basis"] == "heading"
@@ -466,10 +467,10 @@ def test_backfill_names_rows_without_a_display_title_and_leaves_hashes_unknown(c
 
     assert result["updated"] == 2
     assert result["by_basis"] == {"source_label": 1, "unknown": 1}
-    assert conn.execute("SELECT title_basis FROM document_records WHERE document_id=?",
-                        (good,)).fetchone()[0] == "source_label"
+    assert conn.execute("SELECT title_basis FROM document_records WHERE document_id=%s",
+                        (good,)).fetchone().values().__iter__().__next__() == "source_label"
     row = conn.execute("SELECT display_title, title_basis FROM document_records "
-                       "WHERE document_id=?", (bad,)).fetchone()
+                       "WHERE document_id=%s", (bad,)).fetchone()
     assert row["display_title"] is None and row["title_basis"] == "unknown"
 
     # Idempotent: a second run without --recompute finds nothing to do.

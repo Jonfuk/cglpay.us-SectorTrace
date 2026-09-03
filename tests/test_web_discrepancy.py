@@ -25,7 +25,7 @@ def _company(conn, name, number="07688213"):
     conn.execute(
         "INSERT INTO companies (company_number, provider_key, company_name, "
         " match_basis, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES (?, 'cgl', ?, 'seed', 'https://ch/1', ?, 200, "
+        " payload_sha256) VALUES (%s, 'cgl', %s, 'seed', 'https://ch/1', %s, 200, "
         " 'ch', 'h')", (number, name, _NOW))
 
 
@@ -33,8 +33,8 @@ def _cqc_provider(conn, name):
     conn.execute(
         "INSERT INTO cqc_providers (provider_id, provider_name, provider_key, "
         " match_basis, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES ('1-1', ?, 'cgl', 'exact_name', "
-        " 'https://cqc/1', ?, 200, 'cqc', 'h')", (name, _NOW))
+        " payload_sha256) VALUES ('1-1', %s, 'cgl', 'exact_name', "
+        " 'https://cqc/1', %s, 200, 'cqc', 'h')", (name, _NOW))
 
 
 def test_differing_names_are_surfaced_with_every_source(conn: sqlite3.Connection) -> None:
@@ -77,7 +77,7 @@ def test_cqc_rating_channels_that_disagree_are_a_discrepancy(conn: sqlite3.Conne
         " bulk_overall_rating, bulk_overall_rating_date, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
         "('1-loc', '1-1', 'cgl', 'Camden hub', 'Good', '2024-01-01', "
-        " 'Requires improvement', '2023-06-01', 'https://cqc/l', ?, 200, "
+        " 'Requires improvement', '2023-06-01', 'https://cqc/l', %s, 200, "
         " 'cqc', 'h')", (_NOW,))
     conn.commit()
     out = discrepancy.check(conn, provider_key="cgl")

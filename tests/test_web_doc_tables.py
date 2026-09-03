@@ -21,18 +21,18 @@ def _doc(conn, *, source_system="committee_paper_promotion"):
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, http_status, payload_sha256, raw_object_path, mime_type, "
         " content_length, source_table, source_key, created_at) VALUES "
-        "('ev1', ?, 'https://x/1', ?, 200, 's1', 'r/x.pdf', 'application/pdf', "
-        " 10, 'committee_papers', 'k1', ?)", (source_system, _NOW, _NOW))
+        "('ev1', %s, 'https://x/1', %s, 200, 's1', 'r/x.pdf', 'application/pdf', "
+        " 10, 'committee_papers', 'k1', %s)", (source_system, _NOW, _NOW))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, "
         " source_key, document_type, mime_type, title, created_at, updated_at) "
         "VALUES ('d1', 'ev1', 'committee_papers', 'k1', 'committee_paper', "
-        " 'application/pdf', 'Board pack', ?, ?)", (_NOW, _NOW))
+        " 'application/pdf', 'Board pack', %s, %s)", (_NOW, _NOW))
     conn.execute(
         "INSERT INTO document_versions (document_version_id, document_id, "
         " parser_name, parser_version, parse_schema_version, config_hash, "
         " text_sha256, status, is_active, created_at) VALUES "
-        "('v1', 'd1', 'docling', '1', '1', 'c', 't', 'parsed', 1, ?)", (_NOW,))
+        "('v1', 'd1', 'docling', '1', '1', 'c', 't', 'parsed', 1, %s)", (_NOW,))
     els = [
         ("e0", "HEADING", 0, "Table 3: staff costs by band", None),
         ("e1", "table", 1, "band | headcount", '[["Band","Headcount"],["5","12"],["6","4"]]'),
@@ -42,13 +42,13 @@ def _doc(conn, *, source_system="committee_paper_promotion"):
         conn.execute(
             "INSERT INTO document_elements (document_element_id, "
             " document_version_id, element_type, sequence, page_number, text, "
-            " text_sha256, metadata_json) VALUES (?, 'v1', ?, ?, 1, ?, 'h', '{}')",
+            " text_sha256, metadata_json) VALUES (%s, 'v1', %s, %s, 1, %s, 'h', '{}')",
             (eid, etype, seq, text))
         if etype == "table":
             conn.execute(
                 "INSERT INTO document_tables (document_table_id, "
                 " document_element_id, row_count, column_count, table_json, "
-                " markdown) VALUES (?, ?, ?, ?, ?, ?)",
+                " markdown) VALUES (%s, %s, %s, %s, %s, %s)",
                 (f"dt-{eid}", eid, 3 if eid == "e1" else 0,
                  2 if eid == "e1" else 0, tjson,
                  "| x |\n|---|" if eid == "e2" else None))

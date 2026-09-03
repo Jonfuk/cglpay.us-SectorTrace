@@ -232,7 +232,7 @@ def test_a_run_executes_the_module_and_reports_what_it_did(client, fake_module, 
 
     # And it wrote: a run from the browser is a real run.
     assert conn.execute(
-        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone()[0] == 1
+        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone().values().__iter__().__next__() == 1
 
 
 def test_a_dry_run_rolls_back_what_it_did(client, fake_module, conn):
@@ -243,7 +243,7 @@ def test_a_dry_run_rolls_back_what_it_did(client, fake_module, conn):
 
     assert fake_module, "a dry run still runs the module"
     assert conn.execute(
-        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failing_module_fails_its_job_without_taking_the_server_down(

@@ -34,24 +34,24 @@ def _seed(conn, settings, *, mime="text/html", body=_HTML, stored_text="OLD TEXT
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, http_status, payload_sha256, raw_object_path, mime_type, "
         " content_length, source_table, source_key, created_at) VALUES "
-        "('ev1', 'committee_paper_promotion', 'https://x/1', ?, 200, ?, "
-        " ?, ?, ?, 'committee_papers', 'k1', ?)",
+        "('ev1', 'committee_paper_promotion', 'https://x/1', %s, 200, %s, "
+        " %s, %s, %s, 'committee_papers', 'k1', %s)",
         (_NOW, digest, f"data/raw/{rel}", mime, len(body), _NOW))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, "
         " source_key, document_type, mime_type, title, created_at, updated_at) "
-        "VALUES ('d1', 'ev1', 'committee_papers', 'k1', 'committee_paper', ?, "
-        " 'Board pack', ?, ?)", (mime, _NOW, _NOW))
+        "VALUES ('d1', 'ev1', 'committee_papers', 'k1', 'committee_paper', %s, "
+        " 'Board pack', %s, %s)", (mime, _NOW, _NOW))
     conn.execute(
         "INSERT INTO document_versions (document_version_id, document_id, "
         " parser_name, parser_version, parse_schema_version, config_hash, "
         " text_sha256, status, is_active, created_at) VALUES "
         "('v1', 'd1', 'html', 'stdlib-html-parser-1', '1', 'c', 't', "
-        " 'parsed', 1, ?)", (_NOW,))
+        " 'parsed', 1, %s)", (_NOW,))
     conn.execute(
         "INSERT INTO document_elements (document_element_id, document_version_id, "
         " element_type, sequence, text, text_sha256, metadata_json) VALUES "
-        "('e1', 'v1', 'PARAGRAPH', 1, ?, 'h', '{}')", (stored_text,))
+        "('e1', 'v1', 'PARAGRAPH', 1, %s, 'h', '{}')", (stored_text,))
     conn.commit()
     return digest
 
@@ -73,10 +73,10 @@ def test_replay_html_and_diff_against_the_stored_version(conn, settings) -> None
 
 def test_the_replay_writes_nothing(conn: sqlite3.Connection, settings) -> None:
     _seed(conn, settings)
-    before = conn.execute("SELECT COUNT(*) FROM document_elements").fetchone()[0]
+    before = conn.execute("SELECT COUNT(*) FROM document_elements").fetchone().values().__iter__().__next__()
     parser_replay.replay(conn, settings, "d1")
     parser_replay.replay(conn, settings, "d1")
-    after = conn.execute("SELECT COUNT(*) FROM document_elements").fetchone()[0]
+    after = conn.execute("SELECT COUNT(*) FROM document_elements").fetchone().values().__iter__().__next__()
     assert before == after == 1
 
 

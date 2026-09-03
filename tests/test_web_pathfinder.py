@@ -18,7 +18,7 @@ def _company(conn, number, provider_key, *, basis="seed"):
     conn.execute(
         "INSERT INTO companies (company_number, provider_key, company_name, "
         " match_basis, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES (?, ?, ?, ?, 'https://ch/x', "
+        " payload_sha256) VALUES (%s, %s, %s, %s, 'https://ch/x', "
         " '2026-01-01T00:00:00Z', 200, 'companies_house', 'h')",
         (number, provider_key, f"{provider_key.upper()} LTD", basis))
 
@@ -26,14 +26,15 @@ def _company(conn, number, provider_key, *, basis="seed"):
 def _contract(conn, notice_id, ons, supplier_raw, *, alias_key=None):
     if alias_key:
         conn.execute(
-            "INSERT OR IGNORE INTO supplier_aliases (alias_raw, supplier_key, "
-            " canonical_name) VALUES (?, ?, ?)",
+            "INSERT INTO supplier_aliases (alias_raw, supplier_key, "
+            " canonical_name) VALUES (%s, %s, %s) "
+            "ON CONFLICT (alias_raw) DO NOTHING",
             (supplier_raw, alias_key, alias_key))
     conn.execute(
         "INSERT INTO contracts (notice_id, supplier_id, ocid, notice_type, "
         " buyer_name, buyer_ons_code, supplier_name_raw, title, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        "(?, '', ?, 'award', 'B', ?, ?, 'x', 'https://ft/x', "
+        "(%s, '', %s, 'award', 'B', %s, %s, 'x', 'https://ft/x', "
         " '2026-01-01T00:00:00Z', 200, 'find_tender', 'h')",
         (notice_id, f"ocid-{notice_id}", ons, supplier_raw))
 

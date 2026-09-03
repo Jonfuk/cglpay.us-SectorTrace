@@ -40,7 +40,7 @@ def _seed(conn, settings, sentences):
     conn.execute(
         "INSERT INTO entities (entity_id, entity_type, canonical_name, "
         "canonical_name_normalized, status, created_at, updated_at) "
-        "VALUES ('provider:change_grow_live', 'PROVIDER', 'Change Grow Live', ?, "
+        "VALUES ('provider:change_grow_live', 'PROVIDER', 'Change Grow Live', %s, "
         "'active', '2026-01-01', '2026-01-01')", (_normalise("Change Grow Live"),))
     for i, sentence in enumerate(sentences):
         _seed_doc(conn, settings, f"evrb{i:04d}", sentence)
@@ -189,8 +189,9 @@ def test_accept_suggested_rejected_lifts_only_blank_rows_and_notes_the_source(co
     assert out["applied"] == 2 and out["from_suggestion"] == 1
     row = conn.execute(
         "SELECT decision, reason_code, note FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ?", (a["candidate_id"],)).fetchone()
-    assert tuple(row) == ("rejected", "object_is_bare_number", "via screen:object_is_bare_number")
+        "WHERE claim_candidate_id = %s", (a["candidate_id"],)).fetchone()
+    assert (row["decision"], row["reason_code"], row["note"]) == (
+        "rejected", "object_is_bare_number", "via screen:object_is_bare_number")
 
 
 def test_accept_suggested_rejects_anything_other_than_rejected(conn, settings):
@@ -243,9 +244,9 @@ def test_sample_keeps_the_bands_and_a_deterministic_tail(conn, settings):
 # --- apply ---------------------------------------------------------------
 
 def _decided(conn, candidate_id):
-    return [tuple(r) for r in conn.execute(
+    return [tuple(r.values()) for r in conn.execute(
         "SELECT decision, decided_by FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ?", (candidate_id,)).fetchall()]
+        "WHERE claim_candidate_id = %s", (candidate_id,)).fetchall()]
 
 
 def test_apply_records_one_decision_per_row_under_the_given_name(conn, settings):
@@ -256,8 +257,8 @@ def test_apply_records_one_decision_per_row_under_the_given_name(conn, settings)
     assert out["applied"] == 1 and out["by_decision"] == {"approved": 1}
     assert _decided(conn, row["candidate_id"]) == [("approved", "Jon Firth")]
     assert conn.execute(
-        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id = ?",
-        (row["candidate_id"],)).fetchone()[0] == "accepted"
+        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id = %s",
+        (row["candidate_id"],)).fetchone().values().__iter__().__next__() == "accepted"
 
 
 def test_apply_skips_blank_decisions(conn, settings):
@@ -277,8 +278,8 @@ def test_dry_run_validates_but_writes_no_decision(conn, settings):
     assert _decided(conn, row["candidate_id"]) == []
     # a dry run still leaves an nlp_runs trace (D-02)
     assert conn.execute(
-        "SELECT rows_written FROM nlp_runs WHERE run_id = ?",
-        (out["run_id"],)).fetchone()[0] == 0
+        "SELECT rows_written FROM nlp_runs WHERE run_id = %s",
+        (out["run_id"],)).fetchone().values().__iter__().__next__() == 0
 
 
 def test_apply_skips_a_candidate_this_reviewer_already_decided(conn, settings):
@@ -304,8 +305,8 @@ def test_apply_aborts_on_an_invalid_row_and_names_it(conn, settings):
     assert out["applied"] == 1                       # r1 stuck
     assert out["errors"] and "row 2" in out["errors"][0]
     assert conn.execute(
-        "SELECT status FROM nlp_runs WHERE run_id = ?",
-        (out["run_id"],)).fetchone()[0] == "failed"
+        "SELECT status FROM nlp_runs WHERE run_id = %s",
+        (out["run_id"],)).fetchone().values().__iter__().__next__() == "failed"
 
 
 def test_collapsed_decision_fans_out_to_every_member(conn, settings):
@@ -338,10 +339,10 @@ def test_take_suggested_corrections_fills_a_blank_corrected_predicate(conn, sett
     assert out["applied"] == 1
     got = conn.execute(
         "SELECT decision, corrected_predicate, note FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ?", (row["candidate_id"],)).fetchone()
-    assert got[0] == "corrected"
-    assert got[1] == "workforce.has_retention_pressure"
-    assert "via model:m/x" in got[2]
+        "WHERE claim_candidate_id = %s", (row["candidate_id"],)).fetchone()
+    assert got["decision"] == "corrected"
+    assert got["corrected_predicate"] == "workforce.has_retention_pressure"
+    assert "via model:m/x" in got["note"]
 
 
 def test_take_suggested_corrections_leaves_a_typed_predicate_alone(conn, settings):
@@ -354,8 +355,8 @@ def test_take_suggested_corrections_leaves_a_typed_predicate_alone(conn, setting
                              take_suggested_corrections=True)
     got = conn.execute(
         "SELECT corrected_predicate FROM claim_candidate_decisions "
-        "WHERE claim_candidate_id = ?", (row["candidate_id"],)).fetchone()
-    assert got[0] == "workforce.has_turnover"
+        "WHERE claim_candidate_id = %s", (row["candidate_id"],)).fetchone()
+    assert got["corrected_predicate"] == "workforce.has_turnover"
 
 
 def test_until_gate_stops_once_the_category_is_ready(conn, settings, monkeypatch):

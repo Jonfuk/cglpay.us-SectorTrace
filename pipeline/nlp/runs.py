@@ -45,7 +45,7 @@ def start_run(conn, stage: str, *, config: dict, chunker_version: str | None = N
     conn.execute(
         "INSERT INTO nlp_runs (run_id, stage, status, started_at, code_commit, "
         "chunker_version, model_key, model_revision, ontology_version, config_sha256, "
-        "input_scope_json) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)",
+        "input_scope_json) VALUES (%s, %s, 'running', %s, %s, %s, %s, %s, %s, %s, %s)",
         (run_id, stage, utcnow(), code_commit(), chunker_version, model_key,
          model_revision, ontology_version, config_sha256(config),
          json.dumps(input_scope or {}, sort_keys=True)))
@@ -55,6 +55,6 @@ def start_run(conn, stage: str, *, config: dict, chunker_version: str | None = N
 def finish_run(conn, run_id: str, *, status: str, rows_processed: int = 0,
                rows_written: int = 0, error: str | None = None) -> None:
     conn.execute(
-        "UPDATE nlp_runs SET status=?, completed_at=?, rows_processed=?, rows_written=?, "
-        "error=? WHERE run_id=?",
+        "UPDATE nlp_runs SET status=%s, completed_at=%s, rows_processed=%s, rows_written=%s, "
+        "error=%s WHERE run_id=%s",
         (status, utcnow(), rows_processed, rows_written, error, run_id))

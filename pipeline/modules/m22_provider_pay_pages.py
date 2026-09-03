@@ -264,7 +264,7 @@ def _store_page(conn, module_name: str, *, provider_key: str, page_url: str,
     # rows under indexes that no longer mean anything. This table is the
     # re-observation case F-05 says not to version — it is replaced, not
     # accumulated, and the page row's count is what makes the two agree.
-    conn.execute("DELETE FROM provider_pay_mentions WHERE page_url = ?", (page_url,))
+    conn.execute("DELETE FROM provider_pay_mentions WHERE page_url = %s", (page_url,))
 
     for index, mention in enumerate(mentions):
         db.upsert(conn, "provider_pay_mentions", {

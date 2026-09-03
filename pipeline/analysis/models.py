@@ -79,10 +79,10 @@ class AnalysisModelClient:
             raise AnalysisModelConfigurationError(detail)
         prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
         model_candidates = list(dict.fromkeys([model_id, *(self.fallback_models.get(role, []) or [])]))
-        placeholders = ", ".join("?" for _ in model_candidates)
+        placeholders = ", ".join("%s" for _ in model_candidates)
         cached = self.conn.execute(
             "SELECT model_id, provider_id, response_json FROM analysis_model_calls "
-            "WHERE release_id = ? AND model_id IN (" + placeholders + ") AND prompt_sha256 = ? "
+            "WHERE release_id = %s AND model_id IN (" + placeholders + ") AND prompt_sha256 = %s "
             "AND status = 'ok' ORDER BY created_at DESC LIMIT 1",
             (self.release_id, *model_candidates, prompt_sha)).fetchone()
         if cached and cached["response_json"]:
@@ -204,7 +204,7 @@ class AnalysisModelClient:
             "INSERT INTO analysis_model_calls (model_call_id, release_id, run_id, domain_id, window_id, "
             "model_id, provider_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, "
             "retry_count, status_code, status, error_detail, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (f"model-call-{uuid.uuid4()}", self.release_id, self.run_id, domain_id, window_id,
              model_id, provider_id, prompt_sha, response, int(cached), cost_micros, latency_ms,
              max(0, int(retry_count or 0)), status_code, status, error_detail, utcnow()))

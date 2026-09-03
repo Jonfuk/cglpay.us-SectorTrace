@@ -231,7 +231,7 @@ class JobStore:
         self._write(
             "INSERT INTO job_runs "
             "(id, kind, label, args_json, state, dry_run, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (id) DO UPDATE SET "
             "kind = excluded.kind, label = excluded.label, "
             "args_json = excluded.args_json, state = excluded.state, "
@@ -241,8 +241,8 @@ class JobStore:
 
     def finish(self, job: Job) -> None:
         self._write(
-            "UPDATE job_runs SET state = ?, finished_at = ?, error = ?, "
-            "summary_json = ? WHERE id = ?",
+            "UPDATE job_runs SET state = %s, finished_at = %s, error = %s, "
+            "summary_json = %s WHERE id = %s",
             (job.state, job.finished_at, job.error,
              json.dumps(job.summary, default=str) if job.summary else None,
              job.id))
@@ -260,7 +260,7 @@ class JobStore:
         try:
             conn = db.get_connection(self._settings)
             try:
-                stale = [r[0] for r in conn.execute(
+                stale = [r["id"] for r in conn.execute(
                     "SELECT id FROM job_runs WHERE state = 'running'")]
                 if stale:
                     conn.execute("UPDATE job_runs SET state = 'interrupted' "
@@ -270,7 +270,7 @@ class JobStore:
                 rows = conn.execute(
                     "SELECT id, kind, label, args_json, state, started_at, "
                     "       finished_at, error, summary_json "
-                    "FROM job_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+                    "FROM job_runs ORDER BY id DESC LIMIT %s", (limit,)).fetchall()
             finally:
                 conn.close()
         except Exception as exc:
@@ -279,12 +279,12 @@ class JobStore:
 
         jobs = []
         for row in rows:
-            job = Job(id=row[0], kind=row[1], label=row[2],
-                       args=json.loads(row[3]) if row[3] else {},
-                       state=row[4], started_at=row[5])
-            job.finished_at = row[6]
-            job.error = row[7]
-            job.summary = json.loads(row[8]) if row[8] else None
+            job = Job(id=row["id"], kind=row["kind"], label=row["label"],
+                       args=json.loads(row["args_json"]) if row["args_json"] else {},
+                       state=row["state"], started_at=row["started_at"])
+            job.finished_at = row["finished_at"]
+            job.error = row["error"]
+            job.summary = json.loads(row["summary_json"]) if row["summary_json"] else None
             # Its lines are not here and saying so is better than an empty log
             # that reads as a job which printed nothing.
             job.append("info", "log not retained across restart — see logs/")

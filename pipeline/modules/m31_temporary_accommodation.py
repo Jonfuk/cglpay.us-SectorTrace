@@ -230,7 +230,7 @@ def run(ctx: ModuleContext) -> None:
     conn = ctx.conn
     since_year = ctx.since_year()
 
-    known_authorities = {row[0] for row in conn.execute(
+    known_authorities = {row["ons_code"] for row in conn.execute(
         "SELECT ons_code FROM authorities")}
     unmatched_logged: set[str] = set()
 

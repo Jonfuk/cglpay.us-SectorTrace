@@ -1,15 +1,10 @@
-"""Everything the UI reads, on a connection that cannot write.
+"""Everything the UI reads, on a PostgreSQL connection that cannot write.
 
 The browser is a general database viewer — it will run a table scan, a sort on
 an unindexed column, and whatever SQL someone types into the query box. Two
 guards make that safe to expose rather than merely convenient:
 
-  * **`mode=ro` plus `query_only`.** The read-only URI stops writes to the
-    warehouse at the driver level, and `query_only` extends that to anything
-    the connection later attaches. Neither depends on inspecting the SQL, so
-    neither can be talked around by a statement nobody anticipated.
-
-  * **A deadline on every statement.** SQLite's progress handler aborts a
+  * **A deadline on every statement.** PostgreSQL's statement timeout aborts a
     query that outstays it. `la_revenue_budgets` has 237k rows and the
     Fingertips views join across two more, so an ordinary-looking sort can run
     for minutes; the alternative to a deadline is a page that hangs with no
@@ -55,24 +50,16 @@ def readonly_connection(settings: Settings | None = None):
     database is not answering"), and they deserve an answer rather than a
     stack trace.
 
-    Read-only means something different on each backend, and on PostgreSQL it
-    means something *better*:
-
-      * SQLite — `mode=ro` on the URI plus `PRAGMA query_only`, both enforced
-        by the driver rather than by inspecting the SQL, so neither can be
-        talked around by a statement nobody anticipated.
-      * PostgreSQL — `DATABASE_RO_URL`, a role holding `SELECT` and nothing
-        else, plus `default_transaction_read_only` on the connection. The
-        session setting is the belt; the role is the braces, and the role is
-        the one that survives a bug in this file. A session setting is
-        something this application *asks for*; a role without INSERT cannot be
-        talked into one whatever the code does.
+    PostgreSQL read-only means `DATABASE_RO_URL`, a role holding `SELECT` and
+    nothing else, plus `default_transaction_read_only` on the connection. The
+    session setting is the belt; the role is the braces, and the role is the
+    one that survives a bug in this file.
 
     With no `DATABASE_RO_URL` configured this falls back to `DATABASE_URL` —
     which works, and is weaker: reads then run as the role that owns the
     schema, so the only thing standing between the SQL box and a write is the
-    session setting. That is a real difference from the SQLite path, not a
-    tidiness point, so the fallback is logged rather than taken quietly. See
+    session setting. That is a weaker deployment posture, so the fallback is
+    logged rather than taken quietly. See
     pipeline/migrations/postgres/README.md for the role definitions.
     """
     settings = settings or get_settings()
@@ -86,6 +73,12 @@ def readonly_connection(settings: Settings | None = None):
         raise QueryError(
             "No DATABASE_URL configured. PostgreSQL is the only application "
             "database (performance.md Phase 1).")
+    if not settings.database_ro_url and settings.environment.lower() in {
+            "production", "prod"}:
+        raise QueryError(
+            "DATABASE_RO_URL is required for production read paths. Use a "
+            "PostgreSQL role with SELECT only; an owner connection is not a "
+            "read-only deployment guard.")
     if not settings.database_ro_url:
         structlog.get_logger().warning(
             "web.readonly_without_a_reader_role",
@@ -383,7 +376,7 @@ def read_table(
         # URL fragment without the person having to say which column it is in.
         params["q"] = f"%{escape_like(search)}%"
         clauses = " OR ".join(
-            f"CAST({_quote(c)} AS TEXT) LIKE :q ESCAPE '\\'" for c in column_names
+            f"CAST({_quote(c)} AS TEXT) LIKE %(q)s ESCAPE '\\'" for c in column_names
         )
         where = f" WHERE ({clauses})"
 
@@ -406,7 +399,7 @@ def read_table(
     params = {**params, "limit": limit, "offset": offset}
     rows = _run(
         conn,
-        f"SELECT * FROM {_quote(name)}{where}{order_sql} LIMIT :limit OFFSET :offset",
+        f"SELECT * FROM {_quote(name)}{where}{order_sql} LIMIT %(limit)s OFFSET %(offset)s",
         params,
     )
 
@@ -433,8 +426,8 @@ def _row_to_json(row, column_names: list[str]) -> list[Any]:
     across joined tables, and a dict would silently drop one of them.
     """
     values: list[Any] = []
-    for index in range(len(column_names)):
-        value = row[index]
+    for column_name in column_names:
+        value = row[column_name]
         if isinstance(value, bytes):
             # BLOBs are archived payloads, not display material. Say what it
             # is rather than mangling it through a decode that may not hold.
@@ -582,18 +575,18 @@ def review_filter_sql(
     if status and status != "all":
         if status not in ALL_REVIEW_STATUSES:
             raise QueryError(f"Unknown status {status!r}.")
-        where.append("q.status = :status")
+        where.append("q.status = %(status)s")
         params["status"] = status
     if module:
-        where.append("q.module = :module")
+        where.append("q.module = %(module)s")
         params["module"] = module
     if item_type:
-        where.append("q.item_type = :item_type")
+        where.append("q.item_type = %(item_type)s")
         params["item_type"] = item_type
     if search:
         params["q"] = f"%{escape_like(search)}%"
         where.append(
-            "(q.raw_value LIKE :q ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE :q ESCAPE '\\')"
+            "(q.raw_value LIKE %(q)s ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE %(q)s ESCAPE '\\')"
         )
 
     return (f" WHERE {' AND '.join(where)}" if where else ""), params
@@ -641,7 +634,7 @@ def review_items(
         "    SELECT MAX(id) FROM review_decisions e WHERE e.review_item_id = q.id)"
         f"{clause} "
         f"ORDER BY q.created_at {direction}, q.id {direction} "
-        "LIMIT :limit OFFSET :offset",
+        "LIMIT %(limit)s OFFSET %(offset)s",
         params,
     )
 
@@ -712,7 +705,7 @@ def review_clusters(conn: db.Connection, *, status: str = "pending") -> dict:
     rows = _run(
         conn,
         "SELECT id, module, item_type, raw_value, context_json FROM review_queue "
-        "WHERE status = :status ORDER BY created_at, id LIMIT :cap",
+        "WHERE status = %(status)s ORDER BY created_at, id LIMIT %(cap)s",
         {"status": status, "cap": _CLUSTER_SCAN_CAP})
 
     buckets: dict[tuple[str, str, str], dict] = {}
@@ -746,7 +739,7 @@ def review_clusters(conn: db.Connection, *, status: str = "pending") -> dict:
 
 def review_item(conn: db.Connection, item_id: int) -> dict | None:
     """One item with its full decision history, newest first."""
-    rows = _run(conn, "SELECT * FROM review_queue WHERE id = ?", (item_id,))
+    rows = _run(conn, "SELECT * FROM review_queue WHERE id = %s", (item_id,))
     if not rows:
         return None
 
@@ -756,7 +749,7 @@ def review_item(conn: db.Connection, item_id: int) -> dict | None:
         for row in _run(
             conn,
             "SELECT id, decision, status_before, note, decided_by, decided_at, context_json "
-            "FROM review_decisions WHERE review_item_id = ? "
+            "FROM review_decisions WHERE review_item_id = %s "
             "ORDER BY decided_at DESC, id DESC",
             (item_id,),
         )
@@ -772,7 +765,7 @@ def recent_decisions(conn: db.Connection, limit: int = 20) -> list[dict]:
             "SELECT d.id, d.decision, d.note, d.decided_by, d.decided_at, "
             "       q.id AS item_id, q.module, q.item_type, q.raw_value "
             "FROM review_decisions d JOIN review_queue q ON q.id = d.review_item_id "
-            "ORDER BY d.decided_at DESC, d.id DESC LIMIT ?",
+            "ORDER BY d.decided_at DESC, d.id DESC LIMIT %s",
             (max(1, min(int(limit), 200)),),
         )
     ]
@@ -792,7 +785,7 @@ def parse_failures(conn: db.Connection, limit: int = 200) -> list[dict]:
             "SELECT module, reason, field_name, COUNT(*) AS n, "
             "       MIN(created_at) AS first_seen, MAX(created_at) AS last_seen "
             "FROM parse_failures GROUP BY module, reason, field_name "
-            "ORDER BY n DESC LIMIT ?",
+            "ORDER BY n DESC LIMIT %s",
             (max(1, min(int(limit), 500)),),
         )
     ]

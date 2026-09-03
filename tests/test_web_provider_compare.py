@@ -26,19 +26,19 @@ TP = "turning-point"
 def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
     for key, nm in [(CGL, "Change Grow Live"), (TP, "Turning Point")]:
         conn.execute("INSERT INTO providers (provider_key, canonical_name, "
-                     "is_target, notes) VALUES (?, ?, 1, NULL)", (key, nm))
+                     "is_target, notes) VALUES (%s, %s, 1, NULL)", (key, nm))
     conn.execute(
         "INSERT INTO living_wage_accreditations (provider_key, searched_variant, "
         " accredited, employer_name, match_basis, pages_checked, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        " (?, 'Change Grow Live', 1, 'Change Grow Live', 'exact', 1, "
+        " (%s, 'Change Grow Live', 1, 'Change Grow Live', 'exact', 1, "
         " 'https://lw.example/a', '2026-07-01T00:00:00Z', 200, 'lwf', 'lw1')",
         (CGL,))
     conn.execute(
         "INSERT INTO living_wage_accreditations (provider_key, searched_variant, "
         " accredited, employer_name, match_basis, pages_checked, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        " (?, 'Turning Point', 0, NULL, NULL, 3, 'https://lw.example/b', "
+        " (%s, 'Turning Point', 0, NULL, NULL, 3, 'https://lw.example/b', "
         " '2026-07-01T00:00:00Z', 200, 'lwf', 'lw2')",
         (TP,))
     # Two gender pay gap years for CGL — only the newest must come back.
@@ -48,15 +48,15 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " reporting_year_label, employer_id, match_basis, employer_name, "
             " diff_mean_hourly_percent, diff_median_hourly_percent, "
             " written_statement_url, source_url, retrieved_at, http_status, "
-            " source_system, payload_sha256) VALUES (?, ?, ?, 'E1', 'exact', "
-            " 'Change Grow Live', ?, ?, 'https://gpg.example/s', "
-            " 'https://gpg.example/r', '2026-06-01T00:00:00Z', 200, 'gpg', ?)",
+            " source_system, payload_sha256) VALUES (%s, %s, %s, 'E1', 'exact', "
+            " 'Change Grow Live', %s, %s, 'https://gpg.example/s', "
+            " 'https://gpg.example/r', '2026-06-01T00:00:00Z', 200, 'gpg', %s)",
             (CGL, year, f"{year} to {int(year) + 1}", mean, median, f"gpg-{year}"))
     conn.execute(
         "INSERT INTO provider_pay_mentions (page_url, mention_index, provider_key, "
         " mention_text, salary_basis, match_basis, salary_period, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        " ('https://cgl.example/careers', 0, ?, 'Band 5 from £28,407', 'band', "
+        " ('https://cgl.example/careers', 0, %s, 'Band 5 from £28,407', 'band', "
         " 'exact', 'year', 'https://cgl.example/careers', "
         " '2026-05-01T00:00:00Z', 200, 'provider_site', 'pm1')",
         (CGL,))
@@ -66,10 +66,10 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " provider_match_basis, employer_name_raw, job_title, advert_url, "
             " salary_raw, salary_basis, searched_variant, source_url, "
             " retrieved_at, http_status, source_system, payload_sha256, posted_date) "
-            " VALUES (?, ?, 'exact', 'Turning Point', 'Recovery Worker', "
+            " VALUES (%s, %s, 'exact', 'Turning Point', 'Recovery Worker', "
             " 'https://jobs.example/x', '£24,071 to £25,674 a year', 'range', "
             " 'Turning Point', 'https://jobs.example/x', '2026-08-05T00:00:00Z', "
-            " 200, 'nhs_jobs', ?, ?)",
+            " 200, 'nhs_jobs', %s, %s)",
             (f"job-{i}", TP, f"adv-{i}", dt))
     conn.commit()
     return conn

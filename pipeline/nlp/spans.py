@@ -196,9 +196,9 @@ def _chunk_elements(conn, chunk_row) -> list[tuple[str, str]]:
     rows = conn.execute(
         "SELECT de.document_element_id AS eid, de.text AS text "
         "FROM document_elements de "
-        "JOIN document_elements s ON s.document_element_id = ? "
-        "JOIN document_elements e ON e.document_element_id = ? "
-        "WHERE de.document_version_id = ? AND de.sequence BETWEEN s.sequence AND e.sequence "
+        "JOIN document_elements s ON s.document_element_id = %s "
+        "JOIN document_elements e ON e.document_element_id = %s "
+        "WHERE de.document_version_id = %s AND de.sequence BETWEEN s.sequence AND e.sequence "
         "ORDER BY de.sequence",
         (chunk_row["element_start_id"], chunk_row["element_end_id"],
          chunk_row["document_version_id"])).fetchall()
@@ -227,8 +227,8 @@ def extract_chunk(conn, extractor, chunk_row, nlp_run_id: str | None) -> int:
         acc += len(text) + 1  # the "\n" the chunker joined on
 
     conn.execute(
-        "DELETE FROM document_concept_mentions WHERE document_chunk_id = ? "
-        "AND extractor_name = ? AND extractor_version = ?",
+        "DELETE FROM document_concept_mentions WHERE document_chunk_id = %s "
+        "AND extractor_name = %s AND extractor_version = %s",
         (chunk_row["document_chunk_id"], extractor.name, extractor.version))
 
     now = runs.utcnow()
@@ -240,7 +240,7 @@ def extract_chunk(conn, extractor, chunk_row, nlp_run_id: str | None) -> int:
             "document_element_id, label, concept_id, span_text, char_start, char_end, "
             "element_char_start, element_char_end, extractor_name, extractor_version, "
             "extraction_score, superseded, nlp_run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s) "
             "ON CONFLICT(document_chunk_id, extractor_name, extractor_version, char_start, char_end, label) "
             "DO UPDATE SET span_text=excluded.span_text, concept_id=excluded.concept_id, "
             "document_element_id=excluded.document_element_id, "
@@ -267,11 +267,11 @@ def _live_chunks(conn, source_system: str | None, limit: int | None) -> list:
         "WHERE dc.superseded = 0")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " ORDER BY dc.created_at, dc.document_chunk_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 

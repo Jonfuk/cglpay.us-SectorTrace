@@ -45,13 +45,13 @@ _NOTE = (
 def _variants(conn, key: str) -> list[str]:
     rows = _rows(conn,
                  "SELECT DISTINCT alias_raw FROM supplier_aliases "
-                 "WHERE supplier_key = ? ORDER BY alias_raw", (key,))
+                 "WHERE supplier_key = %s ORDER BY alias_raw", (key,))
     return [r["alias_raw"] for r in rows if r["alias_raw"]]
 
 
 def _entity_name(conn, key: str) -> str:
-    row = (_one(conn, "SELECT canonical_name AS n FROM providers WHERE provider_key = ?", (key,))
-           or _one(conn, "SELECT canonical_name AS n FROM supplier_aliases WHERE supplier_key = ? LIMIT 1", (key,)))
+    row = (_one(conn, "SELECT canonical_name AS n FROM providers WHERE provider_key = %s", (key,))
+           or _one(conn, "SELECT canonical_name AS n FROM supplier_aliases WHERE supplier_key = %s LIMIT 1", (key,)))
     return (row or {}).get("n") or key
 
 
@@ -81,9 +81,9 @@ def find(conn, keys: list[str]) -> dict:
         present = {o["name"] for o in catalog.list_objects(conn)}
         if {"document_elements", "document_versions", "document_records",
                 "evidence_records"} <= present:
-            placeholders = ",".join("?" * len(DOCUMENT_SEARCH_SOURCES))
+            placeholders = ",".join("%s" for _ in DOCUMENT_SEARCH_SOURCES)
             per_key_clause = " AND ".join(
-                "(" + " OR ".join("de.text LIKE ? ESCAPE '\\'" for _ in variants[k]) + ")"
+                "(" + " OR ".join("de.text LIKE %s ESCAPE '\\'" for _ in variants[k]) + ")"
                 for k in keys)
             like_params = [f"%{escape_like(v)}%" for k in keys for v in variants[k]]
             rows = _rows(conn, f"""
@@ -120,12 +120,12 @@ def find(conn, keys: list[str]) -> dict:
         HAVING COUNT(DISTINCT provider_key) >= 2"""):
         mentions = _rows(conn,
             "SELECT provider_key, mention_type, matched_name "
-            "FROM pfd_provider_mentions WHERE report_ref = ?", (row["report_ref"],))
+            "FROM pfd_provider_mentions WHERE report_ref = %s", (row["report_ref"],))
         hit = {m["provider_key"] for m in mentions} & kset
         if len(hit) < 2:
             continue
         report = _one(conn, "SELECT report_date, coroner_area, report_url "
-                            "FROM pfd_reports WHERE report_ref = ?", (row["report_ref"],))
+                            "FROM pfd_reports WHERE report_ref = %s", (row["report_ref"],))
         results.append({
             "record_type": "coroner_report",
             "record_id": row["report_ref"],
@@ -144,7 +144,7 @@ def find(conn, keys: list[str]) -> dict:
         HAVING COUNT(DISTINCT provider_key) >= 2"""):
         parties = _rows(conn,
             "SELECT provider_key, decision_date FROM tribunal_cases "
-            "WHERE case_number = ?", (row["case_number"],))
+            "WHERE case_number = %s", (row["case_number"],))
         hit = {p["provider_key"] for p in parties} & kset
         if len(hit) < 2:
             continue
@@ -166,7 +166,7 @@ def find(conn, keys: list[str]) -> dict:
         sups = _rows(conn, """
             SELECT sa.supplier_key, c.title, c.date_published, c.source_url
             FROM contracts c JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
-            WHERE c.notice_id = ?""", (row["notice_id"],))
+            WHERE c.notice_id = %s""", (row["notice_id"],))
         hit = {s["supplier_key"] for s in sups} & kset
         if len(hit) < 2:
             continue

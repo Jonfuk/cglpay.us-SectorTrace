@@ -249,8 +249,8 @@ def _assertion_id(concept_mention_id: str, detector_name: str, detector_version:
 def _entity_mention_id(conn, mention) -> str | None:
     row = conn.execute(
         "SELECT document_entity_mention_id FROM document_entity_mentions "
-        "WHERE document_element_id = ? AND start_offset = ? AND end_offset = ? "
-        "AND matched_text = ? LIMIT 1",
+        "WHERE document_element_id = %s AND start_offset = %s AND end_offset = %s "
+        "AND matched_text = %s LIMIT 1",
         (mention["document_element_id"], mention["element_char_start"],
          mention["element_char_end"], mention["span_text"])).fetchone()
     return row["document_entity_mention_id"] if row else None
@@ -260,13 +260,13 @@ def tag_chunk(conn, tagger, chunk_row, nlp_run_id: str | None) -> int:
     mentions = conn.execute(
         "SELECT document_concept_mention_id, document_element_id, span_text, "
         "char_start, char_end, element_char_start, element_char_end "
-        "FROM document_concept_mentions WHERE document_chunk_id = ? AND superseded = 0",
+        "FROM document_concept_mentions WHERE document_chunk_id = %s AND superseded = 0",
         (chunk_row["document_chunk_id"],)).fetchall()
     if not mentions:
         return 0
     conn.execute(
-        "DELETE FROM document_assertions WHERE document_chunk_id = ? AND detector_name = ? "
-        "AND detector_version = ?",
+        "DELETE FROM document_assertions WHERE document_chunk_id = %s AND detector_name = %s "
+        "AND detector_version = %s",
         (chunk_row["document_chunk_id"], tagger.name, tagger.version))
 
     chunk_text = chunk_row["text"] or ""
@@ -285,7 +285,7 @@ def tag_chunk(conn, tagger, chunk_row, nlp_run_id: str | None) -> int:
             "concept_mention_id, entity_mention_id, assertion_status, detector_name, "
             "detector_version, detector_confidence, cue_text, cue_start, cue_end, "
             "sentence_sha256, superseded, nlp_run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s) "
             "ON CONFLICT(concept_mention_id, detector_name, detector_version) DO UPDATE SET "
             "assertion_status=excluded.assertion_status, detector_confidence=excluded.detector_confidence, "
             "cue_text=excluded.cue_text, cue_start=excluded.cue_start, cue_end=excluded.cue_end, "
@@ -311,11 +311,11 @@ def _live_chunks(conn, source_system: str | None, limit: int | None) -> list:
         "WHERE dc.superseded = 0")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " GROUP BY dc.document_chunk_id ORDER BY MIN(dc.created_at), dc.document_chunk_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 

@@ -45,7 +45,7 @@ def overlaps(conn, *, limit: int = 200) -> dict:
             continue
         rows = conn.execute(
             f"SELECT {column} AS u, COUNT(*) AS n FROM {table} "
-            f"WHERE {column} IS NOT NULL GROUP BY {column} LIMIT ?",
+            f"WHERE {column} IS NOT NULL GROUP BY {column} LIMIT %s",
             (_SCAN_CAP,)).fetchall()
         for row in rows:
             value = str(row["u"])

@@ -28,7 +28,7 @@ def _seed_entity(conn, entity_id, entity_type, name):
     from pipeline.graph.backfill import _normalise
     conn.execute(
         "INSERT INTO entities (entity_id, entity_type, canonical_name, canonical_name_normalized, "
-        "status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)",
+        "status, created_at, updated_at) VALUES (%s, %s, %s, %s, 'active', %s, %s)",
         (entity_id, entity_type, name, _normalise(name),
          "2026-08-27T00:00:00+00:00", "2026-08-27T00:00:00+00:00"))
 
@@ -67,7 +67,7 @@ def test_exact_name_match_writes_an_entity_mention(conn, settings):
         element_text = _ELEMENTS[1].text
         assert element_text[row["start_offset"]:row["end_offset"]] == row["matched_text"]
 
-    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=?",
+    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=%s",
                            (result["run_id"],)).fetchone()
     assert run_row["stage"] == "resolve" and run_row["status"] == "ok"
 
@@ -82,15 +82,15 @@ def test_a_span_with_no_registered_entity_stays_unresolved(conn, settings):
     assert entity_ids == {"provider:turning_point"}
     # the unresolved PROVIDER spans are still there as concept mentions
     assert conn.execute(
-        "SELECT COUNT(*) FROM document_concept_mentions WHERE label='PROVIDER'").fetchone()[0] >= 2
+        "SELECT COUNT(*) FROM document_concept_mentions WHERE label='PROVIDER'").fetchone().values().__iter__().__next__() >= 2
 
 
 def test_resolution_is_idempotent(conn, settings):
     _prepare(conn, settings, entities=[("provider:turning_point", "PROVIDER", "Turning Point")])
     resolve.run(conn)
-    n1 = conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone()[0]
+    n1 = conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone().values().__iter__().__next__()
     resolve.run(conn)
-    n2 = conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone()[0]
+    n2 = conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone().values().__iter__().__next__()
     assert n1 == n2 == 1
 
 
@@ -116,5 +116,5 @@ def test_dry_run_writes_nothing(conn, settings):
     _prepare(conn, settings, entities=[("provider:turning_point", "PROVIDER", "Turning Point")])
     result = resolve.run(conn, dry_run=True)
     assert result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='resolve'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_entity_mentions").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='resolve'").fetchone().values().__iter__().__next__() == 0

@@ -18,7 +18,7 @@ def _rq(conn, module, item_type, status, created, resolved=None):
     _seq[0] += 1
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, status, "
-        " created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?)",
+        " created_at, resolved_at) VALUES (%s, %s, %s, %s, %s, %s)",
         (module, item_type, f"v{_seq[0]}", status, created, resolved))
 
 
@@ -26,8 +26,8 @@ def _ad(conn, scheme, status, reason, decided_by, decided_at):
     conn.execute(
         "INSERT INTO alias_decisions (decision_id, unmatched_name, "
         " target_scheme, canonical_id, canonical_name, status, decided_by, "
-        " reason, decided_at) VALUES (hex(randomblob(8)), 'x', ?, 'c', 'C', "
-        " ?, ?, ?, ?)", (scheme, status, decided_by, reason, decided_at))
+        " reason, decided_at) VALUES (md5(random()::text), 'x', %s, 'c', 'C', "
+        " %s, %s, %s, %s)", (scheme, status, decided_by, reason, decided_at))
 
 
 def test_by_source_aggregates_pending_and_resolved(conn: sqlite3.Connection) -> None:

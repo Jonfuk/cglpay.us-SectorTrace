@@ -37,10 +37,10 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
     ]
     conn.executemany(
         "INSERT INTO providers (provider_key, canonical_name, is_target, status, "
-        "superseded_by) VALUES (?, ?, ?, ?, ?)", rows)
+        "superseded_by) VALUES (%s, %s, %s, %s, %s)", rows)
     conn.executemany(
         "INSERT INTO provider_identifiers (provider_key, scheme, identifier, "
-        "role, status) VALUES (?, ?, ?, ?, ?)", [
+        "role, status) VALUES (%s, %s, %s, %s, %s)", [
             ("with_you", "company_number", "02580377", "registered company", "verified"),
             ("with_you", "charity_number", "1001957", "registered charity", "verified"),
             ("with_you", "cqc_provider_id", "1-abc", None, "unverified"),

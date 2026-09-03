@@ -206,7 +206,7 @@ def test_analysis_cache_reuses_successful_fallback_model(conn, settings):
     conn.execute(
         "INSERT INTO analysis_model_calls (model_call_id, release_id, domain_id, window_id, model_id, "
         "provider_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, status, created_at) "
-        "VALUES ('cached-fallback-call', ?, 'da', 'window-1', 'backup/model', 'provider-1', ?, ?, 0, 17, 42, 'ok', ?)",
+        "VALUES ('cached-fallback-call', %s, 'da', 'window-1', 'backup/model', 'provider-1', %s, %s, 0, 17, 42, 'ok', %s)",
         (release["release_id"], prompt_sha,
          '{"signal": null}', "2025-01-01T00:00:00+00:00"))
     conn.commit()
@@ -276,8 +276,8 @@ def test_signal_graph_rebuild_is_durable_and_isolated(conn, settings):
     release = create_release(conn, settings, domains=["da"])
     result = queue_release_projection(conn, release["release_id"])
     assert result["status"] == "queued"
-    assert conn.execute("SELECT COUNT(*) FROM signal_graph_projection_queue WHERE release_id = ?",
-                        (release["release_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) AS count FROM signal_graph_projection_queue WHERE release_id = %s",
+                        (release["release_id"],)).fetchone()["count"] == 1
 
 
 def test_admin_analysis_read_models_are_admin_only(conn):
@@ -359,7 +359,7 @@ def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
         conn.execute(
             "INSERT INTO contracts (notice_id, supplier_id, ocid, value_core, currency, date_start, "
             "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, 'provider-1', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, 'provider-1', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (notice_id, f"ocid-{notice_id}", value, common["currency"], period,
              common["source_url"], common["retrieved_at"], common["http_status"],
              common["source_system"], common["payload_sha256"]))
@@ -368,9 +368,9 @@ def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
     started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
     result = AnalysisWorker(settings, batch_size=2, worker_id="structured-fixture-worker").run_once()
     assert result["run_id"] == started["run_id"]
-    assert conn.execute("SELECT COUNT(*) FROM structured_signals WHERE signal_id IN "
-                        "(SELECT signal_id FROM automated_signals WHERE release_id = ?)",
-                        (started["release_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) AS count FROM structured_signals WHERE signal_id IN "
+                        "(SELECT signal_id FROM automated_signals WHERE release_id = %s)",
+                        (started["release_id"],)).fetchone()["count"] == 1
 
 
 def test_analysis_worker_processes_narrative_domain(conn, settings):
@@ -387,16 +387,16 @@ def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
         "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
-        "VALUES ('evidence-analysis-1', 'fixture', 'https://example.test/doc', ?, 200, 'hash-analysis', "
-        "'/data/doc.pdf', 'application/pdf', 10, 'committee_papers', 'authority-1', ?)", (now, now))
+        "VALUES ('evidence-analysis-1', 'fixture', 'https://example.test/doc', %s, 200, 'hash-analysis', "
+        "'/data/doc.pdf', 'application/pdf', 10, 'committee_papers', 'authority-1', %s)", (now, now))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
         "created_at, updated_at) VALUES ('document-analysis-1', 'evidence-analysis-1', 'committee_papers', "
-        "'authority-1', 'REPORT', ?, ?)", (now, now))
+        "'authority-1', 'REPORT', %s, %s)", (now, now))
     conn.execute(
         "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
         "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
-        "('version-analysis-1', 'document-analysis-1', 'fixture', '1', '1', 'hash', 'complete', 1, ?)", (now,))
+        "('version-analysis-1', 'document-analysis-1', 'fixture', '1', '1', 'hash', 'complete', 1, %s)", (now,))
     conn.execute(
         "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
         "text_sha256) VALUES ('element-analysis-1', 'version-analysis-1', 'PARAGRAPH', 1, "
@@ -421,10 +421,10 @@ def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
     assert result["run_id"] == started["run_id"]
     assert result["cost_micros"] == 14
     signal = conn.execute("SELECT signal_type, direction, human_verified FROM automated_signals "
-                          "WHERE release_id = ?", (started["release_id"],)).fetchone()
+                          "WHERE release_id = %s", (started["release_id"],)).fetchone()
     assert dict(signal) == {"signal_type": "workforce_strain", "direction": "adverse", "human_verified": 0}
     prevalence = conn.execute("SELECT positives, subjects, suppressed FROM analysis_prevalence_diagnostics "
-                              "WHERE release_id = ?", (started["release_id"],)).fetchone()
+                              "WHERE release_id = %s", (started["release_id"],)).fetchone()
     assert dict(prevalence) == {"positives": 1, "subjects": 1, "suppressed": 1}
 
 
@@ -433,16 +433,16 @@ def test_analysis_worker_pauses_narrative_run_when_models_are_exhausted(conn, se
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
         "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
-        "VALUES ('evidence-analysis-outage', 'fixture', 'https://example.test/outage', ?, 200, 'hash-outage', "
-        "'/data/outage.pdf', 'application/pdf', 10, 'committee_papers', 'authority-outage', ?)", (now, now))
+        "VALUES ('evidence-analysis-outage', 'fixture', 'https://example.test/outage', %s, 200, 'hash-outage', "
+        "'/data/outage.pdf', 'application/pdf', 10, 'committee_papers', 'authority-outage', %s)", (now, now))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
         "created_at, updated_at) VALUES ('document-analysis-outage', 'evidence-analysis-outage', "
-        "'committee_papers', 'authority-outage', 'REPORT', ?, ?)", (now, now))
+        "'committee_papers', 'authority-outage', 'REPORT', %s, %s)", (now, now))
     conn.execute(
         "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
         "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
-        "('version-analysis-outage', 'document-analysis-outage', 'fixture', '1', '1', 'hash', 'complete', 1, ?)", (now,))
+        "('version-analysis-outage', 'document-analysis-outage', 'fixture', '1', '1', 'hash', 'complete', 1, %s)", (now,))
     conn.execute(
         "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
         "text_sha256) VALUES ('element-analysis-outage', 'version-analysis-outage', 'PARAGRAPH', 1, "
@@ -507,9 +507,9 @@ def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):
     started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
     conn.execute(
         "UPDATE analysis_runs SET status = 'running', updated_at = '2000-01-01T00:00:00+00:00' "
-        "WHERE run_id = ?", (started["run_id"],))
+        "WHERE run_id = %s", (started["run_id"],))
     conn.execute(
-        "UPDATE analysis_domain_runs SET status = 'running' WHERE run_id = ?", (started["run_id"],))
+        "UPDATE analysis_domain_runs SET status = 'running' WHERE run_id = %s", (started["run_id"],))
     conn.commit()
 
     worker = AnalysisWorker(settings, worker_id="recovery-fixture-worker")
@@ -519,7 +519,7 @@ def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):
     assert stale["domains"][0]["status"] == "paused"
 
     conn.execute(
-        "UPDATE analysis_runs SET next_retry_at = '2000-01-01T00:00:00+00:00' WHERE run_id = ?",
+        "UPDATE analysis_runs SET next_retry_at = '2000-01-01T00:00:00+00:00' WHERE run_id = %s",
         (started["run_id"],))
     conn.commit()
     assert worker._claim() == started["run_id"]

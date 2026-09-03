@@ -188,23 +188,23 @@ def _document_candidates(conn, evidence_id, source_system, quality, parser_versi
     # evidence (for example, a contract notice) would be retried as a document.
     terms, values = ["e.raw_object_path IS NOT NULL"], []
     if evidence_id:
-        terms.append("e.evidence_id=?")
+        terms.append("e.evidence_id=%s")
         values.append(evidence_id)
     if source_system:
-        terms.append("e.source_system=?")
+        terms.append("e.source_system=%s")
         values.append(source_system)
     if quality:
-        terms.append("s.quality_status=?")
+        terms.append("s.quality_status=%s")
         values.append(quality)
     if parser_version:
         sql += " LEFT JOIN document_records d ON d.evidence_id=e.evidence_id LEFT JOIN document_versions dv ON dv.document_id=d.document_id"
-        terms.append("dv.parser_version=?")
+        terms.append("dv.parser_version=%s")
         values.append(parser_version)
     if pending_only:
         terms.append("COALESCE(s.parse_status, 'PENDING') != 'SUCCESS'")
     if terms:
         sql += " WHERE " + " AND ".join(terms)
-    sql += " ORDER BY e.created_at LIMIT ?"
+    sql += " ORDER BY e.created_at LIMIT %s"
     return conn.execute(sql, (*values, limit)).fetchall()
 
 
@@ -253,7 +253,7 @@ def documents_reprocess(
     try:
         evidence_id = None
         if document_id:
-            row = conn.execute("SELECT evidence_id FROM document_records WHERE document_id=?", (document_id,)).fetchone()
+            row = conn.execute("SELECT evidence_id FROM document_records WHERE document_id=%s", (document_id,)).fetchone()
             if row is None:
                 raise typer.BadParameter(f"unknown document_id {document_id!r}")
             evidence_id = row["evidence_id"]
@@ -288,13 +288,13 @@ def documents_stats() -> None:
     try:
         result = {
             "registered_evidence": conn.execute(
-                "SELECT COUNT(*) FROM document_processing_states s "
+                "SELECT COUNT(*) AS count FROM document_processing_states s "
                 "JOIN evidence_records e ON e.evidence_id=s.evidence_id "
-                "WHERE e.raw_object_path IS NOT NULL").fetchone()[0],
-            "documents": conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0],
-            "active_versions": conn.execute("SELECT COUNT(*) FROM document_versions WHERE is_active=1").fetchone()[0],
-            "parse_runs": conn.execute("SELECT COUNT(*) FROM document_parse_runs").fetchone()[0],
-            "derived_artifacts": conn.execute("SELECT COUNT(*) FROM derived_artifacts").fetchone()[0],
+                "WHERE e.raw_object_path IS NOT NULL").fetchone()["count"],
+            "documents": conn.execute("SELECT COUNT(*) AS count FROM document_records").fetchone()["count"],
+            "active_versions": conn.execute("SELECT COUNT(*) AS count FROM document_versions WHERE is_active=1").fetchone()["count"],
+            "parse_runs": conn.execute("SELECT COUNT(*) AS count FROM document_parse_runs").fetchone()["count"],
+            "derived_artifacts": conn.execute("SELECT COUNT(*) AS count FROM derived_artifacts").fetchone()["count"],
         }
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
@@ -347,7 +347,7 @@ def documents_validate() -> None:
             "duplicate_active_versions": "SELECT COUNT(*) FROM (SELECT document_id FROM document_versions WHERE is_active=1 GROUP BY document_id HAVING COUNT(*) > 1)",
             "broken_artifact_lineage": "SELECT COUNT(*) FROM derived_artifacts a LEFT JOIN evidence_records e ON e.evidence_id=a.evidence_id WHERE e.evidence_id IS NULL",
         }
-        result = {name: conn.execute(sql).fetchone()[0] for name, sql in checks.items()}
+        result = {name: conn.execute(sql).fetchone()["count"] for name, sql in checks.items()}
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
         if any(result.values()):
             raise typer.Exit(code=1)
@@ -373,7 +373,7 @@ def documents_benchmark(
         rows = []
         from pipeline.documents.service import DocumentService
         for evidence_id in evidence_ids:
-            record = conn.execute("SELECT * FROM evidence_records WHERE evidence_id=?", (evidence_id,)).fetchone()
+            record = conn.execute("SELECT * FROM evidence_records WHERE evidence_id=%s", (evidence_id,)).fetchone()
             if record is None:
                 rows.append({"evidence_id": evidence_id, "status": "MISSING"})
                 continue
@@ -1457,8 +1457,7 @@ def backup(
 @app.command()
 def restore(
     backup_file: str = typer.Argument(
-        ..., help="Path to a backup to restore: a .db file for SQLite, a "
-                   ".sql.gz snapshot for PostgreSQL"),
+        ..., help="Path to a PostgreSQL .sql.gz snapshot"),
     force: bool = typer.Option(
         False, "--force",
         help="Required when a warehouse already exists. It is moved aside, "
@@ -1466,12 +1465,8 @@ def restore(
 ) -> None:
     """Put a backup back in place of the warehouse.
 
-    Refuses a backup that fails its own checks, and never throws away what it
-    replaces: a SQLite warehouse is renamed with a timestamp, and a PostgreSQL
-    one is snapshotted before it is emptied.
-
-    Which warehouse is restored into is decided by DATABASE_URL, not by the
-    file — a file from the other backend is refused rather than parsed.
+    Refuses a backup that fails its own checks, and snapshots a populated
+    PostgreSQL warehouse before replacing it.
     """
     from pathlib import Path
 
@@ -1525,8 +1520,8 @@ def pg_capabilities(
     """Report PostgreSQL extension and index readiness, and active fallbacks.
 
     Read-only: catalogue lookups only, no CREATE EXTENSION and no CREATE
-    INDEX. On SQLite it reports that the gate does not apply and exits 0.
-    Point it at a deployment (or a disposable server) with `DATABASE_URL`.
+    INDEX. Point it at a deployment (or a disposable server) with
+    `DATABASE_URL`.
     """
     from pipeline import pg_capabilities as caps
 
@@ -1688,11 +1683,10 @@ def migrate() -> None:
     finally:
         conn.close()
 
-    backend = settings.database_backend
     if applied:
-        typer.echo(f"{backend}: applied {len(applied)} migration(s): {', '.join(applied)}")
+        typer.echo(f"postgres: applied {len(applied)} migration(s): {', '.join(applied)}")
     else:
-        typer.echo(f"{backend}: schema is current")
+        typer.echo("postgres: schema is current")
 
 
 @app.command()
@@ -1732,7 +1726,7 @@ def web(
     if applied:
         typer.echo(f"Applied migrations: {', '.join(applied)}")
     pending = conn.execute(
-        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'pending'").fetchone()["count"]
     conn.close()
 
     try:
@@ -1748,13 +1742,7 @@ def web(
         # The addresses another device on the network can actually type.
         # "listening on 0.0.0.0" is true and useless from a phone.
         ui.info(f"  also on [pipeline.module]{other}[/]")
-    # Whichever warehouse is actually being served. `database_path` is always
-    # set and is the SQLite file, so printing it unconditionally told an
-    # operator running against PostgreSQL the name of a file this process was
-    # not going to open — and the redacted URL is the one line that would have
-    # made that obvious.
-    ui.info(f"  warehouse: [pipeline.muted]"
-             f"{settings.redacted_database_url or settings.database_path}[/]")
+    ui.info(f"  warehouse: [pipeline.muted]{settings.redacted_database_url}[/]")
     ui.info(f"  {pending:,} item(s) pending review")
     if host not in ("127.0.0.1", "localhost", "::1"):
         # Stated every time, not once in a doc. There is no login on this
@@ -1808,8 +1796,8 @@ def _print_summary(summary: list[dict], dry_run: bool) -> None:
         # rather than as something that went wrong.
         ui.muted(f"  {review:,} new review item(s), {failures:,} new parse failure(s) "
                   "— see docs/CAVEATS.md for how to read them:")
-        ui.muted("    sqlite3 data/warehouse.db \"SELECT module, item_type, COUNT(*) "
-                  "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
+        ui.muted("    psql \"$DATABASE_URL\" -c \"SELECT module, item_type, COUNT(*) "
+                 "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
 
 
 class _BarObserver(runner.RunObserver):

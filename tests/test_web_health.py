@@ -37,7 +37,7 @@ def geography(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, region, active_from, "
             " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, ?, ?, '2021-04-01', '2024', '2026', "
+            "VALUES (%s, %s, %s, %s, '2021-04-01', '2024', '2026', "
             " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
             (ons_code, name, kind, region))
     conn.commit()
@@ -64,7 +64,7 @@ def grant(conn, ons_code, year="2025-26"):
         "INSERT INTO public_health_grants (ons_code, financial_year, grant_type, "
         " allocation_status, amount, unit, source_column_header, source_document, "
         " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'public_health_grant', 'final', 1000000, 'gbp', "
+        "VALUES (%s, %s, 'public_health_grant', 'final', 1000000, 'gbp', "
         " '2025-26 allocation', 'allocations.xlsx', "
         " 'https://gov.example/g', '2026-08-01T00:00:00Z', 200, 'dhsc', 'y')",
         (ons_code, year))
@@ -315,7 +315,7 @@ def test_hosts_report_when_each_source_was_last_asked(client, conn):
         ("https://b.example/1", "b.example", "2026-07-01T00:00:00Z"),
     ]:
         conn.execute(
-            "INSERT INTO http_cache (url, host, updated_at) VALUES (?, ?, ?)",
+            "INSERT INTO http_cache (url, host, updated_at) VALUES (%s, %s, %s)",
             (url, host, when))
     conn.commit()
 
@@ -338,7 +338,7 @@ def _run(conn, run_id, started_at, *, completed_at=None, status="completed",
         "INSERT INTO graph_projection_runs (run_id, started_at, completed_at, "
         " status, schema_version, projector_version, entity_count, "
         " relationship_count, claim_count, error_detail) "
-        "VALUES (?, ?, ?, ?, '0050', '1', ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, '0050', '1', %s, %s, %s, %s)",
         (run_id, started_at, completed_at, status, entity_count,
          relationship_count, claim_count, error_detail))
 
@@ -421,8 +421,8 @@ def _evidence(conn, evidence_id, *, source_system="m09_cdp_documents"):
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, payload_sha256, created_at) "
-        "VALUES (?, ?, 'https://example.test/doc.pdf', '2026-08-01T00:00:00Z', "
-        " ?, '2026-08-01T00:00:00Z')",
+        "VALUES (%s, %s, 'https://example.test/doc.pdf', '2026-08-01T00:00:00Z', "
+        " %s, '2026-08-01T00:00:00Z')",
         (evidence_id, source_system, f"hash-{evidence_id}"))
 
 
@@ -430,14 +430,14 @@ def _document(conn, document_id, evidence_id):
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, document_type, "
         " created_at, updated_at) "
-        "VALUES (?, ?, 'UNKNOWN', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
+        "VALUES (%s, %s, 'UNKNOWN', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')",
         (document_id, evidence_id))
 
 
 def _processing_state(conn, evidence_id, parse_status):
     conn.execute(
         "INSERT INTO document_processing_states (evidence_id, parse_status) "
-        "VALUES (?, ?)", (evidence_id, parse_status))
+        "VALUES (%s, %s)", (evidence_id, parse_status))
 
 
 def test_document_status_reports_nothing_registered_when_empty(client):
@@ -502,7 +502,7 @@ def test_the_same_failure_recorded_twice_stays_one_row(conn):
     for _ in range(3):
         db.record_parse_failure(conn, "m03_charity_finance", "wages", "£x", "bad")
     conn.commit()
-    assert conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__() == 1
 
 
 def test_failures_group_by_the_thing_that_makes_them_one_bug(client, some_failures):

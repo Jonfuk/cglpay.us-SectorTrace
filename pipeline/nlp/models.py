@@ -26,7 +26,7 @@ def upsert_model(conn, *, model_key: str, model_provider: str, model_id: str,
     conn.execute(
         "INSERT INTO nlp_model_registry (model_key, model_provider, model_id, revision_sha, "
         "framework, framework_version, tokenizer_revision, dimension, distance_metric, "
-        "normalised, first_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "normalised, first_seen_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT(model_key) DO UPDATE SET model_provider=excluded.model_provider, "
         "model_id=excluded.model_id, revision_sha=excluded.revision_sha, "
         "framework=excluded.framework, framework_version=excluded.framework_version, "
@@ -38,5 +38,5 @@ def upsert_model(conn, *, model_key: str, model_provider: str, model_id: str,
 
 def get_model(conn, model_key: str) -> dict | None:
     row = conn.execute(
-        "SELECT * FROM nlp_model_registry WHERE model_key=?", (model_key,)).fetchone()
+        "SELECT * FROM nlp_model_registry WHERE model_key=%s", (model_key,)).fetchone()
     return dict(row) if row is not None else None

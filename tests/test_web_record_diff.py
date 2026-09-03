@@ -22,8 +22,8 @@ def _notice(conn, notice_id, *, ocid="ocds-x-1", title="Service tender",
         "INSERT INTO contracts (notice_id, supplier_id, ocid, notice_type, "
         " buyer_name, buyer_ons_code, title, value_core, date_published, "
         " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '', ?, 'tender', 'Camden', ?, ?, ?, ?, "
-        " 'https://find-tender/x', ?, 200, 'find_tender', 'h')",
+        "VALUES (%s, '', %s, 'tender', 'Camden', %s, %s, %s, %s, "
+        " 'https://find-tender/x', %s, 200, 'find_tender', 'h')",
         (notice_id, ocid, ons, title, value, published, published + "T00:00:00Z"))
     conn.commit()
 
@@ -64,20 +64,20 @@ def _document(conn, *, source_system="committee_paper_promotion"):
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, http_status, payload_sha256, raw_object_path, mime_type, "
         " content_length, source_table, source_key, created_at) VALUES "
-        "('ev1', ?, 'https://x/1', ?, 200, 's1', 'r/x.pdf', 'application/pdf', "
-        " 10, 'committee_papers', 'k1', ?)", (source_system, n, n))
+        "('ev1', %s, 'https://x/1', %s, 200, 's1', 'r/x.pdf', 'application/pdf', "
+        " 10, 'committee_papers', 'k1', %s)", (source_system, n, n))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, "
         " source_key, document_type, mime_type, title, created_at, updated_at) "
         "VALUES ('d1', 'ev1', 'committee_papers', 'k1', 'committee_paper', "
-        " 'application/pdf', 'Minutes', ?, ?)", (n, n))
+        " 'application/pdf', 'Minutes', %s, %s)", (n, n))
     for vid, ver, active, at in [("v1", "1.0.0", 0, "2026-06-01T00:00:00Z"),
                                   ("v2", "2.0.0", 1, "2026-08-01T00:00:00Z")]:
         conn.execute(
             "INSERT INTO document_versions (document_version_id, document_id, "
             " parser_name, parser_version, parse_schema_version, config_hash, "
             " text_sha256, status, is_active, created_at) VALUES "
-            "(?, 'd1', 'docling', ?, '1', ?, ?, 'parsed', ?, ?)",
+            "(%s, 'd1', 'docling', %s, '1', %s, %s, 'parsed', %s, %s)",
             (vid, ver, f"cfg-{ver}", f"txt-{ver}", active, at))
     # v1: elements at seq 0,1  v2: seq 0 changed, seq 1 same, seq 2 added
     rows = [
@@ -91,7 +91,7 @@ def _document(conn, *, source_system="committee_paper_promotion"):
         conn.execute(
             "INSERT INTO document_elements (document_element_id, "
             " document_version_id, element_type, sequence, text, text_sha256, "
-            " metadata_json) VALUES (?, ?, ?, ?, ?, ?, '{}')",
+            " metadata_json) VALUES (%s, %s, %s, %s, %s, %s, '{}')",
             (eid, vid, etype, seq, text, sha))
     conn.commit()
 

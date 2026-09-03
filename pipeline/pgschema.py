@@ -99,9 +99,9 @@ def reset_sequences(target) -> list[dict]:
         # raises. This spelling gives "the next value is max + 1" in both
         # cases.
         nxt = target.execute(
-            f"SELECT setval(pg_get_serial_sequence(?, ?), "
+            f"SELECT setval(pg_get_serial_sequence(%s, %s), "
             f"COALESCE(MAX({catalog.quote(column)}), 0) + 1, false) "
-            f"FROM {catalog.quote(table)}", (table, column)).fetchone()[0]
+            f"AS next_value FROM {catalog.quote(table)}", (table, column)).fetchone()["next_value"]
         out.append({"table": table, "column": column, "next_value": int(nxt)})
     return out
 

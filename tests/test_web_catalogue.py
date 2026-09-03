@@ -92,7 +92,7 @@ def client(settings: Settings, conn: sqlite3.Connection):
         "INSERT INTO contracts (notice_id, ocid, buyer_name, buyer_ons_code, "
         " supplier_name_raw, title, value_core, currency, date_published, "
         " procedure_type, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES (?, ?, 'Birmingham City Council', 'E08000025', "
+        " payload_sha256) VALUES (%s, %s, 'Birmingham City Council', 'E08000025', "
         " 'A Supplier Ltd', 'Treatment services', 1000, 'GBP', '2025-06-01', "
         " 'open', 'https://find.example/api', '2026-08-02T00:00:00Z', 200, "
         " 'find_a_tender', 'abc123')",

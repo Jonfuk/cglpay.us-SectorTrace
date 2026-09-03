@@ -557,8 +557,8 @@ SMOKE_ORDER: list[Smoke] = [SMOKE_SPECS[name] for name in resolve_run_order(list
 def _count(conn: sqlite3.Connection, table: str, module: str) -> int:
     if table in _SHARED_TABLES:
         return conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE module = ?", (module,)).fetchone()[0]
-    return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            f"SELECT COUNT(*) FROM {table} WHERE module = %s", (module,)).fetchone().values().__iter__().__next__()
+    return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone().values().__iter__().__next__()
 
 
 def _columns(conn, table: str) -> set[str]:
@@ -680,7 +680,7 @@ def test_module_still_reads_its_source(spec: Smoke, warehouse: Warehouse) -> Non
         pytest.skip(f"{spec.requires_key.upper()} is not set — {spec.module} cannot run")
 
     if spec.precondition:
-        if conn.execute(spec.precondition).fetchone()[0] == 0:
+        if conn.execute(spec.precondition).fetchone().values().__iter__().__next__() == 0:
             pytest.skip(f"{spec.module}: {spec.precondition_note}")
 
     before = {table: _count(conn, table, spec.module) for table in spec.produces}
@@ -704,7 +704,7 @@ def test_module_still_reads_its_source(spec: Smoke, warehouse: Warehouse) -> Non
         if table not in gained:
             continue
         populated = conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL").fetchone()[0]
+            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL").fetchone().values().__iter__().__next__()
         assert populated > 0, (
             f"{spec.module} wrote {after[table]} rows to {table} but "
             f"{column} is NULL in every one of them — the classic shape-change "

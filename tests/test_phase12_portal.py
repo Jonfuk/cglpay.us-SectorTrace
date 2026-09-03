@@ -55,8 +55,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
                 " date_end, procedure_type, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'Birmingham City Council', 'E08000025', ?, "
-                " 'Treatment services', ?, 'GBP', ?, ?, 'open', "
+            "VALUES (%s, %s, 'Birmingham City Council', 'E08000025', %s, "
+                " 'Treatment services', %s, 'GBP', %s, %s, 'open', "
             " 'https://find.example/n', '2026-08-01T00:00:00Z', 200, "
             " 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", supplier, value, published, date_end))

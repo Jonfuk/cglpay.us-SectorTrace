@@ -18,8 +18,8 @@ def _stat_rate(conn: sqlite3.Connection, period: str, retrieved_at: str) -> None
         "INSERT INTO statutory_pay_rates (period_label, band_label, band_role, "
         " amount, value_text, source_url, retrieved_at, http_status, "
         " source_system, payload_sha256) VALUES "
-        "(?, '21 and over', 'national_living_wage', 12.21, '£12.21', "
-        " 'https://www.gov.uk/national-minimum-wage-rates', ?, 200, "
+        "(%s, '21 and over', 'national_living_wage', 12.21, '£12.21', "
+        " 'https://www.gov.uk/national-minimum-wage-rates', %s, 200, "
         " 'gov_uk_nmw', 'x')", (period, retrieved_at))
 
 
@@ -27,8 +27,8 @@ def _company(conn: sqlite3.Connection, number: str, retrieved_at: str) -> None:
     conn.execute(
         "INSERT INTO companies (company_number, company_name, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        "(?, 'ACME PROVIDER LTD', 'https://find-and-update.company-information"
-        ".service.gov.uk/company/' || ?, ?, 200, 'companies_house', 'x')",
+        "(%s, 'ACME PROVIDER LTD', 'https://find-and-update.company-information"
+        ".service.gov.uk/company/' || %s, %s, 200, 'companies_house', 'x')",
         (number, number, retrieved_at))
 
 

@@ -25,7 +25,7 @@ def _authority(conn, ons_code, name):
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, active_to, "
         " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
-        " http_status, source_system, payload_sha256) VALUES (?, ?, 'unitary', "
+        " http_status, source_system, payload_sha256) VALUES (%s, %s, 'unitary', "
         " '2021-04-01', NULL, '2024', '2026', 'https://x', "
         " '2026-08-01T00:00:00Z', 200, 'ons', 'x')", (ons_code, name))
 
@@ -33,7 +33,7 @@ def _authority(conn, ons_code, name):
 def _review(conn, item_type, raw_value):
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, status, "
-        "created_at) VALUES ('m01_procurement', ?, ?, 'pending', "
+        "created_at) VALUES ('m01_procurement', %s, %s, 'pending', "
         "'2026-08-01T00:00:00Z')", (item_type, raw_value))
 
 
@@ -100,7 +100,7 @@ def test_accept_then_supersede_updates_the_verified_registry(warehouse):
     # The superseded row is still in the history, untouched.
     rows = warehouse.execute(
         "SELECT COUNT(*) FROM alias_decisions WHERE unmatched_name = 'Hereford Council'"
-    ).fetchone()[0]
+    ).fetchone().values().__iter__().__next__()
     assert rows == 2
 
 

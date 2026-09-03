@@ -130,7 +130,7 @@ def test_the_module_writes_no_verification_markdown():
     supplementing it.
 
     The worklist printed `UPDATE workforce_census_metrics SET verified = 1
-    WHERE census_year = ?` at the top -- twenty flags on one statement,
+    WHERE census_year = %s` at the top -- twenty flags on one statement,
     attributed to nobody. Migration 0033 refuses that statement, so a module
     still generating a document that instructs it would be handing the operator
     a route the database aborts. Asserted against the source rather than the

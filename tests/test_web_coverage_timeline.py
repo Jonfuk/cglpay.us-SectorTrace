@@ -25,7 +25,7 @@ def _provider(conn):
         conn.execute(
             "INSERT INTO charity_financials (charity_number, financial_year_end, "
             " source_url, retrieved_at, http_status, source_system, "
-            " payload_sha256) VALUES ('1099511', ?, 'https://cc/x', "
+            " payload_sha256) VALUES ('1099511', %s, 'https://cc/x', "
             " '2026-01-01T00:00:00Z', 200, 'charity_commission', 'h')",
             (year_end,))
     conn.commit()
@@ -66,7 +66,7 @@ def test_authority_probes_read_by_ons_code(conn: sqlite3.Connection) -> None:
             "INSERT INTO public_health_grants (ons_code, financial_year, "
             " grant_type, allocation_status, unit, amount, source_column_header, "
             " source_document, source_url, retrieved_at, http_status, "
-            " source_system, payload_sha256) VALUES ('E09000007', ?, "
+            " source_system, payload_sha256) VALUES ('E09000007', %s, "
             " 'total_consolidated_public_health_grant', 'confirmed', 'gbp', "
             " 1000000, 'Grant', 'doc', 'https://g/x', '2026-01-01T00:00:00Z', "
             " 200, 'dhsc', 'h')", (fy,))

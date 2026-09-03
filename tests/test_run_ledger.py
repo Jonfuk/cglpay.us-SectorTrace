@@ -28,7 +28,7 @@ def _fake_module(name, *, fail=False):
     def run(ctx):
         ctx.conn.execute(
             "CREATE TABLE IF NOT EXISTS _probe (module TEXT)")
-        ctx.conn.execute("INSERT INTO _probe (module) VALUES (?)", (name,))
+        ctx.conn.execute("INSERT INTO _probe (module) VALUES (%s)", (name,))
         if fail:
             raise RuntimeError("boom")
     return run
@@ -116,7 +116,7 @@ def _insert_run(settings, run_id, *, started, finished, status, results,
             "INSERT INTO run_ledger (run_id, origin, revision, environment, "
             " module_selector, dry_run, started_at, finished_at, status, "
             " modules_total, modules_ok, modules_failed, results_json) VALUES "
-            "(?, ?, 'abc123', 'test', ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            "(%s, %s, 'abc123', 'test', %s, 0, %s, %s, %s, %s, %s, %s, %s)",
             (run_id, origin, selector, started, finished, status,
              len(results), ok, failed, json.dumps(results)))
         conn.commit()
@@ -211,9 +211,9 @@ def test_compare_writes_nothing(settings):
                               "review": 0, "failures": 0, "elapsed_ms": 10}])
     conn = db.get_connection(settings)
     try:
-        before = conn.execute("SELECT COUNT(*) FROM run_ledger").fetchone()[0]
+        before = conn.execute("SELECT COUNT(*) FROM run_ledger").fetchone().values().__iter__().__next__()
         out = run_ledger.compare(conn, None, None)
-        after = conn.execute("SELECT COUNT(*) FROM run_ledger").fetchone()[0]
+        after = conn.execute("SELECT COUNT(*) FROM run_ledger").fetchone().values().__iter__().__next__()
     finally:
         conn.close()
     assert before == after == 2

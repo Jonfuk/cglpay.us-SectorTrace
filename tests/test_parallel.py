@@ -163,7 +163,7 @@ def test_a_workers_connection_is_usable_from_its_own_thread(tmp_path):
     settings = _settings(tmp_path)
 
     def worker(unit, client):
-        return client.conn.execute("SELECT 1").fetchone()[0]
+        return client.conn.execute("SELECT 1").fetchone().values().__iter__().__next__()
 
     outcomes = _run(range(4), worker, settings, max_workers=4)
     assert all(o.ok for o in outcomes), [o.error for o in outcomes if not o.ok]

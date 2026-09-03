@@ -353,7 +353,7 @@ def merge_matched_terms(conn, ons_code: str, document_url: str, term: str) -> st
     """
     row = conn.execute(
         "SELECT matched_terms FROM committee_paper_candidates "
-        "WHERE authority_ons_code = ? AND document_url = ?", (ons_code, document_url)).fetchone()
+        "WHERE authority_ons_code = %s AND document_url = %s", (ons_code, document_url)).fetchone()
     existing = (row["matched_terms"] or "") if row else ""
     terms = {part.strip() for part in existing.split(",") if part.strip()}
     terms.add(term)

@@ -46,7 +46,7 @@ def sidecar(conn, item_id: int) -> dict:
     """Source excerpt + ranked candidates for one review item. Read-only."""
     row = conn.execute(
         "SELECT id, module, item_type, raw_value, context_json "
-        "FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+        "FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     if row is None:
         raise QueryError(f"No review item {item_id}.")
 

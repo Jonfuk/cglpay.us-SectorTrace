@@ -43,8 +43,8 @@ def treatment(conn: sqlite3.Connection) -> sqlite3.Connection:
             " area_type_id, time_period, area_name, ons_code, area_level, value, "
             " lower_ci_95, upper_ci_95, time_period_sortable, source_url, "
             " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-            "(2201, ?, 102, ?, 'x', ?, ?, ?, ?, ?, ?, 'https://ft.example/v', "
-            " '2026-08-01T00:00:00Z', 200, 'ohid', ?)",
+            "(2201, %s, 102, %s, 'x', %s, %s, %s, %s, %s, %s, 'https://ft.example/v', "
+            " '2026-08-01T00:00:00Z', 200, 'ohid', %s)",
             (ons, tp, ons, level, val, lo, hi, ts, f"v{ts}{level}"))
     conn.commit()
     return conn

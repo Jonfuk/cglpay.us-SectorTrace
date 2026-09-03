@@ -49,20 +49,20 @@ def test_a_reparsed_document_is_its_own_kind(conn: sqlite3.Connection, settings)
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, http_status, payload_sha256, raw_object_path, mime_type, "
         " content_length, source_table, source_key, created_at) VALUES "
-        "('ev1', 'committee_paper_promotion', 'https://x/1', ?, 200, 's1', "
-        " 'r/x.pdf', 'application/pdf', 10, 'committee_papers', 'k1', ?)", (n, n))
+        "('ev1', 'committee_paper_promotion', 'https://x/1', %s, 200, 's1', "
+        " 'r/x.pdf', 'application/pdf', 10, 'committee_papers', 'k1', %s)", (n, n))
     conn.execute(
         "INSERT INTO document_records (document_id, evidence_id, source_table, "
         " source_key, document_type, mime_type, title, created_at, updated_at) "
         "VALUES ('d1', 'ev1', 'committee_papers', 'k1', 'committee_paper', "
-        " 'application/pdf', 'Paper', ?, ?)", (n, n))
+        " 'application/pdf', 'Paper', %s, %s)", (n, n))
     for vid, ver, active, at in [("v1", "1.0.0", 0, "2026-06-01T00:00:00Z"),
                                   ("v2", "2.0.0", 1, "2026-08-01T00:00:00Z")]:
         conn.execute(
             "INSERT INTO document_versions (document_version_id, document_id, "
             " parser_name, parser_version, parse_schema_version, config_hash, "
             " text_sha256, status, is_active, created_at) VALUES "
-            "(?, 'd1', 'docling', ?, '1', 'c', 't', 'parsed', ?, ?)",
+            "(%s, 'd1', 'docling', %s, '1', 'c', 't', 'parsed', %s, %s)",
             (vid, ver, active, at))
     conn.commit()
 

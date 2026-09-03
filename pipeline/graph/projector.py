@@ -40,7 +40,7 @@ class GraphProjector:
         started_at = _now()
         self.conn.execute(
             "INSERT INTO graph_projection_runs (run_id, started_at, status, schema_version, "
-            "projector_version, warehouse_snapshot) VALUES (?, ?, 'running', ?, ?, ?)",
+            "projector_version, warehouse_snapshot) VALUES (%s, %s, 'running', %s, %s, %s)",
             (run_id, started_at, SCHEMA_VERSION, PROJECTOR_VERSION, started_at),
         )
         self.conn.commit()
@@ -56,15 +56,15 @@ class GraphProjector:
                 "entity_relationships", self.store.upsert_relationships)
         except Exception as exc:
             self.conn.execute(
-                "UPDATE graph_projection_runs SET completed_at = ?, status = 'failed', "
-                "error_count = 1, error_detail = ? WHERE run_id = ?",
+                "UPDATE graph_projection_runs SET completed_at = %s, status = 'failed', "
+                "error_count = 1, error_detail = %s WHERE run_id = %s",
                 (_now(), str(exc), run_id),
             )
             self.conn.commit()
             raise
         self.conn.execute(
-            "UPDATE graph_projection_runs SET completed_at = ?, status = 'completed', "
-            "entity_count = ?, relationship_count = ?, claim_count = ? WHERE run_id = ?",
+            "UPDATE graph_projection_runs SET completed_at = %s, status = 'completed', "
+            "entity_count = %s, relationship_count = %s, claim_count = %s WHERE run_id = %s",
             (_now(), counts["entities"], counts["relationships"], counts["claims"], run_id),
         )
         self.conn.commit()
@@ -72,7 +72,7 @@ class GraphProjector:
 
     def sync_delta(self, limit: int = 500) -> dict[str, int]:
         rows = self.conn.execute(
-            "SELECT * FROM graph_projection_queue WHERE processed_at IS NULL ORDER BY id LIMIT ?",
+            "SELECT * FROM graph_projection_queue WHERE processed_at IS NULL ORDER BY id LIMIT %s",
             (max(1, limit),),
         ).fetchall()
         processed = 0
@@ -82,16 +82,16 @@ class GraphProjector:
             try:
                 self._sync_item(item)
                 self.conn.execute(
-                    "UPDATE graph_projection_queue SET processed_at = ?, attempt_count = attempt_count + 1, "
-                    "last_error = NULL WHERE id = ?",
+                    "UPDATE graph_projection_queue SET processed_at = %s, attempt_count = attempt_count + 1, "
+                    "last_error = NULL WHERE id = %s",
                     (_now(), item["id"]),
                 )
                 self.conn.commit()
                 processed += 1
             except Exception as exc:
                 self.conn.execute(
-                    "UPDATE graph_projection_queue SET attempt_count = attempt_count + 1, last_error = ? "
-                    "WHERE id = ?",
+                    "UPDATE graph_projection_queue SET attempt_count = attempt_count + 1, last_error = %s "
+                    "WHERE id = %s",
                     (str(exc), item["id"]),
                 )
                 self.conn.commit()
@@ -100,7 +100,7 @@ class GraphProjector:
 
     def status(self) -> dict[str, int]:
         pending = self.conn.execute(
-            "SELECT COUNT(*) FROM graph_projection_queue WHERE processed_at IS NULL").fetchone()[0]
+            "SELECT COUNT(*) AS n FROM graph_projection_queue WHERE processed_at IS NULL").fetchone()["n"]
         return {"pending": int(pending)}
 
     def _project_table(self, table: str, upsert: Any) -> int:
@@ -111,11 +111,11 @@ class GraphProjector:
         while True:
             if last_key is None:
                 sql = (f"SELECT {columns} FROM {table} "
-                       f"ORDER BY {key} LIMIT ?")
+                       f"ORDER BY {key} LIMIT %s")
                 params = (self.batch_size,)
             else:
-                sql = (f"SELECT {columns} FROM {table} WHERE {key} > ? "
-                       f"ORDER BY {key} LIMIT ?")
+                sql = (f"SELECT {columns} FROM {table} WHERE {key} > %s "
+                       f"ORDER BY {key} LIMIT %s")
                 params = (last_key, self.batch_size)
             rows = self.conn.execute(sql, params).fetchall()
             if not rows:
@@ -144,7 +144,7 @@ class GraphProjector:
             table, key, upsert = mapping[operation]
         except KeyError as exc:
             raise ValueError(f"Unknown graph projection operation {operation!r} for {object_type!r}.") from exc
-        row = self.conn.execute(f"SELECT * FROM {table} WHERE {key} = ?", (object_id,)).fetchone()
+        row = self.conn.execute(f"SELECT * FROM {table} WHERE {key} = %s", (object_id,)).fetchone()
         if row is None:
             raise ValueError(f"Queued {operation} refers to absent {table} record {object_id!r}.")
         upsert([dict(row)])

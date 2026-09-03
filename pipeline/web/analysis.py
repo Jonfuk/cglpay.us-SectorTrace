@@ -42,16 +42,16 @@ def worker_status(conn, *, max_age_seconds: int = 30) -> dict[str, Any]:
 
 
 def _cost_snapshot(conn, release_id: str, run_id: str | None = None) -> dict[str, int]:
-    clause = "release_id = ?"
+    clause = "release_id = %s"
     params: list[Any] = [release_id]
     if run_id:
-        clause += " AND run_id = ?"
+        clause += " AND run_id = %s"
         params.append(run_id)
     row = conn.execute(
         "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micros), 0) AS cost_micros "
         f"FROM analysis_model_calls WHERE {clause}", params).fetchone()
     if run_id:
-        run = conn.execute("SELECT cost_micros FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+        run = conn.execute("SELECT cost_micros FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
         return {"model_calls": int(row["calls"]),
                 "cost_micros": int(run["cost_micros"] if run else row["cost_micros"] or 0)}
     return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
@@ -69,20 +69,20 @@ def _estimate_run(conn, selected: list[str]) -> tuple[int | None, int | None]:
         spec = domains.get_domain(domain_id)
         for table in spec.source_tables:
             try:
-                source_rows += int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                source_rows += int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])
             except Exception:
                 continue
     if not source_rows:
         return None, None
     calls = source_rows * 2
     average = conn.execute(
-        "SELECT AVG(cost_micros) FROM analysis_model_calls WHERE cost_micros IS NOT NULL"
-    ).fetchone()[0]
+        "SELECT AVG(cost_micros) AS average FROM analysis_model_calls WHERE cost_micros IS NOT NULL"
+    ).fetchone()["average"]
     return calls, round(calls * float(average)) if average is not None else None
 
 
 def _run_summary(conn, run_id: str) -> dict[str, Any]:
-    row = conn.execute("SELECT * FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+    row = conn.execute("SELECT * FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
     if row is None:
         raise KeyError(run_id)
     item = dict(row)
@@ -91,7 +91,7 @@ def _run_summary(conn, run_id: str) -> dict[str, Any]:
         "SELECT domain_run_id, domain_id, status, prerequisite_status, "
         "missing_tables_json, rows_processed, rows_written, started_at, "
         "completed_at, error_detail, next_retry_at FROM analysis_domain_runs "
-        "WHERE run_id = ? ORDER BY domain_id", (run_id,)).fetchall()
+        "WHERE run_id = %s ORDER BY domain_id", (run_id,)).fetchall()
     domain_items = []
     for domain_row in domains_rows:
         domain = dict(domain_row)
@@ -112,7 +112,7 @@ def _run_summary(conn, run_id: str) -> dict[str, Any]:
 
 def runs(conn, *, limit: int = 20) -> dict[str, Any]:
     rows = conn.execute(
-        "SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT ?", (_limit(limit, 20),)
+        "SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT %s", (_limit(limit, 20),)
     ).fetchall()
     return {"runs": [_run_summary(conn, row["run_id"]) for row in rows]}
 
@@ -125,7 +125,7 @@ def domains_view(conn, *, release_id: str | None = None) -> dict[str, Any]:
     clause = ""
     params: list[Any] = []
     if release_id:
-        clause = "AND dr.release_id = ?"
+        clause = "AND dr.release_id = %s"
         params.append(release_id)
     rows = conn.execute(
         "SELECT dr.domain_id, dr.status, dr.prerequisite_status, dr.missing_tables_json, "
@@ -150,7 +150,7 @@ def overview(conn) -> dict[str, Any]:
     release = conn.execute("SELECT release_id, status, created_at, activated_at FROM analysis_releases ORDER BY created_at DESC LIMIT 1").fetchone()
     counts = {}
     for table in ("automated_signals", "structured_signals", "emerging_themes", "cross_source_signal_links", "adaptation_proposals"):
-        counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        counts[table] = conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
     latest_run = conn.execute("SELECT run_id FROM analysis_runs ORDER BY updated_at DESC LIMIT 1").fetchone()
     worker = worker_status(conn)
     return {"active_release": dict(release) if release else None, "counts": counts,
@@ -171,26 +171,26 @@ def structured(conn, *, release_id: str | None = None, domain_id: str | None = N
                limit: int = 100) -> dict[str, Any]:
     where, params = [], []
     if release_id:
-        where.append("a.release_id = ?")
+        where.append("a.release_id = %s")
         params.append(release_id)
     if domain_id:
-        where.append("s.domain_id = ?")
+        where.append("s.domain_id = %s")
         params.append(domain_id)
     params.append(_limit(limit))
     sql = "SELECT s.*, a.domain_id, a.subject_id, a.direction FROM structured_signals s JOIN automated_signals a ON a.signal_id = s.signal_id"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY s.created_at DESC LIMIT ?"
+    sql += " ORDER BY s.created_at DESC LIMIT %s"
     return {"structured": [dict(row) for row in conn.execute(sql, params)]}
 
 
 def topics(conn, *, release_id: str | None = None, limit: int = 100) -> dict[str, Any]:
     where, params = [], []
     if release_id:
-        where.append("release_id = ?")
+        where.append("release_id = %s")
         params.append(release_id)
     params.append(_limit(limit))
-    sql = "SELECT * FROM analysis_topics" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT ?"
+    sql = "SELECT * FROM analysis_topics" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT %s"
     return {"topics": [dict(row) for row in conn.execute(sql, params)]}
 
 
@@ -198,29 +198,29 @@ def themes(conn, *, release_id: str | None = None, status: str | None = None,
            limit: int = 100) -> dict[str, Any]:
     where, params = [], []
     if release_id:
-        where.append("release_id = ?")
+        where.append("release_id = %s")
         params.append(release_id)
     if status:
-        where.append("status = ?")
+        where.append("status = %s")
         params.append(status)
     params.append(_limit(limit))
-    sql = "SELECT * FROM emerging_themes" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT ?"
+    sql = "SELECT * FROM emerging_themes" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT %s"
     return {"themes": [dict(row) for row in conn.execute(sql, params)]}
 
 
 def entities(conn, *, status: str | None = None, limit: int = 100) -> dict[str, Any]:
     where, params = [], []
     if status:
-        where.append("status = ?")
+        where.append("status = %s")
         params.append(status)
     params.append(_limit(limit))
-    sql = "SELECT * FROM entity_link_suggestions" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT ?"
+    sql = "SELECT * FROM entity_link_suggestions" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT %s"
     return {"entities": [dict(row) for row in conn.execute(sql, params)]}
 
 
 def graph(conn) -> dict[str, Any]:
     run = conn.execute("SELECT * FROM signal_graph_projection_runs ORDER BY started_at DESC LIMIT 1").fetchone()
-    pending = conn.execute("SELECT COUNT(*) FROM signal_graph_projection_queue WHERE processed_at IS NULL").fetchone()[0]
+    pending = conn.execute("SELECT COUNT(*) AS count FROM signal_graph_projection_queue WHERE processed_at IS NULL").fetchone()["count"]
     return {"projection": dict(run) if run else None, "pending": pending,
             "labels": ["AutomatedSignal", "StructuredSignal", "EmergingTheme", "AnalysisRelease"],
             "canonical_claim_isolation": True}
@@ -235,12 +235,12 @@ def prevalence(conn, *, release_id: str | None = None, limit: int = 100) -> dict
     params: list[Any] = []
     clause = ""
     if release_id:
-        clause = " WHERE release_id = ?"
+        clause = " WHERE release_id = %s"
         params.append(release_id)
     params.append(_limit(limit))
     rows = conn.execute(
         "SELECT * FROM analysis_prevalence_diagnostics" + clause +
-        " ORDER BY created_at DESC LIMIT ?", params).fetchall()
+        " ORDER BY created_at DESC LIMIT %s", params).fetchall()
     return {"prevalence": [dict(row) for row in rows]}
 
 
@@ -279,7 +279,7 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         raise ValueError("cost_ceiling_micros must be a non-negative integer") from None
     active = conn.execute(
-        "SELECT run_id FROM analysis_runs WHERE status IN (?, ?, ?, ?) "
+        "SELECT run_id FROM analysis_runs WHERE status IN (%s, %s, %s, %s) "
         "ORDER BY updated_at DESC LIMIT 1", tuple(_ACTIVE_RUN_STATUSES)
     ).fetchone()
     if active:
@@ -300,13 +300,13 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     conn.execute(
         "INSERT INTO analysis_runs (run_id, release_id, run_kind, status, "
         "requested_domains_json, total_domains, estimated_calls, estimated_cost_micros, "
-        "cost_ceiling_micros, started_at, updated_at) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)",
+        "cost_ceiling_micros, started_at, updated_at) VALUES (%s, %s, %s, 'queued', %s, %s, %s, %s, %s, %s, %s)",
         (run_id, manifest["release_id"], run_kind, json.dumps(selected), len(selected),
          estimated_calls, estimated_cost, ceiling, now, now))
     for domain_id in manifest["domains"]:
         conn.execute(
             "INSERT INTO analysis_domain_runs (domain_run_id, run_id, release_id, domain_id, status, started_at) "
-            "VALUES (?, ?, ?, ?, 'pending', ?)",
+            "VALUES (%s, %s, %s, %s, 'pending', %s)",
             (f"domain-run-{uuid.uuid4()}", run_id, manifest["release_id"], domain_id, now))
     conn.commit()
     return {**_run_summary(conn, run_id), "release_manifest": manifest}
@@ -319,11 +319,11 @@ def cancel_run(conn, run_id: str) -> dict[str, Any]:
     now = utcnow()
     conn.execute(
         "UPDATE analysis_runs SET status = 'cancelled', current_stage = 'cancelled', "
-        "cancelled_at = ?, completed_at = ?, updated_at = ? WHERE run_id = ?",
+        "cancelled_at = %s, completed_at = %s, updated_at = %s WHERE run_id = %s",
         (now, now, now, run_id))
     conn.execute(
         "UPDATE analysis_domain_runs SET status = 'cancelled' "
-        "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
+        "WHERE run_id = %s AND status NOT IN ('complete', 'unavailable')", (run_id,))
     conn.commit()
     return _run_summary(conn, run_id)
 
@@ -336,11 +336,11 @@ def resume_run(conn, run_id: str) -> dict[str, Any]:
     conn.execute(
         "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
         "cancelled_at = NULL, completed_at = NULL, error_detail = NULL, "
-        "automatic_retry_count = 0, next_retry_at = NULL, updated_at = ? "
-        "WHERE run_id = ?", (now, run_id))
+        "automatic_retry_count = 0, next_retry_at = NULL, updated_at = %s "
+        "WHERE run_id = %s", (now, run_id))
     conn.execute(
         "UPDATE analysis_domain_runs SET status = 'pending', error_detail = NULL, next_retry_at = NULL "
-        "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
+        "WHERE run_id = %s AND status NOT IN ('complete', 'unavailable')", (run_id,))
     conn.commit()
     return _run_summary(conn, run_id)
 
@@ -351,11 +351,11 @@ def activate(conn, release_id: str) -> dict[str, Any]:
         raise KeyError(release_id)
     if set(manifest.get("domains", [])) != set(domains.domain_registry()):
         raise ValueError("only a complete all-domain release can be activated")
-    incomplete = conn.execute("SELECT COUNT(*) FROM analysis_domain_runs WHERE release_id = ? AND status NOT IN ('complete', 'unavailable')", (release_id,)).fetchone()[0]
+    incomplete = conn.execute("SELECT COUNT(*) AS count FROM analysis_domain_runs WHERE release_id = %s AND status NOT IN ('complete', 'unavailable')", (release_id,)).fetchone()["count"]
     if incomplete:
         raise ValueError("a release may activate only when every registered domain is complete or unavailable")
     conn.execute("UPDATE analysis_releases SET status = 'inactive' WHERE status = 'active'")
-    conn.execute("UPDATE analysis_releases SET status = 'active', activated_at = ? WHERE release_id = ?", (utcnow(), release_id))
+    conn.execute("UPDATE analysis_releases SET status = 'active', activated_at = %s WHERE release_id = %s", (utcnow(), release_id))
     conn.commit()
     return {"release_id": release_id, "status": "active"}
 
@@ -363,17 +363,17 @@ def activate(conn, release_id: str) -> dict[str, Any]:
 def rollback(conn, release_id: str, reason: str | None = None) -> dict[str, Any]:
     if releases.load_release(conn, release_id) is None:
         raise KeyError(release_id)
-    conn.execute("UPDATE analysis_releases SET status = 'rolled_back', rolled_back_at = ?, rollback_reason = ? WHERE release_id = ?", (utcnow(), reason, release_id))
+    conn.execute("UPDATE analysis_releases SET status = 'rolled_back', rolled_back_at = %s, rollback_reason = %s WHERE release_id = %s", (utcnow(), reason, release_id))
     conn.commit()
     return {"release_id": release_id, "status": "rolled_back"}
 
 
 def promote_theme(conn, theme_id: str) -> dict[str, Any]:
-    row = conn.execute("SELECT status FROM emerging_themes WHERE theme_id = ?", (theme_id,)).fetchone()
+    row = conn.execute("SELECT status FROM emerging_themes WHERE theme_id = %s", (theme_id,)).fetchone()
     if row is None:
         raise KeyError(theme_id)
     if row["status"] != "promotion_ready":
         raise ValueError("theme is not promotion_ready")
-    conn.execute("UPDATE emerging_themes SET status = 'promoted', promoted_at = ? WHERE theme_id = ?", (utcnow(), theme_id))
+    conn.execute("UPDATE emerging_themes SET status = 'promoted', promoted_at = %s WHERE theme_id = %s", (utcnow(), theme_id))
     conn.commit()
     return {"theme_id": theme_id, "status": "promoted"}

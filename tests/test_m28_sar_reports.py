@@ -105,7 +105,7 @@ def test_read_docx_records_a_parse_failure_for_a_corrupt_file(conn):
     assert text is None
     assert source is None
     failure = conn.execute(
-        "SELECT reason FROM parse_failures WHERE source_url = ?",
+        "SELECT reason FROM parse_failures WHERE source_url = %s",
         ("https://example.org/bad.docx",)).fetchone()
     assert "DOCX could not be opened" in failure["reason"]
 
@@ -472,13 +472,13 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
         (mr_b_url, "turning_point")}
 
     terms = {r["term"]: r["occurrences"] for r in conn.execute(
-        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
+        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = %s",
         (edward_url,)).fetchall()}
     assert terms["staffing"] == 1
     assert terms["vacancy"] == 1
 
     docx_terms = {r["term"]: r["occurrences"] for r in conn.execute(
-        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
+        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = %s",
         (mr_b_url,)).fetchall()}
     assert docx_terms["caseload"] == 1
 
@@ -488,7 +488,7 @@ def _insert_sar_document(conn, document_url: str, *, ext: str, year: int,
     conn.execute(
         "INSERT INTO sar_documents (document_url, document_ext, library_year, sab_name, "
         "has_body_text, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "VALUES (%s, %s, %s, %s, %s, %s, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
         (document_url, ext, year, sab_name, has_body_text, document_url))
     conn.commit()
 
@@ -545,7 +545,7 @@ def test_run_retries_a_document_recorded_with_no_text(httpx_mock, settings, conn
     sar.run(ctx)
 
     row = conn.execute(
-        "SELECT has_body_text, sab_name FROM sar_documents WHERE document_url = ?",
+        "SELECT has_body_text, sab_name FROM sar_documents WHERE document_url = %s",
         (mr_b_url,)).fetchone()
     assert row["has_body_text"] == 1
     assert row["sab_name"] == "Turning Point Safeguarding Adults Board"

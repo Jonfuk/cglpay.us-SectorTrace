@@ -36,16 +36,17 @@ def test_backfill_seeds_evidence_backed_commissioning_graph_and_queue(tmp_path):
     conn = _conn(tmp_path)
     result = seed_existing_evidence(conn)
     assert result["relationships"] == 1
-    assert conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM entities").fetchone().values().__iter__().__next__() == 2
     edge = conn.execute("SELECT predicate, evidence_id, valid_from, valid_to FROM entity_relationships").fetchone()
-    assert tuple(edge) == ("AWARDED_TO", "evidence:fts:contract-hash", "2024-01-01", "2025-01-01")
-    assert conn.execute("SELECT COUNT(*) FROM graph_projection_queue").fetchone()[0] == result["queued"]
+    assert (edge["predicate"], edge["evidence_id"], edge["valid_from"], edge["valid_to"]) == (
+        "AWARDED_TO", "evidence:fts:contract-hash", "2024-01-01", "2025-01-01")
+    assert conn.execute("SELECT COUNT(*) FROM graph_projection_queue").fetchone().values().__iter__().__next__() == result["queued"]
     snapshot = build_commissioner_provider_graph(conn)
     assert snapshot.graph.number_of_edges() == 1
     assert provider_network_metrics(snapshot)[0]["metric_value"] == 0.0
     seed_existing_evidence(conn)
-    assert conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM graph_projection_queue").fetchone()[0] == result["queued"]
+    assert conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone().values().__iter__().__next__() == 1
+    assert conn.execute("SELECT COUNT(*) FROM graph_projection_queue").fetchone().values().__iter__().__next__() == result["queued"]
     conn.close()
 
 
@@ -61,7 +62,7 @@ def test_backfill_keeps_historical_authorities_that_share_a_display_name(tmp_pat
     rows = conn.execute(
         "SELECT entity_id FROM entities WHERE entity_type = 'LOCAL_AUTHORITY' "
         "ORDER BY entity_id").fetchall()
-    assert [row[0] for row in rows] == ["authority:E00000001", "authority:E00000002"]
+    assert [row["entity_id"] for row in rows] == ["authority:E00000001", "authority:E00000002"]
     conn.close()
 
 

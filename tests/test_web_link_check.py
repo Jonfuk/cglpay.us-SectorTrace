@@ -24,7 +24,7 @@ def _evidence(conn, *, status, sha="deadbeef", raw_path=None, url=_URL):
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, "
         " retrieved_at, http_status, payload_sha256, raw_object_path, "
         " mime_type, content_length, created_at) VALUES "
-        "(?, 'm00', ?, ?, ?, ?, ?, 'application/pdf', 10, ?)",
+        "(%s, 'm00', %s, %s, %s, %s, %s, 'application/pdf', 10, %s)",
         (f"ev-{status}-{sha[:6]}", url, _NOW, status, sha, raw_path, _NOW))
     conn.commit()
 

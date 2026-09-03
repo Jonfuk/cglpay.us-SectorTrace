@@ -83,13 +83,13 @@ def _subject_entity(conn, row) -> str | None:
         "JOIN document_entity_mentions dem ON dem.document_element_id = m.document_element_id "
         "  AND dem.start_offset = m.element_char_start AND dem.end_offset = m.element_char_end "
         "  AND dem.matched_text = m.span_text "
-        "WHERE m.document_concept_mention_id = ?", (row["subject_mention_id"],)).fetchone()
+        "WHERE m.document_concept_mention_id = %s", (row["subject_mention_id"],)).fetchone()
     return hit["entity_id"] if hit else None
 
 
 def _graph_has_pair(conn, entity_id: str, predicate: str) -> bool:
     return conn.execute(
-        "SELECT 1 FROM graph_claims WHERE subject_entity_id = ? AND predicate = ? LIMIT 1",
+        "SELECT 1 FROM graph_claims WHERE subject_entity_id = %s AND predicate = %s LIMIT 1",
         (entity_id, predicate)).fetchone() is not None
 
 
@@ -173,11 +173,11 @@ def _candidates(conn, source_system, limit):
         "WHERE c.status = 'new' AND c.superseded = 0")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " ORDER BY c.relation_score DESC, c.claim_candidate_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 
@@ -221,7 +221,7 @@ def run(conn, *, source_system: str | None = None, limit: int | None = None,
                                   json.dumps(context, sort_keys=True))
             conn.execute(
                 "UPDATE document_claim_candidates SET status = 'queued' "
-                "WHERE claim_candidate_id = ? AND status = 'new'",
+                "WHERE claim_candidate_id = %s AND status = 'new'",
                 (row["claim_candidate_id"],))
             by_reason[pick["reason"]] = by_reason.get(pick["reason"], 0) + 1
             queued += 1

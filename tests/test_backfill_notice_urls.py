@@ -37,7 +37,7 @@ def _contract(conn, notice_id: str, sha256: str, *, source_system: str = FTS,
     conn.execute(
         "INSERT INTO contracts (notice_id, supplier_id, ocid, source_url, "
         "retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '', 'ocds-x', ?, '2026-01-01T00:00:00Z', 200, ?, ?)",
+        "VALUES (%s, '', 'ocds-x', %s, '2026-01-01T00:00:00Z', 200, %s, %s)",
         (notice_id, source_url, source_system, sha256))
     conn.commit()
 
@@ -54,7 +54,7 @@ def test_a_published_notice_url_is_filled_in(seeded, settings):
 
     assert stats["rows_set"] == 1
     assert seeded.execute(
-        "SELECT notice_web_url FROM contracts").fetchone()[0] == NOTICE
+        "SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() == NOTICE
 
 
 def test_the_provenance_column_is_not_touched(seeded, settings):
@@ -67,7 +67,7 @@ def test_the_provenance_column_is_not_touched(seeded, settings):
 
     after = seeded.execute("SELECT source_url, payload_sha256, retrieved_at, "
                             "http_status FROM contracts").fetchone()
-    assert tuple(after) == tuple(before)
+    assert after == before
 
 
 def test_a_release_that_published_no_notice_url_is_left_null(conn, settings):
@@ -79,7 +79,7 @@ def test_a_release_that_published_no_notice_url_is_left_null(conn, settings):
 
     assert stats["rows_set"] == 0
     assert stats["rows_without_a_published_url"] == 1
-    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone()[0] is None
+    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() is None
 
 
 def test_a_missing_archived_page_leaves_the_row_alone(conn, settings):
@@ -91,7 +91,7 @@ def test_a_missing_archived_page_leaves_the_row_alone(conn, settings):
 
     assert stats["pages_missing"] == 1
     assert stats["rows_set"] == 0
-    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone()[0] is None
+    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() is None
 
 
 def test_an_unparseable_archived_page_leaves_the_row_alone(conn, settings):
@@ -103,7 +103,7 @@ def test_an_unparseable_archived_page_leaves_the_row_alone(conn, settings):
     stats = backfill.backfill(conn, settings)
 
     assert stats["pages_missing"] == 1
-    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone()[0] is None
+    assert conn.execute("SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() is None
 
 
 def test_running_it_twice_changes_nothing_the_second_time(seeded, settings):
@@ -113,7 +113,7 @@ def test_running_it_twice_changes_nothing_the_second_time(seeded, settings):
     assert first["rows_set"] == 1
     assert second["rows_considered"] == 0, "a filled row is not reconsidered"
     assert seeded.execute(
-        "SELECT notice_web_url FROM contracts").fetchone()[0] == NOTICE
+        "SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() == NOTICE
 
 
 def test_a_dry_run_writes_nothing(seeded, settings):
@@ -121,7 +121,7 @@ def test_a_dry_run_writes_nothing(seeded, settings):
 
     assert stats["rows_set"] == 1, "it still reports what it would set"
     assert seeded.execute(
-        "SELECT notice_web_url FROM contracts").fetchone()[0] is None
+        "SELECT notice_web_url FROM contracts").fetchone().values().__iter__().__next__() is None
 
 
 def test_one_archived_page_serves_every_row_that_came_from_it(conn, settings):
@@ -132,13 +132,13 @@ def test_one_archived_page_serves_every_row_that_came_from_it(conn, settings):
         conn.execute(
             "INSERT INTO contracts (notice_id, supplier_id, ocid, source_url, "
             "retrieved_at, http_status, source_system, payload_sha256) VALUES "
-            "('076079-2026', ?, 'ocds-x', 'https://api.example/p', "
-            "'2026-01-01T00:00:00Z', 200, ?, 'hash4')", (supplier, FTS))
+            "('076079-2026', %s, 'ocds-x', 'https://api.example/p', "
+            "'2026-01-01T00:00:00Z', 200, %s, 'hash4')", (supplier, FTS))
     conn.commit()
 
     stats = backfill.backfill(conn, settings)
 
     assert stats["pages_read"] == 1
     assert conn.execute(
-        "SELECT COUNT(*) FROM contracts WHERE notice_web_url = ?",
-        (NOTICE,)).fetchone()[0] == 3
+        "SELECT COUNT(*) FROM contracts WHERE notice_web_url = %s",
+        (NOTICE,)).fetchone().values().__iter__().__next__() == 3

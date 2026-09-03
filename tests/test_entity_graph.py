@@ -44,7 +44,7 @@ def test_every_view_is_queryable(conn, view):
 def test_every_edge_declares_what_it_rests_on(conn):
     columns = {r["column_name"] for r in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = current_schema() AND table_name = ?",
+        "WHERE table_schema = current_schema() AND table_name = %s",
         ("v_entity_edges",),
     )}
     assert {"source_type", "source_id", "relationship",
@@ -93,7 +93,7 @@ def test_the_public_edge_view_names_no_one(conn):
     """
     columns = {r["column_name"].lower() for r in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = current_schema() AND table_name = ?",
+        "WHERE table_schema = current_schema() AND table_name = %s",
         ("v_entity_edges",),
     )}
     assert not any("officer" in c or "person" in c or "name" in c and "target_label" != c

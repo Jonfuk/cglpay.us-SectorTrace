@@ -249,7 +249,7 @@ def _chunk_spans(conn, chunk_id: str) -> list:
         "FROM document_concept_mentions m "
         "LEFT JOIN document_assertions a ON a.concept_mention_id = m.document_concept_mention_id "
         "  AND a.superseded = 0 "
-        "WHERE m.document_chunk_id = ? AND m.superseded = 0 ORDER BY m.char_start",
+        "WHERE m.document_chunk_id = %s AND m.superseded = 0 ORDER BY m.char_start",
         (chunk_id,)).fetchall()
 
 
@@ -265,7 +265,7 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
     # stable id means ON CONFLICT keeps it).
     conn.execute(
         "DELETE FROM document_claim_candidates "
-        "WHERE document_chunk_id = ? AND relation_extractor = ? "
+        "WHERE document_chunk_id = %s AND relation_extractor = %s "
         "AND claim_candidate_id NOT IN "
         "  (SELECT claim_candidate_id FROM claim_candidate_decisions)",
         (chunk_row["document_chunk_id"], EXTRACTOR))
@@ -288,7 +288,7 @@ def relations_for_chunk(conn, onto, chunk_row, nlp_run_id, version: str) -> int:
                 "subject_mention_id, subject_hint, predicate, object_concept_id, object_literal, "
                 "assertion_status, relation_extractor, relation_extractor_version, relation_score, "
                 "evidence_span, char_start, char_end, status, superseded, nlp_run_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 0, ?, ?) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new', 0, %s, %s) "
                 "ON CONFLICT DO NOTHING",
                 (cid, chunk_row["document_chunk_id"], triple.subject_mention_id,
                  triple.subject_hint, triple.predicate, triple.object_concept_id,
@@ -311,11 +311,11 @@ def _live_chunks(conn, source_system, limit):
         "WHERE dc.superseded = 0")
     params: list = []
     if source_system:
-        sql += " AND e.source_system = ?"
+        sql += " AND e.source_system = %s"
         params.append(source_system)
     sql += " GROUP BY dc.document_chunk_id ORDER BY MIN(dc.created_at), dc.document_chunk_id"
     if limit:
-        sql += " LIMIT ?"
+        sql += " LIMIT %s"
         params.append(limit)
     return conn.execute(sql, params).fetchall()
 

@@ -19,15 +19,15 @@ def test_provenance_resolves_to_immutable_raw_archive_metadata(tmp_path):
     # slot held for the rest of the run, taking 626 unrelated tests with it.
     conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
                  "canonical_name_normalized, status, created_at, updated_at) "
-                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                  ("provider-1", "PROVIDER", "Provider", "provider", "active", "now", "now"))
     conn.execute("INSERT INTO entities (entity_id, entity_type, canonical_name, "
                  "canonical_name_normalized, status, created_at, updated_at) "
-                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                  ("service-1", "SERVICE", "Service", "service", "active", "now", "now"))
     conn.execute("INSERT INTO evidence_records (evidence_id, source_system, source_url, "
                  "retrieved_at, http_status, payload_sha256, raw_object_path, mime_type, "
-                 "content_length, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 "content_length, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                  ("evidence-1", "fixture", "https://example.test/source", "now", 200, "abc123",
                   "data/raw/fixture/abc123.json", "application/json", 10, "now"))
     conn.execute(

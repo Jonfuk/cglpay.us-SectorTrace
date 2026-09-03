@@ -41,7 +41,7 @@ def seeded(conn: db.Connection) -> db.Connection:
 
 def ids_for(conn: db.Connection, raw_value: str) -> int:
     return conn.execute(
-        "SELECT id FROM review_queue WHERE raw_value = ?", (raw_value,)).fetchone()["id"]
+        "SELECT id FROM review_queue WHERE raw_value = %s", (raw_value,)).fetchone()["id"]
 
 
 # --- the browsing connection cannot write ------------------------------------
@@ -63,7 +63,7 @@ def test_sql_box_reports_a_write_attempt_rather_than_performing_it(seeded, setti
     with pytest.raises(queries.QueryError):
         queries.run_select(ro, "DELETE FROM review_queue")
     ro.close()
-    assert seeded.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0] == 3
+    assert seeded.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__() == 3
 
 
 def test_sql_box_refuses_more_than_one_statement(seeded, settings):
@@ -89,6 +89,13 @@ def test_missing_warehouse_is_a_message_not_a_traceback(settings):
     settings.database_url = ""
     settings.database_ro_url = ""
     with pytest.raises(queries.QueryError, match="No DATABASE_URL"):
+        queries.readonly_connection(settings)
+
+
+def test_production_read_path_requires_a_select_only_role(settings):
+    settings.environment = "production"
+    settings.database_ro_url = ""
+    with pytest.raises(queries.QueryError, match="DATABASE_RO_URL"):
         queries.readonly_connection(settings)
 
 
@@ -121,7 +128,10 @@ def test_read_table_pages_searches_and_sorts(seeded, settings):
     assert queries.read_table(ro, "review_queue", search="%")["total"] == 0
 
     ordered = queries.read_table(ro, "review_queue", order_by="raw_value", descending=True)
-    values = [row[3] for row in ordered["rows"]]
+    raw_value_index = next(
+        i for i, column in enumerate(ordered["columns"])
+        if column["name"] == "raw_value")
+    values = [row[raw_value_index] for row in ordered["rows"]]
     assert values == sorted(values, reverse=True)
     ro.close()
 
@@ -141,12 +151,12 @@ def test_approving_sets_status_and_records_who_decided(seeded):
     result = review.decide(seeded, [item_id], "approved", decided_by="Jon", note="confirmed by hand")
 
     assert result["updated"] == [item_id]
-    row = seeded.execute("SELECT * FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+    row = seeded.execute("SELECT * FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     assert row["status"] == "approved"
     assert row["resolved_at"] is not None
 
     decision = seeded.execute(
-        "SELECT * FROM review_decisions WHERE review_item_id = ?", (item_id,)).fetchone()
+        "SELECT * FROM review_decisions WHERE review_item_id = %s", (item_id,)).fetchone()
     assert decision["decision"] == "approved"
     assert decision["status_before"] == "pending"
     assert decision["decided_by"] == "Jon"
@@ -158,13 +168,13 @@ def test_reverting_to_pending_clears_resolved_at_and_is_itself_recorded(seeded):
     review.decide(seeded, [item_id], "rejected", decided_by="Jon")
     review.decide(seeded, [item_id], "pending", decided_by="Jon", note="rejected in error")
 
-    row = seeded.execute("SELECT * FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+    row = seeded.execute("SELECT * FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     assert row["status"] == "pending"
     assert row["resolved_at"] is None
 
     history = seeded.execute(
         "SELECT decision, status_before FROM review_decisions "
-        "WHERE review_item_id = ? ORDER BY id", (item_id,)).fetchall()
+        "WHERE review_item_id = %s ORDER BY id", (item_id,)).fetchall()
     assert [(r["decision"], r["status_before"]) for r in history] == [
         ("rejected", "pending"), ("pending", "rejected")]
 
@@ -178,8 +188,8 @@ def test_repeating_a_decision_writes_no_second_audit_row(seeded):
     assert result["updated"] == []
     assert result["unchanged"] == [item_id]
     assert seeded.execute(
-        "SELECT COUNT(*) FROM review_decisions WHERE review_item_id = ?",
-        (item_id,)).fetchone()[0] == 1
+        "SELECT COUNT(*) FROM review_decisions WHERE review_item_id = %s",
+        (item_id,)).fetchone().values().__iter__().__next__() == 1
 
 
 def test_repeating_a_decision_with_a_note_does_record_it(seeded):
@@ -188,8 +198,8 @@ def test_repeating_a_decision_with_a_note_does_record_it(seeded):
     review.decide(seeded, [item_id], "approved", decided_by="Sam", note="checked again")
 
     assert seeded.execute(
-        "SELECT COUNT(*) FROM review_decisions WHERE review_item_id = ?",
-        (item_id,)).fetchone()[0] == 2
+        "SELECT COUNT(*) FROM review_decisions WHERE review_item_id = %s",
+        (item_id,)).fetchone().values().__iter__().__next__() == 2
 
 
 def test_bulk_decision_reports_missing_ids_rather_than_failing(seeded):
@@ -222,7 +232,7 @@ def test_deciding_a_filtered_set_needs_the_count_the_page_was_showing(seeded):
                                 confirm_count=5, module="m01_procurement")
 
     assert seeded.execute(
-        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0] == 3
+        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone().values().__iter__().__next__() == 3
 
     result = review.decide_matching(seeded, decision="approved", decided_by="Jon",
                                      confirm_count=2, module="m01_procurement")
@@ -230,7 +240,7 @@ def test_deciding_a_filtered_set_needs_the_count_the_page_was_showing(seeded):
     assert len(result["updated"]) == 2
     # Only the filtered module moved.
     assert seeded.execute(
-        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0] == 1
+        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone().values().__iter__().__next__() == 1
 
 
 def test_deciding_a_filtered_set_writes_the_same_audit_trail(seeded):
@@ -305,7 +315,7 @@ def test_a_decided_item_is_not_reopened_by_a_later_run(seeded):
     db.record_review_item(seeded, "m01_procurement", "unmatched_buyer_name", "Ambridge BC",
                            json.dumps({"contracts": 99}))
 
-    row = seeded.execute("SELECT * FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+    row = seeded.execute("SELECT * FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     assert row["status"] == "rejected"
     assert row["context_json"] is None
 
@@ -494,7 +504,7 @@ def test_deciding_over_http(client, seeded):
     assert response.json()["updated"] == [item_id]
 
     assert seeded.execute(
-        "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()[0] == "approved"
+        "SELECT status FROM review_queue WHERE id = %s", (item_id,)).fetchone().values().__iter__().__next__() == "approved"
 
 
 def test_a_bad_decision_is_a_400_with_a_readable_message(client, seeded):
@@ -516,7 +526,7 @@ def test_writes_require_a_json_content_type(client, seeded):
     )
     assert response.status_code == 415
     assert seeded.execute(
-        "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()[0] == "pending"
+        "SELECT status FROM review_queue WHERE id = %s", (item_id,)).fetchone().values().__iter__().__next__() == "pending"
 
 
 def test_writes_from_another_origin_are_refused(client, seeded):
@@ -528,7 +538,7 @@ def test_writes_from_another_origin_are_refused(client, seeded):
     )
     assert response.status_code == 403
     assert seeded.execute(
-        "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()[0] == "pending"
+        "SELECT status FROM review_queue WHERE id = %s", (item_id,)).fetchone().values().__iter__().__next__() == "pending"
 
 
 def test_a_refused_write_leaves_the_connection_usable(client, seeded):
@@ -561,4 +571,4 @@ def test_the_sql_endpoint_reads_but_cannot_write(client, seeded):
     assert refused.status_code == 400
     assert seeded.execute(
         "SELECT COUNT(*) FROM pg_tables WHERE schemaname = current_schema() "
-        "AND tablename = 'review_queue'").fetchone()[0] == 1
+        "AND tablename = 'review_queue'").fetchone().values().__iter__().__next__() == 1

@@ -122,9 +122,9 @@ def test_bad_input_is_a_search_error(corpus):
 
 
 def test_nothing_is_written_by_a_search(corpus):
-    before = corpus.execute("SELECT COUNT(*) FROM nlp_runs").fetchone()[0]
+    before = corpus.execute("SELECT COUNT(*) FROM nlp_runs").fetchone().values().__iter__().__next__()
     semantic_search.search(corpus, "recruitment retention", mode="hybrid", limit=5)
-    assert corpus.execute("SELECT COUNT(*) FROM nlp_runs").fetchone()[0] == before
+    assert corpus.execute("SELECT COUNT(*) FROM nlp_runs").fetchone().values().__iter__().__next__() == before
 
 
 # --- eval harness ---------------------------------------------------------

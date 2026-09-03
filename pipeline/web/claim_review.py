@@ -75,22 +75,22 @@ def listing(conn, *, status: str | None = None, predicate: str | None = None,
     where = ["c.superseded = 0"]
     params: list = []
     if status:
-        where.append("c.status = ?")
+        where.append("c.status = %s")
         params.append(status)
     if predicate:
-        where.append("c.predicate = ?")
+        where.append("c.predicate = %s")
         params.append(predicate)
     if source_system:
-        where.append("e.source_system = ?")
+        where.append("e.source_system = %s")
         params.append(source_system)
     if q:
-        where.append("(c.evidence_span LIKE ? OR c.subject_hint LIKE ? "
-                     "OR c.object_literal LIKE ?)")
+        where.append("(c.evidence_span LIKE %s OR c.subject_hint LIKE %s "
+                     "OR c.object_literal LIKE %s)")
         params.extend([f"%{q}%"] * 3)
     clause = " AND ".join(where)
 
     total = conn.execute(
-        f"SELECT COUNT(*) {_BASE_JOIN} WHERE {clause}", params).fetchone()[0]
+        f"SELECT COUNT(*) AS count {_BASE_JOIN} WHERE {clause}", params).fetchone()["count"]
 
     rows = _rows(conn, f"""
         SELECT c.claim_candidate_id, c.predicate, c.object_concept_id,
@@ -110,7 +110,7 @@ def listing(conn, *, status: str | None = None, predicate: str | None = None,
         {_BASE_JOIN}
         WHERE {clause}
         ORDER BY c.relation_score DESC, c.claim_candidate_id
-        LIMIT ? OFFSET ?""", [*params, limit, offset])
+        LIMIT %s OFFSET %s""", [*params, limit, offset])
 
     relation_labels, concept_labels, _ = _label_map()
     for row in rows:
@@ -140,7 +140,7 @@ def detail(conn, claim_candidate_id: str) -> dict:
                d.title AS document_title, d.document_type, d.published_at,
                d.document_id
         {_BASE_JOIN}
-        WHERE c.claim_candidate_id = ? AND c.superseded = 0
+        WHERE c.claim_candidate_id = %s AND c.superseded = 0
         """, (claim_candidate_id,)).fetchone()
     if row is None:
         raise QueryError(f"No live claim candidate {claim_candidate_id!r}.")

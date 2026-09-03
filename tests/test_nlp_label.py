@@ -70,7 +70,7 @@ def test_run_writes_ontology_rows_and_leaves_keyword_rows_alone(conn, settings):
     assert result["ontology_version"] == ontology_mod.default().version
 
     run_row = conn.execute("SELECT stage, status, ontology_version, rows_written FROM nlp_runs "
-                           "WHERE run_id=?", (result["run_id"],)).fetchone()
+                           "WHERE run_id=%s", (result["run_id"],)).fetchone()
     assert run_row["stage"] == "label" and run_row["status"] == "ok"
     assert run_row["ontology_version"] == ontology_mod.default().version
     assert run_row["rows_written"] == result["rows"]
@@ -78,7 +78,7 @@ def test_run_writes_ontology_rows_and_leaves_keyword_rows_alone(conn, settings):
     topics = {(r["topic"]) for r in conn.execute(
         "SELECT topic FROM document_topics WHERE match_method='ontology_v1' "
         "AND document_element_id IN (SELECT document_element_id FROM document_elements "
-        "WHERE document_version_id=?)", (version_id,)).fetchall()}
+        "WHERE document_version_id=%s)", (version_id,)).fetchall()}
     assert "workforce.recruitment_difficulty" in topics
     assert "role.recovery_worker" in topics
     assert "medication.methadone" in topics
@@ -88,7 +88,7 @@ def test_run_writes_ontology_rows_and_leaves_keyword_rows_alone(conn, settings):
     keyword_after = conn.execute(
         "SELECT document_element_id, topic, match_count FROM document_topics "
         "WHERE match_method='keyword_v1' ORDER BY topic").fetchall()
-    assert [tuple(r) for r in keyword_after] == [tuple(r) for r in keyword_before]
+    assert [tuple(r.values()) for r in keyword_after] == [tuple(r.values()) for r in keyword_before]
 
 
 def test_run_is_idempotent(conn, settings):
@@ -96,10 +96,10 @@ def test_run_is_idempotent(conn, settings):
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     first = nlp_label.run(conn, source_system="committee_paper_promotion")
     count_1 = conn.execute(
-        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone()[0]
+        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone().values().__iter__().__next__()
     again = nlp_label.run(conn, source_system="committee_paper_promotion")
     count_2 = conn.execute(
-        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone()[0]
+        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone().values().__iter__().__next__()
     assert first["rows"] == again["rows"]
     assert count_1 == count_2
 
@@ -126,8 +126,8 @@ def test_dry_run_writes_nothing(conn, settings):
     result = nlp_label.run(conn, dry_run=True)
     assert result["dry_run"] is True
     assert conn.execute(
-        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='label'").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='label'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_unchunked_versions_are_not_labelled(conn, settings):
@@ -140,7 +140,7 @@ def test_unchunked_versions_are_not_labelled(conn, settings):
 def test_superseded_chunks_are_not_labelled(conn, settings):
     version_id = _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
-    conn.execute("UPDATE document_chunks SET superseded=1 WHERE document_version_id=?", (version_id,))
+    conn.execute("UPDATE document_chunks SET superseded=1 WHERE document_version_id=%s", (version_id,))
     result = nlp_label.run(conn)
     assert result["versions"] == 0 and result["rows"] == 0
 

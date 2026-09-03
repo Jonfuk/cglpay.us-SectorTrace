@@ -34,9 +34,9 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, ?, 'E08000025', ?, 'Treatment services', ?, 'GBP', "
-            " ?, 'open', 0, 'https://find.example/n', ?, 200, "
-            " 'find_a_tender', ?)",
+            "VALUES (%s, %s, %s, 'E08000025', %s, 'Treatment services', %s, 'GBP', "
+            " %s, 'open', 0, 'https://find.example/n', %s, 200, "
+            " 'find_a_tender', %s)",
             (f"n{i}", f"ocds-n{i}", buyer, supplier, 1_000_000 * (i + 1),
              f"2026-0{i + 1}-01", retrieved, f"sha{i}"))
     conn.execute("INSERT INTO supplier_aliases (alias_raw, supplier_key, canonical_name) "

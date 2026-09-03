@@ -74,7 +74,7 @@ def test_run_writes_concept_mentions_with_element_offsets(conn, settings):
     assert result["mentions"] >= 4
     assert result["extractor"] == "ontology-stub"
 
-    run_row = conn.execute("SELECT stage, status, rows_written FROM nlp_runs WHERE run_id=?",
+    run_row = conn.execute("SELECT stage, status, rows_written FROM nlp_runs WHERE run_id=%s",
                            (result["run_id"],)).fetchone()
     assert run_row["stage"] == "spans" and run_row["status"] == "ok"
     assert run_row["rows_written"] == result["mentions"]
@@ -93,7 +93,7 @@ def test_run_writes_concept_mentions_with_element_offsets(conn, settings):
     # element offsets land inside the right element's text
     for row in rows:
         element_text = conn.execute(
-            "SELECT text FROM document_elements WHERE document_element_id=?",
+            "SELECT text FROM document_elements WHERE document_element_id=%s",
             (row["document_element_id"],)).fetchone()["text"]
         assert element_text[row["element_char_start"]:row["element_char_end"]] == row["span_text"]
 
@@ -102,9 +102,9 @@ def test_run_is_idempotent(conn, settings):
     _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     first = spans.run(conn, extractor="stub")
-    n1 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone()[0]
+    n1 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone().values().__iter__().__next__()
     again = spans.run(conn, extractor="stub")
-    n2 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone()[0]
+    n2 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone().values().__iter__().__next__()
     assert first["mentions"] == again["mentions"] and n1 == n2
 
 
@@ -113,13 +113,13 @@ def test_dry_run_writes_nothing(conn, settings):
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     result = spans.run(conn, extractor="stub", dry_run=True)
     assert result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='spans'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='spans'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_superseded_chunks_are_not_processed(conn, settings):
     version_id = _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
-    conn.execute("UPDATE document_chunks SET superseded=1 WHERE document_version_id=?", (version_id,))
+    conn.execute("UPDATE document_chunks SET superseded=1 WHERE document_version_id=%s", (version_id,))
     result = spans.run(conn, extractor="stub")
     assert result["chunks"] == 0 and result["mentions"] == 0

@@ -206,6 +206,6 @@ def test_run_since_skips_an_older_meeting(httpx_mock, settings, conn, monkeypatc
 
     m34.run(_ctx(conn, settings, since="2024-01-01"))
 
-    urls = [r[0].rsplit("/", 1)[-1] for r in conn.execute(
+    urls = [r["document_url"].rsplit("/", 1)[-1] for r in conn.execute(
         "SELECT document_url FROM icb_board_paper_candidates").fetchall()]
     assert urls == ["subject-pack-25-september-2025.pdf"]

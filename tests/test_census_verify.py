@@ -38,7 +38,7 @@ METRIC = {
 def _insert_metric(conn: db.Connection, **overrides) -> dict:
     row = {**METRIC, **overrides}
     columns = ", ".join(row)
-    marks = ", ".join(f":{name}" for name in row)
+    marks = ", ".join(f"%({name})s" for name in row)
     conn.execute(
         f"INSERT INTO workforce_census_metrics ({columns}) VALUES ({marks})", row)
     conn.commit()
@@ -51,7 +51,7 @@ def _insert_page(conn: db.Connection, year: int = 2024, page: int = 6,
         "INSERT INTO workforce_census_page_text "
         "(census_year, page_number, page_text, source_url, retrieved_at, "
         " http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
         (year, page, text, METRIC["source_url"], METRIC["retrieved_at"], 200,
          METRIC["source_system"], METRIC["payload_sha256"]))
     conn.commit()
@@ -119,7 +119,7 @@ def test_a_verification_is_attributed(conn, metric):
     with pytest.raises(census_verify.VerificationError) as raised:
         census_verify.verify(conn, metric, verified_by="   ")
     assert "attributed" in str(raised.value)
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failed_verification_leaves_no_decision_row(conn, metric):
@@ -129,7 +129,7 @@ def test_a_failed_verification_leaves_no_decision_row(conn, metric):
     census_verify.verify(conn, metric, verified_by="Jon")
     with pytest.raises(census_verify.VerificationError):
         census_verify.verify(conn, metric, verified_by="Jon")
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 1
 
 
 # --- no payload hash, because nothing was fetched -----------------------------
@@ -143,7 +143,7 @@ def test_the_mechanism_records_no_payload_hash_of_its_own(conn):
     """
     columns = {row["column_name"] for row in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = current_schema() AND table_name = ?",
+        "WHERE table_schema = current_schema() AND table_name = %s",
         ("census_verifications",),
     )}
 
@@ -214,7 +214,7 @@ def test_resetting_keeps_the_decisions(conn, metric):
 
     assert conn.execute(
         "SELECT verified FROM workforce_census_metrics").fetchone()["verified"] == 0
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 1
 
 
 # --- a verification can go stale ----------------------------------------------
@@ -236,7 +236,7 @@ def test_a_reparsed_value_makes_its_verification_stale(conn, metric):
 
 def test_a_reissued_report_makes_its_verification_stale(conn, metric):
     census_verify.verify(conn, metric, verified_by="Jon")
-    conn.execute("UPDATE workforce_census_metrics SET payload_sha256 = ?", ("b" * 64,))
+    conn.execute("UPDATE workforce_census_metrics SET payload_sha256 = %s", ("b" * 64,))
     conn.commit()
 
     stale = census_verify.stale(conn)

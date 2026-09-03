@@ -53,7 +53,7 @@ def _add_authority(conn, ons_code: str, name: str) -> None:
         "INSERT INTO authorities (ons_code, name, type, active_from, "
         "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
         "http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'utla', '2023-01-01', '2023', '2026', "
+        "VALUES (%s, %s, 'utla', '2023-01-01', '2023', '2026', "
         "'https://example.com/spine', '2026-01-01T00:00:00+00:00', 200, "
         "'test', 'abc')",
         (ons_code, name))

@@ -181,7 +181,7 @@ def test_a_stub_report_gets_its_concerns_from_the_pdf(ctx, conn, httpx_mock, mon
     # And no review item: it was never a decision, it was a document nobody
     # had gone and read.
     assert conn.execute("SELECT COUNT(*) FROM review_queue "
-                         "WHERE item_type='pfd_concerns_in_pdf_only'").fetchone()[0] == 0
+                         "WHERE item_type='pfd_concerns_in_pdf_only'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_the_deceased_is_redacted_out_of_concerns_taken_from_a_pdf(
@@ -236,7 +236,7 @@ def test_the_full_pdf_text_is_restricted_not_public(ctx, conn, httpx_mock, monke
 
     public = conn.execute("SELECT * FROM pfd_reports "
                            "WHERE report_ref='2026-0285'").fetchone()
-    assert not any("Alex Roe" in str(value) for value in tuple(public)), \
+    assert not any("Alex Roe" in str(value) for value in public.values()), \
         "and it appears nowhere in the public row"
 
 
@@ -389,7 +389,7 @@ def test_concerns_read_from_a_text_layer_are_recorded_as_pdf(ctx, conn, httpx_mo
         "MATTERS OF CONCERN (1) Staffing was short.\n6. ACTION SHOULD BE TAKEN"])
     _run(ctx, httpx_mock)
     assert conn.execute("SELECT concerns_source FROM pfd_reports "
-                         "WHERE report_ref='2026-0285'").fetchone()[0] == "pdf"
+                         "WHERE report_ref='2026-0285'").fetchone().values().__iter__().__next__() == "pdf"
 
 
 # --- the post-condition ---------------------------------------------------------------

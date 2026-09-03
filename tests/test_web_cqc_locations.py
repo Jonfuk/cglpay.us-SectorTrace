@@ -45,7 +45,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
                                           "Treatment of disease, disorder or injury"),
             "service_types": kw.get("services", "Substance misuse services"),
         }
-        placeholders = ", ".join("?" for _ in cols)
+        placeholders = ", ".join("%s" for _ in cols)
         conn.execute(
             f"INSERT INTO cqc_locations ({', '.join(cols)}, source_url, "
             f" retrieved_at, http_status, source_system, payload_sha256) "

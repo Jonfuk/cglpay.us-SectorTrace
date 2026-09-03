@@ -43,7 +43,7 @@ def _decisions_by_name(conn, scheme: str) -> dict[str, list[dict]]:
     for row in _rows(conn,
                      "SELECT decision_id, unmatched_name, canonical_id, "
                      "canonical_name, status, decided_by, reason, decided_at, "
-                     "supersedes_id FROM alias_decisions WHERE target_scheme = ? "
+                     "supersedes_id FROM alias_decisions WHERE target_scheme = %s "
                      "ORDER BY decided_at", (scheme,)):
         out.setdefault(row["unmatched_name"], []).append(row)
     return out
@@ -58,14 +58,14 @@ def unresolved(conn, *, scheme: str, limit: int = 100) -> dict:
     limit = max(1, min(int(limit), 1000))
 
     names = [r["raw_value"] for r in _rows(
-        conn, "SELECT DISTINCT raw_value FROM review_queue WHERE item_type = ? "
-              "AND raw_value IS NOT NULL ORDER BY raw_value LIMIT ?",
+        conn, "SELECT DISTINCT raw_value FROM review_queue WHERE item_type = %s "
+              "AND raw_value IS NOT NULL ORDER BY raw_value LIMIT %s",
         (item_type, limit))]
 
     history = _decisions_by_name(conn, scheme)
     verified = {row["unmatched_name"]: row for row in _rows(
         conn, "SELECT unmatched_name, canonical_id, canonical_name, decided_by "
-              "FROM verified_aliases WHERE target_scheme = ?", (scheme,))
+              "FROM verified_aliases WHERE target_scheme = %s", (scheme,))
         if catalog.object_type(conn, "verified_aliases")}
 
     items = []
@@ -126,7 +126,7 @@ def decide(conn, *, unmatched_name: str, target_scheme: str, status: str,
         if not canonical_id:
             raise QueryError("an accepted decision needs a canonical_id.")
         row = conn.execute(
-            f"SELECT {name_col} AS n FROM {table} WHERE {id_col} = ?",
+            f"SELECT {name_col} AS n FROM {table} WHERE {id_col} = %s",
             (canonical_id,)).fetchone()
         if row is None:
             raise QueryError(
@@ -136,7 +136,7 @@ def decide(conn, *, unmatched_name: str, target_scheme: str, status: str,
         raise QueryError("canonical_id only makes sense with status='accepted'.")
 
     if supersedes_id and conn.execute(
-            "SELECT 1 FROM alias_decisions WHERE decision_id = ?",
+            "SELECT 1 FROM alias_decisions WHERE decision_id = %s",
             (supersedes_id,)).fetchone() is None:
         raise QueryError(f"supersedes_id {supersedes_id!r} does not exist.")
 
@@ -146,7 +146,7 @@ def decide(conn, *, unmatched_name: str, target_scheme: str, status: str,
         "INSERT INTO alias_decisions (decision_id, unmatched_name, "
         " target_scheme, canonical_id, canonical_name, status, decided_by, "
         " reason, review_item_id, supersedes_id, decided_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (decision_id, unmatched_name, target_scheme, canonical_id,
          canonical_name, status, decided_by, reason, review_item_id,
          supersedes_id, now))

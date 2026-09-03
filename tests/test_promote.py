@@ -95,7 +95,7 @@ def test_the_guard_is_satisfied_by_a_real_promotion(seeded, settings, document):
                      promoted_by="Jon", fields={"document_type": "strategy"},
                      settings=settings)
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 1
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
 
 
 # --- what promotion refuses ----------------------------------------------------
@@ -125,8 +125,8 @@ def test_a_document_that_does_not_answer_is_not_promoted(seeded, settings, httpx
                          promoted_by="Jon", fields={"document_type": "strategy"},
                          settings=settings)
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 0
-    assert seeded.execute("SELECT COUNT(*) FROM evidence_promotions").fetchone()[0] == 0
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 0
+    assert seeded.execute("SELECT COUNT(*) FROM evidence_promotions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failed_fetch_leaves_nothing_behind(seeded, settings, httpx_mock):
@@ -141,7 +141,7 @@ def test_a_failed_fetch_leaves_nothing_behind(seeded, settings, httpx_mock):
                          settings=settings)
 
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
 
 def test_an_unknown_candidate_is_refused(seeded, settings):
@@ -208,7 +208,7 @@ def test_it_keeps_the_candidate_as_it_read_at_the_time(seeded, settings, documen
                      settings=settings)
 
     context = json.loads(seeded.execute(
-        "SELECT candidate_context_json FROM evidence_promotions").fetchone()[0])
+        "SELECT candidate_context_json FROM evidence_promotions").fetchone().values().__iter__().__next__())
 
     assert context["title"] == "Kent CDP strategy"
     assert context["confidence"] == 0.75
@@ -221,7 +221,7 @@ def test_the_confirmed_type_beats_the_guess(seeded, settings, document):
                      settings=settings)
 
     assert seeded.execute(
-        "SELECT document_type FROM cdp_documents").fetchone()[0] == "needs_assessment"
+        "SELECT document_type FROM cdp_documents").fetchone().values().__iter__().__next__() == "needs_assessment"
 
 
 def test_the_candidate_is_marked_verified(seeded, settings, document):
@@ -277,7 +277,7 @@ def test_rejection_is_bulk_and_promotion_is_not(seeded, settings):
 
     assert count == 1
     assert seeded.execute(
-        "SELECT rejected FROM committee_paper_candidates").fetchone()[0] == 1
+        "SELECT rejected FROM committee_paper_candidates").fetchone().values().__iter__().__next__() == 1
     assert not hasattr(promote, "promote_many")
 
 
@@ -299,9 +299,9 @@ def test_reset_does_not_delete_evidence(seeded, settings, document):
                      settings=settings)
     promote.reset(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf")
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 1
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
 
 def test_history_is_newest_first(seeded, settings, httpx_mock):
@@ -387,7 +387,7 @@ def test_restore_flags_reports_before_it_writes(seeded, settings, document):
 
     assert len(promote.restore_flags(seeded, dry_run=True)) == 1
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
     restored = promote.restore_flags(seeded)
     row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()

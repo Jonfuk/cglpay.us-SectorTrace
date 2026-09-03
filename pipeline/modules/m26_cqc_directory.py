@@ -199,7 +199,7 @@ def iter_ods_rows(body: bytes, sheet_name: str):
 def _existing_location_ids(conn, provider_keys: set[str]) -> set[str]:
     if not provider_keys:
         return set()
-    placeholders = ",".join("?" for _ in provider_keys)
+    placeholders = ",".join("%s" for _ in provider_keys)
     rows = conn.execute(
         f"SELECT location_id FROM cqc_locations WHERE provider_key IN ({placeholders})",
         tuple(provider_keys)).fetchall()
@@ -214,7 +214,7 @@ def _existing_ratings(conn, provider_keys: set[str]) -> dict[str, tuple[str | No
     """
     if not provider_keys:
         return {}
-    placeholders = ",".join("?" for _ in provider_keys)
+    placeholders = ",".join("%s" for _ in provider_keys)
     rows = conn.execute(
         f"SELECT location_id, overall_rating, overall_rating_date, bulk_overall_rating "
         f"FROM cqc_locations WHERE provider_key IN ({placeholders})", tuple(provider_keys)).fetchall()
@@ -232,8 +232,8 @@ def _set_bulk_rating(conn, location_id: str, rating: str | None, rating_date: st
     these four columns fails that INSERT before it ever reaches ON CONFLICT.
     """
     conn.execute(
-        "UPDATE cqc_locations SET bulk_overall_rating = ?, bulk_overall_rating_date = ?, "
-        "bulk_rating_source_url = ?, bulk_rating_retrieved_at = ? WHERE location_id = ?",
+        "UPDATE cqc_locations SET bulk_overall_rating = %s, bulk_overall_rating_date = %s, "
+        "bulk_rating_source_url = %s, bulk_rating_retrieved_at = %s WHERE location_id = %s",
         (rating, rating_date, source_url, retrieved_at, location_id))
 
 
@@ -445,7 +445,7 @@ def _check_ratings_currency(client: PipelineHTTPClient, conn, module_name: str, 
         if existing_bulk_rating is not None:
             _set_bulk_rating(conn, entry["location_id"], None, None, None, None)
             conn.execute(
-                "DELETE FROM cqc_location_reports WHERE location_id = ? AND report_link_id = ?",
+                "DELETE FROM cqc_location_reports WHERE location_id = %s AND report_link_id = %s",
                 (entry["location_id"], BULK_REPORT_LINK_ID))
 
         if not entry["publication_date"]:

@@ -27,7 +27,7 @@ def _seed_provider(conn, provider_id: str = "1-125892604", provider_key: str = "
     conn.execute(
         "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'Change, Grow, Live', 'https://example.com', "
+        "VALUES (%s, %s, 'Change, Grow, Live', 'https://example.com', "
         "'2026-01-01T00:00:00Z', 200, 'test', 'abc') ON CONFLICT DO NOTHING",
         (provider_id, provider_key))
 
@@ -39,7 +39,7 @@ def _seed_location(conn, location_id: str, provider_id: str = "1-125892604",
     conn.execute(
         "INSERT INTO cqc_locations (location_id, provider_id, provider_key, location_name, "
         "overall_rating, overall_rating_date, source_url, retrieved_at, http_status, "
-        "source_system, payload_sha256) VALUES (?, ?, ?, 'CHART Kirklees', ?, ?, "
+        "source_system, payload_sha256) VALUES (%s, %s, %s, 'CHART Kirklees', %s, %s, "
         "'https://example.com', '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
         (location_id, provider_id, provider_key, overall_rating, overall_rating_date))
 
@@ -385,12 +385,12 @@ def test_ratings_clears_a_backfill_once_the_api_supplies_its_own_rating(httpx_mo
     _seed_location(conn, "1-10559211016", overall_rating="Good", overall_rating_date="2026-07-01")
     conn.execute(
         "UPDATE cqc_locations SET bulk_overall_rating='Good', bulk_overall_rating_date='2026-06-03', "
-        "bulk_rating_source_url=?, bulk_rating_retrieved_at='2026-08-20T00:00:00Z' "
+        "bulk_rating_source_url=%s, bulk_rating_retrieved_at='2026-08-20T00:00:00Z' "
         "WHERE location_id='1-10559211016'", (ODS_URL,))
     conn.execute(
         "INSERT INTO cqc_location_reports (location_id, report_link_id, report_date, "
         "first_visit_date, report_uri, source_url, retrieved_at, http_status, source_system, "
-        "payload_sha256) VALUES ('1-10559211016', 'bulk_export', '2026-06-03', NULL, ?, ?, "
+        "payload_sha256) VALUES ('1-10559211016', 'bulk_export', '2026-06-03', NULL, %s, %s, "
         "'2026-08-20T00:00:00Z', 200, 'cqc_location_page', 'page123')",
         (LOCATION_URL, LOCATION_URL))
     ods = _build_ods({"Locations": [

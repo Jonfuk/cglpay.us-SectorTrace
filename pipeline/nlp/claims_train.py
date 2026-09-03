@@ -323,7 +323,7 @@ INSERT INTO claim_head_versions (
     n_heldout_pos, n_heldout_neg, heldout_precision, heldout_recall, heldout_f1,
     min_precision, positive_rate, max_positive_rate, status, selected,
     artifact_path, artifact_sha256, code_commit, nlp_run_id, trained_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT(model_version) DO UPDATE SET
     heldout_candidate_ids_json = excluded.heldout_candidate_ids_json,
     n_train_pos = excluded.n_train_pos, n_train_neg = excluded.n_train_neg,
@@ -356,7 +356,7 @@ def _persist_category(conn, *, category, predicate, results: list[HeadResult],
     # One live head per category: clear the old selection before the new
     # winner is written (the partial unique index forbids two).
     conn.execute("UPDATE claim_head_versions SET selected = 0 "
-                 "WHERE category = ? AND selected = 1", (category,))
+                 "WHERE category = %s AND selected = 1", (category,))
     heldout_json = json.dumps(sorted(heldout_ids))
     for r in results:
         conn.execute(_UPSERT_HEAD, (

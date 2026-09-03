@@ -30,7 +30,7 @@ def test_latest_decision_per_candidate_wins(conn):
     # a later decision flips the first candidate from approved -> rejected
     conn.execute(
         "INSERT INTO claim_candidate_decisions (claim_candidate_id, decision, decided_by, "
-        "decided_at) VALUES (?, 'rejected', 'tester2', '2026-09-01T00:00:00+00:00')", (cand,))
+        "decided_at) VALUES (%s, 'rejected', 'tester2', '2026-09-01T00:00:00+00:00')", (cand,))
     conn.commit()
     by_id = {e.candidate_id: e.label for e in _examples(conn)}
     assert by_id[cand] == 0  # the flip is authoritative
@@ -72,7 +72,7 @@ def test_predict_population_is_live_embedded_chunks(conn):
     assert all(p.embedding and p.chunk_id for p in pop)
     # a superseded chunk drops out
     conn.execute("UPDATE document_chunks SET superseded = 1 "
-                 "WHERE document_chunk_id = ?", (pop[0].chunk_id,))
+                 "WHERE document_chunk_id = %s", (pop[0].chunk_id,))
     conn.commit()
     assert len(claims_features.predict_population(conn, embedder_model_key=STUB_MODEL_KEY)) == 4
 

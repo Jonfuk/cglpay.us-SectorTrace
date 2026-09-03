@@ -35,24 +35,9 @@
 #   ./start.sh web --host 127.0.0.1    # this machine only
 #   ./start.sh web --port 8080 --no-open
 #
-#   PostgreSQL. Set DATABASE_URL in .env and this script syncs the `postgres`
-#   extra, and every command above reads and writes that warehouse instead of
-#   data/warehouse.db. Moving the existing warehouse across is two commands,
-#   and the SQLite file is opened read-only by both:
-#   ./start.sh migrate-data --dry-run   # the plan and the preflight checks
-#   ./start.sh migrate-data             # load, then verify every value
-#   ./start.sh verify-migration         # check the two again, later
-#
-#   After that, collection writes to PostgreSQL and data/warehouse.db stops
-#   moving — so unsetting the URL is only a rollback while that file is
-#   current. Rebuild it from PostgreSQL, verified value by value before it is
-#   installed, with nothing else holding the warehouse open:
-#   ./start.sh sync-sqlite --check      # how far apart the two are
-#   ./start.sh sync-sqlite              # rebuild, verify, then swap it in
-#
-#   `backup` and `restore` follow the configured backend: a .db snapshot on
-#   SQLite, a verified .sql.gz one on PostgreSQL. See docs/BACKUP.md and
-#   docs/DEPLOYMENT.md.
+#   PostgreSQL. DATABASE_URL is required in .env; every command reads and
+#   writes PostgreSQL 18. `backup` and `restore` use the verified PostgreSQL
+#   snapshot path. See docs/BACKUP.md and docs/DEPLOYMENT.md.
 #
 #   Measure whichever backend is configured, and record it under
 #   docs/benchmarks/ so a later change can be judged against it rather than
@@ -122,8 +107,8 @@ CONTACT_EMAIL=
 # Seconds between requests to a single host.
 DEFAULT_RATE_LIMIT_SECONDS=2.0
 
-# Storage paths (relative to the repo root).
-DATABASE_PATH=data/warehouse.db
+# PostgreSQL 18 is the only application warehouse.
+DATABASE_URL=
 RAW_ARCHIVE_DIR=data/raw
 
 # Module 3 — Charity Commission register API (free key).
@@ -188,28 +173,6 @@ if [[ -n "${OCR_ENABLED:-}" ]]; then
     esac
 fi
 
-# The `postgres` extra, on the same rule and for a sharper version of the same
-# reason. `uv sync` removes what the selected extras do not ask for, so with
-# DATABASE_URL set in .env and this check absent, every run of this script
-# uninstalled psycopg and the pipeline then failed at its first connection
-# with ModuleNotFoundError — a working configuration broken by the script that
-# exists to make it work.
-#
-# Presence of the URL is the selector, matching pipeline/config.py exactly:
-# there is deliberately no second switch that could disagree with it. An empty
-# value reads as unset on both sides.
-postgres_wanted=0
-if [[ -f .env ]] && grep -Eq '^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*[^[:space:]]' .env; then
-    postgres_wanted=1
-fi
-if [[ -n "${DATABASE_URL:-}" ]]; then
-    postgres_wanted=1
-elif [[ -n "${DATABASE_URL+set}" ]]; then
-    # Explicitly empty in the environment, which is how the pipeline's own
-    # documented `DATABASE_URL= …` forces SQLite back on for one command.
-    postgres_wanted=0
-fi
-
 # The storage extra follows the archive backend selector for the same reason:
 # `uv sync` removes packages that are not named by the selected extras. Without
 # this check, a local run with ARCHIVE_S3_BUCKET configured uninstalls boto3
@@ -242,9 +205,6 @@ sync_args=(--quiet)
 if (( ocr_wanted )); then
     sync_args+=(--extra ocr)
 fi
-if (( postgres_wanted )); then
-    sync_args+=(--extra postgres)
-fi
 if (( storage_wanted )); then
     sync_args+=(--extra storage)
 fi
@@ -265,9 +225,6 @@ extras=""
 if (( ocr_wanted )); then
     extras="${extras} ocr"
 fi
-if (( postgres_wanted )); then
-    extras="${extras} postgres"
-fi
 if (( storage_wanted )); then
     extras="${extras} storage"
 fi
@@ -282,9 +239,6 @@ fi
 if (( ocr_wanted )); then
     warn "OCR is on. The first scanned report downloads ~105 MB of models to ~/.cache/onnxtr,"
     warn "and reading one takes about nine seconds a page."
-fi
-if (( postgres_wanted )); then
-    ok "DATABASE_URL is set: the warehouse is PostgreSQL, not data/warehouse.db"
 fi
 if (( storage_wanted )); then
     ok "ARCHIVE_S3_BUCKET is set: the raw archive uses the S3 storage extra"

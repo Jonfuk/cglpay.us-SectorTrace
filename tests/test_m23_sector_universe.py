@@ -26,7 +26,7 @@ def add_authority(conn, ons_code="E08000016", name="Barnsley Metropolitan Boroug
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, region, active_from, "
         "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
-        "http_status, source_system, payload_sha256) VALUES (?, ?, 'LBO', "
+        "http_status, source_system, payload_sha256) VALUES (%s, %s, 'LBO', "
         "'Yorkshire and The Humber', '1996-04-01', '2023', '2026', "
         "'https://ons.uk/g', '2026-08-01T00:00:00Z', 200, 'ons_geoportal', 'h')",
         (ons_code, name))
@@ -37,7 +37,7 @@ def add_company(conn, number="03861209", name="Change Grow Live", match_basis="s
     conn.execute(
         "INSERT INTO companies (company_number, provider_key, company_name, match_basis, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, 'https://ch.uk/c', '2026-08-01T00:00:00Z', 200, 'companies_house', 'h')",
+        "VALUES (%s, %s, %s, %s, 'https://ch.uk/c', '2026-08-01T00:00:00Z', 200, 'companies_house', 'h')",
         (number, provider_key, name, match_basis))
 
 
@@ -45,7 +45,7 @@ def add_charity(conn, number="1079327", provider_key="change_grow_live"):
     conn.execute(
         "INSERT INTO charity_financials (charity_number, financial_year_end, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, '2026-03-31', 'https://charitycommission.uk/c', "
+        "VALUES (%s, '2026-03-31', 'https://charitycommission.uk/c', "
         "'2026-08-01T00:00:00Z', 200, 'charity_commission', 'h')",
         (number,))
     if provider_key:
@@ -58,7 +58,7 @@ def add_cqc(conn, provider_id="1-123456789", name="Change Grow Live", company_nu
     conn.execute(
         "INSERT INTO cqc_providers (provider_id, provider_name, companies_house_number, "
         "charity_number, registration_date, source_url, retrieved_at, http_status, "
-        "source_system, payload_sha256) VALUES (?, ?, ?, ?, '2020-01-01', "
+        "source_system, payload_sha256) VALUES (%s, %s, %s, %s, '2020-01-01', "
         "'https://cqc.uk/p', '2026-08-01T00:00:00Z', 200, 'cqc_public_api', 'h')",
         (provider_id, name, company_number, charity_number))
 
@@ -69,7 +69,7 @@ def add_contract(conn, notice_id, supplier_name, ppon=None, date="2026-01-01",
         "INSERT INTO contracts (notice_id, supplier_id, ocid, buyer_name, buyer_ons_code, "
         "supplier_name_raw, supplier_ppon, date_published, psr_basis, source_url, "
         "retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        "(?, '', ?, ?, ?, ?, ?, ?, 0, 'https://fts.uk/r', '2026-08-01T00:00:00Z', "
+        "(%s, '', %s, %s, %s, %s, %s, %s, 0, 'https://fts.uk/r', '2026-08-01T00:00:00Z', "
         "200, 'find_a_tender', 'h')",
         (notice_id, f"ocid-{notice_id}", buyer_name, buyer_ons_code, supplier_name,
          ppon, date))
@@ -78,11 +78,11 @@ def add_contract(conn, notice_id, supplier_name, ppon=None, date="2026-01-01",
 def add_review_item(conn, item_type, raw_value, status="pending"):
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, status, "
-        "created_at) VALUES ('m01_procurement', ?, ?, '{}', ?, '2026-08-01T00:00:00Z')",
+        "created_at) VALUES ('m01_procurement', %s, %s, '{}', %s, '2026-08-01T00:00:00Z')",
         (item_type, raw_value, status))
     return conn.execute(
-        "SELECT id FROM review_queue WHERE item_type = ? AND raw_value = ?",
-        (item_type, raw_value)).fetchone()[0]
+        "SELECT id FROM review_queue WHERE item_type = %s AND raw_value = %s",
+        (item_type, raw_value)).fetchone().values().__iter__().__next__()
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def run_build(conn, dry_run=False):
 
 def universe_row(conn, entity_key):
     return conn.execute(
-        "SELECT * FROM sector_universe WHERE entity_key = ?", (entity_key,)).fetchone()
+        "SELECT * FROM sector_universe WHERE entity_key = %s", (entity_key,)).fetchone()
 
 
 # --- normalisation -------------------------------------------------------------
@@ -271,7 +271,7 @@ def test_a_rebuild_produces_the_same_universe(universe_conn):
     second = universe_conn.execute(
         "SELECT entity_key, canonical_name, notices_count FROM sector_universe "
         "ORDER BY entity_key").fetchall()
-    assert [tuple(r) for r in first] == [tuple(r) for r in second]
+    assert [tuple(r.values()) for r in first] == [tuple(r.values()) for r in second]
     assert universe_conn.execute(
         "SELECT COUNT(*) c FROM sector_universe").fetchone()["c"] > 0
 
@@ -284,8 +284,8 @@ def test_a_rebuild_after_the_sweep_still_rebuilds_funders_and_candidates(univers
     first = universe_conn.execute(
         "SELECT entity_key, canonical_name, notices_count FROM sector_universe "
         "ORDER BY entity_key").fetchall()
-    assert [tuple(r) for r in first] == [
-        tuple(r) for r in universe_conn.execute(
+    assert [tuple(r.values()) for r in first] == [
+        tuple(r.values()) for r in universe_conn.execute(
             "SELECT entity_key, canonical_name, notices_count FROM sector_universe "
             "ORDER BY entity_key").fetchall()]
     funders = universe_conn.execute(
@@ -316,9 +316,12 @@ def test_a_dry_run_writes_nothing(universe_conn):
 # --- capture remains unresolved ------------------------------------------------
 
 def _pending_by_type(conn):
-    return dict(conn.execute(
-        "SELECT item_type, COUNT(*) c FROM review_queue WHERE status = 'pending' "
-        "GROUP BY item_type").fetchall())
+    return {
+        row["item_type"]: row["c"]
+        for row in conn.execute(
+            "SELECT item_type, COUNT(*) c FROM review_queue WHERE status = 'pending' "
+            "GROUP BY item_type")
+    }
 
 
 def test_the_sweep_leaves_captured_identity_questions_pending(universe_conn):
@@ -330,7 +333,7 @@ def test_the_sweep_leaves_captured_identity_questions_pending(universe_conn):
     for status in statuses.values():
         assert status == "pending"
     assert universe_conn.execute(
-        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM review_resolutions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_the_sweep_leaves_decided_items_alone(universe_conn):
@@ -340,11 +343,11 @@ def test_the_sweep_leaves_decided_items_alone(universe_conn):
     run_build(universe_conn)
     universe_conn.execute(
         "UPDATE review_queue SET status = 'approved', resolved_at = '2026-08-02T00:00:00Z' "
-        "WHERE id = ?", (item_id,))
+        "WHERE id = %s", (item_id,))
     universe_conn.commit()
     review_sweep.sweep(universe_conn)
     assert universe_conn.execute(
-        "SELECT status FROM review_queue WHERE id = ?", (item_id,)).fetchone()["status"] == "approved"
+        "SELECT status FROM review_queue WHERE id = %s", (item_id,)).fetchone()["status"] == "approved"
 
 
 def test_preview_has_no_universe_capture_resolution_rules(universe_conn):

@@ -92,10 +92,10 @@ def test_run_writes_one_assertion_per_span(conn, settings):
     result = nlp_context.run(conn, source_system="committee_paper_promotion")
 
     n_spans = conn.execute(
-        "SELECT COUNT(*) FROM document_concept_mentions WHERE superseded=0").fetchone()[0]
+        "SELECT COUNT(*) FROM document_concept_mentions WHERE superseded=0").fetchone().values().__iter__().__next__()
     assert result["assertions"] == n_spans >= 3
 
-    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=?",
+    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=%s",
                            (result["run_id"],)).fetchone()
     assert run_row["stage"] == "context" and run_row["status"] == "ok"
 
@@ -117,9 +117,9 @@ def test_run_is_idempotent(conn, settings):
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     spans.run(conn, extractor="stub")
     first = nlp_context.run(conn)
-    n1 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone()[0]
+    n1 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone().values().__iter__().__next__()
     again = nlp_context.run(conn)
-    n2 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone()[0]
+    n2 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone().values().__iter__().__next__()
     assert first["assertions"] == again["assertions"] and n1 == n2
 
 
@@ -129,8 +129,8 @@ def test_dry_run_writes_nothing(conn, settings):
     spans.run(conn, extractor="stub")
     result = nlp_context.run(conn, dry_run=True)
     assert result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='context'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='context'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_chunk_with_no_spans_is_skipped(conn, settings):

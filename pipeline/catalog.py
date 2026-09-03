@@ -117,9 +117,9 @@ def columns_of(conn, name: str) -> list[dict]:
         "    FROM pg_index i "
         "    JOIN pg_attribute a "
         "      ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-        "    WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
+        "    WHERE i.indrelid = to_regclass(%s) AND i.indisprimary "
         ") k ON k.column_name = c.column_name "
-        "WHERE c.table_schema = current_schema() AND c.table_name = ? "
+        "WHERE c.table_schema = current_schema() AND c.table_name = %s "
         "ORDER BY c.ordinal_position", (name, name)
     ).fetchall()
     return [
@@ -148,7 +148,7 @@ def primary_key(conn, name: str) -> list[str]:
         "FROM pg_index i "
         "JOIN pg_attribute a "
         "  ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-        "WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
+        "WHERE i.indrelid = to_regclass(%s) AND i.indisprimary "
         "ORDER BY array_position(i.indkey, a.attnum)", (name,)
     ).fetchall()
     return [r["name"] for r in rows]
@@ -227,7 +227,7 @@ def tables_with_column(conn, column: str) -> list[str]:
         "JOIN information_schema.tables t "
         "  ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
         "WHERE c.table_schema = current_schema() "
-        "  AND t.table_type = 'BASE TABLE' AND c.column_name = ? "
+        "  AND t.table_type = 'BASE TABLE' AND c.column_name = %s "
         "ORDER BY c.table_name", (column,)
     ).fetchall()
     return [r["name"] for r in rows]

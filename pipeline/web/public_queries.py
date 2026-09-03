@@ -522,7 +522,7 @@ def summary(conn: sqlite3.Connection) -> dict:
     census_metrics = _rows(
         conn,
         "SELECT metric, workforce_segment, value, unit, verified "
-        "FROM workforce_census_metrics WHERE census_year = ? "
+        "FROM workforce_census_metrics WHERE census_year = %s "
         "  AND metric IN ('vacancy_rate', 'turnover_rate') "
         "ORDER BY metric, workforce_segment",
         (latest_census,)) if latest_census else []
@@ -721,7 +721,6 @@ def meta(conn: sqlite3.Connection, settings) -> dict:
                           "ORDER BY started_at DESC LIMIT 1")
         last_run = row or None
 
-    backend = db.backend_of(conn)
     extension_state = {
         ext["name"]: bool(ext["installed"]) for ext in health.extensions(conn)
     }
@@ -732,7 +731,7 @@ def meta(conn: sqlite3.Connection, settings) -> dict:
         "revision": settings.git_revision or _git_revision_from_checkout(),
         "revision_source": "deployment" if settings.git_revision else "checkout",
         "build_time": settings.build_time,
-        "backend": backend,
+        "backend": "postgres",
         "schema": {
             "latest_migration": max(applied) if applied else None,
             "applied_count": len(applied),
@@ -1281,8 +1280,8 @@ def ending_soon(conn: sqlite3.Connection, clause: str, params: dict,
                  (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END)
                    AS matched
         FROM contracts c{clause}
-        {'AND' if clause else 'WHERE'} c.date_end >= :window_start
-              AND c.date_end <= :window_end
+        {'AND' if clause else 'WHERE'} c.date_end >= %(window_start)s
+              AND c.date_end <= %(window_end)s
         GROUP BY quarter ORDER BY quarter""",
         {**params, "window_start": window_start, "window_end": window_end})
     return {
@@ -1334,16 +1333,16 @@ def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only
     if provider_key:
         where.append(
             "c.supplier_name_raw IN (SELECT alias_raw FROM supplier_aliases "
-            "WHERE supplier_key = :provider_key)")
+            "WHERE supplier_key = %(provider_key)s)")
         params["provider_key"] = provider_key
     if buyer_ons_code:
-        where.append("c.buyer_ons_code = :buyer")
+        where.append("c.buyer_ons_code = %(buyer)s")
         params["buyer"] = buyer_ons_code
     if year_from:
-        where.append("substr(c.date_published, 1, 4) >= :year_from")
+        where.append("substr(c.date_published, 1, 4) >= %(year_from)s")
         params["year_from"] = str(year_from)
     if year_to:
-        where.append("substr(c.date_published, 1, 4) <= :year_to")
+        where.append("substr(c.date_published, 1, 4) <= %(year_to)s")
         params["year_to"] = str(year_to)
     if psr_only:
         where.append("c.psr_basis IS NOT NULL")
@@ -1359,14 +1358,14 @@ def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only
         term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         params["contract_q"] = f"%{term}%"
         where.append(
-            f"(c.buyer_name {op} :contract_q ESCAPE '\\' "
-            f"OR c.supplier_name_raw {op} :contract_q ESCAPE '\\')")
+            f"(c.buyer_name {op} %(contract_q)s ESCAPE '\\' "
+            f"OR c.supplier_name_raw {op} %(contract_q)s ESCAPE '\\')")
     if since_retrieved_at:
         # A plain string comparison, like the year bounds above: retrieved_at
         # is an ISO-8601 timestamp and sorts lexically. Lets a reader ask
         # "notices this warehouse has seen since <date>" and get a result set
         # a shared link reproduces.
-        where.append("c.retrieved_at >= :since_retrieved_at")
+        where.append("c.retrieved_at >= %(since_retrieved_at)s")
         params["since_retrieved_at"] = since_retrieved_at
     return (f" WHERE {' AND '.join(where)}" if where else ""), params
 
@@ -1378,7 +1377,7 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
     clause, params = _contract_filters(
         provider_key, buyer_ons_code, year_from, year_to, psr_only,
         q=q, since_retrieved_at=since_retrieved_at,
-        ilike=db.backend_of(conn) == "postgres")
+        ilike=True)
 
     totals = _one(conn, f"""
         SELECT COUNT(*) AS total,
@@ -1443,7 +1442,7 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
     page_offset = max(0, int(offset))
     notices = _rows(
         conn,
-        _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT :limit OFFSET :offset",
+        _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT %(limit)s OFFSET %(offset)s",
         {**params, "limit": page_limit, "offset": page_offset})
     _add_notice_links(notices)
 
@@ -1529,7 +1528,7 @@ def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
     clause, params = _contract_filters(
         provider_key, buyer_ons_code, year_from, year_to, psr_only,
         q=q, since_retrieved_at=since_retrieved_at,
-        ilike=db.backend_of(conn) == "postgres")
+        ilike=True)
     total = _one(conn, f"SELECT COUNT(*) AS n FROM contracts c{clause}",
                   params).get("n", 0)
 
@@ -1610,7 +1609,7 @@ def contract_process(conn: sqlite3.Connection, ocid: str) -> dict:
                     (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END
                     AS supplier_is_tracked
         FROM contracts c
-        WHERE c.ocid = :ocid
+        WHERE c.ocid = %(ocid)s
         ORDER BY c.date_published, c.notice_id, c.supplier_id""",
         {"ocid": ocid})
     if not rows:
@@ -1959,13 +1958,13 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
     if provider_key:
         wage_where.append(
             "w.charity_number IN (SELECT identifier FROM provider_identifiers "
-            "WHERE provider_key = :provider_key AND scheme = 'charity_number')")
+            "WHERE provider_key = %(provider_key)s AND scheme = 'charity_number')")
         wage_params["provider_key"] = provider_key
     if year_from:
-        wage_where.append("substr(w.financial_year_end, 1, 4) >= :year_from")
+        wage_where.append("substr(w.financial_year_end, 1, 4) >= %(year_from)s")
         wage_params["year_from"] = str(year_from)
     if year_to:
-        wage_where.append("substr(w.financial_year_end, 1, 4) <= :year_to")
+        wage_where.append("substr(w.financial_year_end, 1, 4) <= %(year_to)s")
         wage_params["year_to"] = str(year_to)
     wage_clause = f" WHERE {' AND '.join(wage_where)}" if wage_where else ""
 
@@ -1982,7 +1981,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
 
     job_where, job_params = [], {}
     if provider_key:
-        job_where.append("n.provider_key = :provider_key")
+        job_where.append("n.provider_key = %(provider_key)s")
         job_params["provider_key"] = provider_key
     job_clause = f" WHERE {' AND '.join(job_where)}" if job_where else ""
 
@@ -2017,7 +2016,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
     try:
         repeat_roles = _rows(conn, f"""
             SELECT r.* FROM v_nhs_repeat_advertised_roles r
-            {' WHERE r.provider_key = :provider_key' if provider_key else ''}
+            {' WHERE r.provider_key = %(provider_key)s' if provider_key else ''}
             ORDER BY r.advert_count DESC""", job_params)
     except QueryError:
         repeat_roles = []
@@ -2048,7 +2047,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                l.payload_sha256
         FROM living_wage_accreditations l
         LEFT JOIN providers p ON p.provider_key = l.provider_key
-        {'WHERE l.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE l.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY p.canonical_name, l.searched_variant""", provider_params)
     gender_pay_gap = _rows(conn, f"""
         SELECT g.provider_key, p.canonical_name, g.reporting_year,
@@ -2060,7 +2059,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                g.source_system, g.payload_sha256
         FROM gender_pay_gap_reports g
         LEFT JOIN providers p ON p.provider_key = g.provider_key
-        {'WHERE g.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE g.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY g.reporting_year DESC, p.canonical_name, g.employer_name""",
         provider_params)
     provider_published_pay = _rows(conn, f"""
@@ -2070,7 +2069,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                m.retrieved_at, m.source_system, m.payload_sha256
         FROM provider_pay_mentions m
         LEFT JOIN providers p ON p.provider_key = m.provider_key
-        {'WHERE m.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE m.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY p.canonical_name, m.page_url, m.mention_index""", provider_params)
     ashe = _rows(conn, """
         SELECT dataset_id, dataset_title, edition, version, dimension_kind,
@@ -2148,10 +2147,10 @@ def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
 
     where, params = [], {}
     if authority_ons_code:
-        where.append("s.authority_ons_code = :authority_ons_code")
+        where.append("s.authority_ons_code = %(authority_ons_code)s")
         params["authority_ons_code"] = authority_ons_code
     if provider_key:
-        where.append("s.provider_key = :provider_key")
+        where.append("s.provider_key = %(provider_key)s")
         params["provider_key"] = provider_key
     clause = f" WHERE {' AND '.join(where)}" if where else ""
     total = _one(conn, f"SELECT COUNT(*) AS n FROM council_spend s{clause}", params).get("n", 0)
@@ -2165,11 +2164,11 @@ def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
         LEFT JOIN providers p ON p.provider_key = s.provider_key
         {clause}
         ORDER BY s.retrieved_at DESC, s.authority_ons_code, s.file_url, s.row_index
-        LIMIT :limit""", {**params, "limit": limit})
+        LIMIT %(limit)s""", {**params, "limit": limit})
 
     file_where, file_params = [], {}
     if authority_ons_code:
-        file_where.append("f.authority_ons_code = :authority_ons_code")
+        file_where.append("f.authority_ons_code = %(authority_ons_code)s")
         file_params["authority_ons_code"] = authority_ons_code
     file_clause = f" WHERE {' AND '.join(file_where)}" if file_where else ""
     files = _rows(conn, f"""
@@ -2333,7 +2332,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
         year = available[0] if available else None
 
     if "grant_type" in spec:
-        year_clause = " AND g.financial_year = :year" if year else ""
+        year_clause = " AND g.financial_year = %(year)s" if year else ""
         if year:
             params["year"] = year
         params["grant_type"] = spec["grant_type"]
@@ -2345,7 +2344,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
                    g.allocation_status
             FROM public_health_grants g
             JOIN authorities a ON a.ons_code = g.ons_code
-            WHERE g.grant_type = :grant_type{year_clause}
+            WHERE g.grant_type = %(grant_type)s{year_clause}
             GROUP BY g.ons_code, a.name, a.region, g.financial_year,
                      g.allocation_status
             ORDER BY value DESC"""
@@ -2355,11 +2354,11 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
         status = _rows(conn, f"""
             SELECT g.financial_year, g.allocation_status, COUNT(*) AS n
             FROM public_health_grants g
-            WHERE g.grant_type = :grant_type{year_clause}
+            WHERE g.grant_type = %(grant_type)s{year_clause}
             GROUP BY g.financial_year, g.allocation_status
             ORDER BY g.financial_year""", params)
     elif metric == "budget_public_health":
-        year_clause = " AND b.financial_year = :year" if year else ""
+        year_clause = " AND b.financial_year = %(year)s" if year else ""
         if year:
             params["year"] = year
         sql = f"""
@@ -2371,7 +2370,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
             ORDER BY value DESC"""
     elif metric == "treatment_numbers":
         caveat = CAVEATS["treatment_not_need"]
-        year_clause = " AND f.time_period = :year" if year else ""
+        year_clause = " AND f.time_period = %(year)s" if year else ""
         if year:
             params["year"] = year
         sql = f"""
@@ -2419,7 +2418,7 @@ def geography_years(conn: sqlite3.Connection, metric: str) -> list[str]:
     spec = GEOGRAPHY_METRICS.get(metric, {})
     if "grant_type" in spec:
         rows = _rows(conn, "SELECT DISTINCT financial_year AS y FROM public_health_grants "
-                            "WHERE grant_type = ? ORDER BY y DESC", (spec["grant_type"],))
+                            "WHERE grant_type = %s ORDER BY y DESC", (spec["grant_type"],))
     elif metric == "budget_public_health":
         rows = _rows(conn, "SELECT DISTINCT financial_year AS y "
                             "FROM v_la_public_health_budget ORDER BY y DESC")
@@ -2488,13 +2487,13 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
 
     ind_where, params = [], {}
     if indicator_id:
-        ind_where.append("i.indicator_id = :indicator_id")
+        ind_where.append("i.indicator_id = %(indicator_id)s")
         params["indicator_id"] = int(indicator_id)
     if topic:
-        ind_where.append("i.topic = :topic")
+        ind_where.append("i.topic = %(topic)s")
         params["topic"] = topic
     if substance:
-        ind_where.append("i.substance = :substance")
+        ind_where.append("i.substance = %(substance)s")
         params["substance"] = substance
     ind_clause = f" WHERE {' AND '.join(ind_where)}" if ind_where else ""
 
@@ -2509,12 +2508,12 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
                  "caveat": CAVEATS["treatment_not_need"]}
 
     ids = [i["indicator_id"] for i in indicators]
-    placeholders = ", ".join(f":i{n}" for n in range(len(ids)))
+    placeholders = ", ".join(f"%(i{n})s" for n in range(len(ids)))
     value_params = {f"i{n}": v for n, v in enumerate(ids)}
 
     area_clause = ""
     if ons_code:
-        area_clause = " AND f.ons_code = :ons_code"
+        area_clause = " AND f.ons_code = %(ons_code)s"
         value_params["ons_code"] = ons_code
 
     series = _rows(conn, f"""
@@ -2569,11 +2568,11 @@ def treatment_metrics(conn: sqlite3.Connection) -> dict:
                    MAX(CASE WHEN area_level = 'england' THEN 1 ELSE 0 END) AS england,
                    MAX(CASE WHEN lower_ci_95 IS NOT NULL THEN 1 ELSE 0 END) AS has_ci,
                    MAX(retrieved_at) AS retrieved_at
-            FROM fingertips_la_values WHERE indicator_id = ?""",
+            FROM fingertips_la_values WHERE indicator_id = %s""",
             (ind["indicator_id"],))
         periods = [r["time_period"] for r in _rows(conn, """
             SELECT DISTINCT time_period, time_period_sortable
-            FROM fingertips_la_values WHERE indicator_id = ?
+            FROM fingertips_la_values WHERE indicator_id = %s
             ORDER BY time_period_sortable""", (ind["indicator_id"],))]
         metrics.append({
             "source": "fingertips",
@@ -2831,10 +2830,10 @@ def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
     if not ons_code:
         return {**payload, "estimates": [], "other_rows": [], "authority": None}
 
-    where = ["s.ons_code = :ons_code"]
+    where = ["s.ons_code = %(ons_code)s"]
     params: dict = {"ons_code": ons_code}
     if table_ref:
-        where.append("s.table_ref = :table_ref")
+        where.append("s.table_ref = %(table_ref)s")
         params["table_ref"] = table_ref
 
     rows = _rows(conn, f"""
@@ -2850,7 +2849,7 @@ def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
     return {
         **payload,
         "authority": _one(conn, "SELECT ons_code, name, region FROM authorities "
-                                 "WHERE ons_code = ?", (ons_code,)),
+                                 "WHERE ons_code = %s", (ons_code,)),
         "estimates": estimates,
         "other_rows": other,
     }
@@ -3266,23 +3265,23 @@ def cqc_locations(conn: sqlite3.Connection, *,
     where = ["l.provider_key IS NOT NULL"]
     binds: list = []
     if provider_key:
-        where.append("l.provider_key = ?")
+        where.append("l.provider_key = %s")
         binds.append(provider_key)
     if authority_ons_code:
-        where.append("l.local_authority_ons_code = ?")
+        where.append("l.local_authority_ons_code = %s")
         binds.append(authority_ons_code)
     if registration_status:
-        where.append("l.registration_status = ?")
+        where.append("l.registration_status = %s")
         binds.append(registration_status)
     if rating:
-        where.append("COALESCE(l.overall_rating, l.bulk_overall_rating) = ?")
+        where.append("COALESCE(l.overall_rating, l.bulk_overall_rating) = %s")
         binds.append(rating)
     if regulated_activity:
-        where.append("COALESCE(l.regulated_activities, '') LIKE ? ESCAPE '\\'")
+        where.append("COALESCE(l.regulated_activities, '') LIKE %s ESCAPE '\\'")
         binds.append(f"%{escape_like(regulated_activity)}%")
     if service_type:
         where.append(
-            "(',' || COALESCE(l.service_types, '') || ',') LIKE ? ESCAPE '\\'")
+            "(',' || COALESCE(l.service_types, '') || ',') LIKE %s ESCAPE '\\'")
         binds.append(f"%,{escape_like(service_type)},%")
 
     clause = " AND ".join(where)
@@ -3291,10 +3290,10 @@ def cqc_locations(conn: sqlite3.Connection, *,
 
     cols = ", ".join(f"l.{c}" for c in _CQC_LOCATION_COLUMNS)
     total = conn.execute(
-        f"SELECT COUNT(*) FROM cqc_locations l WHERE {clause}", binds).fetchone()[0]
+        f"SELECT COUNT(*) AS count FROM cqc_locations l WHERE {clause}", binds).fetchone()["count"]
     without_coordinate = conn.execute(
-        f"SELECT COUNT(*) FROM cqc_locations l WHERE {clause} "
-        "AND (l.latitude IS NULL OR l.longitude IS NULL)", binds).fetchone()[0]
+        f"SELECT COUNT(*) AS count FROM cqc_locations l WHERE {clause} "
+        "AND (l.latitude IS NULL OR l.longitude IS NULL)", binds).fetchone()["count"]
 
     rows = _rows(conn, f"""
         SELECT {cols}, p.canonical_name AS provider_name,
@@ -3303,7 +3302,7 @@ def cqc_locations(conn: sqlite3.Connection, *,
         LEFT JOIN providers p ON p.provider_key = l.provider_key
         WHERE {clause}
         ORDER BY p.canonical_name, l.location_name, l.location_id
-        LIMIT ? OFFSET ?""", [*binds, limit, offset])
+        LIMIT %s OFFSET %s""", [*binds, limit, offset])
 
     for row in rows:
         bulk = row.pop("bulk_overall_rating")
@@ -3321,7 +3320,7 @@ def cqc_locations(conn: sqlite3.Connection, *,
     facet_where = "l.provider_key IS NOT NULL"
     facet_binds: list = []
     if provider_key:
-        facet_where += " AND l.provider_key = ?"
+        facet_where += " AND l.provider_key = %s"
         facet_binds.append(provider_key)
 
     def _facet(expr: str) -> list[dict]:
@@ -3502,7 +3501,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
               "v_provider_disclosure_gaps", "company_filings",
               "pfd_provider_mentions", "pfd_reports"])
 
-    provider = _one(conn, "SELECT * FROM providers WHERE provider_key = ?",
+    provider = _one(conn, "SELECT * FROM providers WHERE provider_key = %s",
                      (provider_key,))
     if not provider:
         raise QueryError(f"No provider {provider_key!r}.")
@@ -3510,7 +3509,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     # The successor's display name, so the portal can link "now trading as X"
     # / "merged into X" rather than printing a slug.
     if provider.get("superseded_by"):
-        successor = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = ?",
+        successor = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = %s",
                           (provider["superseded_by"],))
         provider["superseded_by_name"] = successor.get("canonical_name") if successor else None
 
@@ -3522,7 +3521,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM charity_financials cf
         JOIN provider_identifiers pi ON pi.identifier = cf.charity_number
                                      AND pi.scheme = 'charity_number'
-        WHERE pi.provider_key = ?""", (provider_key,)):
+        WHERE pi.provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "charity_accounts",
             "label": "Annual accounts",
@@ -3534,7 +3533,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     for row in _rows(conn, """
         SELECT decision_date AS date, case_number, outcome, outcome_confidence,
                provider_match_basis, source_url, retrieved_at
-        FROM tribunal_cases WHERE provider_key = ?""", (provider_key,)):
+        FROM tribunal_cases WHERE provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "tribunal",
             "label": "Employment tribunal judgment",
@@ -3548,7 +3547,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     for row in _rows(conn, """
         SELECT posted_date AS date, job_title, salary_raw, advert_url,
                source_url, retrieved_at
-        FROM nhs_job_adverts WHERE provider_key = ?""", (provider_key,)):
+        FROM nhs_job_adverts WHERE provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "nhs_job_advert",
             "label": row["job_title"],
@@ -3563,7 +3562,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                c.source_url, c.retrieved_at
         FROM contracts c
         JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
-        WHERE sa.supplier_key = ?""", (provider_key,)):
+        WHERE sa.supplier_key = %s""", (provider_key,)):
         value = f" — £{row['value_core']:,.0f}" if row["value_core"] else ""
         # The timeline's "source" link is the one a reader actually follows,
         # so it gets the notice rather than the API cursor the row came from.
@@ -3587,7 +3586,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                overall_rating, overall_rating_date, registration_status,
                source_url, retrieved_at,
                bulk_overall_rating, bulk_overall_rating_date, bulk_rating_source_url
-        FROM cqc_locations WHERE provider_key = ?
+        FROM cqc_locations WHERE provider_key = %s
         ORDER BY location_name""", (provider_key,))
     # m26_cqc_directory backfills these two only when the API supplied
     # nothing at all for a location -- see its module docstring for why a
@@ -3605,13 +3604,13 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     edges = _rows(conn, """
         SELECT source_type, source_id, relationship, target_type, target_id,
                target_label, basis, source_url, retrieved_at
-        FROM v_entity_edges WHERE source_id = ? OR target_id = ?""",
+        FROM v_entity_edges WHERE source_id = %s OR target_id = %s""",
         (provider_key, provider_key))
 
     tribunals = _rows(conn, """
         SELECT case_number, decision_date, outcome, outcome_confidence, region,
                hearing_venue_raw, provider_match_basis, document_count, source_url
-        FROM tribunal_cases WHERE provider_key = ?
+        FROM tribunal_cases WHERE provider_key = %s
         ORDER BY decision_date DESC""", (provider_key,))
 
     # --- W-24: the four sources the deep dive stopped at ---------------------
@@ -3630,7 +3629,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM charity_financials cf
         JOIN provider_identifiers pi ON pi.identifier = cf.charity_number
                                      AND pi.scheme = 'charity_number'
-        WHERE pi.provider_key = ?
+        WHERE pi.provider_key = %s
         ORDER BY cf.financial_year_end""", (provider_key,))
     for row in charity_finance:
         income = row["total_income"]
@@ -3649,7 +3648,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                r.source_url, r.retrieved_at
         FROM cqc_location_reports r
         JOIN cqc_locations l ON l.location_id = r.location_id
-        WHERE l.provider_key = ?
+        WHERE l.provider_key = %s
         ORDER BY r.report_date DESC""", (provider_key,))
 
     # What each report *does not* discuss, from the view built over m14's
@@ -3660,12 +3659,12 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     disclosure_gaps = _rows(conn, """
         SELECT d.financial_year_end, d.topic, d.search_terms, d.caveat
         FROM v_provider_disclosure_gaps d
-        WHERE d.provider_key = ?
+        WHERE d.provider_key = %s
         ORDER BY d.financial_year_end, d.topic""", (provider_key,))
     disclosed = _rows(conn, """
         SELECT d.financial_year_end, d.topic
         FROM provider_report_disclosure d
-        WHERE d.provider_key = ? AND d.matched = 1
+        WHERE d.provider_key = %s AND d.matched = 1
         ORDER BY d.financial_year_end, d.topic""", (provider_key,))
     # A year whose annual report was read but has no disclosure rows at all
     # was never searched. Distinct from every "not matched" cell above, and
@@ -3677,7 +3676,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         LEFT JOIN provider_report_disclosure d
                ON d.provider_key = ar.provider_key
               AND d.financial_year_end = ar.financial_year_end
-        WHERE ar.provider_key = ? AND d.provider_key IS NULL
+        WHERE ar.provider_key = %s AND d.provider_key IS NULL
         ORDER BY ar.financial_year_end""", (provider_key,))
 
     filings = _rows(conn, """
@@ -3686,7 +3685,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM company_filings f
         JOIN provider_identifiers pi ON pi.identifier = f.company_number
                                      AND pi.scheme = 'company_number'
-        WHERE pi.provider_key = ?
+        WHERE pi.provider_key = %s
         ORDER BY f.filing_date DESC""", (provider_key,))
 
     # --- W-25: the reports that mention this provider -------------------------
@@ -3701,7 +3700,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                r.report_date, r.coroner_area, r.report_url
         FROM pfd_provider_mentions m
         JOIN pfd_reports r ON r.report_ref = m.report_ref
-        WHERE m.provider_key = ?
+        WHERE m.provider_key = %s
         ORDER BY r.report_ref DESC""", (provider_key,))
 
     return {
@@ -3788,7 +3787,7 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
         return cells
 
     sql = " UNION ALL ".join(
-        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = ?"
+        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = %s"
         for i, (_label, table, column) in enumerate(counted)
     ) + " ORDER BY i"
     for row in conn.execute(sql, tuple(ons_code for _ in counted)):
@@ -3825,12 +3824,12 @@ def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
     provider = _one(
         conn,
         "SELECT provider_key, canonical_name, status, superseded_by, is_target "
-        "FROM providers WHERE provider_key = ?", (provider_key,))
+        "FROM providers WHERE provider_key = %s", (provider_key,))
     if not provider:
         raise QueryError(f"No provider {provider_key!r}.")
 
     def _name(key: str) -> str | None:
-        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = ?",
+        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = %s",
                     (key,))
         return row["canonical_name"] if row else None
 
@@ -3854,7 +3853,7 @@ def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
     for row in _rows(
         conn,
         "SELECT provider_key, canonical_name, status FROM providers "
-        "WHERE superseded_by = ? ORDER BY canonical_name", (provider_key,)):
+        "WHERE superseded_by = %s ORDER BY canonical_name", (provider_key,)):
         edges.append({
             "relationship": _LINEAGE_REVERSE.get(row["status"], "superseded_from"),
             "direction": "predecessor",
@@ -3872,7 +3871,7 @@ def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
         seen.add(cursor)
         row = _one(conn,
                     "SELECT provider_key, canonical_name, status, superseded_by "
-                    "FROM providers WHERE provider_key = ?", (cursor,))
+                    "FROM providers WHERE provider_key = %s", (cursor,))
         if not row:
             break
         chain.append({"provider_key": row["provider_key"],
@@ -3883,7 +3882,7 @@ def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
     identifiers = _rows(
         conn,
         "SELECT scheme, identifier, role FROM provider_identifiers "
-        "WHERE provider_key = ? AND status = 'verified' "
+        "WHERE provider_key = %s AND status = 'verified' "
         "ORDER BY scheme, identifier", (provider_key,))
 
     return {
@@ -3915,7 +3914,7 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
-              "WHERE ons_code = ?", (ons_code,))
+              "WHERE ons_code = %s", (ons_code,))
     if not authority_row:
         raise QueryError(f"No authority {ons_code!r}.")
 
@@ -3926,14 +3925,14 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
     grant = _rows(conn, """
         SELECT financial_year, grant_type, allocation_status, amount, unit,
                source_url, retrieved_at, payload_sha256
-        FROM public_health_grants WHERE ons_code = ?
+        FROM public_health_grants WHERE ons_code = %s
         ORDER BY financial_year, grant_type""", (ons_code,))
 
     # Budgeted public health spend by year. The same aggregation the geography
     # page's budget metric uses, so the two cannot disagree.
     budget = _rows(conn, """
         SELECT b.financial_year, SUM(b.budget_gbp) AS amount
-        FROM v_la_public_health_budget b WHERE b.ons_code = ?
+        FROM v_la_public_health_budget b WHERE b.ons_code = %s
         GROUP BY b.financial_year ORDER BY b.financial_year""", (ons_code,))
 
     # W-27: the drill-down, by section and line code as published. Amounts
@@ -3943,7 +3942,7 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
     budget_detail = _rows(conn, """
         SELECT financial_year, section, line_code, line_number, column_label,
                amounts_multiplier, amount, value_text
-        FROM la_revenue_budgets WHERE ons_code = ?
+        FROM la_revenue_budgets WHERE ons_code = %s
         ORDER BY financial_year, section, line_number""", (ons_code,))
 
     # Treatment with its paired intervals, straight from the functions the
@@ -3974,25 +3973,25 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
     rough_sleeping = _rows(conn, """
         SELECT snapshot_year, count, count_text, rate_per_100k, rate_text,
                source_url, retrieved_at, payload_sha256
-        FROM rough_sleeping_snapshot WHERE ons_code = ?
+        FROM rough_sleeping_snapshot WHERE ons_code = %s
         ORDER BY snapshot_year""", (ons_code,))
     statutory_homelessness = _rows(conn, """
         SELECT quarter_start, quarter_label, total_initial_assessments,
                total_initial_assessments_text, total_owed_duty,
                total_owed_duty_text, prevention_duty_owed, relief_duty_owed,
                source_url, retrieved_at, payload_sha256
-        FROM statutory_homelessness_snapshot WHERE ons_code = ?
+        FROM statutory_homelessness_snapshot WHERE ons_code = %s
         ORDER BY quarter_start""", (ons_code,))
     temporary_accommodation = _rows(conn, """
         SELECT quarter_start, quarter_label, total_households_ta,
                total_households_ta_text, households_ta_with_children,
                children_in_ta, source_url, retrieved_at, payload_sha256
-        FROM temporary_accommodation_snapshot WHERE ons_code = ?
+        FROM temporary_accommodation_snapshot WHERE ons_code = %s
         ORDER BY quarter_start""", (ons_code,))
     temporary_accommodation_breakdown = _rows(conn, """
         SELECT quarter_start, quarter_label, measure, unit, households,
                households_text, source_url, retrieved_at, payload_sha256
-        FROM temporary_accommodation_breakdowns WHERE ons_code = ?
+        FROM temporary_accommodation_breakdowns WHERE ons_code = %s
         ORDER BY quarter_start, measure""", (ons_code,))
 
     return {
@@ -4067,7 +4066,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
     authority_rows: list[dict] = []
     provider_rows: list[dict] = []
     if ons:
-        placeholders = ", ".join(f":o{n}" for n in range(len(ons)))
+        placeholders = ", ".join(f"%(o{n})s" for n in range(len(ons)))
         params = {f"o{n}": v for n, v in enumerate(ons)}
         authority_rows = _rows(conn, f"""
             SELECT ons_code, name, region, type FROM authorities
@@ -4077,7 +4076,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
         if missing:
             raise QueryError(f"No authority {missing[0]!r}.")
     if keys:
-        placeholders = ", ".join(f":p{n}" for n in range(len(keys)))
+        placeholders = ", ".join(f"%(p{n})s" for n in range(len(keys)))
         params = {f"p{n}": v for n, v in enumerate(keys)}
         provider_rows = _rows(conn, f"""
             SELECT provider_key, canonical_name, is_target FROM providers
@@ -4090,7 +4089,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
     series: dict[str, dict] = {}
 
     if ons:
-        in_clause = ", ".join(f":o{n}" for n in range(len(ons)))
+        in_clause = ", ".join(f"%(o{n})s" for n in range(len(ons)))
         on_params = {f"o{n}": v for n, v in enumerate(ons)}
 
         # The allocation series, as the authority page draws it: `allocation`
@@ -4162,7 +4161,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
         }
 
     if keys:
-        in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+        in_clause = ", ".join(f"%(p{n})s" for n in range(len(keys)))
         key_params = {f"p{n}": v for n, v in enumerate(keys)}
 
         # Income and expenditure as filed, per financial year end — one
@@ -4234,7 +4233,7 @@ def providers_compare(conn: sqlite3.Connection, provider_keys) -> dict:
             f"providers/compare needs between {_PROVIDER_COMPARE_MIN} and "
             f"{_PROVIDER_COMPARE_MAX} distinct `provider_key` values.")
 
-    placeholders = ", ".join(f":p{n}" for n in range(len(keys)))
+    placeholders = ", ".join(f"%(p{n})s" for n in range(len(keys)))
     params = {f"p{n}": v for n, v in enumerate(keys)}
     known = {row["provider_key"]: row["canonical_name"] for row in _rows(
         conn, f"SELECT provider_key, canonical_name FROM providers "
@@ -4355,7 +4354,7 @@ def _source_meta(conn: sqlite3.Connection, table: str, column: str,
 
 def _provider_source_meta(conn: sqlite3.Connection, table: str,
                           keys: list[str]) -> dict:
-    in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+    in_clause = ", ".join(f"%(p{n})s" for n in range(len(keys)))
     params = {f"p{n}": v for n, v in enumerate(keys)}
     return {
         "retrieved_at": _one(conn, f"""
@@ -4423,7 +4422,7 @@ def relationships(conn: sqlite3.Connection, *,
     center = _one(conn, """
         SELECT e.entity_id, e.entity_type, e.canonical_name
         FROM entity_identifiers i JOIN entities e ON e.entity_id = i.entity_id
-        WHERE i.identifier_scheme = :scheme AND i.identifier_value = :value
+        WHERE i.identifier_scheme = %(scheme)s AND i.identifier_value = %(value)s
         """, {"scheme": scheme, "value": value})
     if not center:
         return _relationships_fallback(conn, ons_code, provider_key)
@@ -4434,7 +4433,7 @@ def relationships(conn: sqlite3.Connection, *,
                ev.source_url, ev.retrieved_at, ev.source_system
         FROM entity_relationships r
         LEFT JOIN evidence_records ev ON ev.evidence_id = r.evidence_id
-        WHERE (r.subject_entity_id = :id OR r.object_entity_id = :id)
+        WHERE (r.subject_entity_id = %(id)s OR r.object_entity_id = %(id)s)
           AND r.predicate = 'AWARDED_TO'
           AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
         ORDER BY r.valid_from DESC""", {"id": center["entity_id"]})
@@ -4444,7 +4443,7 @@ def relationships(conn: sqlite3.Connection, *,
         else e["subject_entity_id"] for e in edges})
     neighbours = []
     if neighbour_ids:
-        placeholders = ", ".join(f":n{n}" for n in range(len(neighbour_ids)))
+        placeholders = ", ".join(f"%(n{n})s" for n in range(len(neighbour_ids)))
         params = {f"n{n}": v for n, v in enumerate(neighbour_ids)}
         neighbours = _rows(conn, f"""
             SELECT entity_id, entity_type, canonical_name FROM entities
@@ -4462,12 +4461,12 @@ def _relationships_fallback(conn: sqlite3.Connection,
     absence of the authority or provider itself, so this still has to name
     who was asked about rather than just failing."""
     if ons_code:
-        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = :v",
+        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = %(v)s",
                    {"v": ons_code})
         entity_type, name = "LOCAL_AUTHORITY", row.get("name")
     else:
         row = _one(conn, "SELECT canonical_name AS name FROM providers "
-                          "WHERE provider_key = :v", {"v": provider_key})
+                          "WHERE provider_key = %(v)s", {"v": provider_key})
         entity_type, name = "PROVIDER", row.get("name")
     if not name:
         raise QueryError(f"No {'authority' if ons_code else 'provider'} "
@@ -4498,7 +4497,7 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
     edge = _one(conn, """
         SELECT relationship_id, subject_entity_id, object_entity_id, predicate
         FROM entity_relationships
-        WHERE relationship_id = :id AND predicate = 'AWARDED_TO'
+        WHERE relationship_id = %(id)s AND predicate = 'AWARDED_TO'
           AND derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
         """, {"id": relationship_id})
     if not edge:
@@ -4507,7 +4506,7 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
     ends = _rows(conn, """
         SELECT e.entity_id, e.entity_type, e.canonical_name
         FROM entities e
-        WHERE e.entity_id IN (:a, :b)
+        WHERE e.entity_id IN (%(a)s, %(b)s)
         """, {"a": edge["subject_entity_id"], "b": edge["object_entity_id"]})
     by_id = {row["entity_id"]: row for row in ends}
     subject = by_id.get(edge["subject_entity_id"], {})
@@ -4521,7 +4520,7 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
 
     def _identifier(entity_id: str, scheme: str) -> str | None:
         row = _one(conn, "SELECT identifier_value FROM entity_identifiers "
-                          "WHERE entity_id = :id AND identifier_scheme = :s",
+                          "WHERE entity_id = %(id)s AND identifier_scheme = %(s)s",
                    {"id": entity_id, "s": scheme})
         return row.get("identifier_value")
 
@@ -4546,12 +4545,12 @@ def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
         LEFT JOIN contracts c
           ON c.payload_sha256 = ev.payload_sha256
          AND c.source_system = ev.source_system
-        WHERE r.subject_entity_id = :subj AND r.object_entity_id = :obj
+        WHERE r.subject_entity_id = %(subj)s AND r.object_entity_id = %(obj)s
           AND r.predicate = 'AWARDED_TO'
           AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
         ORDER BY COALESCE(r.valid_from, c.date_published) DESC NULLS LAST,
                  r.relationship_id
-        LIMIT :cap
+        LIMIT %(cap)s
         """, {"subj": edge["subject_entity_id"], "obj": edge["object_entity_id"],
               "cap": TIMELINE_CAP + 1})
     truncated = len(timeline) > TIMELINE_CAP
@@ -4721,8 +4720,9 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
             continue
         # Table and column names come from health.COVERAGE_COLUMNS, which is
         # code, not a request — the same trust as the admin matrix.
-        for (code,) in conn.execute(
-                f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL"):
+        for row in conn.execute(
+                f"SELECT DISTINCT {column} AS code FROM {table} WHERE {column} IS NOT NULL"):
+            code = row["code"]
             if code in names:
                 held.setdefault(code, set()).add(label)
 
@@ -4786,7 +4786,7 @@ def claims(conn: sqlite3.Connection) -> dict:
         citations = []
         for citation in _rows(conn, """
                 SELECT evidence_table, evidence_key, cited_by, cited_at, note
-                FROM claim_citations WHERE claim_id = ? ORDER BY id""",
+                FROM claim_citations WHERE claim_id = %s ORDER BY id""",
                               (row["id"],)):
             resolved = claims_resolve(
                 conn, citation["evidence_table"], citation["evidence_key"])
@@ -4978,17 +4978,17 @@ def _document_scope_filters(document_type, year_from, year_to, since_retrieved_a
     """
     scope, scope_params = [], []
     if year_from:
-        scope.append("substr(d.published_at, 1, 4) >= ?")
+        scope.append("substr(d.published_at, 1, 4) >= %s")
         scope_params.append(str(year_from))
     if year_to:
-        scope.append("substr(d.published_at, 1, 4) <= ?")
+        scope.append("substr(d.published_at, 1, 4) <= %s")
         scope_params.append(str(year_to))
     if since_retrieved_at:
-        scope.append("e.retrieved_at >= ?")
+        scope.append("e.retrieved_at >= %s")
         scope_params.append(since_retrieved_at)
     type_sql, type_params = "", []
     if document_type:
-        type_sql = " AND d.document_type = ?"
+        type_sql = " AND d.document_type = %s"
         type_params = [document_type]
     return "".join(f" AND {c}" for c in scope), scope_params, type_sql, type_params
 
@@ -5015,8 +5015,8 @@ def document_search(conn: sqlite3.Connection, *, query: str,
     offset = max(0, int(offset))
 
     sources = (source_system,) if source_system else DOCUMENT_SEARCH_SOURCES
-    src_ph = ", ".join("?" for _ in sources)
-    all_src_ph = ", ".join("?" for _ in DOCUMENT_SEARCH_SOURCES)
+    src_ph = ", ".join("%s" for _ in sources)
+    all_src_ph = ", ".join("%s" for _ in DOCUMENT_SEARCH_SOURCES)
     scope_sql, scope_params, type_sql, type_params = _document_scope_filters(
         document_type, year_from, year_to, since_retrieved_at)
 
@@ -5035,7 +5035,7 @@ def document_search(conn: sqlite3.Connection, *, query: str,
     # `websearch_to_tsquery` accepts a reader's quotes, OR and -term without
     # raising, and `ts_rank_cd` gives a deterministic relevance order.
     _tsv = "to_tsvector('simple', COALESCE(de.text, ''))"
-    _tsq = "websearch_to_tsquery('simple', ?)"
+    _tsq = "websearch_to_tsquery('simple', %s)"
     match = f"dv.is_active = 1 AND {_tsv} @@ {_tsq}"
     order = (f"ORDER BY ts_rank_cd({_tsv}, {_tsq}) DESC, "
              "d.document_id, de.page_number, de.document_element_id")
@@ -5045,9 +5045,9 @@ def document_search(conn: sqlite3.Connection, *, query: str,
     order_binds = (query,)
     filt_params = (*scope_params, *type_params)
 
-    sql = f"SELECT {cols} {frm} {where} {order} LIMIT ? OFFSET ?"
+    sql = f"SELECT {cols} {frm} {where} {order} LIMIT %s OFFSET %s"
     params = (query, *sources, *filt_params, *order_binds, limit, offset)
-    count_sql = f"SELECT COUNT(*) {frm} {where}"
+    count_sql = f"SELECT COUNT(*) AS count {frm} {where}"
     count_params = (query, *sources, *filt_params)
 
     # Facet counts: over the text query and the date/source scope only, not
@@ -5059,7 +5059,7 @@ def document_search(conn: sqlite3.Connection, *, query: str,
 
     try:
         rows = _rows(conn, sql, params)
-        total = conn.execute(count_sql, count_params).fetchone()[0]
+        total = conn.execute(count_sql, count_params).fetchone()["count"]
         facets = {
             facet: _rows(
                 conn,
@@ -5150,14 +5150,14 @@ def document_context(conn: sqlite3.Connection, document_id: str, *,
         "d.published_at, e.source_url, e.retrieved_at, e.source_system "
         "FROM document_records d "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE d.document_id = ?", (document_id,))
+        "WHERE d.document_id = %s", (document_id,))
     if not meta or meta["source_system"] not in DOCUMENT_SEARCH_SOURCES:
         raise QueryError(f"No document {document_id!r}.")
 
     version = _one(
         conn,
         "SELECT document_version_id, parser_name, parser_version "
-        "FROM document_versions WHERE document_id = ? AND is_active = 1",
+        "FROM document_versions WHERE document_id = %s AND is_active = 1",
         (document_id,))
     if not version:
         raise QueryError(f"Document {document_id!r} has no active parsed version.")
@@ -5166,7 +5166,7 @@ def document_context(conn: sqlite3.Connection, document_id: str, *,
         conn,
         "SELECT document_element_id, sequence, page_number, element_type, "
         "heading_level, text FROM document_elements "
-        "WHERE document_version_id = ? ORDER BY sequence",
+        "WHERE document_version_id = %s ORDER BY sequence",
         (version["document_version_id"],))
 
     anchor_index = None

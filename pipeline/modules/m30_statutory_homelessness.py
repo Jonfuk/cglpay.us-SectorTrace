@@ -34,7 +34,7 @@ documentation:
    own docstring for how collisions between a total and its own
    sub-breakdown are avoided.
 2. **`sheet_rows()` here is not the same function m13/m29 use.** Those
-   modules' own copies only walk `<table:table-cell>` elements. That is
+   modules' own copies only walk `<table%(table)s-cell>` elements. That is
    invisible in their own sources, which do not have genuine
    multi-column-spanning merged cells — but H-CLIC's older-era files do
    (the merged group-header cells in the multi-row shape), and ODF
@@ -392,7 +392,7 @@ def run(ctx: ModuleContext) -> None:
     conn = ctx.conn
     since_year = ctx.since_year()
 
-    known_authorities = {row[0] for row in conn.execute(
+    known_authorities = {row["ons_code"] for row in conn.execute(
         "SELECT ons_code FROM authorities")}
     unmatched_logged: set[str] = set()
 

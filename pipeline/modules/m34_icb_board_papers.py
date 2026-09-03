@@ -104,7 +104,7 @@ _KIND_PATTERNS: list[tuple[str, re.Pattern]] = [
 # committee name is kept whole ("Finance and Performance Committee"), not
 # trimmed to its last word.
 _COMMITTEE_RE = re.compile(
-    r"((?:[A-Z][A-Za-z&'-]+(?:\s+(?:and|&|of|in)\s+)?\s*){1,5}"
+    r"(([A-Z][A-Za-z&'-]+(?:\s+(?:and|&|of|in)\s+)?\s*){1,5}"
     r"(?:Committee(?:s)?(?:\s+in\s+Common)?|Sub-Committee))\b")
 
 _MONTHS = {name.lower(): i for i, name in enumerate(
@@ -411,7 +411,7 @@ def _already_processed(conn, icb_name: str, document_url: str) -> bool:
     """
     row = conn.execute(
         "SELECT has_body_text FROM icb_board_paper_candidates "
-        "WHERE icb_name = ? AND document_url = ?", (icb_name, document_url)).fetchone()
+        "WHERE icb_name = %s AND document_url = %s", (icb_name, document_url)).fetchone()
     if row is None:
         return False
     if row["has_body_text"]:
@@ -598,8 +598,8 @@ def run(ctx: ModuleContext) -> None:
 
         if crawl.board_url:
             conn.execute(
-                "UPDATE integrated_care_boards SET board_url = ?, board_url_source = ? "
-                "WHERE name = ? AND (board_url IS NULL OR board_url_source != 'registry')",
+                "UPDATE integrated_care_boards SET board_url = %s, board_url_source = %s "
+                "WHERE name = %s AND (board_url IS NULL OR board_url_source != 'registry')",
                 (crawl.board_url, crawl.board_url_source, icb_name))
 
         icb_docs = icb_subject = 0

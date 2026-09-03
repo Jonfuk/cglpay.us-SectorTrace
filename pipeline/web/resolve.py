@@ -161,7 +161,7 @@ def _authority_name(conn: sqlite3.Connection, ons_code: str) -> str | None:
     """
     try:
         row = conn.execute(
-            "SELECT name FROM authorities WHERE ons_code = ?", (ons_code,)).fetchone()
+            "SELECT name FROM authorities WHERE ons_code = %s", (ons_code,)).fetchone()
     except Exception:
         return None
     return row["name"] if row else None
@@ -194,7 +194,7 @@ def resolve_authority_url(
         raise ResolveError(f"Note is too long ({MAX_NOTE_LENGTH} characters maximum).")
 
     item = conn.execute(
-        "SELECT * FROM review_queue WHERE id = ?", (item_id,)).fetchone()
+        "SELECT * FROM review_queue WHERE id = %s", (item_id,)).fetchone()
     if item is None:
         raise ResolveError(f"No review item {item_id}.")
 
@@ -223,7 +223,7 @@ def resolve_authority_url(
     now = _utcnow()
     field = spec["field"]
     existing = conn.execute(
-        "SELECT * FROM authority_url_overrides WHERE ons_code = ?", (ons_code,)).fetchone()
+        "SELECT * FROM authority_url_overrides WHERE ons_code = %s", (ons_code,)).fetchone()
 
     row = {
         "ons_code": ons_code,
@@ -248,8 +248,8 @@ def resolve_authority_url(
             "INSERT INTO authority_url_overrides "
             "(ons_code, base_url, committee_url, committee_system, checked_url, "
             " checked_status, checked_at, verified_by, verified_at, note, review_item_id) "
-            "VALUES (:ons_code, :base_url, :committee_url, :committee_system, :checked_url, "
-            " :checked_status, :checked_at, :verified_by, :verified_at, :note, :review_item_id) "
+            "VALUES (%(ons_code)s, %(base_url)s, %(committee_url)s, %(committee_system)s, %(checked_url)s, "
+            " %(checked_status)s, %(checked_at)s, %(verified_by)s, %(verified_at)s, %(note)s, %(review_item_id)s) "
             "ON CONFLICT (ons_code) DO UPDATE SET "
             "  base_url = excluded.base_url, committee_url = excluded.committee_url, "
             "  committee_system = excluded.committee_system, "

@@ -38,7 +38,7 @@ def save_diagnostics(conn, *, release_id: str, domain_id: str,
     conn.execute(
         "INSERT INTO analysis_prevalence_diagnostics (prevalence_id, release_id, domain_id, positives, "
         "negatives, subjects, pacc, emq, continue_exploration, suppressed, reason, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (prevalence_id, release_id, domain_id, result.positives, result.negatives, result.subjects,
          result.pacc, result.emq, int(result.continue_exploration), int(result.suppressed),
          result.reason, utcnow()))

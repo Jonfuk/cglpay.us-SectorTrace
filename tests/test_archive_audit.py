@@ -22,7 +22,7 @@ def _obj(conn, object_id, sha, source, size, path=None):
     conn.execute(
         "INSERT INTO archive_objects (object_id, source_system, payload_sha256, "
         "logical_path, mime_type, size_bytes, first_seen_at, last_seen_at) "
-        "VALUES (?, ?, ?, ?, 'application/pdf', ?, '2026-08-01T00:00:00Z', "
+        "VALUES (%s, %s, %s, %s, 'application/pdf', %s, '2026-08-01T00:00:00Z', "
         "'2026-08-01T00:00:00Z')",
         (object_id, source, sha, path or f"raw/{object_id}", size))
 
@@ -130,6 +130,6 @@ def _count_audits(settings) -> int:
 
     conn = db.get_connection(settings)
     try:
-        return conn.execute("SELECT COUNT(*) FROM archive_audits").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM archive_audits").fetchone().values().__iter__().__next__()
     finally:
         conn.close()

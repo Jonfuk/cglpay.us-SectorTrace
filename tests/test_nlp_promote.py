@@ -31,7 +31,7 @@ def _seed_entity(conn, entity_id, entity_type, name):
     from pipeline.graph.backfill import _normalise
     conn.execute(
         "INSERT INTO entities (entity_id, entity_type, canonical_name, canonical_name_normalized, "
-        "status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)",
+        "status, created_at, updated_at) VALUES (%s, %s, %s, %s, 'active', %s, %s)",
         (entity_id, entity_type, name, _normalise(name),
          "2026-08-27T00:00:00+00:00", "2026-08-27T00:00:00+00:00"))
 
@@ -59,7 +59,7 @@ def test_a_primary_candidate_is_queued_with_full_context(conn, settings):
     assert result["queued"] >= 1
     assert "primary" in result["by_reason"]
 
-    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=?",
+    run_row = conn.execute("SELECT stage, status FROM nlp_runs WHERE run_id=%s",
                            (result["run_id"],)).fetchone()
     assert run_row["stage"] == "queue" and run_row["status"] == "ok"
 
@@ -76,7 +76,7 @@ def test_a_primary_candidate_is_queued_with_full_context(conn, settings):
 
     # the candidate is marked queued
     assert conn.execute(
-        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id=?",
+        "SELECT status FROM document_claim_candidates WHERE claim_candidate_id=%s",
         (ctx["candidate_id"],)).fetchone()["status"] == "queued"
 
 
@@ -104,7 +104,7 @@ def test_a_negated_claim_is_not_queued_as_primary(conn, settings):
     # a NEGATED recruitment-pressure candidate exists but is not 'primary'
     negated = conn.execute(
         "SELECT COUNT(*) FROM document_claim_candidates WHERE assertion_status='NEGATED'"
-    ).fetchone()[0]
+    ).fetchone().values().__iter__().__next__()
     assert negated >= 1
     assert "primary" not in result.get("by_reason", {})
 
@@ -112,9 +112,9 @@ def test_a_negated_claim_is_not_queued_as_primary(conn, settings):
 def test_run_is_idempotent(conn, settings):
     _run_to_candidates(conn, settings)
     promote.run(conn)
-    n1 = conn.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]
+    n1 = conn.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__()
     promote.run(conn)
-    n2 = conn.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0]
+    n2 = conn.execute("SELECT COUNT(*) FROM review_queue").fetchone().values().__iter__().__next__()
     assert n1 == n2
 
 
@@ -181,7 +181,7 @@ def test_dry_run_writes_nothing(conn, settings):
     assert result["dry_run"] is True
     assert conn.execute(
         "SELECT COUNT(*) FROM review_queue WHERE item_type='semantic_claim_candidate'"
-    ).fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='queue'").fetchone()[0] == 0
+    ).fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='queue'").fetchone().values().__iter__().__next__() == 0
     assert conn.execute(
-        "SELECT COUNT(*) FROM document_claim_candidates WHERE status='queued'").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM document_claim_candidates WHERE status='queued'").fetchone().values().__iter__().__next__() == 0

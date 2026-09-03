@@ -290,13 +290,13 @@ def _t_claim_candidates(conn, settings, *, source_system=None, predicate=None,
     where = ["c.superseded = 0"]
     params: list = []
     if predicate:
-        where.append("c.predicate = ?")
+        where.append("c.predicate = %s")
         params.append(predicate)
     if assertion_status:
-        where.append("c.assertion_status = ?")
+        where.append("c.assertion_status = %s")
         params.append(assertion_status)
     if status:
-        where.append("c.status = ?")
+        where.append("c.status = %s")
         params.append(status)
     join = ""
     if source_system:
@@ -304,7 +304,7 @@ def _t_claim_candidates(conn, settings, *, source_system=None, predicate=None,
                 " JOIN document_versions v ON v.document_version_id = dc.document_version_id "
                 " JOIN document_records d ON d.document_id = v.document_id "
                 " JOIN evidence_records e ON e.evidence_id = d.evidence_id")
-        where.append("e.source_system = ?")
+        where.append("e.source_system = %s")
         params.append(source_system)
     rows = conn.execute(
         "SELECT c.predicate AS predicate, c.assertion_status AS assertion_status, "
@@ -312,7 +312,7 @@ def _t_claim_candidates(conn, settings, *, source_system=None, predicate=None,
         f"FROM document_claim_candidates c{join} "
         f"WHERE {' AND '.join(where)} "
         "GROUP BY c.predicate, c.assertion_status, c.status "
-        "ORDER BY n DESC, c.predicate LIMIT ?", (*params, limit)).fetchall()
+        "ORDER BY n DESC, c.predicate LIMIT %s", (*params, limit)).fetchall()
     groups = [dict(r) for r in rows]
     total = sum(g["n"] for g in groups)
     predicates = sorted({g["predicate"] for g in groups if g["predicate"]})
@@ -391,25 +391,25 @@ def _t_emerging_themes(conn, settings, *, domain_id=None, status=None,
                        limit=_MAX_LIMIT) -> tuple[dict, list]:
     where, params = [], []
     if domain_id:
-        where.append("domain_id = ?")
+        where.append("domain_id = %s")
         params.append(domain_id)
     if status:
-        where.append("status = ?")
+        where.append("status = %s")
         params.append(status)
     params.append(limit)
-    sql = "SELECT * FROM emerging_themes" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT ?"
+    sql = "SELECT * FROM emerging_themes" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY created_at DESC LIMIT %s"
     rows = [dict(row) for row in conn.execute(sql, params)]
     return {"themes": rows, "caveat": "Emerging themes remain in shadow until admin promotion."}, [r["theme_id"] for r in rows]
 
 
 def _t_structured(conn, settings, *, subject_id, metric=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
-    where = ["a.subject_id = ?"]
+    where = ["a.subject_id = %s"]
     params = [subject_id]
     if metric:
-        where.append("s.metric = ?")
+        where.append("s.metric = %s")
         params.append(metric)
     params.append(limit)
-    rows = [dict(row) for row in conn.execute("SELECT s.*, a.domain_id, a.subject_id, a.direction FROM structured_signals s JOIN automated_signals a ON a.signal_id = s.signal_id WHERE " + " AND ".join(where) + " ORDER BY s.created_at DESC LIMIT ?", params)]
+    rows = [dict(row) for row in conn.execute("SELECT s.*, a.domain_id, a.subject_id, a.direction FROM structured_signals s JOIN automated_signals a ON a.signal_id = s.signal_id WHERE " + " AND ".join(where) + " ORDER BY s.created_at DESC LIMIT %s", params)]
     return {"structured": rows, "caveat": "Arithmetic and direction are deterministic; no model-generated numbers are included."}, [r["structured_signal_id"] for r in rows]
 
 
@@ -422,23 +422,23 @@ def _t_links(conn, settings, *, release_id=None, subject_id=None,
 
 
 def _t_lineage(conn, settings, *, signal_id) -> tuple[dict, list]:
-    signal = conn.execute("SELECT * FROM automated_signals WHERE signal_id = ?", (signal_id,)).fetchone()
+    signal = conn.execute("SELECT * FROM automated_signals WHERE signal_id = %s", (signal_id,)).fetchone()
     if signal is None:
         raise ToolError(f"no automated signal {signal_id!r}")
-    calls = [dict(row) for row in conn.execute("SELECT * FROM analysis_model_calls WHERE release_id = ? AND domain_id = ?", (signal["release_id"], signal["domain_id"]))]
-    verifiers = [dict(row) for row in conn.execute("SELECT * FROM analysis_verifier_results WHERE signal_id = ?", (signal_id,))]
+    calls = [dict(row) for row in conn.execute("SELECT * FROM analysis_model_calls WHERE release_id = %s AND domain_id = %s", (signal["release_id"], signal["domain_id"]))]
+    verifiers = [dict(row) for row in conn.execute("SELECT * FROM analysis_verifier_results WHERE signal_id = %s", (signal_id,))]
     return {"signal": dict(signal), "model_calls": calls, "verifiers": verifiers}, [signal_id]
 
 
 def _t_health(conn, settings, *, source_table=None, limit=_MAX_LIMIT) -> tuple[dict, list]:
     where, params = [], []
     if source_table:
-        where.append("source_table = ?")
+        where.append("source_table = %s")
         params.append(source_table)
     params.append(limit)
-    sql = "SELECT * FROM analysis_health_snapshots" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY collected_at DESC LIMIT ?"
+    sql = "SELECT * FROM analysis_health_snapshots" + ((" WHERE " + " AND ".join(where)) if where else "") + " ORDER BY collected_at DESC LIMIT %s"
     rows = [dict(row) for row in conn.execute(sql, params)]
-    proposals = [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?", (limit,))]
+    proposals = [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals WHERE status = 'pending' ORDER BY created_at DESC LIMIT %s", (limit,))]
     return {"health": rows, "proposals": proposals}, [r["health_snapshot_id"] for r in rows]
 
 

@@ -59,7 +59,7 @@ def register_existing(conn, settings, source: str, limit: int) -> dict:
         raise ValueError(f"Unknown legacy source {source!r}; choose one of: {', '.join(sources())}")
     if limit < 1:
         raise ValueError("limit must be at least 1")
-    rows = conn.execute(LEGACY_SOURCES[source].query + " LIMIT ?", (limit,)).fetchall()
+    rows = conn.execute(LEGACY_SOURCES[source].query + " LIMIT %s", (limit,)).fetchall()
     archive = get_archive(settings)
     service = DocumentService(conn, settings)
     result = {

@@ -122,15 +122,15 @@ def candidate(conn: sqlite3.Connection, kind: str, url: str) -> dict | None:
     spec = _spec(kind)
     row = conn.execute(
         f"SELECT * FROM {spec['candidate_table']} "
-        f"WHERE {spec['candidate_url_column']} = ?", (url,)).fetchone()
+        f"WHERE {spec['candidate_url_column']} = %s", (url,)).fetchone()
     return dict(row) if row else None
 
 
 def promoted_urls(conn: sqlite3.Connection, kind: str) -> set[str]:
     """Candidates already promoted, so a list can say so."""
     spec = _spec(kind)
-    return {row[0] for row in conn.execute(
-        "SELECT candidate_url FROM evidence_promotions WHERE candidate_table = ?",
+    return {row["candidate_url"] for row in conn.execute(
+        "SELECT candidate_url FROM evidence_promotions WHERE candidate_table = %s",
         (spec["candidate_table"],))}
 
 
@@ -282,7 +282,7 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
              " fetched_url, http_status, payload_sha256, archived_path, "
              " actor_type, actor_id, model_id, policy_version, "
              " evidence_manifest_sha256, independent_review_count, confidence, qa_status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (spec["candidate_table"], url, spec["target_table"], target_key,
              promoted_by.strip(), promoted_at, note,
              json.dumps(found, default=str), result.url, result.status_code,
@@ -312,8 +312,8 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
                    natural_key=[spec["authority_column"], spec["target_url_column"]])
 
         conn.execute(
-            f"UPDATE {spec['candidate_table']} SET verified = 1, verified_at = ? "
-            f"WHERE {spec['candidate_url_column']} = ?", (promoted_at, url))
+            f"UPDATE {spec['candidate_table']} SET verified = 1, verified_at = %s "
+            f"WHERE {spec['candidate_url_column']} = %s", (promoted_at, url))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -367,7 +367,7 @@ def reject(conn: sqlite3.Connection, kind: str, urls: list[str],
     if not urls:
         return 0
 
-    marks = ", ".join("?" for _ in urls)
+    marks = ", ".join("%s" for _ in urls)
     cursor = conn.execute(
         f"UPDATE {spec['candidate_table']} SET rejected = 1, verified = 0 "
         f"WHERE {spec['candidate_url_column']} IN ({marks}) AND rejected = 0",
@@ -407,7 +407,7 @@ def promotions_without_flag(conn: sqlite3.Connection,
             f"       COUNT(p.id) AS promotions "
             f"FROM {spec['candidate_table']} c "
             f"JOIN evidence_promotions p "
-            f"  ON p.candidate_table = ? "
+            f"  ON p.candidate_table = %s "
             f" AND p.candidate_url = c.{spec['candidate_url_column']} "
             f"WHERE c.verified = 0 "
             f"GROUP BY 1, 2, 3 ORDER BY 1",
@@ -436,8 +436,8 @@ def restore_flags(conn: sqlite3.Connection, kind: str | None = None,
     for row in found:
         spec = KINDS[row["kind"]]
         conn.execute(
-            f"UPDATE {spec['candidate_table']} SET verified = 1, verified_at = ? "
-            f"WHERE {spec['candidate_url_column']} = ?",
+            f"UPDATE {spec['candidate_table']} SET verified = 1, verified_at = %s "
+            f"WHERE {spec['candidate_url_column']} = %s",
             (row["promoted_at"], row["url"]))
     conn.commit()
     log.info("promote.flags_restored", count=len(found),
@@ -452,7 +452,7 @@ def reset(conn: sqlite3.Connection, kind: str, url: str) -> None:
     spec = _spec(kind)
     conn.execute(
         f"UPDATE {spec['candidate_table']} SET rejected = 0, verified = 0, "
-        f"verified_at = NULL WHERE {spec['candidate_url_column']} = ?", (url,))
+        f"verified_at = NULL WHERE {spec['candidate_url_column']} = %s", (url,))
     conn.commit()
 
 
@@ -460,4 +460,4 @@ def history(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:
     return [dict(row) for row in conn.execute(
         "SELECT id, candidate_table, candidate_url, target_table, promoted_by, "
         "       promoted_at, note, http_status, payload_sha256 "
-        "FROM evidence_promotions ORDER BY id DESC LIMIT ?", (limit,))]
+        "FROM evidence_promotions ORDER BY id DESC LIMIT %s", (limit,))]

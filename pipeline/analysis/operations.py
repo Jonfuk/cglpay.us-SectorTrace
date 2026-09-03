@@ -93,7 +93,7 @@ def save_snapshot(conn, snapshot: HealthSnapshot, *, release_id: str | None = No
         "INSERT INTO analysis_health_snapshots (health_snapshot_id, release_id, domain_id, source_table, "
         "collected_at, collection_success, freshness_at, content_hash, parse_success, expected_schema_json, "
         "observed_schema_json, row_count, document_count, embedding_coverage, outlier_rate, extractor_agreement, "
-        "verifier_pass_rate, cost_micros, latency_ms, cache_hits, signal_yield) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "verifier_pass_rate, cost_micros, latency_ms, cache_hits, signal_yield) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (snapshot_id, release_id, domain_id, data["source_table"], data["collected_at"],
          None if data["collection_success"] is None else int(data["collection_success"]), data["freshness_at"],
          data["content_hash"], None if data["parse_success"] is None else int(data["parse_success"]),
@@ -109,7 +109,7 @@ def save_proposal(conn, proposal: dict[str, Any], *, release_id: str | None = No
     proposal_id = proposal.get("proposal_id") or f"proposal-{uuid.uuid4()}"
     conn.execute(
         "INSERT INTO adaptation_proposals (proposal_id, release_id, domain_id, proposal_type, trigger_json, "
-        "status, automatic_action, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+        "status, automatic_action, created_at) VALUES (%s, %s, %s, %s, %s, 'pending', %s, %s)",
         (proposal_id, release_id, domain_id, proposal["proposal_type"], json.dumps(proposal.get("trigger", {}), sort_keys=True),
          "retry/cache/resume only" if proposal["proposal_type"] in {"transient_retry", "cache_reuse", "resume_batch"} else None, utcnow()))
     return proposal_id
@@ -118,5 +118,5 @@ def save_proposal(conn, proposal: dict[str, Any], *, release_id: str | None = No
 def decide_proposal(conn, proposal_id: str, *, status: str, admin_reason: str | None = None) -> None:
     if status not in {"accepted", "deferred", "dismissed"}:
         raise ValueError("proposal decision must be accepted, deferred or dismissed")
-    conn.execute("UPDATE adaptation_proposals SET status = ?, admin_reason = ?, decided_at = ? WHERE proposal_id = ?",
+    conn.execute("UPDATE adaptation_proposals SET status = %s, admin_reason = %s, decided_at = %s WHERE proposal_id = %s",
                  (status, admin_reason, utcnow(), proposal_id))

@@ -64,7 +64,8 @@ def _registry_answers_committee_url(conn: sqlite3.Connection) -> list[tuple]:
         "WHERE item_type = 'committee_url_unknown' AND status = 'pending'"
     ).fetchall()
     out = []
-    for item_id, ons_code in rows:
+    for row in rows:
+        item_id, ons_code = row["id"], row["raw_value"]
         entry = AUTHORITY_WEBSITES.get(ons_code)
         if entry is not None and entry.committee_url:
             out.append((item_id,
@@ -91,7 +92,8 @@ def _website_answers_authority_website(conn: sqlite3.Connection) -> list[tuple]:
         "WHERE item_type = 'authority_website_unknown' AND status = 'pending'"
     ).fetchall()
     out = []
-    for item_id, ons_code in rows:
+    for row in rows:
+        item_id, ons_code = row["id"], row["raw_value"]
         entry = website_for(str(ons_code), conn)
         if entry is not None and entry.base_url:
             out.append((item_id,
@@ -127,7 +129,7 @@ RULES: dict[str, dict] = {
         "sql": """
             SELECT r.id,
                    'the report''s matters_of_concern were read from its PDF ('
-                   || LENGTH(p.matters_of_concern) || ' characters)'
+                   || LENGTH(p.matters_of_concern) || ' characters)' AS evidence
               FROM review_queue r
               JOIN pfd_reports p ON p.report_ref = r.raw_value
              WHERE r.item_type = 'pfd_concerns_in_pdf_only'
@@ -143,7 +145,8 @@ def _matches(conn: sqlite3.Connection, spec: dict) -> list[tuple]:
     """The items one rule would close, however that rule is expressed."""
     if "find" in spec:
         return list(spec["find"](conn))
-    return [tuple(row) for row in conn.execute(spec["sql"]).fetchall()]
+    return [(row["id"], row["evidence"])
+            for row in conn.execute(spec["sql"]).fetchall()]
 
 
 def preview(conn: sqlite3.Connection, rule: str | None = None) -> dict[str, int]:
@@ -184,15 +187,15 @@ def sweep(conn: sqlite3.Connection, rule: str | None = None,
                 # conditional update actually won. A concurrent human decision
                 # must not acquire a false automated audit row.
                 cursor = conn.execute(
-                    "UPDATE review_queue SET status = 'answered', resolved_at = ? "
-                    "WHERE id = ? AND status = 'pending'",
+                    "UPDATE review_queue SET status = 'answered', resolved_at = %s "
+                    "WHERE id = %s AND status = 'pending'",
                     (resolved_at, item_id))
                 if cursor.rowcount != 1:
                     continue
                 conn.execute(
                     "INSERT INTO review_resolutions "
                     "(review_item_id, rule, evidence, status_before, resolved_at) "
-                    "VALUES (?, ?, ?, 'pending', ?)",
+                    "VALUES (%s, %s, %s, 'pending', %s)",
                     (item_id, name, evidence, resolved_at))
                 applied += 1
             conn.commit()
@@ -215,15 +218,15 @@ def reopen(conn: sqlite3.Connection, rule: str) -> int:
     if rule not in RULES:
         raise KeyError(f"unknown rule {rule!r}")
 
-    ids = [row[0] for row in conn.execute(
-        "SELECT review_item_id FROM review_resolutions WHERE rule = ?", (rule,))]
+    ids = [row["review_item_id"] for row in conn.execute(
+        "SELECT review_item_id FROM review_resolutions WHERE rule = %s", (rule,))]
     if not ids:
         return 0
-    marks = ", ".join("?" for _ in ids)
+    marks = ", ".join("%s" for _ in ids)
     cursor = conn.execute(
         f"UPDATE review_queue SET status = 'pending', resolved_at = NULL "
         f"WHERE id IN ({marks}) AND status = 'answered'", ids)
-    conn.execute("DELETE FROM review_resolutions WHERE rule = ?", (rule,))
+    conn.execute("DELETE FROM review_resolutions WHERE rule = %s", (rule,))
     conn.commit()
     log.info("review.reopened", rule=rule, reopened=cursor.rowcount)
     return cursor.rowcount

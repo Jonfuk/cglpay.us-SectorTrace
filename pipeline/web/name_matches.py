@@ -64,7 +64,7 @@ def _query_text(item_type: str, raw_value: str) -> str:
 def suggestions(conn, item_id: int) -> dict:
     """Ranked candidate targets for review item `item_id`. Read-only."""
     row = conn.execute(
-        "SELECT id, item_type, raw_value FROM review_queue WHERE id = ?",
+        "SELECT id, item_type, raw_value FROM review_queue WHERE id = %s",
         (item_id,)).fetchone()
     if row is None:
         raise NameMatchError(f"No review item {item_id}.")
@@ -86,8 +86,8 @@ def suggestions(conn, item_id: int) -> dict:
     matches: list[dict] = []
     for table, id_col, name_col, extra in targets:
         for got in _trgm_ranked(conn, table, id_col, name_col, extra, query):
-            matches.append({"target": table, "id": got[0], "name": got[1],
-                            "score": round(float(got[2]), 4)})
+            matches.append({"target": table, "id": got[id_col], "name": got[name_col],
+                            "score": round(float(got["score"]), 4)})
     matches.sort(key=lambda m: m["score"], reverse=True)
 
     return {
@@ -102,12 +102,12 @@ def suggestions(conn, item_id: int) -> dict:
 def _trgm_ranked(conn, table, id_col, name_col, extra, query):
     # psycopg sends an untyped placeholder as `unknown`; pg_trgm's overloaded
     # function needs the search value resolved to text before it can plan.
-    where = f"WHERE {name_col} IS NOT NULL AND public.similarity({name_col}, ?::text) >= ?"
+    where = f"WHERE {name_col} IS NOT NULL AND public.similarity({name_col}, %s::text) >= %s"
     if extra:
         where += f" AND {extra}"
     # Placeholders in text order: similarity() in SELECT, similarity() and the
     # floor in WHERE, then LIMIT.
     return conn.execute(
-        f"SELECT {id_col}, {name_col}, public.similarity({name_col}, ?::text) AS score "
-        f"FROM {table} {where} ORDER BY score DESC LIMIT ?",
+        f"SELECT {id_col}, {name_col}, public.similarity({name_col}, %s::text) AS score "
+        f"FROM {table} {where} ORDER BY score DESC LIMIT %s",
         (query, query, _MIN_SCORE, _MAX_SUGGESTIONS)).fetchall()

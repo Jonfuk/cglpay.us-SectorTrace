@@ -31,8 +31,8 @@ def paydata(conn: sqlite3.Connection) -> sqlite3.Connection:
             " salary_raw, salary_min, salary_max, salary_period, salary_basis, "
             " searched_variant, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) VALUES "
-            "(?, 'cgl', 'exact', 'CGL', ?, 'https://jobs.example/a', "
-            " 'see advert', ?, ?, ?, 'single', 'CGL', 'https://jobs.example/a', "
+            "(%s, 'cgl', 'exact', 'CGL', %s, 'https://jobs.example/a', "
+            " 'see advert', %s, %s, %s, 'single', 'CGL', 'https://jobs.example/a', "
             " '2026-08-01T00:00:00Z', 200, 'nhs_jobs', 'h')",
             (ref, title, smin, smin, period))
     conn.execute(

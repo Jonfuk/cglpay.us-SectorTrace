@@ -166,12 +166,12 @@ class AnalysisWorker:
             now = utcnow()
             conn.execute(
                 "INSERT INTO analysis_worker_heartbeats (worker_id, last_seen_at, status, version) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT (worker_id) DO UPDATE SET "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (worker_id) DO UPDATE SET "
                 "last_seen_at = excluded.last_seen_at, status = excluded.status, version = excluded.version",
                 (self.worker_id, now, status, worker_version))
             if run_id is not None:
                 conn.execute(
-                    "UPDATE analysis_runs SET updated_at = ? WHERE run_id = ? AND status = 'running'",
+                    "UPDATE analysis_runs SET updated_at = %s WHERE run_id = %s AND status = 'running'",
                     (now, run_id))
             conn.commit()
         finally:
@@ -195,15 +195,15 @@ class AnalysisWorker:
             release_id = queue["release_id"]
             project_release(conn, store, release_id)
             conn.execute(
-                "UPDATE signal_graph_projection_queue SET processed_at = ?, attempt_count = attempt_count + 1, "
-                "last_error = NULL WHERE release_id = ? AND processed_at IS NULL",
+                "UPDATE signal_graph_projection_queue SET processed_at = %s, attempt_count = attempt_count + 1, "
+                "last_error = NULL WHERE release_id = %s AND processed_at IS NULL",
                 (utcnow(), release_id))
             conn.commit()
         except Exception as exc:
             if queue is not None:
                 conn.execute(
-                    "UPDATE signal_graph_projection_queue SET attempt_count = attempt_count + 1, last_error = ? "
-                    "WHERE release_id = ? AND processed_at IS NULL",
+                    "UPDATE signal_graph_projection_queue SET attempt_count = attempt_count + 1, last_error = %s "
+                    "WHERE release_id = %s AND processed_at IS NULL",
                     (str(exc), queue["release_id"]))
                 conn.commit()
         finally:
@@ -223,7 +223,7 @@ class AnalysisWorker:
             run_id = row["run_id"]
             changed = conn.execute(
                 "UPDATE analysis_runs SET status = 'running', current_stage = 'starting', "
-                "updated_at = ? WHERE run_id = ? AND status = 'queued'",
+                "updated_at = %s WHERE run_id = %s AND status = 'queued'",
                 (utcnow(), run_id)).rowcount
             if changed != 1:
                 conn.rollback()
@@ -239,19 +239,19 @@ class AnalysisWorker:
         retry_at = _retry_at(getattr(self.settings, "analysis_retry_cooldown_seconds", 300.0))
         stale_before = _stale_before(getattr(self.settings, "analysis_stale_worker_seconds", 900.0))
         stale_rows = conn.execute(
-            "SELECT run_id FROM analysis_runs WHERE status = 'running' AND updated_at < ?",
+            "SELECT run_id FROM analysis_runs WHERE status = 'running' AND updated_at < %s",
             (stale_before,)).fetchall()
         for row in stale_rows:
             run_id = row["run_id"]
             changed = conn.execute(
                 "UPDATE analysis_runs SET status = 'paused', current_stage = 'waiting_for_retry', "
-                "error_detail = ?, next_retry_at = ?, completed_at = NULL, updated_at = ? "
-                "WHERE run_id = ? AND status = 'running'",
+                "error_detail = %s, next_retry_at = %s, completed_at = NULL, updated_at = %s "
+                "WHERE run_id = %s AND status = 'running'",
                 ("worker heartbeat became stale; automatic retry scheduled", retry_at, now, run_id)).rowcount
             if changed:
                 conn.execute(
                     "UPDATE analysis_domain_runs SET status = 'paused', completed_at = NULL, "
-                    "error_detail = ?, next_retry_at = ? WHERE run_id = ? AND status = 'running'",
+                    "error_detail = %s, next_retry_at = %s WHERE run_id = %s AND status = 'running'",
                     ("worker heartbeat became stale; automatic retry scheduled", retry_at, run_id))
                 log.warning("analysis_run_requeued_after_stale_worker", run_id=run_id,
                             retry_at=retry_at)
@@ -259,7 +259,7 @@ class AnalysisWorker:
         due_rows = conn.execute(
             "SELECT run_id, COALESCE(automatic_retry_count, 0) AS automatic_retry_count "
             "FROM analysis_runs WHERE status = 'paused' AND next_retry_at IS NOT NULL "
-            "AND next_retry_at <= ? ORDER BY updated_at",
+            "AND next_retry_at <= %s ORDER BY updated_at",
             (now,)).fetchall()
         max_retries = max(0, int(getattr(self.settings, "analysis_max_automatic_retries", 12)))
         for row in due_rows:
@@ -268,14 +268,14 @@ class AnalysisWorker:
             if retry_count >= max_retries:
                 conn.execute(
                     "UPDATE analysis_runs SET status = 'failed', current_stage = 'failed', "
-                    "error_detail = ?, completed_at = ?, next_retry_at = NULL, updated_at = ? "
-                    "WHERE run_id = ? AND status = 'paused'",
+                "error_detail = %s, completed_at = %s, next_retry_at = NULL, updated_at = %s "
+                    "WHERE run_id = %s AND status = 'paused'",
                     ("automatic retry limit reached", now, now, run_id))
                 conn.execute(
                     "UPDATE analysis_domain_runs SET status = 'failed', prerequisite_status = 'failed', "
-                    "completed_at = COALESCE(completed_at, ?), next_retry_at = NULL, "
-                    "error_detail = COALESCE(error_detail, ?) "
-                    "WHERE run_id = ? AND status = 'paused'",
+                "completed_at = COALESCE(completed_at, %s), next_retry_at = NULL, "
+                "error_detail = COALESCE(error_detail, %s) "
+                    "WHERE run_id = %s AND status = 'paused'",
                     (now, "automatic retry limit reached", run_id))
                 log.error("analysis_run_automatic_retry_limit_reached", run_id=run_id,
                           retry_count=retry_count)
@@ -283,13 +283,13 @@ class AnalysisWorker:
             changed = conn.execute(
                 "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
                 "current_domain = NULL, automatic_retry_count = automatic_retry_count + 1, "
-                "next_retry_at = NULL, error_detail = NULL, updated_at = ? "
-                "WHERE run_id = ? AND status = 'paused'",
+                "next_retry_at = NULL, error_detail = NULL, updated_at = %s "
+                "WHERE run_id = %s AND status = 'paused'",
                 (now, run_id)).rowcount
             if changed:
                 conn.execute(
                     "UPDATE analysis_domain_runs SET status = 'pending', next_retry_at = NULL, "
-                    "error_detail = NULL WHERE run_id = ? AND status = 'paused'",
+                    "error_detail = NULL WHERE run_id = %s AND status = 'paused'",
                     (run_id,))
                 log.info("analysis_run_automatically_requeued", run_id=run_id,
                          retry_count=retry_count + 1)
@@ -298,7 +298,7 @@ class AnalysisWorker:
     def _execute(self, run_id: str) -> dict[str, Any]:
         conn = db.get_connection(self.settings)
         try:
-            run = conn.execute("SELECT * FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            run = conn.execute("SELECT * FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 raise KeyError(run_id)
             requested = json.loads(run["requested_domains_json"] or "[]")
@@ -327,14 +327,14 @@ class AnalysisWorker:
         conn = db.get_connection(self.settings)
         try:
             row = conn.execute(
-                "SELECT * FROM analysis_domain_runs WHERE run_id = ? AND domain_id = ?",
+                "SELECT * FROM analysis_domain_runs WHERE run_id = %s AND domain_id = %s",
                 (run_id, domain_id)).fetchone()
             if row is None or row["status"] in {"complete", "unavailable"}:
                 return
             now = utcnow()
             conn.execute(
                 "UPDATE analysis_domain_runs SET status = 'running', prerequisite_status = 'checking', "
-                "started_at = COALESCE(started_at, ?), error_detail = NULL WHERE run_id = ? AND domain_id = ?",
+                "started_at = COALESCE(started_at, %s), error_detail = NULL WHERE run_id = %s AND domain_id = %s",
                 (now, run_id, domain_id))
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="preflight")
             missing = self._missing_tables(conn, spec.source_tables)
@@ -362,7 +362,7 @@ class AnalysisWorker:
         """
         conn = db.get_connection(self.settings)
         try:
-            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 raise KeyError(run_id)
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
@@ -427,7 +427,7 @@ class AnalysisWorker:
         """Create only allowlisted, canonical-identity links between signals."""
         conn = db.get_connection(self.settings)
         try:
-            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 return
             # The old implementation materialised every signal and compared
@@ -455,7 +455,7 @@ class AnalysisWorker:
                 "FROM automated_signals l JOIN automated_signals r ON "
                 "l.release_id = r.release_id AND l.subject_type = r.subject_type "
                 "AND l.subject_id = r.subject_id AND l.domain_id < r.domain_id "
-                f"AND {date_clause} WHERE l.release_id = ? ORDER BY l.signal_id, r.signal_id",
+                f"AND {date_clause} WHERE l.release_id = %s ORDER BY l.signal_id, r.signal_id",
                 (run["release_id"],)).fetchall()
             self._update_run(conn, run_id, current_stage="connecting")
             for raw in rows:
@@ -481,7 +481,7 @@ class AnalysisWorker:
         """Persist a small, source-local health snapshot after each run."""
         conn = db.get_connection(self.settings)
         try:
-            row = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            row = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if row is None:
                 return
             self._update_run(conn, run_id, current_stage="monitoring")
@@ -494,7 +494,7 @@ class AnalysisWorker:
                         cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
                         description = getattr(cursor, "description", None) or []
                         observed_schema = {str(item[0]): str(item[1] or "unknown") for item in description}
-                        count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                        count = int(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
                     except Exception:
                         exists, count = False, None
                     current = {
@@ -506,7 +506,7 @@ class AnalysisWorker:
                     }
                     baseline_row = conn.execute(
                         "SELECT expected_schema_json, observed_schema_json, row_count, parse_success, content_hash "
-                        "FROM analysis_health_snapshots WHERE source_table = ? ORDER BY collected_at DESC LIMIT 1",
+                        "FROM analysis_health_snapshots WHERE source_table = %s ORDER BY collected_at DESC LIMIT 1",
                         (table,)).fetchone()
                     baseline = {}
                     if baseline_row:
@@ -531,10 +531,10 @@ class AnalysisWorker:
         passages: list[dict[str, Any]] = []
         processed = 0
         try:
-            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 raise KeyError(run_id)
-            source_marks = ", ".join("?" for _ in spec.source_tables)
+            source_marks = ", ".join("%s" for _ in spec.source_tables)
             # Keyset pagination keeps the database result set bounded and does
             # not get slower as an overnight run advances through millions of
             # elements. The element id is a deterministic tie-breaker for
@@ -550,9 +550,9 @@ class AnalysisWorker:
                     f"AND d.source_table IN ({source_marks})")
                 params: list[Any] = list(spec.source_tables)
                 if last_document is not None:
-                    where += (" AND (d.document_id > ? OR "
-                              "(d.document_id = ? AND (de.sequence > ? OR "
-                              "(de.sequence = ? AND de.document_element_id > ?))))")
+                    where += (" AND (d.document_id > %s OR "
+                              "(d.document_id = %s AND (de.sequence > %s OR "
+                              "(de.sequence = %s AND de.document_element_id > %s))))")
                     params.extend([last_document, last_document, last_sequence,
                                    last_sequence, last_element])
                 batch = conn.execute(
@@ -561,7 +561,7 @@ class AnalysisWorker:
                     "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
                     "JOIN document_records d ON d.document_id = dv.document_id "
                     f"WHERE {where} ORDER BY d.document_id, de.sequence, "
-                    "de.document_element_id LIMIT ?", (*params, self.batch_size)).fetchall()
+                    "de.document_element_id LIMIT %s", (*params, self.batch_size)).fetchall()
                 if not batch:
                     break
                 for row in batch:
@@ -573,8 +573,8 @@ class AnalysisWorker:
                     conn.execute(
                         "INSERT INTO analysis_windows (window_id, domain_run_id, domain_id, "
                         "source_table, source_record_id, subject_type, subject_id, feature_json, status) "
-                        "SELECT ?, domain_run_id, ?, 'document_elements', ?, 'document', ?, ?, 'processed' "
-                        "FROM analysis_domain_runs WHERE run_id = ? AND domain_id = ? "
+                        "SELECT %s, domain_run_id, %s, 'document_elements', %s, 'document', %s, %s, 'processed' "
+                        "FROM analysis_domain_runs WHERE run_id = %s AND domain_id = %s "
                         "ON CONFLICT (domain_run_id, source_table, source_record_id) DO UPDATE SET "
                         "feature_json = excluded.feature_json, status = excluded.status",
                          (f"window-{uuid.uuid4()}", domain_id, row["document_element_id"],
@@ -624,9 +624,9 @@ class AnalysisWorker:
                 conn.commit()
                 return
             positive_row = conn.execute(
-                "SELECT COUNT(DISTINCT signal_id), COUNT(DISTINCT subject_id) FROM automated_signals "
-                "WHERE release_id = ? AND domain_id = ?", (run["release_id"], domain_id)).fetchone()
-            positives, subjects = int(positive_row[0]), int(positive_row[1])
+                "SELECT COUNT(DISTINCT signal_id) AS positives, COUNT(DISTINCT subject_id) AS subjects FROM automated_signals "
+                "WHERE release_id = %s AND domain_id = %s", (run["release_id"], domain_id)).fetchone()
+            positives, subjects = int(positive_row["positives"]), int(positive_row["subjects"])
             save_diagnostics(
                 conn, release_id=run["release_id"], domain_id=domain_id,
                 result=diagnostics(positives=positives, negatives=max(0, processed - positives),
@@ -690,7 +690,7 @@ class AnalysisWorker:
                     save_signal(conn, signal)
                     conn.execute(
                         "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, passed, score, reasons_json, created_at) "
-                        "VALUES (?, ?, 'dual_model_exact_grounding', 1, 1.0, '[]', ?)",
+                        "VALUES (%s, %s, 'dual_model_exact_grounding', 1, 1.0, '[]', %s)",
                         (f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()))
                     conn.commit()
                 if model_unavailable:
@@ -766,7 +766,7 @@ class AnalysisWorker:
         with self._budget_lock:
             budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
             conn = client.conn
-            conn.execute("UPDATE analysis_runs SET cost_micros = ?, updated_at = ? WHERE run_id = ?",
+            conn.execute("UPDATE analysis_runs SET cost_micros = %s, updated_at = %s WHERE run_id = %s",
                          (budget.spent_micros, utcnow(), self._current_run_id))
             conn.commit()
         return payload
@@ -787,28 +787,28 @@ class AnalysisWorker:
     @staticmethod
     def _update_run(conn, run_id: str, **values: Any) -> None:
         values["updated_at"] = utcnow()
-        clause = ", ".join(f"{key} = ?" for key in values)
-        conn.execute(f"UPDATE analysis_runs SET {clause} WHERE run_id = ?",
+        clause = ", ".join(f"{key} = %s" for key in values)
+        conn.execute(f"UPDATE analysis_runs SET {clause} WHERE run_id = %s",
                      (*values.values(), run_id))
 
     @staticmethod
     def _update_domain_progress(conn, run_id: str, domain_id: str,
                                 processed: int, written: int) -> None:
         conn.execute(
-            "UPDATE analysis_domain_runs SET rows_processed = ?, rows_written = ? "
-            "WHERE run_id = ? AND domain_id = ?", (processed, written, run_id, domain_id))
+            "UPDATE analysis_domain_runs SET rows_processed = %s, rows_written = %s "
+            "WHERE run_id = %s AND domain_id = %s", (processed, written, run_id, domain_id))
 
     def _pause_for_retry(self, conn, run_id: str, domain_id: str, error_detail: str) -> None:
         now = utcnow()
         retry_at = _retry_at(getattr(self.settings, "analysis_retry_cooldown_seconds", 300.0))
         conn.execute(
             "UPDATE analysis_domain_runs SET status = 'paused', completed_at = NULL, "
-            "next_retry_at = ?, error_detail = ? WHERE run_id = ? AND domain_id = ?",
+            "next_retry_at = %s, error_detail = %s WHERE run_id = %s AND domain_id = %s",
             (retry_at, error_detail, run_id, domain_id))
         conn.execute(
             "UPDATE analysis_runs SET status = 'paused', current_stage = 'waiting_for_retry', "
-            "next_retry_at = ?, error_detail = ?, completed_at = NULL, updated_at = ? "
-            "WHERE run_id = ? AND status = 'running'",
+            "next_retry_at = %s, error_detail = %s, completed_at = NULL, updated_at = %s "
+            "WHERE run_id = %s AND status = 'running'",
             (retry_at, error_detail, now, run_id))
 
     @staticmethod
@@ -817,9 +817,9 @@ class AnalysisWorker:
                        missing_tables: list[str], error_detail: str | None) -> None:
         now = utcnow()
         conn.execute(
-            "UPDATE analysis_domain_runs SET status = ?, prerequisite_status = ?, "
-            "missing_tables_json = ?, rows_processed = ?, rows_written = ?, "
-            "completed_at = ?, error_detail = ? WHERE run_id = ? AND domain_id = ?",
+            "UPDATE analysis_domain_runs SET status = %s, prerequisite_status = %s, "
+            "missing_tables_json = %s, rows_processed = %s, rows_written = %s, "
+            "completed_at = %s, error_detail = %s WHERE run_id = %s AND domain_id = %s",
             (status, prerequisite_status, json.dumps(missing_tables), processed, written,
              now, error_detail, run_id, domain_id))
 
@@ -829,7 +829,7 @@ class AnalysisWorker:
         conn = db.get_connection(self.settings)
         try:
             rows = conn.execute(
-                "SELECT status FROM analysis_domain_runs WHERE run_id = ?", (self_run_id,)).fetchall()
+                "SELECT status FROM analysis_domain_runs WHERE run_id = %s", (self_run_id,)).fetchall()
             statuses = [row["status"] for row in rows]
             if self._cancelled_with_conn(conn, self_run_id):
                 status, stage = "cancelled", "cancelled"
@@ -852,7 +852,7 @@ class AnalysisWorker:
     def _run_status(self, run_id: str) -> str | None:
         conn = db.get_connection(self.settings)
         try:
-            row = conn.execute("SELECT status FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+            row = conn.execute("SELECT status FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             return row["status"] if row else None
         finally:
             conn.close()
@@ -863,11 +863,11 @@ class AnalysisWorker:
             now = utcnow()
             conn.execute(
                 "UPDATE analysis_runs SET status = 'cancelled', current_stage = 'cancelled', "
-                "completed_at = COALESCE(completed_at, ?), cancelled_at = COALESCE(cancelled_at, ?), "
-                "updated_at = ? WHERE run_id = ?", (now, now, now, run_id))
+                "completed_at = COALESCE(completed_at, %s), cancelled_at = COALESCE(cancelled_at, %s), "
+                "updated_at = %s WHERE run_id = %s", (now, now, now, run_id))
             conn.execute(
                 "UPDATE analysis_domain_runs SET status = 'cancelled' "
-                "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable')", (run_id,))
+                "WHERE run_id = %s AND status NOT IN ('complete', 'unavailable')", (run_id,))
             conn.commit()
             from pipeline.web.analysis import run as read_run
             return read_run(conn, run_id)
@@ -880,12 +880,12 @@ class AnalysisWorker:
             now = utcnow()
             conn.execute(
                 "UPDATE analysis_runs SET status = 'failed', current_stage = 'failed', "
-                "error_detail = ?, completed_at = ?, updated_at = ? WHERE run_id = ?",
+                "error_detail = %s, completed_at = %s, updated_at = %s WHERE run_id = %s",
                 (f"{type(exc).__name__}: {exc}", now, now, run_id))
             conn.execute(
                 "UPDATE analysis_domain_runs SET status = 'failed', prerequisite_status = 'failed', "
-                "completed_at = COALESCE(completed_at, ?), error_detail = COALESCE(error_detail, ?) "
-                "WHERE run_id = ? AND status NOT IN ('complete', 'unavailable', 'failed')",
+                "completed_at = COALESCE(completed_at, %s), error_detail = COALESCE(error_detail, %s) "
+                "WHERE run_id = %s AND status NOT IN ('complete', 'unavailable', 'failed')",
                 (now, f"{type(exc).__name__}: {exc}", run_id))
             conn.commit()
         finally:
@@ -900,5 +900,5 @@ class AnalysisWorker:
 
     @staticmethod
     def _cancelled_with_conn(conn, run_id: str) -> bool:
-        row = conn.execute("SELECT status FROM analysis_runs WHERE run_id = ?", (run_id,)).fetchone()
+        row = conn.execute("SELECT status FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
         return row is None or row["status"] == "cancelled"

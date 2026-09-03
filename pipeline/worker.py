@@ -45,7 +45,7 @@ class WorkerQueue:
         )
         self.conn.execute(
             "INSERT INTO warehouse_data_version(version, updated_at) "
-            "SELECT 0, ? WHERE NOT EXISTS (SELECT 1 FROM warehouse_data_version)", (_now(),)
+            "SELECT 0, %s WHERE NOT EXISTS (SELECT 1 FROM warehouse_data_version)", (_now(),)
         )
         self.conn.commit()
 
@@ -55,7 +55,7 @@ class WorkerQueue:
         now = _now()
         self.conn.execute(
             "INSERT INTO worker_jobs(job_id, kind, arguments_json, state, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'queued', ?, ?)",
+            "VALUES (%s, %s, %s, 'queued', %s, %s)",
             (job_id, kind, json.dumps(arguments, sort_keys=True, default=str), now, now))
         self.conn.commit()
         return job_id
@@ -68,14 +68,14 @@ class WorkerQueue:
         row = self.conn.execute(
             "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count "
             "FROM worker_jobs WHERE state = 'queued' OR "
-            "(state = 'running' AND lease_until < ?) "
+            "(state = 'running' AND lease_until < %s) "
             "ORDER BY created_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED", (now,)
         ).fetchone()
         if row is None:
             return None
         self.conn.execute(
-            "UPDATE worker_jobs SET state = 'running', lease_until = ?, "
-            "attempt_count = attempt_count + 1, updated_at = ? WHERE job_id = ?",
+            "UPDATE worker_jobs SET state = 'running', lease_until = %s, "
+            "attempt_count = attempt_count + 1, updated_at = %s WHERE job_id = %s",
             (lease, now, row["job_id"]))
         self.conn.commit()
         return {"job_id": row["job_id"], "kind": row["kind"],
@@ -86,37 +86,36 @@ class WorkerQueue:
 
     def checkpoint(self, job_id: str, checkpoint: dict[str, Any]) -> None:
         self.conn.execute(
-            "UPDATE worker_jobs SET checkpoint_json = ?, updated_at = ? WHERE job_id = ?",
+            "UPDATE worker_jobs SET checkpoint_json = %s, updated_at = %s WHERE job_id = %s",
             (json.dumps(checkpoint, sort_keys=True, default=str), _now(), job_id))
         self.conn.commit()
 
     def finish(self, job_id: str, *, success: bool, error: str | None = None) -> None:
         self.conn.execute(
-            "UPDATE worker_jobs SET state = ?, lease_until = NULL, updated_at = ? "
-            "WHERE job_id = ?", ("finished" if success else "failed", _now(), job_id))
+            "UPDATE worker_jobs SET state = %s, lease_until = NULL, updated_at = %s "
+            "WHERE job_id = %s", ("finished" if success else "failed", _now(), job_id))
         if error:
             self.event(job_id, "error", error)
         self.conn.commit()
         if success:
             self.conn.execute(
-                "UPDATE warehouse_data_version SET version = version + 1, updated_at = ?",
+                "UPDATE warehouse_data_version SET version = version + 1, updated_at = %s",
                 (_now(),))
             self.conn.commit()
 
     def event(self, job_id: str, level: str, message: str) -> None:
         row = self.conn.execute(
             "SELECT COALESCE(MAX(sequence_no), 0) + 1 AS n FROM worker_job_events "
-            "WHERE job_id = ?", (job_id,)).fetchone()
+            "WHERE job_id = %s", (job_id,)).fetchone()
         self.conn.execute(
             "INSERT INTO worker_job_events(job_id, sequence_no, level, message, created_at) "
-            "VALUES (?, ?, ?, ?, ?)", (job_id, row["n"], level, message[:4000], _now()))
+            "VALUES (%s, %s, %s, %s, %s)", (job_id, row["n"], level, message[:4000], _now()))
         self.conn.execute(
-            "DELETE FROM worker_job_events WHERE job_id = ? AND sequence_no <= "
-            "(SELECT COALESCE(MAX(sequence_no), 0) - ? FROM worker_job_events WHERE job_id = ?)",
+            "DELETE FROM worker_job_events WHERE job_id = %s AND sequence_no <= "
+            "(SELECT COALESCE(MAX(sequence_no), 0) - %s FROM worker_job_events WHERE job_id = %s)",
             (job_id, self.event_limit, job_id))
         self.conn.commit()
 
     def data_version(self) -> int:
         return int(self.conn.execute(
             "SELECT version FROM warehouse_data_version").fetchone()["version"])
-

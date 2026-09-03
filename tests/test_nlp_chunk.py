@@ -90,7 +90,7 @@ def test_run_writes_chunks_a_run_row_and_is_idempotent(conn, settings):
     result = nlp_chunk.run(conn, source_system="committee_papers")
     assert result["versions"] == 1 and result["chunks"] >= 1
 
-    run_row = conn.execute("SELECT status, rows_written FROM nlp_runs WHERE run_id=?",
+    run_row = conn.execute("SELECT status, rows_written FROM nlp_runs WHERE run_id=%s",
                            (result["run_id"],)).fetchone()
     assert run_row["status"] == "ok"
     assert run_row["rows_written"] == result["chunks"]
@@ -98,31 +98,31 @@ def test_run_writes_chunks_a_run_row_and_is_idempotent(conn, settings):
     rows = conn.execute(
         "SELECT document_chunk_id, chunk_index, element_start_id, element_end_id, "
         "page_start, page_end, char_start, char_end, superseded FROM document_chunks "
-        "WHERE document_version_id=? ORDER BY chunk_index", (version_id,)).fetchall()
+        "WHERE document_version_id=%s ORDER BY chunk_index", (version_id,)).fetchall()
     assert rows and all(r["superseded"] == 0 for r in rows)
     assert all(r["document_chunk_id"].startswith("dc-") for r in rows)
     # every element id referenced actually exists
     for row in rows:
         for col in ("element_start_id", "element_end_id"):
-            assert conn.execute("SELECT 1 FROM document_elements WHERE document_element_id=?",
+            assert conn.execute("SELECT 1 FROM document_elements WHERE document_element_id=%s",
                                 (row[col],)).fetchone()
 
     first_ids = [r["document_chunk_id"] for r in rows]
     again = nlp_chunk.run(conn, source_system="committee_papers")
     assert again["chunks"] == result["chunks"]
     second_ids = [r["document_chunk_id"] for r in conn.execute(
-        "SELECT document_chunk_id FROM document_chunks WHERE document_version_id=? ORDER BY chunk_index",
+        "SELECT document_chunk_id FROM document_chunks WHERE document_version_id=%s ORDER BY chunk_index",
         (version_id,)).fetchall()]
     assert first_ids == second_ids  # content-derived id is stable across runs
-    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == len(first_ids)
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone().values().__iter__().__next__() == len(first_ids)
 
 
 def test_dry_run_writes_nothing(conn, settings):
     _seed_version(conn, settings, _ELEMENTS)
     result = nlp_chunk.run(conn, dry_run=True)
     assert result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs").fetchone().values().__iter__().__next__() == 0
 
 
 def test_source_system_filter_scopes_the_run(conn, settings):

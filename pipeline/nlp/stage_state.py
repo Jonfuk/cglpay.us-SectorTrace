@@ -43,7 +43,7 @@ def needs_processing(conn, stage: str, input_identity: str, input_hash: str, *,
         return True
     row = conn.execute(
         "SELECT input_hash, processor_version, model_or_ontology_version, configuration_hash, status "
-        "FROM nlp_stage_state WHERE stage = ? AND input_identity = ?",
+        "FROM nlp_stage_state WHERE stage = %s AND input_identity = %s",
         (stage, input_identity)).fetchone()
     if row is None:
         return True
@@ -62,7 +62,7 @@ def mark_complete(conn, stage: str, input_identity: str, input_hash: str, *,
     conn.execute(
         "INSERT INTO nlp_stage_state(stage, input_identity, input_hash, processor_version, "
         "model_or_ontology_version, configuration_hash, output_digest, status, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, 'complete', %s) "
         "ON CONFLICT(stage, input_identity) DO UPDATE SET input_hash = excluded.input_hash, "
         "processor_version = excluded.processor_version, model_or_ontology_version = excluded.model_or_ontology_version, "
         "configuration_hash = excluded.configuration_hash, output_digest = excluded.output_digest, "
@@ -79,9 +79,8 @@ def invalidate_downstream(conn, stage: str, input_identity: str) -> int:
         raise ValueError(f"unknown NLP stage {stage!r}")
     if not downstream:
         return 0
-    marks = ", ".join("?" for _ in downstream)
+    marks = ", ".join("%s" for _ in downstream)
     cursor = conn.execute(
-        f"DELETE FROM nlp_stage_state WHERE input_identity = ? AND stage IN ({marks})",
+        f"DELETE FROM nlp_stage_state WHERE input_identity = %s AND stage IN ({marks})",
         (input_identity, *downstream))
     return max(0, int(cursor.rowcount or 0))
-

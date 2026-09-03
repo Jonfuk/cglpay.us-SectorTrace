@@ -72,7 +72,7 @@ def check(conn: sqlite3.Connection, settings, url: str) -> dict:
     for table in _url_tables(conn):
         row = _one(conn,
                    f"SELECT http_status, retrieved_at, payload_sha256 "
-                   f"FROM {table} WHERE source_url = ? "
+                   f"FROM {table} WHERE source_url = %s "
                    f"ORDER BY retrieved_at DESC LIMIT 1", (url,))
         if not row:
             continue
@@ -81,7 +81,7 @@ def check(conn: sqlite3.Connection, settings, url: str) -> dict:
 
     ev = _one(conn,
               "SELECT retrieved_at, http_status, payload_sha256, raw_object_path "
-              "FROM evidence_records WHERE source_url = ? "
+              "FROM evidence_records WHERE source_url = %s "
               "ORDER BY retrieved_at DESC LIMIT 1", (url,))
     if ev and (best is None or (ev.get("retrieved_at") or "") >= (best.get("retrieved_at") or "")):
         best = {**ev, "table": "evidence_records"}

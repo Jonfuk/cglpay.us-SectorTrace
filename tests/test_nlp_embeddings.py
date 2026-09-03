@@ -115,7 +115,7 @@ def test_run_embeds_live_chunks_and_registers_the_model(conn, settings):
     assert result["model_key"] == "embed:stub"
 
     run_row = conn.execute("SELECT stage, status, model_key, rows_written FROM nlp_runs "
-                           "WHERE run_id=?", (result["run_id"],)).fetchone()
+                           "WHERE run_id=%s", (result["run_id"],)).fetchone()
     assert run_row["stage"] == "embed" and run_row["status"] == "ok"
     assert run_row["model_key"] == "embed:stub"
     assert run_row["rows_written"] == result["embedded"]
@@ -143,14 +143,14 @@ def test_second_run_is_a_no_op(conn, settings):
     again = embeddings.run(conn, model="stub")
     assert first["embedded"] >= 1
     assert again["pending"] == 0 and again["embedded"] == 0
-    total = conn.execute("SELECT COUNT(*) FROM document_embeddings").fetchone()[0]
+    total = conn.execute("SELECT COUNT(*) FROM document_embeddings").fetchone().values().__iter__().__next__()
     assert total == first["embedded"]
 
 
 def test_superseded_chunks_are_not_embedded(conn, settings):
     version_id = _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
-    conn.execute("UPDATE document_chunks SET superseded = 1 WHERE document_version_id = ?",
+    conn.execute("UPDATE document_chunks SET superseded = 1 WHERE document_version_id = %s",
                  (version_id,))
     result = embeddings.run(conn, model="stub")
     assert result["pending"] == 0 and result["embedded"] == 0
@@ -161,11 +161,11 @@ def test_dry_run_writes_nothing(conn, settings):
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     result = embeddings.run(conn, model="stub", dry_run=True)
     assert result["dry_run"] is True
-    assert conn.execute("SELECT COUNT(*) FROM document_embeddings").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='embed'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM document_embeddings").fetchone().values().__iter__().__next__() == 0
+    assert conn.execute("SELECT COUNT(*) FROM nlp_runs WHERE stage='embed'").fetchone().values().__iter__().__next__() == 0
     # register() also rolls back with the run.
     assert conn.execute(
-        "SELECT COUNT(*) FROM nlp_model_registry WHERE model_key='embed:stub'").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM nlp_model_registry WHERE model_key='embed:stub'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_source_system_filter_scopes_the_run(conn, settings):

@@ -62,7 +62,7 @@ def _columns(conn, table: str) -> set[str]:
         str(row["column_name"])
         for row in conn.execute(
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = current_schema() AND table_name = ?",
+            "WHERE table_schema = current_schema() AND table_name = %s",
             (table,),
         ).fetchall()
     }

@@ -11,7 +11,7 @@ def relationship_provenance(conn: Any, relationship_id: str) -> dict | None:
         "r.claim_id, r.evidence_id, e.source_system, e.source_url, e.retrieved_at, "
         "e.http_status, e.payload_sha256, e.raw_object_path "
         "FROM entity_relationships r LEFT JOIN evidence_records e ON e.evidence_id = r.evidence_id "
-        "WHERE r.relationship_id = ?",
+        "WHERE r.relationship_id = %s",
         (relationship_id,),
     ).fetchone()
     return dict(row) if row else None
@@ -25,7 +25,7 @@ def claim_provenance(conn: Any, claim_id: str) -> dict | None:
         "c.evidence_span, c.evidence_id, e.source_system, e.source_url, e.retrieved_at, "
         "e.payload_sha256, e.raw_object_path "
         "FROM graph_claims c LEFT JOIN evidence_records e ON e.evidence_id = c.evidence_id "
-        "WHERE c.claim_id = ?",
+        "WHERE c.claim_id = %s",
         (claim_id,),
     ).fetchone()
     return dict(row) if row else None

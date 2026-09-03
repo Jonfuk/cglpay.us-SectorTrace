@@ -105,7 +105,7 @@ def test_a_status_cannot_move_without_a_decision(conn):
     with pytest.raises(db.IntegrityError):
         # The SQL-box route: an UPDATE that skips the decision table. The
         # trigger refuses it.
-        conn.execute("UPDATE claims SET status = 'published' WHERE id = ?",
+        conn.execute("UPDATE claims SET status = 'published' WHERE id = %s",
                       (claim["id"],))
 
 

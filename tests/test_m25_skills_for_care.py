@@ -144,7 +144,7 @@ def _add_authority(conn, ons_code: str, name: str) -> None:
         "INSERT INTO authorities (ons_code, name, type, active_from, "
         "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
         "http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'utla', '2023-01-01', '2023', '2026', "
+        "VALUES (%s, %s, 'utla', '2023-01-01', '2023', '2026', "
         "'https://example.com/spine', '2026-01-01T00:00:00+00:00', 200, "
         "'test', 'abc')", (ons_code, name))
 
@@ -342,7 +342,7 @@ def test_run_records_an_unreadable_workbook(httpx_mock, settings, conn):
     files = conn.execute("SELECT * FROM skills_for_care_files").fetchall()
     assert len(files) == 1
     assert files[0]["parse_status"] == "unreadable"
-    assert conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__() == 1
 
 
 def test_run_resolves_relative_workbook_links(httpx_mock, settings, conn):
@@ -380,4 +380,4 @@ def test_run_page_unavailable_is_a_review_item(httpx_mock, settings, conn):
     items = {r["item_type"] for r in conn.execute(
         "SELECT item_type FROM review_queue").fetchall()}
     assert "skills_for_care_page_unavailable" in items
-    assert conn.execute("SELECT COUNT(*) FROM skills_for_care_files").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM skills_for_care_files").fetchone().values().__iter__().__next__() == 0

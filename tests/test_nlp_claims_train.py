@@ -25,7 +25,7 @@ def _heads(conn, category=None):
     sql = "SELECT * FROM claim_head_versions"
     params = ()
     if category:
-        sql += " WHERE category = ?"
+        sql += " WHERE category = %s"
         params = (category,)
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
@@ -54,7 +54,7 @@ def test_logreg_head_trains_selects_and_records(conn, tmp_path):
                    for cid in json.loads(row["heldout_candidate_ids_json"]))
     assert (tmp_path / "vacancy_pressure").glob("*.json")
     assert row["artifact_sha256"]
-    run = conn.execute("SELECT status FROM nlp_runs WHERE run_id = ?",
+    run = conn.execute("SELECT status FROM nlp_runs WHERE run_id = %s",
                        (result["run_id"],)).fetchone()
     assert run["status"] == "ok"
 
@@ -159,10 +159,10 @@ def _prep_run(conn, run_id):
     of a direct _persist_category call. Committed because the write-slot
     connection can roll back uncommitted setup between statements."""
     conn.execute("INSERT INTO nlp_model_registry (model_key, model_provider, model_id, "
-                 "first_seen_at) VALUES (?, 'stub', 'stub', ?) ON CONFLICT DO NOTHING",
+                 "first_seen_at) VALUES (%s, 'stub', 'stub', %s) ON CONFLICT DO NOTHING",
                  (STUB_MODEL_KEY, "2026-08-31T00:00:00+00:00"))
     conn.execute("INSERT INTO nlp_runs (run_id, stage, status, started_at, config_sha256) "
-                 "VALUES (?, 'claims-train', 'running', ?, 'x')",
+                 "VALUES (%s, 'claims-train', 'running', %s, 'x')",
                  (run_id, "2026-08-31T00:00:00+00:00"))
     conn.commit()
 

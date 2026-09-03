@@ -22,8 +22,8 @@ def _notice(conn, notice_id, *, ntype="tender", ons="E08000025",
         " buyer_name, buyer_ons_code, supplier_name_raw, title, value_core, "
         " currency, date_published, date_start, date_end, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        "(?, '', ?, ?, 'Birmingham', ?, ?, 'Substance misuse service', "
-        " 5000000, 'GBP', ?, ?, ?, 'https://ft/x', "
+        "(%s, '', %s, %s, 'Birmingham', %s, %s, 'Substance misuse service', "
+        " 5000000, 'GBP', %s, %s, %s, 'https://ft/x', "
         " '2026-01-01T00:00:00Z', 200, 'find_tender', 'h')",
         (notice_id, ocid, ntype, ons, supplier, published, start, end))
     conn.commit()

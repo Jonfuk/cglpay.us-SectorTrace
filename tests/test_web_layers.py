@@ -51,7 +51,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, region, geometry_geojson, "
             " active_from, first_seen_vintage, last_seen_vintage, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'county', 'West Midlands', ?, '2021-04-01', '2024', '2026', "
+            "VALUES (%s, %s, 'county', 'West Midlands', %s, '2021-04-01', '2024', '2026', "
             " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
             (ons_code, name, GEOMETRY))
 
@@ -63,8 +63,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'A Council', ?, 'Supplier Ltd', 'Treatment services', "
-            " ?, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
+            "VALUES (%s, %s, 'A Council', %s, 'Supplier Ltd', 'Treatment services', "
+            " %s, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
             " '2026-08-01T00:00:00Z', 200, 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", ons_code, value))
 
@@ -80,8 +80,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " local_authority_raw, local_authority_ons_code, region, overall_rating, "
             " latitude, longitude, registration_status, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, 'prov1', 'A regulated service', 'Birmingham', ?, "
-            " 'West Midlands', 'Good', ?, ?, 'Registered', 'https://cqc.example/l', "
+            "VALUES (%s, 'prov1', 'A regulated service', 'Birmingham', %s, "
+            " 'West Midlands', 'Good', %s, %s, 'Registered', 'https://cqc.example/l', "
             " '2026-08-01T00:00:00Z', 200, 'cqc', 'c')",
             (location_id, ons_code, latitude, longitude))
 
@@ -97,7 +97,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO fingertips_la_values (indicator_id, area_code, area_type_id, "
             " time_period, area_name, ons_code, area_level, value, time_period_sortable, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (92454, ?, 102, ?, 'Birmingham', ?, 'local_authority', ?, ?, "
+            "VALUES (92454, %s, 102, %s, 'Birmingham', %s, 'local_authority', %s, %s, "
             " 'https://fingertips.example/v', '2026-08-01T00:00:00Z', 200, 'ohid', 'f')",
             (ons_code, period, ons_code, value, period))
 

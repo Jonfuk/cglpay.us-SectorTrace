@@ -61,7 +61,7 @@ def _doc_guard(conn: sqlite3.Connection, document_id: str) -> dict:
                e.retrieved_at
         FROM document_records d
         JOIN evidence_records e ON e.evidence_id = d.evidence_id
-        WHERE d.document_id = ?""", (document_id,))
+        WHERE d.document_id = %s""", (document_id,))
     if not row:
         raise QueryError(f"No document {document_id!r}.")
     if row["source_system"] not in DOCUMENT_SEARCH_SOURCES:
@@ -80,7 +80,7 @@ def tables(conn: sqlite3.Connection, document_id: str) -> dict:
         JOIN document_versions v ON v.document_version_id = de.document_version_id
                                  AND v.is_active = 1
         JOIN document_records d ON d.document_id = v.document_id
-        WHERE d.document_id = ?
+        WHERE d.document_id = %s
         ORDER BY de.sequence""", (document_id,))
 
     out = []
@@ -130,7 +130,7 @@ def table_detail(conn: sqlite3.Connection, document_table_id: str) -> dict:
         JOIN document_versions v ON v.document_version_id = de.document_version_id
         JOIN document_records d ON d.document_id = v.document_id
         JOIN evidence_records e ON e.evidence_id = d.evidence_id
-        WHERE dt.document_table_id = ?""", (document_table_id,))
+        WHERE dt.document_table_id = %s""", (document_table_id,))
     if not r:
         raise QueryError(f"No table {document_table_id!r}.")
     if r["source_system"] not in DOCUMENT_SEARCH_SOURCES:
@@ -139,9 +139,9 @@ def table_detail(conn: sqlite3.Connection, document_table_id: str) -> dict:
     grid = _grid(r["table_json"])
     context = _rows(conn, """
         SELECT sequence, element_type, text FROM document_elements
-        WHERE document_version_id = ?
-          AND sequence BETWEEN ? AND ?
-          AND document_element_id <> ?
+        WHERE document_version_id = %s
+          AND sequence BETWEEN %s AND %s
+          AND document_element_id <> %s
         ORDER BY sequence""",
         (r["document_version_id"], r["sequence"] - _CONTEXT_ELEMENTS,
          r["sequence"] + _CONTEXT_ELEMENTS, r["document_element_id"]))

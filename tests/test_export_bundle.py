@@ -132,12 +132,14 @@ def test_a_bundle_never_contains_a_previous_bundle(exports):
 
 
 def test_a_symlink_out_of_the_export_tree_does_not_travel_in_the_zip(
-        exports, settings):
+        exports, tmp_path):
     """The same rule the download route applies: resolve, then check it is
     still under the export root."""
+    target = tmp_path / "outside.db"
+    target.write_text("outside", encoding="utf-8")
     link = exports / "sheets" / "escape.db"
     try:
-        link.symlink_to(settings.database_path)
+        link.symlink_to(target)
     except (OSError, NotImplementedError):
         pytest.skip("this platform/user cannot create symlinks")
 

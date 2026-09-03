@@ -8,13 +8,9 @@ PostgreSQL 18 is the only application database (performance.md Phase 1). What
 a caller relies on:
 
   * `get_connection()` for writes, closed in `finally`;
-  * `?` and `:name` parameters — the style this codebase writes, translated to
-    psycopg's `%s` / `%(name)s` at the connection boundary by
-    `pipeline/sqldialect.py`. One SQL string per query, in one style; the
-    translation is a scanner, not a regex, and is the only place the two
-    styles meet;
-  * rows addressable by name and by position (`row["x"]`, `row[0]`) — see
-    `pipeline/pg.py`'s row factory;
+  * psycopg's native `%s` and `%(name)s` parameter styles;
+  * named result rows from psycopg's `dict_row` factory. Scalar aggregates
+    alias their result explicitly so interpretation never depends on position;
   * `db.IntegrityError` and friends in `except` clauses.
 
 There is no write slot: SQLite allowed one writer at a time and needed a fair
@@ -73,10 +69,8 @@ def get_connection(settings: Settings | None = None,
                     check_same_thread: bool = True):
     """A warehouse connection.
 
-    `check_same_thread` is a SQLite concept with no meaning on PostgreSQL — a
-    connection is not bound to the thread that opened it — but it stays in the
-    signature and is ignored, because the fetch pools pass it and rewriting
-    those call sites is not this change's job.
+    `check_same_thread` is retained as a no-op for the existing call signature;
+    PostgreSQL connections are managed by the application and read pools.
     """
     settings = settings or get_settings()
     if not settings.database_url:
@@ -89,23 +83,10 @@ def get_connection(settings: Settings | None = None,
     return pg.connect(settings.database_url)
 
 
-def backend_of(conn) -> str:
-    """Always `"postgres"`.
-
-    Retained as a function rather than removed at 60-odd call sites: it now has
-    one answer, but the sites that ask `backend_of(conn) == "postgres"` still
-    read clearly and cost nothing. They are simplified where they are touched
-    for other reasons; there is no value in a mechanical sweep that changes
-    nothing.
-    """
-    return "postgres"
-
-
 def migrations_dir_for(settings: Settings | None = None) -> Path:
-    """The migration tree — one tree now, under `postgres/`.
+    """The PostgreSQL migration tree.
 
-    Recorded in `schema_migrations` in filename order. The former SQLite tree
-    beside it is gone with the SQLite backend.
+    Recorded in `schema_migrations` in filename order.
     """
     settings = settings or get_settings()
     return (settings.migrations_dir if settings.migrations_dir.name == "postgres"
@@ -115,7 +96,7 @@ def migrations_dir_for(settings: Settings | None = None) -> Path:
 def applied_migrations(conn) -> set[str]:
     exists = conn.execute(
         "SELECT 1 FROM information_schema.tables "
-        "WHERE table_schema = current_schema() AND table_name = ?",
+        "WHERE table_schema = current_schema() AND table_name = %s",
         ("schema_migrations",)).fetchone()
     if exists is None:
         return set()
@@ -144,7 +125,7 @@ def has_extension(conn, name: str) -> bool:
     `ensure_extensions` can change the answer within a single process run.
     """
     return conn.execute(
-        "SELECT 1 FROM pg_extension WHERE extname = ?", (name,)).fetchone() is not None
+        "SELECT 1 FROM pg_extension WHERE extname = %s", (name,)).fetchone() is not None
 
 
 def ensure_extensions(conn, names: Sequence[str] = WAREHOUSE_EXTENSIONS) -> list[str]:
@@ -233,7 +214,7 @@ def grant_reader_access(conn, settings: Settings | None = None) -> str | None:
     # spelling of the quoting rule the project keeps.
     from pipeline.catalog import quote
 
-    if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = ?", (role,)).fetchone() is None:
+    if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone() is None:
         # Named in the settings and absent from the server. Not fatal here —
         # the read path will fail to connect at all and say so — but silence
         # is what produced the defect this function exists for.
@@ -246,7 +227,7 @@ def grant_reader_access(conn, settings: Settings | None = None) -> str | None:
         return None
 
     grantee = quote(role)
-    schema = quote(conn.execute("SELECT current_schema()").fetchone()[0])
+    schema = quote(conn.execute("SELECT current_schema() AS schema_name").fetchone()["schema_name"])
     with conn:
         conn.execute(f"GRANT USAGE ON SCHEMA {schema} TO {grantee}")
         conn.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {grantee}")
@@ -293,7 +274,7 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
                 "(filename TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
             )
             conn.execute(
-                "INSERT INTO schema_migrations (filename, applied_at) VALUES (?, ?)",
+                "INSERT INTO schema_migrations (filename, applied_at) VALUES (%s, %s)",
                 (path.name, _utcnow()),
             )
         newly_applied.append(path.name)
@@ -362,7 +343,7 @@ def upsert(
     its time, not the first run's.
     """
     columns = list(row.keys())
-    placeholders = ", ".join(f":{c}" for c in columns)
+    placeholders = ", ".join(f"%({c})s" for c in columns)
     column_list = ", ".join(columns)
     protected = set(preserve)
     update_columns = [c for c in columns
@@ -411,7 +392,7 @@ def upsert_many(
     updates = [c for c in columns if c not in natural_key and c not in protected]
     key_sql = ", ".join(natural_key)
     column_sql = ", ".join(columns)
-    placeholders = ", ".join(f":{column}" for column in columns)
+    placeholders = ", ".join(f"%({column})s" for column in columns)
     if updates:
         assignments = ", ".join(f"{c} = excluded.{c}" for c in updates)
         changed = " OR ".join(f"{table}.{c} IS DISTINCT FROM excluded.{c}" for c in updates)
@@ -442,7 +423,7 @@ def record_parse_failure(
     """
     conn.execute(
         "INSERT INTO parse_failures (module, source_url, field_name, raw_fragment, reason, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "VALUES (%s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (module, COALESCE(source_url, ''), COALESCE(field_name, ''), COALESCE(raw_fragment, '')) "
         "DO UPDATE SET reason = excluded.reason",
         (module, source_url, field_name, raw_fragment, reason, _utcnow()),
@@ -462,7 +443,7 @@ def record_review_item(
     """
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, status, created_at) "
-        "VALUES (?, ?, ?, ?, 'pending', ?) "
+        "VALUES (%s, %s, %s, %s, 'pending', %s) "
         "ON CONFLICT (module, item_type, raw_value) DO UPDATE SET "
         "context_json = excluded.context_json "
         "WHERE review_queue.status = 'pending'",
@@ -472,14 +453,14 @@ def record_review_item(
 
 def get_cursor(conn: Connection, module: str) -> str | None:
     row = conn.execute(
-        "SELECT cursor_value FROM module_cursors WHERE module = ?", (module,)
+        "SELECT cursor_value FROM module_cursors WHERE module = %s", (module,)
     ).fetchone()
     return row["cursor_value"] if row else None
 
 
 def set_cursor(conn: Connection, module: str, cursor_value: str) -> None:
     conn.execute(
-        "INSERT INTO module_cursors (module, cursor_value, updated_at) VALUES (?, ?, ?) "
+        "INSERT INTO module_cursors (module, cursor_value, updated_at) VALUES (%s, %s, %s) "
         "ON CONFLICT (module) DO UPDATE SET cursor_value = excluded.cursor_value, "
         "updated_at = excluded.updated_at",
         (module, cursor_value, _utcnow()),
@@ -487,7 +468,7 @@ def set_cursor(conn: Connection, module: str, cursor_value: str) -> None:
 
 
 def get_http_cache(conn: Connection, url: str):
-    return conn.execute("SELECT * FROM http_cache WHERE url = ?", (url,)).fetchone()
+    return conn.execute("SELECT * FROM http_cache WHERE url = %s", (url,)).fetchone()
 
 
 def set_http_cache(
@@ -500,7 +481,7 @@ def set_http_cache(
 ) -> None:
     conn.execute(
         "INSERT INTO http_cache (url, host, etag, last_modified, payload_sha256, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
+        "VALUES (%s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (url) DO UPDATE SET etag = excluded.etag, "
         "last_modified = excluded.last_modified, payload_sha256 = excluded.payload_sha256, "
         "updated_at = excluded.updated_at",

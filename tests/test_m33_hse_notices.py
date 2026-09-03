@@ -119,5 +119,5 @@ def test_run_stores_only_exact_org_matches_and_queues_a_near_miss(
 
     near_miss = conn.execute(
         "SELECT COUNT(*) FROM review_queue WHERE item_type = 'hse_name_near_miss'"
-    ).fetchone()[0]
+    ).fetchone().values().__iter__().__next__()
     assert near_miss == 1

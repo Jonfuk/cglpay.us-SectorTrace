@@ -47,7 +47,7 @@ def refresh_authority_geometry(conn) -> int:
 
     with conn:
         conn.execute(
-            "SELECT set_config('search_path', ?, true)",
+            "SELECT set_config('search_path', %s, true)",
             (f"{extension['application_schema']},"
              f"{extension['postgis_schema']},pg_catalog",))
         conn.execute("ALTER TABLE authorities ADD COLUMN IF NOT EXISTS "

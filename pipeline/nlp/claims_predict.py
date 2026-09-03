@@ -32,7 +32,7 @@ ORDER BY category
 _UPSERT_PREDICTION = """
 INSERT INTO document_claim_predictions
     (document_chunk_id, category, model_version, label, score, split, nlp_run_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT(document_chunk_id, category, model_version) DO UPDATE SET
     label = excluded.label, score = excluded.score, split = excluded.split,
     nlp_run_id = excluded.nlp_run_id, created_at = excluded.created_at
@@ -53,7 +53,7 @@ def _chunk_splits(conn, heldout_ids_json: str, predicate: str) -> dict[str, str]
         "SELECT c.claim_candidate_id AS cid, c.document_chunk_id AS chunk "
         "FROM document_claim_candidates c "
         "JOIN claim_candidate_decisions d ON d.claim_candidate_id = c.claim_candidate_id "
-        "WHERE c.predicate = ?", (predicate,)).fetchall()
+        "WHERE c.predicate = %s", (predicate,)).fetchall()
     out: dict[str, str] = {}
     for r in rows:
         out[r["chunk"]] = "heldout" if r["cid"] in heldout else "train"
