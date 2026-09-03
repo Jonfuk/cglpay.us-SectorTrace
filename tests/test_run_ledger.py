@@ -7,18 +7,14 @@ write that fails must never fail the collection.
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import httpx
 import pytest
 
 from pipeline import console as ui
 from pipeline import db, run_ledger, runner
-from pipeline.config import Settings
 from pipeline.registry import MODULE_REGISTRY, discover_modules
 from pipeline.web.server import build_server
-
-MIGRATIONS = Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,18 +22,6 @@ def _discovered():
     # So MODULE_REGISTRY holds the real module set and the "all" heuristic in
     # run_waves does not misfire on a two-module test run.
     discover_modules()
-
-
-@pytest.fixture
-def settings(tmp_path) -> Settings:
-    s = Settings(contact_email="t@example.com", database_path=tmp_path / "w.db",
-                 raw_archive_dir=tmp_path / "raw", logs_dir=tmp_path / "logs",
-                 migrations_dir=MIGRATIONS, environment="test", _env_file=None)
-    conn = db.get_connection(s)
-    db.apply_migrations(conn, MIGRATIONS)
-    conn.commit()
-    conn.close()
-    return s
 
 
 def _fake_module(name, *, fail=False):
