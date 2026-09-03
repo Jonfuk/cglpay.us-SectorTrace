@@ -126,7 +126,9 @@ def test_the_cli_records_one_and_show_prints_without_writing(warehouse, settings
 
 
 def _count_audits(settings) -> int:
-    conn = sqlite3.connect(settings.database_path)
+    from pipeline import db
+
+    conn = db.get_connection(settings)
     try:
         return conn.execute("SELECT COUNT(*) FROM archive_audits").fetchone()[0]
     finally:

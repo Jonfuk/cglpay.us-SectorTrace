@@ -34,11 +34,13 @@ def compute(conn) -> dict:
     totals = conn.execute(
         "SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS b "
         "FROM archive_objects").fetchone()
-    object_count = totals["n"]
-    total_bytes = totals["b"]
+    # PostgreSQL returns NUMERIC aggregates as Decimal; the audit contract is
+    # JSON and these counters are integral byte/object counts.
+    object_count = int(totals["n"])
+    total_bytes = int(totals["b"] or 0)
 
     by_source = {
-        row["source_system"]: {"count": row["n"], "bytes": row["b"]}
+        row["source_system"]: {"count": int(row["n"]), "bytes": int(row["b"] or 0)}
         for row in conn.execute(
             "SELECT source_system, COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS b "
             "FROM archive_objects GROUP BY source_system ORDER BY source_system")
