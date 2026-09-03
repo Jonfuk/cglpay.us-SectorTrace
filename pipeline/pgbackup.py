@@ -57,7 +57,7 @@ from pathlib import Path
 
 import structlog
 
-from pipeline import catalog, db, pgload
+from pipeline import catalog, db, pgschema
 from pipeline.backup import (
     POSTGRES_SUFFIX as ARCHIVE_SUFFIX,
 )
@@ -109,9 +109,8 @@ def snapshot_connection(settings: Settings) -> _ConnAdapter:
     """A read-only, single-instant view of the warehouse, in this codebase's
     dialect.
 
-    Shared with `pipeline/pgsync.py`, which needs exactly the same thing for
-    the opposite direction: a warehouse being copied out has to be read as of
-    one moment whether the copy lands in a file or in another database.
+    `REPEATABLE READ, READ ONLY` so every table in the dump is read as of one
+    instant, whatever the dump's duration.
     """
     return _ConnAdapter(_connect_for_snapshot(settings))
 
@@ -261,10 +260,10 @@ def _write_archive(conn, path: Path, settings: Settings,
     edges the triggers impose and no foreign key expresses — so that restoring
     the file in the order it was written satisfies every reference and every
     refusal from migrations 0030 and 0033 as it goes. See
-    `pipeline/pgload.py`.
+    `pipeline/pgschema.py`.
     """
     asked = _ConnAdapter(conn)
-    tables = pgload.load_order(asked)
+    tables = pgschema.load_order(asked)
     header = {
         "format": FORMAT_VERSION,
         "created_at": started.isoformat(timespec="seconds"),
@@ -331,8 +330,8 @@ def _write_archive(conn, path: Path, settings: Settings,
 
 
 class _ConnAdapter:
-    """A raw psycopg connection wearing the methods `catalog`, `pgload` and
-    `pgverify` call on a warehouse connection.
+    """A raw psycopg connection wearing the methods `catalog` and `pgschema`
+    call on a warehouse connection.
 
     Those helpers dispatch on `db.backend_of`, which asks whether the object is
     a `sqlite3.Connection` — anything else is PostgreSQL — and then execute
@@ -510,7 +509,7 @@ def restore(archive: Path, settings: Settings | None = None,
                 "commit that has those files first.")
         ahead = sorted(ledger - set(verified["migrations"]))
 
-        tables = pgload.load_order(target)
+        tables = pgschema.load_order(target)
         unknown = sorted(set(verified["counts"]) - set(tables))
         if unknown:
             raise BackupError(
@@ -534,7 +533,7 @@ def restore(archive: Path, settings: Settings | None = None,
             superseded = dump(settings, label="superseded-by-restore")["warehouse"]["backup"]
             log.info("backup.superseded_snapshot", path=superseded)
             # Emptied inside the restore's own transaction rather than through
-            # `pgload.truncate_all`, which commits: that is right for a
+            # `pgschema.truncate_all`, which commits: that is right for a
             # migration, which is a thing you resume, and wrong for a restore,
             # which either replaced the warehouse or did not. Committing the
             # emptying separately would mean a restore that failed half way
@@ -557,7 +556,7 @@ def restore(archive: Path, settings: Settings | None = None,
                 + ", ".join(f"{t}: archive {a:,}, written {b:,}"
                              for t, (a, b) in sorted(drift.items())))
 
-        sequences = pgload.reset_sequences(target)
+        sequences = pgschema.reset_sequences(target)
         target.commit()
     finally:
         target.close()
@@ -575,10 +574,8 @@ def restore(archive: Path, settings: Settings | None = None,
 def _restore_data(archive: Path, target, on_table=None) -> dict[str, int]:
     """Feed every `COPY` block in the archive back through `COPY FROM STDIN`.
 
-    One transaction for the whole file, committed by the caller. That is the
-    opposite of `pgload`, which commits per table so an interrupted migration
-    leaves whole tables — and it is deliberate: a migration is a thing you
-    resume, and a restore is a thing that either replaced the warehouse or did
+    One transaction for the whole file, committed by the caller. That is
+    deliberate: a restore is a thing that either replaced the warehouse or did
     not. Half a restore is a warehouse nobody can reason about.
     """
     written: dict[str, int] = {}

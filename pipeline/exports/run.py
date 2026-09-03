@@ -68,7 +68,7 @@ def run_targets(conn, targets: list[str], base: Path, docs_dir: Path, settings,
             noun = "bundles"
         else:
             paths = [docs_export.write_data_dictionary(
-                conn, settings.migrations_dir, docs_dir)]
+                conn, settings.migrations_dir / "postgres", docs_dir)]
             noun = "documents"
 
         results.append({
