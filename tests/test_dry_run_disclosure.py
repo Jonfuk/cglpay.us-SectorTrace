@@ -52,11 +52,13 @@ def module_log(settings, monkeypatch):
 
 
 def a_writing_module(ctx):
-    # REPLACE so the same module can be run twice in one test — a dry run
-    # after a real one is exactly the comparison worth making.
+    # Upsert so the same module can be run twice in one test — a dry run after
+    # a real one is exactly the comparison worth making.
     ctx.conn.execute(
-        "INSERT OR REPLACE INTO module_cursors (module, cursor_value, updated_at) "
-        "VALUES ('a_fake', '2026-01-01', '2026-01-01T00:00:00Z')")
+        "INSERT INTO module_cursors (module, cursor_value, updated_at) "
+        "VALUES ('a_fake', '2026-01-01', '2026-01-01T00:00:00Z') "
+        "ON CONFLICT (module) DO UPDATE SET cursor_value = EXCLUDED.cursor_value, "
+        "updated_at = EXCLUDED.updated_at")
 
 
 def run_once(settings, dry_run: bool):
