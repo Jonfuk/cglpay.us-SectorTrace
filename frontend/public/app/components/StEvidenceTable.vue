@@ -17,6 +17,11 @@ export interface Column<R> {
   label: string
   /** Render as a validated http(s) link (uses StLink). */
   link?: boolean
+  /** Render the cell as an internal NuxtLink to the returned in-app path
+   *  (e.g. an entity detail page). Returning null/undefined renders plain text.
+   *  Internal paths are app-controlled, not source-derived, so they do not need
+   *  the StLink external-URL validation. */
+  to?: (row: R) => string | null | undefined
   /** Right-align + thousands-format numeric values. */
   numeric?: boolean
   /** Monospace (ids, hashes, dates). */
@@ -79,6 +84,11 @@ function keyFor(row: Row, i: number): string | number {
             }"
           >
             <StLink v-if="col.link" :href="(row[col.key] as string | null | undefined)" />
+            <NuxtLink
+              v-else-if="col.to && col.to(row)"
+              :to="col.to(row) as string"
+              class="text-[var(--st-accent)] underline underline-offset-2"
+            >{{ cell(row, col) }}</NuxtLink>
             <template v-else>{{ cell(row, col) }}</template>
           </td>
         </tr>

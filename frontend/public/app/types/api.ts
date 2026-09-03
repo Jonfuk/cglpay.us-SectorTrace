@@ -343,6 +343,92 @@ export interface CalendarResponse {
   [key: string]: unknown
 }
 
+/** A provider-timeline event (`/api/v1/providers/{key}/timeline` → `events[]`).
+ *  Each event keeps its own dated provenance. */
+export interface TimelineEvent {
+  date: string | null
+  event_type: string | null
+  label: string | null
+  value_summary?: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface ProviderTimelineResponse {
+  provider: Record<string, unknown> | null
+  events: TimelineEvent[]
+  [key: string]: unknown
+}
+
+/** A coverage-timeline dataset probe (`/api/v1/coverage_timeline` → `datasets[]`). */
+export interface CoverageDataset {
+  dataset_id: string
+  title: string | null
+  period_kind: string | null
+  periods: string[]
+  held: boolean
+  link: string | null
+  [key: string]: unknown
+}
+
+export interface CoverageResponse {
+  entity: { kind?: string; id?: string | null; name?: string | null } | null
+  datasets: CoverageDataset[]
+  span?: { min: number; max: number } | null
+  [key: string]: unknown
+}
+
+/** A contract-diary event (`/api/v1/contract_diary` → `events[]`). */
+export interface DiaryEvent {
+  date: string | null
+  kind: string | null
+  kind_label: string | null
+  title: string | null
+  buyer_name: string | null
+  supplier: string | null
+  value_core: number | null
+  source_url: string | null
+  [key: string]: unknown
+}
+
+export interface DiaryResponse {
+  scope: { kind?: string; id?: string | null } | null
+  events: DiaryEvent[]
+  span?: { min: string; max: string } | null
+  caveat?: string
+  [key: string]: unknown
+}
+
+/** A discrepancy check (`/api/v1/discrepancies`). Only identity-level fields are
+ *  compared; a discrepancy is a difference between sources, not an error claim. */
+export interface DiscrepancyRow {
+  id: string
+  label: string
+  observations?: Array<Record<string, unknown>>
+  distinct_values?: unknown[]
+  value?: unknown
+  sources?: string[]
+  [key: string]: unknown
+}
+
+export interface DiscrepancyResponse {
+  entity: { kind?: string; id?: string | null; name?: string | null } | null
+  discrepancies: DiscrepancyRow[]
+  agreed: DiscrepancyRow[]
+  checked: number
+  caveat?: string
+  [key: string]: unknown
+}
+
+/** `/api/v1/compare` — parallel series for two or more entities. */
+export interface CompareResponse {
+  authorities?: Array<Record<string, unknown>>
+  providers?: Array<Record<string, unknown>>
+  series?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */

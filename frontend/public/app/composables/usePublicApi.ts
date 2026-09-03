@@ -4,14 +4,19 @@ import type {
   CatalogueResponse,
   ChangesResponse,
   ClaimsResponse,
+  CompareResponse,
   ContractsResponse,
+  CoverageResponse,
   CqcResponse,
+  DiaryResponse,
+  DiscrepancyResponse,
   DocumentSearchResponse,
   GeographyResponse,
   MetaResponse,
   PayResponse,
   PfdResponse,
   ProviderRow,
+  ProviderTimelineResponse,
   RelationshipsResponse,
   SummaryResponse,
   TreatmentResponse,
@@ -71,6 +76,16 @@ export interface PublicApi {
   changes(options?: TransportOptions): Promise<ChangesResponse>
   /** `/api/v1/publication_calendar` — per-source release cadence and status. */
   calendar(options?: TransportOptions): Promise<CalendarResponse>
+  /** `/api/v1/providers/{key}/timeline` — a provider's dated event timeline. */
+  providerTimeline(key: string, options?: TransportOptions): Promise<ProviderTimelineResponse>
+  /** `/api/v1/coverage_timeline` — which datasets hold an entity, and when. */
+  coverage(options?: TransportOptions): Promise<CoverageResponse>
+  /** `/api/v1/contract_diary` — an entity's dated procurement events. */
+  diary(options?: TransportOptions): Promise<DiaryResponse>
+  /** `/api/v1/discrepancies` — identity-field differences across sources. */
+  discrepancies(options?: TransportOptions): Promise<DiscrepancyResponse>
+  /** `/api/v1/compare` — parallel series for two or more entities. */
+  compare(options?: TransportOptions): Promise<CompareResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -95,5 +110,11 @@ export function usePublicApi(): PublicApi {
     relationships: (options) => get<RelationshipsResponse>('/relationships', options),
     changes: (options) => get<ChangesResponse>('/changes', options),
     calendar: (options) => get<CalendarResponse>('/publication_calendar', options),
+    providerTimeline: (key, options) =>
+      get<ProviderTimelineResponse>(`/providers/${encodeURIComponent(key)}/timeline`, options),
+    coverage: (options) => get<CoverageResponse>('/coverage_timeline', options),
+    diary: (options) => get<DiaryResponse>('/contract_diary', options),
+    discrepancies: (options) => get<DiscrepancyResponse>('/discrepancies', options),
+    compare: (options) => get<CompareResponse>('/compare', options),
   }
 }

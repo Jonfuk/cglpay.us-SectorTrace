@@ -35,7 +35,13 @@ const rows = computed<ProviderRow[]>(() => {
 // shape that could drift. Name first, then up to five count columns.
 const columns = computed<Column<ProviderRow>[]>(() => {
   const first = (data.value ?? [])[0]
-  const cols: Column<ProviderRow>[] = [{ key: 'canonical_name', label: 'Provider' }]
+  const cols: Column<ProviderRow>[] = [
+    {
+      key: 'canonical_name',
+      label: 'Provider',
+      to: (row) => (row.provider_key ? `/providers/${row.provider_key}` : null),
+    },
+  ]
   if (!first) return cols
   const numericKeys = Object.keys(first).filter(
     (k) => k !== 'canonical_name' && k !== 'provider_key' && typeof first[k] === 'number',
