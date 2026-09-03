@@ -58,18 +58,18 @@ def test_vec_literal_is_pgvector_text_form():
     assert [float(x) for x in literal[1:-1].split(",")] == stored
 
 
-def test_backfill_vectors_is_a_noop_without_pgvector(conn, settings):
+def test_backfill_vectors_uses_the_postgres_backend(conn, settings):
     _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     embeddings.run(conn, model="stub")
     result = embeddings.backfill_vectors(conn)
-    assert result["backend"] == "sqlite"
+    assert result["backend"] == "postgres"
     assert result["written"] == 0
 
 
 def test_stub_run_does_not_write_embedding_vec(conn, settings):
-    # The column does not exist on SQLite, and the stub is 256-wide anyway —
-    # `run` must not reference embedding_vec on this path.
+    # The stub is 256-wide while the production vector column is larger, so
+    # `run` must not attempt to write embedding_vec for this fixture model.
     _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     result = embeddings.run(conn, model="stub")
