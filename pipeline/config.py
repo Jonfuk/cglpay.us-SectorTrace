@@ -405,32 +405,16 @@ class Settings(BaseSettings):
     # a finite bound. Permanent configuration errors fail immediately.
     analysis_max_automatic_retries: int = 96
 
-    # Deprecated. PostgreSQL is the only application database now
-    # (performance.md Phase 1); nothing on the application path reads this. It
-    # is retained only so a few dead SQLite-era code paths (a benchmark scratch
-    # branch, a recovery branch) still resolve the attribute until they are
-    # removed. Do not add new readers.
-    database_path: Path = REPO_ROOT / "data" / "warehouse.db"
-
-    # The PostgreSQL warehouse. Required in practice: `db.get_connection`
-    # raises clearly when it is unset, because there is no longer a file
-    # backend to fall back to. Left as an optional field rather than a hard
-    # startup validator so the logging and test paths that build a bare
-    # `Settings()` for something other than the database still construct.
+    # The PostgreSQL warehouse. `get_settings()` enforces this at the process
+    # boundary; the field remains optional so small settings-only unit tests
+    # can construct a value without opening a warehouse connection.
     #
     # There is deliberately no separate DATABASE_BACKEND switch; `DATABASE_URL`
     # is the one place the warehouse is named.
-    # To force SQLite for one command, unset the variable: `DATABASE_URL= …`.
     #
     # No default points at a real server, and nothing in the repository holds a
     # hostname or a password. `redacted_database_url` is what goes in a log.
     database_url: str | None = None
-
-    # A second PostgreSQL URL used only by the explicit mirror commands. It
-    # never selects the application's backend: DATABASE_URL remains the
-    # database normal commands write to. Keeping the source opt-in prevents a
-    # stale local URL from changing ordinary Railway or local runs.
-    database_source_url: str | None = None
 
     # The same warehouse, as a role that holds SELECT and nothing else.
     #
@@ -613,7 +597,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("database_url", "database_ro_url", "database_source_url")
+    @field_validator("database_url", "database_ro_url")
     @classmethod
     def _usable_database_url(cls, v: str | None) -> str | None:
         """An unusable URL is refused here, not at the first connection.
@@ -621,8 +605,8 @@ class Settings(BaseSettings):
         The alternative is a run that applies migrations, fetches for an hour
         and then fails on a write, which is the shape of failure this project
         spends most of its design avoiding. An empty string is treated as
-        unset so `DATABASE_URL=` on a command line forces SQLite back on
-        without editing `.env`.
+        unset so validation can produce the same clear startup error as a
+        missing variable.
         """
         if v is None or not v.strip():
             return None
@@ -632,9 +616,7 @@ class Settings(BaseSettings):
         # generated rather than one anybody typed.
         if not v.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
             raise ValueError(
-                f"DATABASE_URL must be a PostgreSQL URL, got {v.split(':', 1)[0]!r}. "
-                "PostgreSQL is the only alternative backend; leave it unset to "
-                "use the SQLite warehouse at DATABASE_PATH."
+                f"DATABASE_URL must be a PostgreSQL URL, got {v.split(':', 1)[0]!r}."
             )
         return v
 
@@ -749,17 +731,6 @@ class Settings(BaseSettings):
     @property
     def archive_backend(self) -> str:
         return "s3" if self.archive_s3_bucket else "filesystem"
-
-    @property
-    def database_backend(self) -> str:
-        """Vestigial. PostgreSQL is the only backend (performance.md Phase 1).
-
-        Returns `"postgres"` whenever a URL is configured — which it must be for
-        any database work — and `"sqlite"` only for a URL-less `Settings()` that
-        is not going to touch the warehouse (logging, some tests). A handful of
-        dead SQLite-era branches still read it; new code should not.
-        """
-        return "postgres" if self.database_url else "sqlite"
 
     @staticmethod
     def _redact(url: str | None) -> str | None:
@@ -901,4 +872,10 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if not settings.database_url:
+        raise RuntimeError(
+            "DATABASE_URL is required. PostgreSQL 18 is the only application "
+            "database; set it in .env before starting the process."
+        )
+    return settings
