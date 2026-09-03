@@ -59,6 +59,7 @@ around.
 
 ```bash
 ./start.sh                        # show CLI help
+./start.sh tui                    # interactive terminal UI for the CLI
 ./start.sh run all                # collect from every source, in dependency order
 ./start.sh run m01_procurement    # run one module
 ./start.sh run all --jobs 4       # collect concurrently across different hosts

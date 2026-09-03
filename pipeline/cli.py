@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
+from trogon.trogon import Trogon
 
 from pipeline import console as ui
 from pipeline import db, runner
@@ -33,6 +34,14 @@ app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
 app.add_typer(mirror_app, name="mirror")
+# Keep the TUI as another entry point over the existing command schema. This
+# means command validation and side effects remain in the tested CLI handlers.
+@app.command("tui", help="Open Textual TUI.")
+def tui() -> None:
+    # Typer 0.26 vendors its Click compatibility layer, while Trogon imports
+    # external Click. Passing the external context makes Trogon's adapter fail
+    # before launch, so use the explicit application name and no context.
+    Trogon(typer.main.get_group(app), app_name="pipeline", click_context=None).run()
 
 
 def _document_connection():
