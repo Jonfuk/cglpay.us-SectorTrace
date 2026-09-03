@@ -64,8 +64,10 @@ def test_max_applied_migration_reads_the_numeric_prefix() -> None:
 # --- unit: classify_db_error --------------------------------------------
 
 
-def test_classify_recognises_a_missing_sqlite_table() -> None:
-    exc = sqlite3.OperationalError("no such table: run_ledger")
+def test_classify_recognises_a_missing_postgres_table() -> None:
+    from psycopg.errors import UndefinedTable
+
+    exc = UndefinedTable("relation run_ledger does not exist")
     out = degrade.classify_db_error(exc, feature="run_ledger")
     assert out is not None
     assert out.code == "missing_table"
@@ -73,8 +75,10 @@ def test_classify_recognises_a_missing_sqlite_table() -> None:
     assert "run_ledger" not in out.message  # no raw object name to the reader
 
 
-def test_classify_recognises_an_interrupted_query_as_a_retryable_timeout() -> None:
-    out = degrade.classify_db_error(sqlite3.OperationalError("interrupted"))
+def test_classify_recognises_a_postgres_timeout_as_retryable() -> None:
+    from psycopg.errors import QueryCanceled
+
+    out = degrade.classify_db_error(QueryCanceled("canceling statement due to statement timeout"))
     assert out is not None
     assert out.code == "timeout"
     assert out.retryable is True
@@ -83,7 +87,8 @@ def test_classify_recognises_an_interrupted_query_as_a_retryable_timeout() -> No
 def test_classify_leaves_an_unrelated_error_for_the_500_path() -> None:
     assert degrade.classify_db_error(ValueError("nope")) is None
     assert degrade.classify_db_error(
-        sqlite3.OperationalError("database is locked")
+        __import__("psycopg.errors", fromlist=["OperationalError"]).OperationalError(
+            "database is locked")
     ) is None
 
 
@@ -129,7 +134,7 @@ def test_run_ledger_without_its_table_degrades_by_feature(client, conn) -> None:
 
 
 def test_document_search_without_its_element_table_degrades(client, conn) -> None:
-    conn.execute("DROP TABLE document_elements")
+    conn.execute("DROP TABLE document_elements CASCADE")
     conn.commit()
 
     response = client.get("/api/v1/document_search", params={"q": "grant"})

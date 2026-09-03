@@ -251,7 +251,7 @@ def geometry_status(conn: db.Connection) -> dict | None:
     row = conn.execute(
         "SELECT COUNT(*) FILTER (WHERE geometry_geojson IS NOT NULL) AS with_geojson, "
         "       COUNT(*) FILTER (WHERE geom IS NOT NULL) AS with_geom, "
-        "       COUNT(*) FILTER (WHERE geom IS NOT NULL AND NOT ST_IsValid(geom)) AS invalid "
+        "       COUNT(*) FILTER (WHERE geom IS NOT NULL AND NOT public.ST_IsValid(geom)) AS invalid "
         "FROM authorities").fetchone()
     return {"with_geojson": row["with_geojson"], "with_geom": row["with_geom"],
             "invalid": row["invalid"]}

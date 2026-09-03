@@ -107,7 +107,8 @@ def migrations_dir_for(settings: Settings | None = None) -> Path:
     beside it is gone with the SQLite backend.
     """
     settings = settings or get_settings()
-    return settings.migrations_dir / "postgres"
+    return (settings.migrations_dir if settings.migrations_dir.name == "postgres"
+            else settings.migrations_dir / "postgres")
 
 
 def applied_migrations(conn) -> set[str]:
