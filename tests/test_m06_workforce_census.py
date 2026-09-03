@@ -4,6 +4,7 @@ import inspect
 
 import pytest
 
+from pipeline import catalog
 from pipeline.modules import m06_workforce_census as census
 
 # --- segment classification ------------------------------------------------------
@@ -148,7 +149,7 @@ def test_metrics_table_has_no_provider_column(conn):
     """The census publishes sector aggregates only; attributing a figure to a
     named provider would be inference presented as measurement.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(workforce_census_metrics)")]
+    columns = [r["name"] for r in catalog.columns_of(conn, "workforce_census_metrics")]
     assert not any("provider" in c for c in columns)
 
 
