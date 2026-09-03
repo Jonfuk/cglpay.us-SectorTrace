@@ -30,7 +30,9 @@ jobs:
     # anywhere else, so the first thing this will tell us is whether that is
     # true. If it turns out not to be, that is the finding.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The PostgreSQL-only suite is intentionally comprehensive and its
+    # documented clean run is about 35 minutes on GitHub's Ubuntu runner.
+    timeout-minutes: 45
 
     steps:
       # Pinned to a commit rather than a tag: a tag is a moving pointer
