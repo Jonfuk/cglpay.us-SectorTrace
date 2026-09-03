@@ -97,8 +97,10 @@ def test_cdp_documents_requires_a_confirmed_type(conn):
     """cdp_documents.document_type is NOT NULL — a promoted document has a
     confirmed type, never a guess.
     """
-    info = {c[1]: c for c in conn.execute("PRAGMA table_info(cdp_documents)")}
-    assert info["document_type"][3] == 1  # notnull
+    info = {c["column_name"]: c for c in conn.execute(
+        "SELECT column_name, is_nullable FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'cdp_documents'")}
+    assert info["document_type"]["is_nullable"] == "NO"
 
 
 # --- review worklist ------------------------------------------------------------------------
