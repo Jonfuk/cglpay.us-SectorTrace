@@ -9,8 +9,8 @@ exist and were built the right way, and lists which query paths are running
 on their fallback right now because something is missing.
 
 Strictly read-only — `pg_catalog` / `information_schema` lookups only. No
-`CREATE EXTENSION`, no `CREATE INDEX`. On SQLite it reports that the gate
-does not apply and stops.
+`CREATE EXTENSION`, no `CREATE INDEX`. PostgreSQL is the only application
+backend, so this is the active deployment gate rather than an optional probe.
 """
 from __future__ import annotations
 
@@ -42,15 +42,15 @@ BACKED_INDEXES: tuple[BackedIndex, ...] = (
     BackedIndex("pg_trgm", "idx_authorities_name_trgm", "authorities", "gin",
                 "gin_trgm_ops",
                 "operator fuzzy-name search vs authorities.name",
-                "sequential scan + difflib ranking (pipeline/web/name_matches.py)"),
+                "not available: pg_trgm is required (pipeline/web/name_matches.py)"),
     BackedIndex("pg_trgm", "idx_companies_name_trgm", "companies", "gin",
                 "gin_trgm_ops",
                 "review-queue possible_group_company vs companies.company_name",
-                "sequential scan + difflib ranking"),
+                "not available: pg_trgm is required"),
     BackedIndex("pg_trgm", "idx_providers_name_trgm", "providers", "gin",
                 "gin_trgm_ops",
                 "review-queue possible_group_company vs providers.canonical_name",
-                "sequential scan + difflib ranking"),
+                "not available: pg_trgm is required"),
     BackedIndex("pg_trgm", "idx_contracts_supplier_name_trgm", "contracts", "gin",
                 "gin_trgm_ops",
                 "portal contract supplier text filter",
@@ -61,23 +61,17 @@ BACKED_INDEXES: tuple[BackedIndex, ...] = (
                 "full ILIKE '%...%' scan of the contracts table"),
     BackedIndex("postgis", "idx_authorities_geom", "authorities", "gist", None,
                 "authority point-in-polygon and centroid queries on authorities.geom",
-                "shapely pass over geometry_geojson (pipeline/geo.py)"),
+                "not available: PostGIS is required (pipeline/geo.py)"),
     BackedIndex("vector", "idx_document_embeddings_vec", "document_embeddings", "hnsw",
                 "vector_cosine_ops",
                 "semantic-search approximate nearest neighbour",
-                "exact cosine sweep in Python (pipeline/nlp/semantic_search.py)"),
+                "not available: pgvector is required (pipeline/nlp/semantic_search.py)"),
 )
 
 # A derived column, not an index: pgvector's typed copy of the embedding
 # bytes. `idx_document_embeddings_vec` cannot exist without it, so it is
 # checked and reported alongside.
 _VECTOR_COLUMN = ("document_embeddings", "embedding_vec")
-
-_NOT_APPLICABLE = (
-    "This warehouse is on SQLite. The PostgreSQL extension gate does not "
-    "apply; every feature it covers already runs its portable fallback."
-)
-
 
 def _server_version(conn: db.Connection) -> str | None:
     row = conn.execute("SELECT current_setting('server_version') AS v").fetchone()
@@ -125,17 +119,6 @@ def _has_column(conn: db.Connection, table: str, column: str) -> bool:
 
 def report(conn: db.Connection) -> dict:
     """The capability report. See module docstring. Read-only."""
-    if db.backend_of(conn) != "postgres":
-        return {
-            "backend": "sqlite",
-            "applies": False,
-            "ready": True,
-            "note": _NOT_APPLICABLE,
-            "extensions": [],
-            "indexes": [],
-            "active_fallbacks": [],
-        }
-
     extensions = _installed_extensions(conn)
     defs = _index_defs(conn, tuple(b.index for b in BACKED_INDEXES))
     vector_column = _has_column(conn, *_VECTOR_COLUMN)

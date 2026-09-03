@@ -1,14 +1,13 @@
 """PostgreSQL extension readiness report (BETA-063).
 
-The SQLite branch, the CLI, the admin route, and the consistency of the
-hand-maintained matrix against the migration text. The PostgreSQL behaviour
-itself is in `test_pg_capabilities_live.py`, which needs a real server.
+The CLI, admin route, and consistency of the hand-maintained matrix against
+the migration text. The whole suite now runs against PostgreSQL, so the
+extension gate is active in every test.
 """
 from __future__ import annotations
 
 import json
 import re
-import sqlite3
 import threading
 from pathlib import Path
 
@@ -24,13 +23,13 @@ POSTGRES_MIGRATIONS = (
     Path(__file__).resolve().parent.parent / "pipeline" / "migrations" / "postgres")
 
 
-def test_on_sqlite_the_gate_does_not_apply(conn: sqlite3.Connection):
+def test_on_postgres_the_gate_applies(conn):
     result = pg_capabilities.report(conn)
-    assert result["backend"] == "sqlite"
-    assert result["applies"] is False
+    assert result["backend"] == "postgres"
+    assert result["applies"] is True
     assert result["ready"] is True
-    assert "SQLite" in result["note"]
-    assert result["indexes"] == [] and result["active_fallbacks"] == []
+    assert {row["extension"] for row in result["indexes"]} <= set(db.WAREHOUSE_EXTENSIONS)
+    assert result["active_fallbacks"] == []
 
 
 def test_every_matrix_row_names_a_warehouse_extension():
@@ -52,14 +51,14 @@ def test_every_matrix_index_is_declared_in_the_postgres_tree():
             assert backed.opclass in tree, f"{backed.opclass} not in the pg tree"
 
 
-def test_the_cli_reports_and_stays_zero_on_sqlite(conn, settings, monkeypatch):
+def test_the_cli_reports_and_stays_zero_on_postgres(conn, settings, monkeypatch):
     monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
     result = CliRunner().invoke(cli_module.app, ["pg-capabilities"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["applies"] is False
+    assert payload["applies"] is True
 
-    # --strict cannot fail a SQLite warehouse: there is nothing to be ready for.
+    # --strict succeeds when the required extensions and indexes are healthy.
     strict = CliRunner().invoke(cli_module.app, ["pg-capabilities", "--strict"])
     assert strict.exit_code == 0
 
@@ -83,5 +82,5 @@ def client(conn, settings):
 def test_the_route_is_admin_only(client):
     ok = client.get("/api/admin/pg-capabilities")
     assert ok.status_code == 200
-    assert ok.json()["applies"] is False
+    assert ok.json()["applies"] is True
     assert client.get("/api/v1/pg-capabilities").status_code == 404
