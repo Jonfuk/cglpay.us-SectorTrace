@@ -72,9 +72,12 @@ terminal form, including nested commands and their options. Use `Ctrl+S` to
 search, `Ctrl+T` to return to the command tree, `Ctrl+O` for command help, and
 `Ctrl+R` to close the form and run the selected command.
 
-For the operator landing view, use `./start.sh dashboard`. It is read-only and
-shows warehouse health, parse-failure pressure, and an oldest-first pending
-review worklist; select a row to inspect its stored provenance.
+For the operator landing view, use `./start.sh dashboard`. It shows warehouse
+health, parse-failure pressure, and an oldest-first pending review worklist;
+select a row to inspect its stored provenance. Enter a reviewer name and
+optional note to approve, reject or reset an item. Every decision is confirmed
+and recorded through the same audited review workflow as the web UI; it does
+not promote evidence or edit a canonical table.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle

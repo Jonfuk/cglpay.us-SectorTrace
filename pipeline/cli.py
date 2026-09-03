@@ -1987,7 +1987,7 @@ def web(
 
 @app.command()
 def dashboard() -> None:
-    """Open the read-only operator dashboard in the terminal."""
+    """Open the operator dashboard and audited review controls in the terminal."""
     from pipeline import tui_dashboard
 
     tui_dashboard.run()
