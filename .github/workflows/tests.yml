@@ -30,7 +30,9 @@ jobs:
     # anywhere else, so the first thing this will tell us is whether that is
     # true. If it turns out not to be, that is the finding.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The PostgreSQL-only suite is intentionally comprehensive and its
+    # documented clean run is about 35 minutes on GitHub's Ubuntu runner.
+    timeout-minutes: 45
 
     steps:
       # Pinned to a commit rather than a tag: a tag is a moving pointer
@@ -46,6 +48,22 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync
+
+      - name: Start PostgreSQL 18 test database
+        # The application test suite is PostgreSQL-only. Build the same image
+        # used for local development so CI has pgvector, pg_trgm, and PostGIS
+        # rather than silently exercising a different database capability set.
+        run: |
+          docker build --tag sectortrace-postgres:18-test deploy/postgres
+          docker run --detach --name sectortrace-postgres --publish 5432:5432 \
+            --env POSTGRES_USER=sectortrace_app \
+            --env POSTGRES_PASSWORD=sectortrace_app_dev \
+            --env POSTGRES_DB=postgres \
+            --volume "$PWD/deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro" \
+            sectortrace-postgres:18-test
+          until docker exec sectortrace-postgres pg_isready -U sectortrace_app -d postgres; do
+            sleep 1
+          done
 
       - name: Lint
         run: uv run ruff check pipeline tests
@@ -79,6 +97,13 @@ jobs:
         # become annotations on the run. Annotations are readable without a
         # token; the raw logs are not, so a red build was otherwise a red
         # light with no message attached to anyone without repo access.
+        env:
+          # This is a disposable container created by the preceding step;
+          # tests still select their database through POSTGRES_TEST_URL and
+          # never inherit a production DATABASE_URL.
+          POSTGRES_TEST_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
+          DATABASE_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
+          CONTACT_EMAIL: test@example.com
         run: |
           set -o pipefail
           uv run python -m pytest -q --tb=short > pytest.log 2>&1 && exit 0
