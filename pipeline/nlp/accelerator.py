@@ -80,6 +80,7 @@ def select(mode: str):
 
 def ontology_matches(ontology, texts, *, mode: str = "auto"):
     """Run the packed extension when installed, otherwise the trie exactly."""
+    texts = list(texts)
     extension = select(mode)
     if extension is None:
         return ontology.match_batch(texts)
@@ -90,4 +91,46 @@ def ontology_matches(ontology, texts, *, mode: str = "auto"):
     result = extension.match_ontology(packed.utf8, packed.offsets, ontology.version)
     if not isinstance(result, tuple) or len(result) != 5:
         raise MojoIncompatible("Mojo ontology result does not match packed ABI v1")
-    return result
+    return _unpack_matches(ontology, texts, result)
+
+
+def _unpack_matches(ontology, texts: list[str], packed_result):
+    """Convert ABI-v1 columns into the same row shape as ``match_batch``.
+
+    Concept ordinals are indexes into the ontology's sorted concept IDs. The
+    extension does not return the display alias because persistence consumes
+    only concept identity and token offsets; recover the deterministic alias
+    from the authoritative Python ontology so callers still receive ``Match``
+    objects on both accelerator paths.
+    """
+    from pipeline.nlp.ontology import Match, _fold_tokens, _normalise
+
+    concept_ordinals, starts, ends, counts, text_ordinals = packed_result
+    columns = tuple(map(tuple, (concept_ordinals, starts, ends, counts, text_ordinals)))
+    if len({len(column) for column in columns}) != 1:
+        raise MojoIncompatible("Mojo ontology result columns have inconsistent lengths")
+    if any(int(count) != 1 for count in columns[3]):
+        raise MojoIncompatible("Mojo ontology ABI v1 requires one packed row per match")
+    concept_ids = sorted(ontology.concepts)
+    output = [[] for _ in texts]
+    token_rows = [_fold_tokens(_normalise(text or "").split()) for text in texts]
+    for concept_ordinal, start, end, _count, text_ordinal in zip(*columns, strict=True):
+        concept_ordinal = int(concept_ordinal)
+        start, end, text_ordinal = int(start), int(end), int(text_ordinal)
+        if not (0 <= concept_ordinal < len(concept_ids)):
+            raise MojoIncompatible("Mojo ontology result contains an unknown concept ordinal")
+        if not (0 <= text_ordinal < len(texts)) or not (0 <= start < end):
+            raise MojoIncompatible("Mojo ontology result contains invalid text or span offsets")
+        tokens = token_rows[text_ordinal]
+        if end > len(tokens):
+            raise MojoIncompatible("Mojo ontology result span exceeds its input text")
+        concept_id = concept_ids[concept_ordinal]
+        matched_tokens = tokens[start:end]
+        aliases = [alias for alias, alias_tokens in ontology.concepts[concept_id].alias_tokens
+                   if alias_tokens == matched_tokens]
+        if not aliases:
+            raise MojoIncompatible("Mojo ontology result is not an ontology alias match")
+        output[text_ordinal].append(Match(concept_id, aliases[0], start, end))
+    for matches in output:
+        matches.sort(key=lambda match: (match.start_token, match.end_token, match.concept_id))
+    return output

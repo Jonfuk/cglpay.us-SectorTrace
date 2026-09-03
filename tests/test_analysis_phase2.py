@@ -15,6 +15,7 @@ from pipeline.analysis.releases import create_release, finalise_manifest
 from pipeline.analysis.signals import new_signal
 from pipeline.analysis.state import (
     EMPTY_ORDERED_DIGEST,
+    _theme_batch_summary,
     accumulate_themes,
     accumulated_themes,
     chain_digest,
@@ -97,6 +98,21 @@ def test_incremental_theme_accumulator_matches_original_order_and_counts():
         resumed.add(passage)
     assert resumed.themes() == expected
     assert sum(len(theme["passages"]) for theme in resumed.themes()) <= 3
+
+
+def test_theme_batch_summary_has_stable_first_seen_and_distinct_order():
+    passages = [
+        {"text": "staffing pressure", "document_id": "doc-b", "subject_id": "subject-b"},
+        {"text": "staffing vacancy", "document_id": "doc-a", "subject_id": "subject-a"},
+        {"text": "staffing pressure", "document_id": "doc-b", "subject_id": "subject-b"},
+    ]
+    keyed, counts, first, documents, subjects = _theme_batch_summary(
+        passages, first_ordinal=7)
+    assert [ordinal for ordinal, _key, _passage in keyed] == [7, 8, 9]
+    assert dict(counts) == {"staffing": 3}
+    assert first == {"staffing": 7}
+    assert documents == [("staffing", "doc-a"), ("staffing", "doc-b")]
+    assert subjects == [("staffing", "subject-a"), ("staffing", "subject-b")]
 
 
 def test_postgres_checkpoint_resume_preserves_counts_order_and_candidates(conn, settings):

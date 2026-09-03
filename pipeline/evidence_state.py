@@ -47,6 +47,31 @@ def known_date(value) -> date | None:
         return None
 
 
+def classify_change(current, *, evidence_hash: str,
+                    source_url: str | None, explicit_state: str | None = None) -> str:
+    """Classify an observation without mistaking reappearance for absence.
+
+    A current ``removed``/``historical`` row describes the last observation,
+    not the underlying fact.  Seeing the source bytes again must therefore
+    create a fresh live state even when their hash and URL are identical to
+    the pre-removal value; calling that observation ``unchanged`` would leave
+    the evidence permanently current-as-removed.
+    """
+    if explicit_state is not None and explicit_state not in _CHANGE_STATES - {"unchanged"}:
+        raise ValueError(f"invalid explicit evidence state {explicit_state!r}")
+    if current is None:
+        return explicit_state or "new"
+    if explicit_state:
+        return explicit_state
+    if current["state"] in {"removed", "historical"}:
+        return "new"
+    if current["evidence_hash"] != evidence_hash:
+        return "modified"
+    if (current["source_url"] or None) != (source_url or None):
+        return "redirected"
+    return "unchanged"
+
+
 def observe(
     conn,
     *,
@@ -70,18 +95,9 @@ def observe(
         "AND is_current ORDER BY created_at DESC LIMIT 1",
         (layer, identity),
     ).fetchone()
-    if explicit_state is not None and explicit_state not in _CHANGE_STATES - {"unchanged"}:
-        raise ValueError(f"invalid explicit evidence state {explicit_state!r}")
-    if current is None:
-        change = explicit_state or "new"
-    elif explicit_state:
-        change = explicit_state
-    elif current["evidence_hash"] != evidence_hash:
-        change = "modified"
-    elif (current["source_url"] or None) != (source_url or None):
-        change = "redirected"
-    else:
-        change = "unchanged"
+    change = classify_change(
+        current, evidence_hash=evidence_hash, source_url=source_url,
+        explicit_state=explicit_state)
 
     if change == "unchanged":
         state_id = current["temporal_state_id"]

@@ -67,6 +67,42 @@ def test_mojo_is_linux_only_and_cannot_activate_before_parity(monkeypatch):
         accelerator.select("mojo")
 
 
+def test_packed_mojo_rows_decode_to_the_python_match_contract(monkeypatch):
+    onto = ontology.default()
+    texts = ["Recruitment difficulties remain.", "No staffing pressure."]
+    expected = onto.match_batch(texts)
+    concept_ids = sorted(onto.concepts)
+    packed_rows = [
+        (concept_ids.index(match.concept_id), match.start_token, match.end_token, ordinal)
+        for ordinal, matches in enumerate(expected) for match in matches
+    ]
+
+    class Boundary:
+        @staticmethod
+        def match_ontology(_utf8, _offsets, version):
+            assert version == onto.version
+            return (
+                tuple(row[0] for row in packed_rows),
+                tuple(row[1] for row in packed_rows),
+                tuple(row[2] for row in packed_rows),
+                tuple(1 for _row in packed_rows),
+                tuple(row[3] for row in packed_rows),
+            )
+
+    monkeypatch.setattr(accelerator, "select", lambda _mode: Boundary())
+    assert accelerator.ontology_matches(onto, texts, mode="mojo") == expected
+
+
+def test_packed_mojo_rows_reject_non_unit_match_counts():
+    onto = ontology.default()
+    match = onto.match("Recruitment difficulties remain.")[0]
+    concept_ordinal = sorted(onto.concepts).index(match.concept_id)
+    with pytest.raises(accelerator.MojoIncompatible, match="one packed row per match"):
+        accelerator._unpack_matches(
+            onto, ["Recruitment difficulties remain."],
+            ((concept_ordinal,), (match.start_token,), (match.end_token,), (2,), (0,)))
+
+
 def test_three_path_rrf_is_stable_and_never_names_truth_or_quality():
     first = semantic_search._rrf(["b", "a"], ["c", "a"], [("d", 0.9), ("a", 0.8)])
     second = semantic_search._rrf(["b", "a"], ["c", "a"], [("d", 0.9), ("a", 0.8)])
@@ -140,15 +176,21 @@ def test_temporal_changes_and_quality_axes_remain_separate(conn):
         provenance={"meaning": "passage absent, not proof the fact ended"})
     assert redirected["change_state"] == "redirected"
     assert removed["change_state"] == "removed"
+    reappeared = evidence_state.observe(
+        conn, layer="document_element", identity="doc|1", evidence_hash="bbb",
+        retrieved_at="2026-01-06T00:00:00Z", source_url="https://example.test/moved",
+        provenance={"meaning": "source passage observed again"})
+    assert reappeared["change_state"] == "new"
     states = conn.execute(
         "SELECT temporal_state_id,state,is_current,supersedes_id FROM evidence_temporal_state "
         "WHERE layer='document_element' AND evidence_identity='doc|1' ORDER BY created_at"
     ).fetchall()
-    assert len(states) == 4
+    assert len(states) == 5
     assert sum(bool(row["is_current"]) for row in states) == 1
     assert all(states[index]["supersedes_id"] == states[index - 1]["temporal_state_id"]
                for index in range(1, len(states)))
-    assert states[-1]["state"] == "removed"
+    assert states[-2]["state"] == "removed"
+    assert states[-1]["state"] == "new"
     for axis in ("authority", "extraction_quality", "corroboration",
                  "temporal_completeness", "review_state"):
         evidence_state.assert_quality(
@@ -160,6 +202,16 @@ def test_temporal_changes_and_quality_axes_remain_separate(conn):
     assert [row["assertion_type"] for row in rows] == sorted([
         "authority", "extraction_quality", "corroboration",
         "temporal_completeness", "review_state"])
+
+
+def test_identical_evidence_reappearing_after_removal_becomes_live_again():
+    removed = {
+        "state": "removed",
+        "evidence_hash": "aaa",
+        "source_url": "https://example.test/a",
+    }
+    assert evidence_state.classify_change(
+        removed, evidence_hash="aaa", source_url="https://example.test/a") == "new"
 
 
 def test_changed_source_bytes_preserve_history_but_only_new_version_is_active(conn, settings):
