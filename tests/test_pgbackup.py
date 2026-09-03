@@ -194,31 +194,26 @@ class TestNamingAndRetention:
                      / "warehouse-20260814T010101Z.manifest.json").exists(), (
             "the manifest describes a file that is gone")
 
-    def test_both_backends_appear_in_one_listing(self, tmp_path):
+    def test_listing_contains_postgres_snapshots_only(self, tmp_path):
         settings = Settings(contact_email="t@example.com",
                              backup_dir=tmp_path / "backups", _env_file=None)
         settings.backup_dir.mkdir(parents=True)
-        (settings.backup_dir / "warehouse-20260813T010101Z.db").write_bytes(b"x")
         (settings.backup_dir / "warehouse-20260815T010101Z.sql.gz").write_bytes(b"x")
 
         by_name = {e["name"]: e for e in backup.listing(settings)}
 
-        assert by_name["warehouse-20260813T010101Z.db"]["backend"] == "sqlite"
         assert by_name["warehouse-20260815T010101Z.sql.gz"]["backend"] == "postgres"
 
 
-class TestTheBackendDecidesNotTheFile:
-    def test_a_sqlite_backup_is_not_restored_into_postgres(self, tmp_path):
-        """Refused on the name, before anything is opened. The alternative is
-        a parse error from inside a driver, which does not tell the operator
-        that the thing to change is DATABASE_URL."""
+class TestThePostgresBackupContract:
+    def test_a_non_postgres_backup_is_refused(self, tmp_path):
         settings = Settings(contact_email="t@example.com",
                              database_url="postgresql://u:p@lan:5432/sectortrace",
                              _env_file=None)
         file = tmp_path / "warehouse-20260815T010101Z.db"
         file.write_bytes(b"SQLite format 3\x00")
 
-        with pytest.raises(backup.BackupError, match="not a postgres backup"):
+        with pytest.raises(backup.BackupError, match="not a PostgreSQL backup"):
             backup.restore(file, settings)
 
     def test_an_invalid_postgres_archive_is_rejected_before_restore(self, tmp_path):
@@ -237,5 +232,5 @@ class TestTheBackendDecidesNotTheFile:
                              database_path=tmp_path / "warehouse.db",
                              _env_file=None)
 
-        with pytest.raises(backup.BackupError, match="DATABASE_URL is not set"):
+        with pytest.raises(backup.BackupError, match="requires DATABASE_URL"):
             pgbackup.dump(settings)

@@ -165,9 +165,8 @@ def dump(settings: Settings | None = None, destination: Path | None = None,
     and unlinking is not.
     """
     settings = settings or get_settings()
-    if settings.database_backend != "postgres":
-        raise BackupError(
-            "this is the PostgreSQL backup path and DATABASE_URL is not set.")
+    if not settings.database_url:
+        raise BackupError("PostgreSQL backup path requires DATABASE_URL.")
 
     started = _now()
     name = (f"warehouse-{started.strftime('%Y%m%dT%H%M%SZ')}"
@@ -176,9 +175,8 @@ def dump(settings: Settings | None = None, destination: Path | None = None,
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if destination is None:
-        # Same reasoning as the SQLite path: a second-resolution name the
-        # caller did not choose, colliding, is not their mistake to be told
-        # about.
+        # A second-resolution name the caller did not choose may collide; it
+        # is not their mistake to be told about.
         attempt = 2
         while target.exists():
             target = settings.backup_dir / f"{name}-{attempt}{ARCHIVE_SUFFIX}"
@@ -484,9 +482,8 @@ def restore(archive: Path, settings: Settings | None = None,
         wrong one.
     """
     settings = settings or get_settings()
-    if settings.database_backend != "postgres":
-        raise BackupError(
-            "this is the PostgreSQL restore path and DATABASE_URL is not set.")
+    if not settings.database_url:
+        raise BackupError("PostgreSQL restore path requires DATABASE_URL.")
     if not archive.is_file():
         raise BackupError(f"no snapshot at {archive}.")
 
