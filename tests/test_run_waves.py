@@ -430,14 +430,12 @@ def test_a_parallel_wave_of_writing_modules_all_commit(tmp_path, monkeypatch):
     Reproduces the shape of the failing run: one module whose own work takes a
     while, and a wave of others starting at the same moment. Before the fix,
     the provider seed each of them wrote on startup was left uncommitted, so
-    the first module to open a transaction held the database's only write slot
-    across its whole run and the rest died on the busy handler.
+    the first module to open a transaction held the database transaction open
+    across its whole run and the rest could not make progress.
 
-    Given a busy timeout of two seconds rather than the real two minutes, and
-    a slow module that outlasts it. Without that this test has no teeth: eight
-    modules waiting politely for a second and a half all succeed against a
-    120-second timeout whether the bug is present or not — which is exactly
-    why the original failure needed a four-hour run to show itself.
+    The slow module outlasts the other modules. That gives the test teeth: the
+    workers must commit their independent setup work before doing the slow
+    part, rather than relying on a single shared transaction at the end.
     """
     import time
 
@@ -464,7 +462,6 @@ def test_a_parallel_wave_of_writing_modules_all_commit(tmp_path, monkeypatch):
     for index, name in enumerate(names):
         monkeypatch.setitem(MODULE_REGISTRY, name, make(name, 5.0 if index == 0 else 0.1))
 
-    monkeypatch.setattr(db, "BUSY_TIMEOUT_MS", 2_000)
     with ui.progress() as bar:
         summary = cli_module._run_waves([names], 8, settings, None, False, None, bar)
 
