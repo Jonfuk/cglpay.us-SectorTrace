@@ -23,8 +23,8 @@ RESTRICTED_VIEWS = ["restricted_v_shared_officers", "restricted_v_officer_edges"
 
 
 def _views(conn) -> set[str]:
-    return {r["name"] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='view'")}
+    return {r["viewname"] for r in conn.execute(
+        "SELECT viewname FROM pg_views WHERE schemaname = current_schema()")}
 
 
 def test_the_graph_views_exist(conn):
@@ -42,7 +42,11 @@ def test_every_view_is_queryable(conn, view):
 
 
 def test_every_edge_declares_what_it_rests_on(conn):
-    columns = {r["name"] for r in conn.execute("PRAGMA table_info(v_entity_edges)")}
+    columns = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = ?",
+        ("v_entity_edges",),
+    )}
     assert {"source_type", "source_id", "relationship",
             "target_type", "target_id", "basis"} <= columns
 
@@ -55,7 +59,7 @@ def test_the_confidence_view_breaks_edges_down_by_basis():
     from pathlib import Path
 
     sql = (Path(__file__).resolve().parent.parent / "pipeline" / "migrations"
-            / "0023_entity_graph.sql").read_text(encoding="utf-8")
+           / "postgres" / "0023_entity_graph.sql").read_text(encoding="utf-8")
     assert "v_entity_edge_confidence" in sql
     assert "GROUP BY relationship, basis" in sql
 
@@ -87,7 +91,11 @@ def test_the_public_edge_view_names_no_one(conn):
     """Organisation-to-organisation only. Officer names live exclusively in
     the restricted views.
     """
-    columns = {r["name"].lower() for r in conn.execute("PRAGMA table_info(v_entity_edges)")}
+    columns = {r["column_name"].lower() for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = ?",
+        ("v_entity_edges",),
+    )}
     assert not any("officer" in c or "person" in c or "name" in c and "target_label" != c
                     for c in columns if c not in {"target_label"})
 
