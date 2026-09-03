@@ -53,10 +53,10 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         conn.execute(
             "INSERT INTO contracts (notice_id, ocid, buyer_name, buyer_ons_code, "
             " supplier_name_raw, title, value_core, currency, date_published, "
-            " date_end, procedure_type, psr_basis, source_url, retrieved_at, "
+                " date_end, procedure_type, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
             "VALUES (?, ?, 'Birmingham City Council', 'E08000025', ?, "
-            " 'Treatment services', ?, 'GBP', ?, ?, 'open', 'psr', "
+                " 'Treatment services', ?, 'GBP', ?, ?, 'open', "
             " 'https://find.example/n', '2026-08-01T00:00:00Z', 200, "
             " 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", supplier, value, published, date_end))
