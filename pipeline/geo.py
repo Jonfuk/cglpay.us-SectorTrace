@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import structlog
 
-from pipeline import db
-
 log = structlog.get_logger()
 
 # geometry_geojson -> geom. ST_MakeValid can hand back a GeometryCollection
@@ -34,14 +32,11 @@ def refresh_authority_geometry(conn) -> int:
     boundaries, so the derived column tracks its source whichever path changed
     it.
 
-    A no-op unless PostgreSQL + PostGIS. Also (re)creates the column and its
-    GiST index: migration 0070 guards that DDL on PostGIS being present when
-    it runs, so a cluster that gains PostGIS later would otherwise never get
-    the column.
+    Also (re)creates the column and its GiST index: migration 0070 guards that
+    DDL on PostGIS being present when it runs, so a cluster that gains PostGIS
+    later would otherwise never get the column. PostGIS is a required extension
+    now, so the former no-op-without-it guard is gone.
     """
-    if db.backend_of(conn) != "postgres" or not db.has_extension(conn, "postgis"):
-        return 0
-
     extension = conn.execute(
         "SELECT current_schema() AS application_schema, n.nspname AS "
         "postgis_schema FROM pg_extension e "

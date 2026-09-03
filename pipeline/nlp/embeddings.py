@@ -15,10 +15,11 @@
   Its resolved revision SHA is recorded on the run and the registry row where
   the hub exposes one.
 
-The vector is stored as a little-endian float32 blob with its dimension on
-the row: identical bytes in both dialect trees, so exact cosine is computed
-in Python and a pgvector column + ANN index stay a later, benchmark-gated,
-Postgres-only migration. See docs/semantic-analysis.md.
+The vector is stored two ways on the row: a little-endian float32 blob with
+its dimension, and — for models of the width the column is typed to
+(VECTOR_COLUMN_DIM) — a pgvector `embedding_vec` with an HNSW index (migration
+0071), which is the semantic-search path. Collapsing to the single pgvector
+copy is Phase 3 of performance.md. See docs/semantic-analysis.md.
 """
 from __future__ import annotations
 
@@ -29,7 +30,6 @@ import struct
 import threading
 from typing import Any
 
-from pipeline import db
 from pipeline.nlp import models, runs
 
 STUB_MODEL_KEY = "embed:stub"
@@ -280,13 +280,12 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
     now = runs.utcnow()
     written = 0
 
-    # On PostgreSQL with pgvector, fill the ANN column in the same statement so
-    # a fresh embed run needs no separate backfill. Only for the width the
-    # `embedding_vec` column is typed to (migration 0071); the stub and any
-    # other-width model stay on the exact path.
-    with_vec = (db.backend_of(conn) == "postgres"
-                and getattr(embedder, "dimension", None) == VECTOR_COLUMN_DIM
-                and db.has_extension(conn, "vector"))
+    # Fill the pgvector ANN column in the same statement so a fresh embed run
+    # needs no separate backfill. Only for the width the `embedding_vec` column
+    # is typed to (migration 0071); the stub and any other-width model stay on
+    # the exact path, which writes the blob alone. pgvector is mandatory now, so
+    # the only question left is whether this model's width fits the column.
+    with_vec = getattr(embedder, "dimension", None) == VECTOR_COLUMN_DIM
     if with_vec:
         _set_vector_search_path(conn)
         insert_sql = (
@@ -393,11 +392,6 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
 
     Only the `VECTOR_COLUMN_DIM`-wide rows: the column is typed to that width.
     """
-    backend = db.backend_of(conn)
-    if backend != "postgres" or not db.has_extension(conn, "vector"):
-        return {"backend": backend, "pending": 0, "written": 0,
-                "note": "pgvector not present; nothing to backfill"}
-
     with conn:
         _set_vector_search_path(conn)
         conn.execute(

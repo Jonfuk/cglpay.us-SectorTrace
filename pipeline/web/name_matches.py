@@ -16,19 +16,14 @@ table (pipeline/web/review.py) — `buyer_name_overrides.py` and
 `provider_identifiers` are edited by hand, deliberately (settled decision 4's
 spirit: judgement is not automated).
 
-On PostgreSQL with `pg_trgm` the ranking is `similarity()` over the GIN
-indexes migration 0069 adds. Without it — SQLite, or a PostgreSQL server with
-no pg_trgm — the same shape is computed with `difflib` over a capped candidate
-pull: slower, a different metric, but the same ordering at the sizes here
-(347 authorities, ~2k providers/companies). `method` in the response says
-which ran so the score is not over-read.
+The ranking is `similarity()` over the `pg_trgm` GIN indexes migration 0069
+adds. pg_trgm is a required extension now, so this is the only path; the
+`difflib` fallback that once stood in for it on SQLite is gone. `method` in the
+response stays ("pg_trgm") so the score is not over-read.
 """
 from __future__ import annotations
 
-import difflib
 import re
-
-from pipeline import db
 
 # item_type -> the reference sets to rank a candidate name against, each as
 # (table, id_column, name_column, extra_where_or_None). Table and column names
@@ -46,11 +41,8 @@ _TARGETS: dict[str, list[tuple[str, str, str, str | None]]] = {
 
 _MAX_SUGGESTIONS = 12
 # A floor so a page of near-random matches is not offered as if it meant
-# something. Applies to both metrics; neither is calibrated, both are 0..1.
+# something. Not calibrated; 0..1.
 _MIN_SCORE = 0.15
-# Rows pulled for the Python fallback before ranking — a ceiling comfortably
-# above every reference set the targets name, not a filter.
-_FALLBACK_CANDIDATE_CAP = 5000
 
 
 class NameMatchError(ValueError):
@@ -89,13 +81,11 @@ def suggestions(conn, item_id: int) -> dict:
         return {"item_id": item_id, "item_type": item_type, "query": "",
                 "method": None, "matches": []}
 
-    use_trgm = (db.backend_of(conn) == "postgres"
-                and db.has_extension(conn, "pg_trgm"))
-    rank = _trgm_ranked if use_trgm else _difflib_ranked
-
+    # pg_trgm is a required extension now, so ranking always goes through it;
+    # the difflib fallback that stood in for it went with the SQLite backend.
     matches: list[dict] = []
     for table, id_col, name_col, extra in targets:
-        for got in rank(conn, table, id_col, name_col, extra, query):
+        for got in _trgm_ranked(conn, table, id_col, name_col, extra, query):
             matches.append({"target": table, "id": got[0], "name": got[1],
                             "score": round(float(got[2]), 4)})
     matches.sort(key=lambda m: m["score"], reverse=True)
@@ -104,7 +94,7 @@ def suggestions(conn, item_id: int) -> dict:
         "item_id": item_id,
         "item_type": item_type,
         "query": query,
-        "method": "pg_trgm" if use_trgm else "difflib",
+        "method": "pg_trgm",
         "matches": matches[:_MAX_SUGGESTIONS],
     }
 
@@ -119,22 +109,3 @@ def _trgm_ranked(conn, table, id_col, name_col, extra, query):
         f"SELECT {id_col}, {name_col}, similarity({name_col}, ?) AS score "
         f"FROM {table} {where} ORDER BY score DESC LIMIT ?",
         (query, query, _MIN_SCORE, _MAX_SUGGESTIONS)).fetchall()
-
-
-def _difflib_ranked(conn, table, id_col, name_col, extra, query):
-    where = f"WHERE {name_col} IS NOT NULL AND {name_col} <> ''"
-    if extra:
-        where += f" AND {extra}"
-    rows = conn.execute(
-        f"SELECT {id_col}, {name_col} FROM {table} {where} LIMIT ?",
-        (_FALLBACK_CANDIDATE_CAP,)).fetchall()
-
-    needle = query.lower()
-    scored = []
-    for got in rows:
-        name = got[1] or ""
-        score = difflib.SequenceMatcher(None, needle, name.lower()).ratio()
-        if score >= _MIN_SCORE:
-            scored.append((got[0], name, score))
-    scored.sort(key=lambda t: t[2], reverse=True)
-    return scored[:_MAX_SUGGESTIONS]

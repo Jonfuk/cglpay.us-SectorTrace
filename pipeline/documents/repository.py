@@ -152,8 +152,6 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
          config_hash, text_hash, now),
     )
     conn.execute("DELETE FROM document_elements WHERE document_version_id=?", (version_id,))
-    if settings.database_backend == "sqlite":
-        conn.execute("DELETE FROM document_element_search WHERE document_id=?", (document_id,))
     element_ids: dict[int, str] = {}
     for item in parsed.elements:
         element_id = stable_id("document-element", f"{version_id}|{item.sequence}")
@@ -167,15 +165,10 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
              item.heading_level, item.text, text_hash, _json(item.bbox) if item.bbox else None,
              _json(item.metadata)),
         )
-        if settings.database_backend == "sqlite" and item.text:
-            # Named columns here despite positional being the FTS5 idiom. SQLite refuses
-            # ALTER on a virtual table, so this cannot drift the way 0054 drifted
-            # evidence_records; what remains reachable is a migration dropping and
-            # recreating the table in a different order, which naming survives.
-            conn.execute(
-                "INSERT INTO document_element_search (document_element_id, document_id, page_number, "
-                "element_type, text) VALUES (?, ?, ?, ?, ?)",
-                (element_id, document_id, item.page_number, item.element_type, item.text))
+        # No FTS5 index to maintain here any more: PostgreSQL search is a
+        # `tsvector` computed over document_elements.text at query time
+        # (see `search` below and semantic_search), so the element row is the
+        # whole write.
         for topic, count in topic_matches(item.text or "").items():
             conn.execute(
                 "INSERT INTO document_topics (document_element_id, topic, match_count, match_method) "
@@ -229,17 +222,10 @@ def mark_unchanged(conn, evidence_id: str, ocr_status: str) -> None:
 
 
 def search(conn, settings, query: str, limit: int = 25) -> list[dict]:
-    if settings.database_backend == "sqlite":
-        rows = conn.execute(
-            "SELECT s.document_element_id, s.document_id, s.page_number, s.element_type, s.text, "
-            "d.evidence_id, e.source_url FROM document_element_search s JOIN document_records d ON d.document_id=s.document_id "
-            "JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE document_element_search MATCH ? LIMIT ?",
-            (query, limit)).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT de.document_element_id, d.document_id, de.page_number, de.element_type, de.text, d.evidence_id, e.source_url "
-            "FROM document_elements de JOIN document_versions dv ON dv.document_version_id=de.document_version_id "
-            "JOIN document_records d ON d.document_id=dv.document_id JOIN evidence_records e ON e.evidence_id=d.evidence_id "
-            "WHERE dv.is_active=1 AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) LIMIT ?",
-            (query, limit)).fetchall()
+    rows = conn.execute(
+        "SELECT de.document_element_id, d.document_id, de.page_number, de.element_type, de.text, d.evidence_id, e.source_url "
+        "FROM document_elements de JOIN document_versions dv ON dv.document_version_id=de.document_version_id "
+        "JOIN document_records d ON d.document_id=dv.document_id JOIN evidence_records e ON e.evidence_id=d.evidence_id "
+        "WHERE dv.is_active=1 AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) LIMIT ?",
+        (query, limit)).fetchall()
     return [dict(row) for row in rows]

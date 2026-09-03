@@ -1,31 +1,21 @@
-"""What the warehouse contains, asked the same way on either backend.
+"""What the warehouse contains, asked once for the whole codebase.
 
-`sqlite_master` and `PRAGMA table_info` have no PostgreSQL equivalent, and
-four places needed them: the migration ledger and restricted-table guard in
-`db.py`, the table browser and SQL box in `web/queries.py`, the Health tab in
-`web/health.py`, and the DATA_DICTIONARY generator in `exports/docs.py`. They
-had four slightly different spellings of the same two questions, which is
-three more than the number of places a schema-introspection bug should be
-able to hide.
+Schema introspection through `information_schema` and `pg_catalog`, gathered
+into one helper each for the four places that needed it: the migration ledger
+and restricted-table guard in `db.py`, the table browser and SQL box in
+`web/queries.py`, the Health tab in `web/health.py`, and the DATA_DICTIONARY
+generator in `exports/docs.py`. They had four slightly different spellings of
+the same questions, which is three more than the number of places a
+schema-introspection bug should be able to hide.
 
-One helper each, here, dispatching on the backend.
-
-A note on ordering. SQLite sorts NULLs first ascending and last descending;
-PostgreSQL does the reverse. Nothing in this file orders by a nullable
-column, and it stays that way — `name` and `ordinal_position` are both NOT
-NULL — but the rule is written down here because the same trap is live in
-`pipeline/exports/`, where the answer had to be explicit `NULLS` clauses.
+A note on ordering. Nothing in this file orders by a nullable column, and it
+stays that way — `name` and `ordinal_position` are both NOT NULL — but the rule
+is written down here because the same trap is live in `pipeline/exports/`,
+where the answer had to be explicit `NULLS` clauses.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
-
-from pipeline import db
-
-# The tables SQLite keeps for itself. PostgreSQL puts its equivalents in
-# pg_catalog and information_schema, which are separate schemas and therefore
-# never in `current_schema()` — no filter needed on that side.
-_SQLITE_INTERNAL = "sqlite_%"
 
 
 def quote(identifier: str) -> str:
@@ -50,47 +40,19 @@ def list_objects(conn) -> list[dict]:
     Ordered by name so two backends produce the same list in the same order —
     the migration-tree equivalence test compares them directly.
     """
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT table_name AS name, "
-            "       CASE WHEN table_type = 'VIEW' THEN 'view' ELSE 'table' END AS type "
-            "FROM information_schema.tables "
-            "WHERE table_schema = current_schema() "
-            "ORDER BY table_name"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT name, type FROM sqlite_master "
-            "WHERE type IN ('table', 'view') AND name NOT LIKE ? "
-            "ORDER BY name", (_SQLITE_INTERNAL,)
-        ).fetchall()
+    rows = conn.execute(
+        "SELECT table_name AS name, "
+        "       CASE WHEN table_type = 'VIEW' THEN 'view' ELSE 'table' END AS type "
+        "FROM information_schema.tables "
+        "WHERE table_schema = current_schema() "
+        "ORDER BY table_name"
+    ).fetchall()
     return [{"name": r["name"], "type": r["type"]} for r in rows]
 
 
 def table_names(conn) -> list[str]:
     """Base tables only, views excluded."""
     return [o["name"] for o in list_objects(conn) if o["type"] == "table"]
-
-
-def fts5_tables(conn) -> frozenset[str]:
-    """FTS5 virtual tables, and the shadow tables SQLite keeps behind them.
-
-    An FTS5 index is a SQLite-only mechanism — `document_element_search` and
-    its `_data`/`_idx`/`_docsize`/`_config`/`_content` tables appear in
-    `sqlite_master` like any other table, but PostgreSQL has no virtual-table
-    equivalent. `migrations/postgres/0053_document_analysis.sql` gives the
-    same search a `tsvector` GIN index instead, so these names are never
-    created there and are not part of the schema the two backends share.
-    Empty on PostgreSQL, where the question does not apply.
-    """
-    if db.backend_of(conn) == "postgres":
-        return frozenset()
-    virtual = [r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' "
-        "AND sql LIKE 'CREATE VIRTUAL TABLE%USING fts5%'").fetchall()]
-    shadows = {f"{name}_{suffix}" for name in virtual
-               for suffix in ("data", "idx", "docsize", "config", "content")}
-    return frozenset(virtual) | shadows
 
 
 def row_counts(conn, names: Sequence[str]) -> dict[str, int]:
@@ -145,38 +107,26 @@ def columns_of(conn, name: str) -> list[dict]:
     schema-equivalence test maps them deliberately rather than by string
     equality.
     """
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT c.column_name AS name, c.data_type AS type, "
-            "       c.is_nullable AS is_nullable, "
-            "       COALESCE(k.is_pk, 0) AS pk "
-            "FROM information_schema.columns c "
-            "LEFT JOIN ( "
-            "    SELECT a.attname AS column_name, 1 AS is_pk "
-            "    FROM pg_index i "
-            "    JOIN pg_attribute a "
-            "      ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-            "    WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
-            ") k ON k.column_name = c.column_name "
-            "WHERE c.table_schema = current_schema() AND c.table_name = ? "
-            "ORDER BY c.ordinal_position", (name, name)
-        ).fetchall()
-        return [
-            {
-                "name": r["name"],
-                "type": r["type"] or "",
-                "notnull": r["is_nullable"] == "NO",
-                "pk": bool(r["pk"]),
-            }
-            for r in rows
-        ]
-
-    rows = conn.execute(f"PRAGMA table_info({quote(name)})").fetchall()
+    rows = conn.execute(
+        "SELECT c.column_name AS name, c.data_type AS type, "
+        "       c.is_nullable AS is_nullable, "
+        "       COALESCE(k.is_pk, 0) AS pk "
+        "FROM information_schema.columns c "
+        "LEFT JOIN ( "
+        "    SELECT a.attname AS column_name, 1 AS is_pk "
+        "    FROM pg_index i "
+        "    JOIN pg_attribute a "
+        "      ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+        "    WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
+        ") k ON k.column_name = c.column_name "
+        "WHERE c.table_schema = current_schema() AND c.table_name = ? "
+        "ORDER BY c.ordinal_position", (name, name)
+    ).fetchall()
     return [
         {
             "name": r["name"],
             "type": r["type"] or "",
-            "notnull": bool(r["notnull"]),
+            "notnull": r["is_nullable"] == "NO",
             "pk": bool(r["pk"]),
         }
         for r in rows
@@ -193,18 +143,15 @@ def primary_key(conn, name: str) -> list[str]:
     caller has to say so rather than return rows in whatever order the heap
     is in today.
     """
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT a.attname AS name "
-            "FROM pg_index i "
-            "JOIN pg_attribute a "
-            "  ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-            "WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
-            "ORDER BY array_position(i.indkey, a.attnum)", (name,)
-        ).fetchall()
-        return [r["name"] for r in rows]
-
-    return [c["name"] for c in columns_of(conn, name) if c["pk"]]
+    rows = conn.execute(
+        "SELECT a.attname AS name "
+        "FROM pg_index i "
+        "JOIN pg_attribute a "
+        "  ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+        "WHERE i.indrelid = to_regclass(?) AND i.indisprimary "
+        "ORDER BY array_position(i.indkey, a.attnum)", (name,)
+    ).fetchall()
+    return [r["name"] for r in rows]
 
 
 def foreign_key_columns(conn) -> list[dict]:
@@ -216,35 +163,26 @@ def foreign_key_columns(conn) -> list[dict]:
     *on*, so a cell can become a link to the matching parent row.
     """
     out: list[dict] = []
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT r.relname AS child, "
-            "       a.attname AS from_col, "
-            "       cr.relname AS parent, "
-            "       af.attname AS to_col "
-            "FROM pg_constraint c "
-            "JOIN pg_class r ON r.oid = c.conrelid "
-            "JOIN pg_class cr ON cr.oid = c.confrelid "
-            "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
-            "JOIN unnest(c.confkey) WITH ORDINALITY AS fk(attnum, ord) "
-            "  ON fk.ord = k.ord "
-            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
-            "JOIN pg_attribute af ON af.attrelid = c.confrelid AND af.attnum = fk.attnum "
-            "WHERE c.contype = 'f' "
-            "  AND r.relnamespace = current_schema()::regnamespace"
-        ).fetchall()
-        for r in rows:
-            if r["child"] != r["parent"]:
-                out.append({"child": r["child"], "from_col": r["from_col"],
-                            "parent": r["parent"], "to_col": r["to_col"]})
-        return sorted(out, key=lambda e: (e["child"], e["from_col"]))
-
-    for child in table_names(conn):
-        for row in conn.execute(
-                f"PRAGMA foreign_key_list({quote(child)})").fetchall():
-            if row["table"] != child:
-                out.append({"child": child, "from_col": row["from"],
-                            "parent": row["table"], "to_col": row["to"]})
+    rows = conn.execute(
+        "SELECT r.relname AS child, "
+        "       a.attname AS from_col, "
+        "       cr.relname AS parent, "
+        "       af.attname AS to_col "
+        "FROM pg_constraint c "
+        "JOIN pg_class r ON r.oid = c.conrelid "
+        "JOIN pg_class cr ON cr.oid = c.confrelid "
+        "JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+        "JOIN unnest(c.confkey) WITH ORDINALITY AS fk(attnum, ord) "
+        "  ON fk.ord = k.ord "
+        "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+        "JOIN pg_attribute af ON af.attrelid = c.confrelid AND af.attnum = fk.attnum "
+        "WHERE c.contype = 'f' "
+        "  AND r.relnamespace = current_schema()::regnamespace"
+    ).fetchall()
+    for r in rows:
+        if r["child"] != r["parent"]:
+            out.append({"child": r["child"], "from_col": r["from_col"],
+                        "parent": r["parent"], "to_col": r["to_col"]})
     return sorted(out, key=lambda e: (e["child"], e["from_col"]))
 
 
@@ -262,22 +200,15 @@ def foreign_keys(conn) -> list[tuple[str, str]]:
     order within one load — a different problem, and not one this warehouse
     has.
     """
-    edges: set[tuple[str, str]] = set()
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT c.conrelid::regclass::text AS child, "
-            "       c.confrelid::regclass::text AS parent "
-            "FROM pg_constraint c "
-            "JOIN pg_class r ON r.oid = c.conrelid "
-            "WHERE c.contype = 'f' "
-            "  AND r.relnamespace = current_schema()::regnamespace"
-        ).fetchall()
-        edges = {(r["child"], r["parent"]) for r in rows}
-    else:
-        for child in table_names(conn):
-            for row in conn.execute(
-                    f"PRAGMA foreign_key_list({quote(child)})").fetchall():
-                edges.add((child, row["table"]))
+    rows = conn.execute(
+        "SELECT c.conrelid::regclass::text AS child, "
+        "       c.confrelid::regclass::text AS parent "
+        "FROM pg_constraint c "
+        "JOIN pg_class r ON r.oid = c.conrelid "
+        "WHERE c.contype = 'f' "
+        "  AND r.relnamespace = current_schema()::regnamespace"
+    ).fetchall()
+    edges = {(r["child"], r["parent"]) for r in rows}
     return sorted((child, parent) for child, parent in edges if child != parent)
 
 
@@ -290,20 +221,13 @@ def tables_with_column(conn, column: str) -> list[str]:
     `information_schema.columns` answers it directly, and the SQLite side
     keeps the join it already had.
     """
-    if db.backend_of(conn) == "postgres":
-        rows = conn.execute(
-            "SELECT DISTINCT c.table_name AS name "
-            "FROM information_schema.columns c "
-            "JOIN information_schema.tables t "
-            "  ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
-            "WHERE c.table_schema = current_schema() "
-            "  AND t.table_type = 'BASE TABLE' AND c.column_name = ? "
-            "ORDER BY c.table_name", (column,)
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT m.name AS name FROM sqlite_master m "
-            "JOIN pragma_table_info(m.name) p "
-            "WHERE m.type = 'table' AND p.name = ? ORDER BY m.name", (column,)
-        ).fetchall()
+    rows = conn.execute(
+        "SELECT DISTINCT c.table_name AS name "
+        "FROM information_schema.columns c "
+        "JOIN information_schema.tables t "
+        "  ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
+        "WHERE c.table_schema = current_schema() "
+        "  AND t.table_type = 'BASE TABLE' AND c.column_name = ? "
+        "ORDER BY c.table_name", (column,)
+    ).fetchall()
     return [r["name"] for r in rows]

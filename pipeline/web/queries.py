@@ -15,19 +15,16 @@ guards make that safe to expose rather than merely convenient:
     for minutes; the alternative to a deadline is a page that hangs with no
     way to cancel and a thread stuck behind it.
 
-Read-only is not a permission boundary between people. Anyone who can reach
-this server can already open the file with `sqlite3`. It is a boundary between
-*this tool* and the warehouse: a viewer that can only view cannot corrupt the
-evidence base through a mis-click, and that is what it is for.
+Read-only is not a permission boundary between people. It is a boundary between
+*this tool* and the warehouse: reads go through a SELECT-only role
+(DATABASE_RO_URL) so a viewer that can only view cannot corrupt the evidence
+base through a mis-click, and that is what it is for.
 """
 from __future__ import annotations
 
 import json
 import re
-import sqlite3
-import time
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Iterator
 
 from pipeline import catalog, db
@@ -43,12 +40,6 @@ MAX_PAGE_SIZE = 500
 # Long enough for a sort over the largest table on a cold cache, short enough
 # that a mistake is a message rather than a hang.
 QUERY_TIMEOUT_SECONDS = 20.0
-
-# How often SQLite consults the progress handler, in VM instructions. Small
-# enough to notice a deadline promptly, large enough that the callback is not
-# itself a cost.
-_PROGRESS_INSTRUCTIONS = 10_000
-
 
 class QueryError(Exception):
     """A query that could not run, with a message meant for the person who
@@ -86,101 +77,49 @@ def readonly_connection(settings: Settings | None = None):
     """
     settings = settings or get_settings()
 
-    if settings.database_backend == "postgres":
-        import structlog
+    import structlog
 
-        from pipeline import pg
+    from pipeline import pg
 
-        url = settings.database_ro_url or settings.database_url
-        if not settings.database_ro_url:
-            structlog.get_logger().warning(
-                "web.readonly_without_a_reader_role",
-                database=settings.redacted_database_url,
-                note="reads are running as the schema owner; set DATABASE_RO_URL "
-                     "to a SELECT-only role so a write is refused by the server "
-                     "rather than by a session setting")
-        try:
-            # Borrowed, not opened: `close()` gives it back. Opening one to
-            # the LAN server is 68ms, which the web layer was paying on every
-            # request — more than most of the queries it then ran. See
-            # `pg.read_pool`.
-            return pg.connect_pooled(
-                url, application_name="sectortrace-web",
-                statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
-        except db.Error as exc:
-            raise QueryError(
-                f"Could not reach the PostgreSQL warehouse at "
-                f"{settings._redact(url)}: {exc}"
-            ) from exc
-
-    path = Path(settings.database_path).resolve()
-    if not path.exists():
+    url = settings.database_ro_url or settings.database_url
+    if not url:
         raise QueryError(
-            f"No warehouse at {path}. Run a module first — e.g. "
-            "`./start.sh run m00_geography` — and the database will be created."
-        )
-
-    # SQLite's URI form wants forward slashes on every platform, and an
-    # absolute Windows path (C:/...) needs the extra leading slash to sit in
-    # the authority-less form the parser expects.
-    as_posix = path.as_posix()
-    uri = f"file:{as_posix}?mode=ro" if as_posix.startswith("/") else f"file:/{as_posix}?mode=ro"
-
+            "No DATABASE_URL configured. PostgreSQL is the only application "
+            "database (performance.md Phase 1).")
+    if not settings.database_ro_url:
+        structlog.get_logger().warning(
+            "web.readonly_without_a_reader_role",
+            database=settings.redacted_database_url,
+            note="reads are running as the schema owner; set DATABASE_RO_URL "
+                 "to a SELECT-only role so a write is refused by the server "
+                 "rather than by a session setting")
     try:
-        conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-    except db.OperationalError as exc:
-        # The usual cause is a WAL database whose -shm file is missing and
-        # cannot be created by a read-only connection: SQLite needs shared
-        # memory to read a WAL, and read-only cannot make it. Any pipeline
-        # command re-creates it.
+        # Borrowed, not opened: `close()` gives it back. Opening one to the LAN
+        # server is 68ms, which the web layer was paying on every request —
+        # more than most of the queries it then ran. See `pg.read_pool`.
+        return pg.connect_pooled(
+            url, application_name="sectortrace-web",
+            statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
+    except db.Error as exc:
         raise QueryError(
-            f"Could not open {path} for reading: {exc}. If the database is in "
-            "WAL mode and was left without its -shm file, run any pipeline "
-            "command (e.g. `./start.sh list-modules`) to restore it."
+            f"Could not reach the PostgreSQL warehouse at "
+            f"{settings._redact(url)}: {exc}"
         ) from exc
-
-    conn.row_factory = sqlite3.Row
-    # Belt and braces over mode=ro: query_only also covers databases ATTACHed
-    # later, which the read-only flag on the main database does not.
-    conn.execute("PRAGMA query_only = ON")
-    return conn
 
 
 @contextmanager
 def deadline(conn, seconds: float = QUERY_TIMEOUT_SECONDS) -> Iterator[None]:
     """Abort statements on this connection that run longer than `seconds`.
 
-    On PostgreSQL this is a no-op, because the equivalent is already in place
-    and is not a context manager: `readonly_connection` sets
-    `statement_timeout` on the session, so every statement carries the
-    deadline whether or not anyone remembered to wrap it. The server cancels
-    and raises `QueryCanceled`, which `_run` turns into the same message the
-    SQLite path produces.
-
-    A no-op rather than an error because the callers should not have to ask
-    which backend they are on — `with deadline(conn):` reads the same and
-    means the same, and the only difference is where the timer lives.
-
-    The one behavioural difference worth naming: the argument is honoured on
-    SQLite and ignored on PostgreSQL, where the session's timeout wins. Both
-    callers that pass a value pass a shorter one for a cheap probe, so the
-    effect is a probe that may run for the full 20s instead of 2s rather than
-    one that outlives its deadline.
+    A no-op: the deadline is already in place and is not a context manager.
+    `readonly_connection` sets `statement_timeout` on the session, so every
+    statement carries it whether or not anyone remembered to wrap it. The
+    server cancels and raises `QueryCanceled`, which `_run` turns into a
+    timed-out message. `with deadline(conn):` stays at the call sites because
+    it reads clearly and means the deadline is enforced; `seconds` is ignored
+    because the session's timeout wins.
     """
-    if db.backend_of(conn) == "postgres":
-        yield
-        return
-
-    expires_at = time.monotonic() + seconds
-
-    def _abort_if_late() -> int:
-        return 1 if time.monotonic() > expires_at else 0
-
-    conn.set_progress_handler(_abort_if_late, _PROGRESS_INSTRUCTIONS)
-    try:
-        yield
-    finally:
-        conn.set_progress_handler(None, 0)
+    yield
 
 
 def escape_like(term: str) -> str:
@@ -396,30 +335,17 @@ def columns_of(conn, name: str) -> list[dict]:
 def _default_order(conn, name: str) -> str:
     """The ORDER BY that makes paging a table stable, or `""` if there is none.
 
-    SQLite has `rowid`, a stable per-row identifier every ordinary table has,
-    and the probe below is how you find out whether this one does — WITHOUT
-    ROWID tables and views do not.
-
-    PostgreSQL has no equivalent. `ctid` looks like one and is not: it is a
-    physical location that moves when a row is updated and when VACUUM
-    reclaims space, so paging by it would silently repeat and skip rows —
-    which is the precise failure this function exists to prevent, arrived at
-    by a different route. The primary key is the honest answer, and a table
-    without one has no stable order to offer; the caller reports `ordered:
-    False` and the UI says so, exactly as it already does for a view.
+    The primary key is the answer. PostgreSQL's `ctid` looks like a per-row
+    identifier and is not: it is a physical location that moves when a row is
+    updated and when VACUUM reclaims space, so paging by it would silently
+    repeat and skip rows — the precise failure this function exists to prevent.
+    A table without a primary key has no stable order to offer; the caller
+    reports `ordered: False` and the UI says so, exactly as it does for a view.
     """
-    if db.backend_of(conn) == "postgres":
-        key = catalog.primary_key(conn, name)
-        if not key:
-            return ""
-        return " ORDER BY " + ", ".join(_quote(column) for column in key)
-
-    try:
-        with deadline(conn, 2.0):
-            conn.execute(f"SELECT rowid FROM {_quote(name)} LIMIT 0")
-        return " ORDER BY rowid"
-    except db.Error:
+    key = catalog.primary_key(conn, name)
+    if not key:
         return ""
+    return " ORDER BY " + ", ".join(_quote(column) for column in key)
 
 
 def read_table(
@@ -435,9 +361,10 @@ def read_table(
     """One page of a table or view, with the columns and the matching count.
 
     Paging without an ORDER BY is only stable if the underlying query has a
-    stable order, which a view's does not have to. Tables are ordered by rowid
-    by default for exactly that reason; for a view, `ordered` comes back False
-    and the UI says so rather than letting page 2 quietly overlap page 1.
+    stable order, which a view's does not have to. Tables are ordered by their
+    primary key by default for exactly that reason; for a view, or a table with
+    no primary key, `ordered` comes back False and the UI says so rather than
+    letting page 2 quietly overlap page 1.
     """
     kind = object_type(conn, name)
     if kind is None:
@@ -847,7 +774,6 @@ def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     """The landing screen: what is in the queue, what has been decided, and
     what the warehouse holds."""
     settings = settings or get_settings()
-    path = Path(settings.database_path)
     facets = review_facets(conn)
 
     objects = catalog.list_objects(conn)
@@ -856,11 +782,16 @@ def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     migrations = _run(
         conn, "SELECT COUNT(*) AS n FROM schema_migrations")[0]["n"]
     failures = _run(conn, "SELECT COUNT(*) AS n FROM parse_failures")[0]["n"]
+    # The warehouse identity and size, PostgreSQL-side. `path` keeps its key so
+    # the admin overview's shape is unchanged; it now carries the redacted
+    # database URL rather than a file path, and the size is the whole database.
+    size_bytes = _run(
+        conn, "SELECT pg_database_size(current_database()) AS n")[0]["n"]
 
     return {
         "database": {
-            "path": str(path),
-            "size_bytes": path.stat().st_size if path.exists() else 0,
+            "path": settings.redacted_database_url or "(DATABASE_URL unset)",
+            "size_bytes": size_bytes,
             "tables": tables,
             "views": views,
             "migrations": migrations,

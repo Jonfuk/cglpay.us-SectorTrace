@@ -117,15 +117,12 @@ class _ClientPool:
             # hook of its own to close it in.
             conn = db.get_connection(self._settings, check_same_thread=False)
             client = PipelineHTTPClient(self._source_system, settings=self._settings, conn=conn)
-            # Deferring is SQLite's answer to SQLite's single writer. On
-            # PostgreSQL a worker writes its own cache entries on its own
-            # connection, which is what the module docstring above has always
-            # wished were true — see `PipelineHTTPClient` for why the commit
-            # travels with it.
-            if db.backend_of(conn) == "sqlite":
-                client.defer_cache_writes = True
-            else:
-                client.commit_cache_writes = True
+            # A worker writes its own cache entries on its own connection — what
+            # the module docstring above always wished were true, and now is:
+            # SQLite's single writer (and the deferral that worked around it)
+            # is gone. See `PipelineHTTPClient` for why the commit travels with
+            # it.
+            client.commit_cache_writes = True
             if self._configure is not None:
                 self._configure(client)
             self._local.client = client

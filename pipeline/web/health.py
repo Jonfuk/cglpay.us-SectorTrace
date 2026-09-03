@@ -151,16 +151,10 @@ def coverage(conn: db.Connection, tier: str = "upper") -> dict:
 def warehouse(conn: db.Connection, settings) -> dict:
     """Size, shape, and whether the schema on disk is the schema that ran.
 
-    The migration half of this is the part that matters and it is identical on
-    both backends: what the ledger says was applied, what is on disk, and the
-    two ways those can disagree. The size half is where the backends stop
-    resembling each other, and the shape of the answer says which one you are
-    looking at rather than pretending they are the same measurement.
+    The migration half of this is the part that matters: what the ledger says
+    was applied, what is on disk, and the two ways those can disagree. The size
+    half is PostgreSQL's `pg_database_size`.
     """
-    # Applied-vs-on-disk, from the tree matching this connection. Reading
-    # `settings.migrations_dir` here would list SQLite's filenames against a
-    # PostgreSQL ledger — they happen to be the same names today, which is
-    # exactly what would make the bug survive review.
     applied = [row["filename"] for row in conn.execute(
         "SELECT filename FROM schema_migrations ORDER BY filename")]
     on_disk = sorted(p.name for p in db.migrations_dir_for(settings).glob("*.sql"))
@@ -174,46 +168,19 @@ def warehouse(conn: db.Connection, settings) -> dict:
         "applied_without_file": [name for name in applied if name not in on_disk],
     }
 
-    if db.backend_of(conn) == "postgres":
-        # No file, no sidecars, no page count this side of the connection, and
-        # no freelist at all: PostgreSQL's dead-tuple space is per-table and is
-        # reclaimed by autovacuum rather than being a single number about the
-        # database. `pg_database_size` is the honest total; anything finer
-        # belongs in a Phase 4 panel that measures per-relation bloat properly
-        # rather than in a field named after a SQLite pragma.
-        size = conn.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
-        return {
-            "backend": "postgres",
-            "path": settings.redacted_database_url,
-            "files": {},
-            "bytes": size,
-            "page_size": None,
-            "page_count": None,
-            "free_bytes": None,
-            **common,
-        }
-
-    database_path = Path(settings.database_path)
-    files = {}
-    for suffix in ("", "-wal", "-shm"):
-        candidate = Path(str(database_path) + suffix)
-        if candidate.exists():
-            files[candidate.name] = candidate.stat().st_size
-
-    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
-    page_count = conn.execute("PRAGMA page_count").fetchone()[0]
-    freelist = conn.execute("PRAGMA freelist_count").fetchone()[0]
-
+    # No file, no sidecars, no page count, and no freelist: PostgreSQL's
+    # dead-tuple space is per-table and reclaimed by autovacuum rather than a
+    # single database number. `pg_database_size` is the honest total; anything
+    # finer belongs in a panel that measures per-relation bloat properly.
+    size = conn.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
     return {
-        "backend": "sqlite",
-        "path": str(database_path),
-        "files": files,
-        "bytes": sum(files.values()),
-        "page_size": page_size,
-        "page_count": page_count,
-        # Free pages are space the file is holding but not using. Worth seeing
-        # before wondering why a 230 MB warehouse holds 200 MB of evidence.
-        "free_bytes": freelist * page_size,
+        "backend": "postgres",
+        "path": settings.redacted_database_url,
+        "files": {},
+        "bytes": size,
+        "page_size": None,
+        "page_count": None,
+        "free_bytes": None,
         **common,
     }
 

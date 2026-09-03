@@ -6,8 +6,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pipeline import db
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -16,9 +14,8 @@ def _now() -> str:
 class WorkerQueue:
     """Durable enqueue/claim/checkpoint operations.
 
-    PostgreSQL claims use ``FOR UPDATE SKIP LOCKED`` so multiple worker
-    processes can safely share the queue. SQLite remains usable for local
-    development and uses its existing single-writer discipline.
+    Claims use ``FOR UPDATE SKIP LOCKED`` so multiple worker processes can
+    safely share the queue.
     """
 
     def __init__(self, conn, *, lease_seconds: int = 900,
@@ -66,20 +63,14 @@ class WorkerQueue:
     def claim(self) -> dict[str, Any] | None:
         now = _now()
         lease = (datetime.now(timezone.utc) + timedelta(seconds=self.lease_seconds)).isoformat(timespec="seconds")
-        if db.backend_of(self.conn) == "postgres":
-            row = self.conn.execute(
-                "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count "
-                "FROM worker_jobs WHERE state = 'queued' OR "
-                "(state = 'running' AND lease_until < ?) "
-                "ORDER BY created_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED", (now,)
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count "
-                "FROM worker_jobs WHERE state = 'queued' OR "
-                "(state = 'running' AND lease_until < ?) "
-                "ORDER BY created_at, job_id LIMIT 1", (now,)
-            ).fetchone()
+        # FOR UPDATE SKIP LOCKED is what lets more than one worker claim from
+        # the same queue without two of them taking the same job.
+        row = self.conn.execute(
+            "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count "
+            "FROM worker_jobs WHERE state = 'queued' OR "
+            "(state = 'running' AND lease_until < ?) "
+            "ORDER BY created_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED", (now,)
+        ).fetchone()
         if row is None:
             return None
         self.conn.execute(

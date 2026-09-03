@@ -437,13 +437,9 @@ class AnalysisWorker:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS ix_automated_signals_link_candidates "
                 "ON automated_signals(release_id, subject_type, subject_id, domain_id, period_end)")
-            if db.backend_of(conn) == "sqlite":
-                date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
-                               "AND ABS(julianday(l.period_end) - julianday(r.period_end)) <= 365")
-            else:
-                date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
-                               "AND ABS(EXTRACT(EPOCH FROM (l.period_end::date - "
-                               "r.period_end::date))) <= 365 * 86400")
+            date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
+                           "AND ABS(EXTRACT(EPOCH FROM (l.period_end::date - "
+                           "r.period_end::date))) <= 365 * 86400")
             rows = conn.execute(
                 "SELECT l.*, r.signal_id AS _right_signal_id, r.domain_id AS _right_domain_id, "
                 "r.taxonomy_namespace AS _right_taxonomy_namespace, r.signal_type AS _right_signal_type, "

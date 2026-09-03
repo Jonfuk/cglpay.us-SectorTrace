@@ -63,59 +63,16 @@ def _purpose(rule_id: str, kind: str) -> str:
 
 
 def _schema_rules(conn) -> list[dict]:
-    """CHECK, provenance NOT NULL and trigger rules, read from the live
-    SQLite schema. Empty on PostgreSQL — the schema is the same but this
-    reads `sqlite_master` directly; the note says so."""
-    if db.backend_of(conn) != "sqlite":
-        return []
+    """CHECK, provenance NOT NULL and trigger rules read from the live schema.
 
-    rules: list[dict] = []
-
-    tables = conn.execute(
-        "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
-        "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()
-    for row in tables:
-        table, sql = row["name"], row["sql"] or ""
-        for match in _CHECK_IN.finditer(sql):
-            column = match.group(1)
-            values = [v.strip().strip("'\"") for v in match.group(2).split(",")]
-            rid = f"check:{table}:{column}"
-            rules.append({
-                "id": rid, "kind": "check", "title": f"{table}.{column}",
-                "purpose": _purpose(rid, "check"),
-                "modules": [], "fields": [column], "table": table,
-                "detail": f"one of: {', '.join(v for v in values if v)}",
-            })
-        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        names = {c["name"] for c in cols}
-        prov = [c for c in _PROVENANCE_COLUMNS if c in names]
-        if prov:
-            enforced = [c["name"] for c in cols
-                        if c["name"] in prov and c["notnull"]]
-            rid = f"provenance:{table}"
-            rules.append({
-                "id": rid, "kind": "provenance",
-                "title": f"{table}: provenance columns",
-                "purpose": _purpose(rid, "provenance"),
-                "modules": [], "fields": prov, "table": table,
-                "detail": ("NOT NULL: " + ", ".join(enforced)) if enforced
-                          else "present but nullable — provenance not enforced",
-                "enforced": len(enforced) == len(prov),
-            })
-
-    triggers = conn.execute(
-        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'trigger' "
-        "ORDER BY name").fetchall()
-    for row in triggers:
-        rid = f"trigger:{row['name']}"
-        raised = re.search(r"RAISE\s*\(\s*ABORT\s*,\s*'([^']+)'", row["sql"] or "")
-        rules.append({
-            "id": rid, "kind": "trigger", "title": row["name"],
-            "purpose": _purpose(rid, "trigger"),
-            "modules": [], "fields": [], "table": row["tbl_name"],
-            "detail": raised.group(1) if raised else "guards the write",
-        })
-    return rules
+    Always empty. This introspection was written against `sqlite_master` and
+    `PRAGMA table_info`, and returned nothing on PostgreSQL from the start — the
+    note the caller renders says so. The SQLite reader is gone with the SQLite
+    backend rather than being ported: reconstructing these rules from
+    `information_schema`/`pg_constraint` is its own piece of work, and until it
+    exists the panel shows the same empty section it always did on PostgreSQL.
+    """
+    return []
 
 
 def _parse_rules(conn, since: str) -> list[dict]:

@@ -2,13 +2,12 @@
 
 Three modes:
 
-* ``keyword`` -- the full-text index that already exists (SQLite FTS5
-  ``document_element_search`` / PostgreSQL ``tsvector`` over
-  ``document_elements``), lifted from the matching *element* up to its
+* ``keyword`` -- the PostgreSQL ``tsvector`` full-text index over
+  ``document_elements``, lifted from the matching *element* up to its
   containing *chunk* so every mode returns the same unit and the same ids.
-* ``semantic`` -- exact cosine of the query embedding against
-  ``document_embeddings`` for one model. Brute force in Python; no ANN index
-  yet (034A benchmarks before that trade is taken).
+* ``semantic`` -- cosine of the query embedding against ``document_embeddings``
+  for one model, ordered in the database against the pgvector/HNSW index
+  (migration 0071).
 * ``hybrid`` -- Reciprocal Rank Fusion (k=60) of the two ranked lists. The
   default: keyword catches the literal term, semantic catches the paraphrase,
   and "services struggling to recruit enough workers" needs both.
@@ -19,10 +18,8 @@ writes, promotes, or attributes anything -- that stays the review-queue ->
 """
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 
-from pipeline import db
 from pipeline.config import get_settings
 from pipeline.nlp import embeddings
 
@@ -86,7 +83,7 @@ class Filters:
 
 # --- keyword: FTS element hit -> containing chunk ---------------------------
 
-def _element_to_chunk_sql(backend: str, placeholders: str, filter_sql: str) -> str:
+def _element_to_chunk_sql(placeholders: str, filter_sql: str) -> str:
     """Map a set of matched element ids to the live chunk that contains each.
 
     A chunk is a contiguous run of elements (`element_start_id`..`element_end_id`
@@ -112,43 +109,32 @@ def _element_to_chunk_sql(backend: str, placeholders: str, filter_sql: str) -> s
 
 
 def _keyword_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]:
-    """Chunk ids best-match first, from the existing full-text index."""
-    backend = db.backend_of(conn)
+    """Chunk ids best-match first, from the tsvector full-text index."""
     filter_sql, filter_params = filters.sql()
     # Pull more matched elements than chunks wanted: several elements can land
     # in one chunk, and a filter can drop some entirely.
     element_cap = depth * 5
 
-    if backend == "sqlite":
-        try:
-            hits = conn.execute(
-                "SELECT document_element_id AS eid, rank FROM document_element_search "
-                "WHERE document_element_search MATCH ? ORDER BY rank LIMIT ?",
-                (query, element_cap)).fetchall()
-        except sqlite3.OperationalError as error:  # malformed FTS query syntax
-            raise SearchError(f"Could not search for {query!r}: {error}") from None
-    else:
-        hits = conn.execute(
-            "SELECT de.document_element_id AS eid, "
-            "ts_rank_cd(to_tsvector('simple', COALESCE(de.text, '')), "
-            "           plainto_tsquery('simple', ?)) AS rank "
-            "FROM document_elements de "
-            "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-            "WHERE dv.is_active = 1 "
-            "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
-            "ORDER BY rank DESC LIMIT ?",
-            (query, query, element_cap)).fetchall()
+    hits = conn.execute(
+        "SELECT de.document_element_id AS eid, "
+        "ts_rank_cd(to_tsvector('simple', COALESCE(de.text, '')), "
+        "           plainto_tsquery('simple', ?)) AS rank "
+        "FROM document_elements de "
+        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+        "WHERE dv.is_active = 1 "
+        "AND to_tsvector('simple', COALESCE(de.text, '')) @@ plainto_tsquery('simple', ?) "
+        "ORDER BY rank DESC LIMIT ?",
+        (query, query, element_cap)).fetchall()
 
     if not hits:
         return []
-    # FTS5 `rank` is bm25-like: smaller (more negative) is better, so the fetch
-    # order above is already best-first. Postgres ts_rank is the opposite and
-    # was ordered DESC. Either way, first-seen wins.
+    # ts_rank is larger-is-better and was ordered DESC, so the fetch order is
+    # already best-first; first-seen wins.
     order = {row["eid"]: i for i, row in enumerate(hits)}
     eids = list(order)
     placeholders = ",".join("?" for _ in eids)
     rows = conn.execute(
-        _element_to_chunk_sql(backend, placeholders, filter_sql),
+        _element_to_chunk_sql(placeholders, filter_sql),
         [*eids, *filter_params]).fetchall()
 
     best: dict[str, int] = {}
@@ -176,60 +162,38 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
 
     filter_sql, filter_params = filters.sql()
 
-    # PostgreSQL + pgvector: order by cosine distance in the database, against
-    # the HNSW index (migration 0071), and take only `depth` rows. The exact
-    # path below pulls every embedding for the model and scores each in a
-    # Python loop -- ~30 s per query at 167k embeddings on the live mirror.
-    if db.backend_of(conn) == "postgres" and db.has_extension(conn, "vector"):
-        literal = embeddings.vec_literal(query_vec)
-        rows = conn.execute(
-            "SELECT em.document_chunk_id AS cid, "
-            "1 - (em.embedding_vec <=> ?::vector) AS score "
-            "FROM document_embeddings em "
-            "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
-            "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
-            "JOIN document_records d ON d.document_id = dv.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-            "WHERE em.model_key = ? AND em.embedding_vec IS NOT NULL" + filter_sql
-            + " ORDER BY em.embedding_vec <=> ?::vector LIMIT ?",
-            [literal, model_key, *filter_params, literal, depth]).fetchall()
-        if rows:
-            return model_key, [(row["cid"], float(row["score"])) for row in rows], None
-        backfilled = conn.execute(
-            "SELECT COUNT(*) FROM document_embeddings "
-            "WHERE model_key = ? AND embedding_vec IS NOT NULL", (model_key,)).fetchone()[0]
-        if backfilled == 0:
-            total = conn.execute(
-                "SELECT COUNT(*) FROM document_embeddings WHERE model_key = ?",
-                (model_key,)).fetchone()[0]
-            note = (f"no embeddings for model {model_key!r} -- run `pipeline nlp embed`"
-                    if total == 0
-                    else "pgvector is installed but embedding_vec is empty -- "
-                         "run `pipeline nlp backfill-vectors`")
-            return model_key, [], note
-        return model_key, [], None  # filters matched nothing
-
+    # pgvector/HNSW is the only semantic-search path (performance.md Phase 3):
+    # order by cosine distance in the database, against the HNSW index
+    # (migration 0071), and take only `depth` rows. The former exact path that
+    # pulled every embedding for the model and scored each in a Python loop
+    # (~30 s per query at 167k embeddings) is gone with the SQLite backend.
+    literal = embeddings.vec_literal(query_vec)
     rows = conn.execute(
-        "SELECT em.document_chunk_id AS cid, em.embedding AS blob "
+        "SELECT em.document_chunk_id AS cid, "
+        "1 - (em.embedding_vec <=> ?::vector) AS score "
         "FROM document_embeddings em "
         "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
         "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
         "JOIN document_records d ON d.document_id = dv.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
-        "WHERE em.model_key = ?" + filter_sql,
-        [model_key, *filter_params]).fetchall()
-    if not rows:
+        "WHERE em.model_key = ? AND em.embedding_vec IS NOT NULL" + filter_sql
+        + " ORDER BY em.embedding_vec <=> ?::vector LIMIT ?",
+        [literal, model_key, *filter_params, literal, depth]).fetchall()
+    if rows:
+        return model_key, [(row["cid"], float(row["score"])) for row in rows], None
+    backfilled = conn.execute(
+        "SELECT COUNT(*) FROM document_embeddings "
+        "WHERE model_key = ? AND embedding_vec IS NOT NULL", (model_key,)).fetchone()[0]
+    if backfilled == 0:
         total = conn.execute(
             "SELECT COUNT(*) FROM document_embeddings WHERE model_key = ?",
             (model_key,)).fetchone()[0]
         note = (f"no embeddings for model {model_key!r} -- run `pipeline nlp embed`"
-                if total == 0 else None)
+                if total == 0
+                else "pgvector is installed but embedding_vec is empty -- "
+                     "run `pipeline nlp backfill-vectors`")
         return model_key, [], note
-
-    scored = [(row["cid"], embeddings.cosine(query_vec, embeddings.unpack(row["blob"])))
-              for row in rows]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return model_key, scored[:depth], None
+    return model_key, [], None  # filters matched nothing
 
 
 # --- fusion --------------------------------------------------------------

@@ -43,7 +43,6 @@ catalogue only.
 from __future__ import annotations
 
 import re
-import sqlite3
 from dataclasses import dataclass
 
 from .. import catalog, db
@@ -213,7 +212,7 @@ def preflight(conn, feature: str) -> None:
                 retryable=False,
             )
 
-    if req.extensions and db.backend_of(conn) == "postgres":
+    if req.extensions:
         installed = {
             ext["name"] for ext in health.extensions(conn) if ext["installed"]
         }
@@ -232,12 +231,8 @@ def preflight(conn, feature: str) -> None:
 
 # --- recognising schema drift in a raw database error ----------------------
 
-# SQLite phrases these as OperationalError; psycopg raises distinct classes
-# whose names we match textually to avoid importing psycopg here (it is an
-# optional dependency on the SQLite-only checkout).
-_DRIFT_SQLITE = re.compile(
-    r"no such (table|column|module|view|function)\b", re.I
-)
+# psycopg raises distinct classes for these; we match their names textually to
+# keep this module free of a psycopg import at its top.
 _DRIFT_PG_CLASSES = {
     "UndefinedTable": ("missing_table", False),
     "UndefinedColumn": ("missing_table", False),
@@ -261,24 +256,6 @@ def classify_db_error(exc: BaseException, feature: str = "unknown") -> FeatureUn
 
     name = type(exc).__name__
     text = str(exc)
-
-    if isinstance(exc, sqlite3.OperationalError):
-        if "interrupted" in text or "timeout" in text.lower():
-            return FeatureUnavailable(
-                feature,
-                "This section took too long to build and was stopped. Try again.",
-                code="timeout",
-                retryable=True,
-            )
-        if _DRIFT_SQLITE.search(text):
-            return FeatureUnavailable(
-                feature,
-                "This section depends on a database object this build does "
-                "not have. It is unavailable until the schema is updated.",
-                code="missing_table",
-                retryable=False,
-            )
-        return None
 
     hit = _DRIFT_PG_CLASSES.get(name)
     # psycopg wraps the SQLSTATE class name in the exception's own name for
