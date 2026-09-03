@@ -131,12 +131,12 @@ def _fuzzy_ranked(conn, query: str, filters: Filters, depth: int) -> list[str]:
     """A distinct pg_trgm candidate path; similarity is retrieval-only."""
     filter_sql, filter_params = filters.sql()
     rows = conn.execute(
-        "SELECT dc.document_chunk_id AS cid,similarity(dc.text,%s) AS rank "
+        "SELECT dc.document_chunk_id AS cid,public.similarity(dc.text,%s::text) AS rank "
         "FROM document_chunks dc "
         "JOIN document_versions dv ON dv.document_version_id=dc.document_version_id AND dv.is_active=1 "
         "JOIN document_records d ON d.document_id=dv.document_id "
         "JOIN evidence_records e ON e.evidence_id=d.evidence_id "
-        "WHERE dc.superseded=0 AND dc.text OPERATOR(public.%%) %s" + filter_sql +
+        "WHERE dc.superseded=0 AND dc.text OPERATOR(public.%%) %s::text" + filter_sql +
         " ORDER BY rank DESC,dc.document_chunk_id LIMIT %s",
         [query, query, *filter_params, depth]).fetchall()
     return [row["cid"] for row in rows]

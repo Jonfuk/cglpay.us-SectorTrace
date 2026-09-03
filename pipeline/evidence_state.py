@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 _CHANGE_STATES = {"new", "unchanged", "modified", "removed", "redirected", "superseded"}
 _QUALITY_TYPES = {
@@ -87,6 +87,11 @@ def observe(
         state_id = current["temporal_state_id"]
     else:
         state_id = _id("ets", layer, identity, evidence_hash, source_url, observed.isoformat())
+        created_at = datetime.now(timezone.utc)
+        if current is not None and current["created_at"] >= created_at:
+            # PostgreSQL timestamps have microsecond precision, so successive
+            # observations can otherwise tie and make history order unstable.
+            created_at = current["created_at"] + timedelta(microseconds=1)
         if current is not None:
             conn.execute(
                 "UPDATE evidence_temporal_state SET is_current=false,"
@@ -116,7 +121,7 @@ def observe(
                 source_url,
                 payload_sha256,
                 json.dumps(provenance or {}, sort_keys=True),
-                datetime.now(timezone.utc),
+                created_at,
             ),
         )
     event_id = _id(

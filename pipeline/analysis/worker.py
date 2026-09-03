@@ -499,9 +499,12 @@ class AnalysisWorker:
                     "AND l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
                     "AND l.period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
                     "AND r.period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
-                    "AND CASE WHEN pg_input_is_valid(LEFT(l.period_end, 10), 'date'::regtype) "
-                    "AND pg_input_is_valid(LEFT(r.period_end, 10), 'date'::regtype) "
-                    "THEN ABS(LEFT(l.period_end, 10)::date - LEFT(r.period_end, 10)::date) <= 365 "
+                    "AND CASE WHEN to_char(to_date(LEFT(l.period_end, 10), 'YYYY-MM-DD'), "
+                    "'YYYY-MM-DD') = LEFT(l.period_end, 10) "
+                    "AND to_char(to_date(LEFT(r.period_end, 10), 'YYYY-MM-DD'), "
+                    "'YYYY-MM-DD') = LEFT(r.period_end, 10) "
+                    "THEN ABS(to_date(LEFT(l.period_end, 10), 'YYYY-MM-DD') "
+                    "- to_date(LEFT(r.period_end, 10), 'YYYY-MM-DD')) <= 365 "
                     "ELSE FALSE END "
                     f"AND ({pair_clause}) WHERE l.release_id = %s "
                     "AND (l.signal_id > %s OR (l.signal_id = %s AND r.signal_id > %s)) "
@@ -737,8 +740,9 @@ class AnalysisWorker:
         if getattr(self, "_budget", CallBudget()).ceiling_micros > 0:
             requested_workers = 1
         if isinstance(passage_batches, list):
-            passage_batches = (passage_batches[start:start + self.batch_size]
-                               for start in range(0, len(passage_batches), self.batch_size))
+            passages = passage_batches
+            passage_batches = (passages[start:start + self.batch_size]
+                               for start in range(0, len(passages), self.batch_size))
         audit_rows: queue.SimpleQueue = queue.SimpleQueue()
         cache_rows: queue.SimpleQueue = queue.SimpleQueue()
         response_cache: dict[str, dict[str, Any]] = {}
