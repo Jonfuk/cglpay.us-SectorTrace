@@ -27,7 +27,7 @@ def _rule(out: dict, rule_id: str) -> dict | None:
 
 def test_rules_are_typed_and_derived(conn: sqlite3.Connection) -> None:
     out = validation.rules(conn, today="2026-08-29")
-    assert out["backend"] == "sqlite"
+    assert out["backend"] == "postgres"
     assert set(out["kinds"]) == {"trigger", "check", "provenance",
                                   "parse_failure", "review_gate"}
     assert set(out["counts"]["by_kind"]) <= set(out["kinds"])

@@ -65,14 +65,78 @@ def _purpose(rule_id: str, kind: str) -> str:
 def _schema_rules(conn) -> list[dict]:
     """CHECK, provenance NOT NULL and trigger rules read from the live schema.
 
-    Always empty. This introspection was written against `sqlite_master` and
-    `PRAGMA table_info`, and returned nothing on PostgreSQL from the start — the
-    note the caller renders says so. The SQLite reader is gone with the SQLite
-    backend rather than being ported: reconstructing these rules from
-    `information_schema`/`pg_constraint` is its own piece of work, and until it
-    exists the panel shows the same empty section it always did on PostgreSQL.
+    PostgreSQL keeps these separately in `pg_constraint`,
+    `information_schema.columns` and `pg_trigger`; reading those catalogs keeps
+    the explorer useful after the SQLite backend was removed.
     """
-    return []
+    rules: list[dict] = []
+
+    columns = {
+        row["table_name"]: row["columns"]
+        for row in conn.execute(
+            "SELECT table_name, array_agg(column_name ORDER BY ordinal_position) "
+            "AS columns FROM information_schema.columns "
+            "WHERE table_schema = current_schema() GROUP BY table_name")
+    }
+    for table, names in columns.items():
+        provenance = [name for name in _PROVENANCE_COLUMNS if name in names]
+        if not provenance:
+            continue
+        notnull = {
+            row["column_name"]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = ? "
+                "AND is_nullable = 'NO'", (table,))
+        }
+        enforced = [name for name in provenance if name in notnull]
+        rid = f"provenance:{table}"
+        rules.append({
+            "id": rid, "kind": "provenance",
+            "title": f"{table}: provenance columns",
+            "purpose": _purpose(rid, "provenance"),
+            "modules": [], "fields": provenance, "table": table,
+            "detail": ("NOT NULL: " + ", ".join(enforced)) if enforced
+                      else "present but nullable — provenance not enforced",
+            "enforced": len(enforced) == len(provenance),
+        })
+
+    for row in conn.execute(
+            "SELECT c.relname AS table_name, pg_get_constraintdef(co.oid) AS definition "
+            "FROM pg_constraint co JOIN pg_class c ON c.oid = co.conrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE co.contype = 'c' AND n.nspname = current_schema() "
+            "ORDER BY c.relname, co.conname"):
+        definition = row["definition"] or ""
+        match = re.search(
+            r"\(\(?([a-z_][a-z0-9_]*)\s*=\s*ANY\s*\(ARRAY\[(.*?)\]",
+            definition, re.IGNORECASE)
+        if not match:
+            continue
+        values = re.findall(r"'([^']*)'", match.group(2))
+        table, column = row["table_name"], match.group(1)
+        rid = f"check:{table}:{column}"
+        rules.append({
+            "id": rid, "kind": "check", "title": f"{table}.{column}",
+            "purpose": _purpose(rid, "check"), "modules": [],
+            "fields": [column], "table": table,
+            "detail": f"one of: {', '.join(values)}",
+        })
+
+    for row in conn.execute(
+            "SELECT t.tgname AS name, c.relname AS table_name, "
+            "pg_get_triggerdef(t.oid) AS definition "
+            "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE NOT t.tgisinternal AND n.nspname = current_schema() "
+            "ORDER BY t.tgname"):
+        rid = f"trigger:{row['name']}"
+        rules.append({
+            "id": rid, "kind": "trigger", "title": row["name"],
+            "purpose": _purpose(rid, "trigger"), "modules": [], "fields": [],
+            "table": row["table_name"], "detail": row["definition"],
+        })
+    return rules
 
 
 def _parse_rules(conn, since: str) -> list[dict]:
@@ -88,7 +152,7 @@ def _parse_rules(conn, since: str) -> list[dict]:
         rid = f"parse:{module}:{field or '—'}"
         reasons = [r["reason"] for r in conn.execute(
             "SELECT DISTINCT reason FROM parse_failures "
-            "WHERE module = ? AND field_name IS ? AND reason IS NOT NULL "
+            "WHERE module = ? AND field_name IS NOT DISTINCT FROM ? AND reason IS NOT NULL "
             "ORDER BY reason LIMIT 8", (module, field)).fetchall()]
         examples = [{
             "field": ex["field_name"],
@@ -99,7 +163,7 @@ def _parse_rules(conn, since: str) -> list[dict]:
             "chars": len(ex["raw_fragment"] or ""),
         } for ex in conn.execute(
             "SELECT field_name, reason, source_url, raw_fragment, created_at "
-            "FROM parse_failures WHERE module = ? AND field_name IS ? "
+            "FROM parse_failures WHERE module = ? AND field_name IS NOT DISTINCT FROM ? "
             "ORDER BY created_at DESC LIMIT ?",
             (module, field, _EXAMPLES_PER_RULE)).fetchall()]
         out.append({
@@ -164,7 +228,7 @@ def rules(conn, *, today: str | None = None) -> dict:
         "kinds": ["trigger", "check", "provenance", "parse_failure", "review_gate"],
         "redaction": EXAMPLE_REDACTION,
         "note": "Rules are derived on the request: schema rules from the live "
-                "SQLite schema (empty on PostgreSQL), observed rules from "
+                "PostgreSQL catalog, observed rules from "
                 "parse_failures and review_queue. Purpose text is the only "
                 "hand-kept part. Failure examples never carry the raw "
                 "fragment.",
