@@ -9,7 +9,9 @@ def test_apply_migrations_is_idempotent(settings):
     conn = db.get_connection(settings)
     first = db.apply_migrations(conn, settings.migrations_dir)
     second = db.apply_migrations(conn, settings.migrations_dir)
-    assert "0001_core.sql" in first
+    # The PostgreSQL test schema is migrated once per worker in conftest.py;
+    # this test verifies that applying the current tree again is a no-op.
+    assert first == []
     assert second == []
     conn.close()
 

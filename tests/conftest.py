@@ -399,7 +399,7 @@ def settings(tmp_path: Path, _pg_warehouse) -> Settings:
         database_url=_pg_warehouse.url,
         database_ro_url=_pg_warehouse.ro_url,
         raw_archive_dir=tmp_path / "raw",
-        migrations_dir=MIGRATIONS_DIR,
+        migrations_dir=POSTGRES_MIGRATIONS_DIR,
         logs_dir=tmp_path / "logs",
         export_output_dir=tmp_path / "exports" / "output",
         backup_dir=tmp_path / "backups",
