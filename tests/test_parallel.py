@@ -12,8 +12,10 @@ it is lost:
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -24,9 +26,18 @@ from pipeline.parallel import Outcome, fetch_in_parallel, worker_count
 
 
 def _settings(tmp_path, **overrides) -> Settings:
+    # The application database is PostgreSQL now; keep these tests' isolated
+    # filesystem paths for raw/log settings, but point worker clients at the
+    # same disposable test schema as the suite fixtures.
+    database_url = os.environ.get("POSTGRES_TEST_URL")
+    if not database_url:
+        from dotenv import dotenv_values
+
+        database_url = dotenv_values(Path(__file__).resolve().parent.parent / ".env").get(
+            "POSTGRES_TEST_URL")
     base = dict(
         contact_email="t@example.com",
-        database_path=tmp_path / "w.db",
+        database_url=database_url,
         raw_archive_dir=tmp_path / "raw",
         logs_dir=tmp_path / "logs",
         default_rate_limit_seconds=0.0,
@@ -176,62 +187,61 @@ def test_clients_are_closed_even_when_a_worker_raises(tmp_path):
 
 # --- the conditional-request cache ---------------------------------------------------
 
-def test_worker_clients_defer_their_cache_writes(tmp_path):
-    """The bug this exists to prevent: a worker writing the HTTP cache takes
-    SQLite's single writer slot, which the main thread is holding while it
-    commits an authority's evidence — so the worker blocks for the whole
-    busy_timeout, over and over. Observed as a hung test suite.
-
-    SQLite only. On PostgreSQL there is no slot to take and the worker writes
-    its own — see `test_postgres_live.py::TestFetchPoolCacheWrites`.
+def test_worker_clients_write_cache_on_their_own_connections(settings):
+    """PostgreSQL workers write their cache entries on their own connections;
+    there is no single-writer slot or caller-side deferral to coordinate.
     """
-    settings = _settings(tmp_path)
 
     def worker(unit, client):
-        assert client.defer_cache_writes is True
-        assert client.commit_cache_writes is False
-        client.pending_cache_writes.append(
-            dict(url=f"https://h{unit}.example.com/x", host=f"h{unit}.example.com",
-                 etag=f"etag-{unit}", last_modified=None, payload_sha256=f"sha-{unit}"))
+        assert client.defer_cache_writes is False
+        assert client.commit_cache_writes is True
+        from pipeline import db
+
+        db.set_http_cache(
+            client.conn, url=f"https://h{unit}.example.com/x", host=f"h{unit}.example.com",
+            etag=f"etag-{unit}", last_modified=None, payload_sha256=f"sha-{unit}")
+        client.conn.commit()
         return unit
 
     assert all(o.ok for o in _run(range(4), worker, settings, max_workers=4))
 
 
-def test_deferred_cache_entries_are_flushed_by_the_caller(tmp_path, settings, conn):
-    """Deferring must not mean discarding: conditional requests are how
-    re-runs avoid re-downloading documents that have not changed.
-    """
+def test_worker_cache_entries_are_visible_without_caller_flush(settings, conn):
+    """Worker commits survive pool shutdown and are visible to the caller."""
     def worker(unit, client):
-        client.pending_cache_writes.append(
-            dict(url=f"https://h{unit}.example.com/x", host=f"h{unit}.example.com",
-                 etag=f"etag-{unit}", last_modified=None, payload_sha256=f"sha-{unit}"))
+        from pipeline import db
+
+        db.set_http_cache(
+            client.conn, url=f"https://h{unit}.example.com/x", host=f"h{unit}.example.com",
+            etag=f"etag-{unit}", last_modified=None, payload_sha256=f"sha-{unit}")
+        client.conn.commit()
         return unit
 
     list(fetch_in_parallel(range(3), worker, source_system="test_source",
-                           settings=settings, max_workers=3, cache_conn=conn))
+                           settings=settings, max_workers=3))
 
     rows = conn.execute("SELECT url, etag FROM http_cache ORDER BY url").fetchall()
     assert [r["etag"] for r in rows] == ["etag-0", "etag-1", "etag-2"]
 
 
-def test_without_a_cache_connection_nothing_is_written(tmp_path, settings, conn):
-    """A caller that does not pass one is opting out, not silently losing
-    writes to a connection it never named.
-    """
+def test_without_a_cache_connection_workers_still_write(tmp_path, settings, conn):
+    """`cache_conn` is unused on PostgreSQL; worker-owned writes still commit."""
     def worker(unit, client):
-        client.pending_cache_writes.append(
-            dict(url="https://x.example.com/y", host="x.example.com",
-                 etag="e", last_modified=None, payload_sha256="s"))
+        from pipeline import db
+
+        db.set_http_cache(
+            client.conn, url=f"https://x{unit}.example.com/y", host=f"x{unit}.example.com",
+            etag=f"e{unit}", last_modified=None, payload_sha256=f"s{unit}")
+        client.conn.commit()
         return unit
 
     list(fetch_in_parallel(range(2), worker, source_system="test_source",
                            settings=settings, max_workers=2))
-    assert conn.execute("SELECT COUNT(*) c FROM http_cache").fetchone()["c"] == 0
+    assert conn.execute("SELECT COUNT(*) c FROM http_cache").fetchone()["c"] == 2
 
 
 def test_a_serial_client_still_writes_its_cache_immediately(conn, settings):
-    """Deferral is opt-in for the pool. Every other module writes as it goes."""
+    """A serial client writes its cache immediately as well."""
     from pipeline.http import PipelineHTTPClient
 
     client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
