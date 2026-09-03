@@ -69,7 +69,7 @@ def unpack(blob: bytes) -> list[float]:
 def vec_literal(vector) -> str:
     """A vector as pgvector's text input form: ``[0.1,0.2,...]``.
 
-    Bound as a plain string and cast with ``?::vector`` at the call site, so
+    Bound as a plain string and cast with ``?::public.vector`` at the call site, so
     the pgvector psycopg adapter is not a dependency. ``repr`` on a float
     round-trips exactly, which the on-disk bytea already guarantees anyway.
     """
@@ -291,7 +291,7 @@ def run(conn, *, model: str | None = None, source_system: str | None = None,
         insert_sql = (
             "INSERT INTO document_embeddings (document_chunk_id, model_key, dimension, "
             "embedding, embedding_vec, nlp_run_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?::vector, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?::public.vector, ?, ?) "
             "ON CONFLICT(document_chunk_id, model_key) DO UPDATE SET "
             "dimension=excluded.dimension, embedding=excluded.embedding, "
             "embedding_vec=excluded.embedding_vec, "
@@ -396,7 +396,7 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         _set_vector_search_path(conn)
         conn.execute(
             f"ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS "
-            f"embedding_vec vector({VECTOR_COLUMN_DIM})")
+            f"embedding_vec public.vector({VECTOR_COLUMN_DIM})")
 
     sql = ("SELECT document_chunk_id, model_key, embedding FROM document_embeddings "
            "WHERE embedding_vec IS NULL AND dimension = ?")
@@ -425,7 +425,7 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
         chunk = pending[start:start + max(1, batch_size)]
         _set_vector_search_path(conn)
         conn.executemany(
-            "UPDATE document_embeddings SET embedding_vec = ?::vector "
+            "UPDATE document_embeddings SET embedding_vec = ?::public.vector "
             "WHERE document_chunk_id = ? AND model_key = ?",
             [(vec_literal(unpack(r["embedding"])), r["document_chunk_id"], r["model_key"])
              for r in chunk])

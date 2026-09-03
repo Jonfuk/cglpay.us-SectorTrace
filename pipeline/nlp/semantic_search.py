@@ -170,14 +170,14 @@ def _semantic_ranked(conn, query: str, filters: Filters, depth: int,
     literal = embeddings.vec_literal(query_vec)
     rows = conn.execute(
         "SELECT em.document_chunk_id AS cid, "
-        "1 - (em.embedding_vec <=> ?::vector) AS score "
+        "1 - (em.embedding_vec OPERATOR(public.<=>) ?::public.vector) AS score "
         "FROM document_embeddings em "
         "JOIN document_chunks dc ON dc.document_chunk_id = em.document_chunk_id AND dc.superseded = 0 "
         "JOIN document_versions dv ON dv.document_version_id = dc.document_version_id AND dv.is_active = 1 "
         "JOIN document_records d ON d.document_id = dv.document_id "
         "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
         "WHERE em.model_key = ? AND em.embedding_vec IS NOT NULL" + filter_sql
-        + " ORDER BY em.embedding_vec <=> ?::vector LIMIT ?",
+        + " ORDER BY em.embedding_vec OPERATOR(public.<=>) ?::public.vector LIMIT ?",
         [literal, model_key, *filter_params, literal, depth]).fetchall()
     if rows:
         return model_key, [(row["cid"], float(row["score"])) for row in rows], None

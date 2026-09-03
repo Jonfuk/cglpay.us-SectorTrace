@@ -47,7 +47,7 @@ BEGIN
             format('%I,%I,pg_catalog', application_schema, vector_schema),
             true
         );
-        ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS embedding_vec vector(384);
+        ALTER TABLE document_embeddings ADD COLUMN IF NOT EXISTS embedding_vec public.vector(384);
         -- Build the HNSW index single-threaded. pgvector's *parallel* build
         -- reserves a shared-memory segment the size of maintenance_work_mem in
         -- /dev/shm before it counts rows, so even this empty partial index
