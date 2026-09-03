@@ -1,9 +1,9 @@
 # Working in this repository
 
 An England-wide substance misuse sector evidence pipeline: it collects
-public-domain evidence for a trade union pay campaign, stores it in a SQLite
-warehouse with full provenance, and serves a public evidence portal at `/` and
-an operator UI at `/admin` from one stdlib HTTP server.
+public-domain evidence for a trade union pay campaign, stores it in a
+PostgreSQL warehouse with full provenance, and serves a public evidence portal
+at `/` and an operator UI at `/admin` from one stdlib HTTP server.
 
 Read [`README.md`](README.md) for what it does.
 [`docs/CAVEATS.md`](docs/CAVEATS.md) is not optional reading before touching
@@ -52,10 +52,16 @@ explicitly, not to slip in.
    trusted.
 9. **Values reach the DOM as text nodes**, never as concatenated HTML.
    `static/app.js` throws on an `html:` prop — keep it that way.
-10. **SQLite discipline.** Connection per request or per module,
-    `readonly_connection` for reads, `db.get_connection` for writes, closed in
-    `finally`, the process-wide write slot handed out in arrival order, and
-    commits per unit of work rather than once at the end.
+10. **PostgreSQL discipline.** PostgreSQL 18 is the only application database
+    (performance.md Phase 1 reversed the former SQLite-default decision).
+    Connection per request or per module, `readonly_connection` for reads (the
+    pooled SELECT-only reader role), `db.get_connection` for writes, closed in
+    `finally`, commits per unit of work rather than once at the end. There is
+    no write slot — MVCC lets writers interleave; the one-overlapping-run rule
+    moves to a PostgreSQL advisory lock in the Phase 5 worker cutover. pgvector,
+    pg_trgm and PostGIS are required extensions (`db.ensure_extensions` fails
+    the migrate without them). `DATABASE_URL` is mandatory; `deploy/docker-compose.postgres.yml`
+    provides a local one.
 
 ## House style
 
@@ -96,7 +102,7 @@ uv run ruff check pipeline tests # lint; CI runs both
 | | |
 |---|---|
 | `pipeline/modules/m00`–`m16` | One per source; each declares its dependencies |
-| `pipeline/registry.py`, `runner.py`, `parallel.py` | Module registry, execution, the write slot |
+| `pipeline/registry.py`, `runner.py`, `parallel.py` | Module registry, execution, worker fan-out |
 | `pipeline/http.py`, `netguard.py` | The shared client; where a fetch may land |
 | `pipeline/promote.py` | Candidates becoming evidence |
 | `pipeline/backup.py` | `VACUUM INTO` snapshots and restore |

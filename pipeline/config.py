@@ -405,16 +405,21 @@ class Settings(BaseSettings):
     # a finite bound. Permanent configuration errors fail immediately.
     analysis_max_automatic_retries: int = 96
 
+    # Deprecated. PostgreSQL is the only application database now
+    # (performance.md Phase 1); nothing on the application path reads this. It
+    # is retained only so a few dead SQLite-era code paths (a benchmark scratch
+    # branch, a recovery branch) still resolve the attribute until they are
+    # removed. Do not add new readers.
     database_path: Path = REPO_ROOT / "data" / "warehouse.db"
 
-    # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
-    # still the backend of record, and a checkout with no `.env` entry here
-    # behaves exactly as it did before PostgreSQL existed.
+    # The PostgreSQL warehouse. Required in practice: `db.get_connection`
+    # raises clearly when it is unset, because there is no longer a file
+    # backend to fall back to. Left as an optional field rather than a hard
+    # startup validator so the logging and test paths that build a bare
+    # `Settings()` for something other than the database still construct.
     #
-    # Presence of the URL is what selects the backend — there is deliberately
-    # no separate DATABASE_BACKEND switch. Two settings that can disagree have
-    # a third state where they do, and the failure ("why is it writing to the
-    # file when the URL is set?") is silent and reads like a bug in the driver.
+    # There is deliberately no separate DATABASE_BACKEND switch; `DATABASE_URL`
+    # is the one place the warehouse is named.
     # To force SQLite for one command, unset the variable: `DATABASE_URL= …`.
     #
     # No default points at a real server, and nothing in the repository holds a
@@ -747,10 +752,12 @@ class Settings(BaseSettings):
 
     @property
     def database_backend(self) -> str:
-        """`"postgres"` or `"sqlite"`. The single answer to "which backend?".
+        """Vestigial. PostgreSQL is the only backend (performance.md Phase 1).
 
-        Derived, never set: see the note on `database_url` for why there is no
-        second switch that could disagree with this one.
+        Returns `"postgres"` whenever a URL is configured — which it must be for
+        any database work — and `"sqlite"` only for a URL-less `Settings()` that
+        is not going to touch the warehouse (logging, some tests). A handful of
+        dead SQLite-era branches still read it; new code should not.
         """
         return "postgres" if self.database_url else "sqlite"
 
