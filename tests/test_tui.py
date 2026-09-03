@@ -1,7 +1,6 @@
 """Regression coverage for the generated terminal UI entry point."""
 
 from trogon.introspect import introspect_click_app
-from trogon.trogon import Trogon
 from trogon.widgets.command_tree import CommandTree
 from trogon.widgets.form import CommandForm
 from trogon.widgets.parameter_controls import ParameterControls
@@ -9,6 +8,7 @@ from typer.main import get_group
 from typer.testing import CliRunner
 
 from pipeline import cli as cli_module
+from pipeline.tui import RunConfirmation, SafeTrogon, command_requires_confirmation
 
 
 def test_cli_exposes_tui_command() -> None:
@@ -73,8 +73,22 @@ def test_trogon_headless_smoke_renders_nested_form() -> None:
             )
         }
         assert "--limit" in option_names
+        builder.app.post_run_command = ["documents", "search", "--limit", "2"]
+        builder.action_close_and_run()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, RunConfirmation)
+        assert "documents search --limit 2" in pilot.app.screen.command
+        pilot.app.pop_screen()
         pilot.app.exit()
 
-    Trogon(root, app_name="pipeline").run(
+    SafeTrogon(root, app_name="pipeline").run(
         headless=True, size=(120, 40), auto_pilot=autopilot
     )
+
+
+def test_tui_execution_policy_defaults_to_confirmation() -> None:
+    assert not command_requires_confirmation(["root", "dashboard"])
+    assert not command_requires_confirmation(["root", "list-modules"])
+    assert command_requires_confirmation(["root", "run"])
+    assert command_requires_confirmation(["root", "documents", "search"])
+    assert command_requires_confirmation([])

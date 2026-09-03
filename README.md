@@ -70,7 +70,10 @@ around.
 `./start.sh tui` presents the same complete command tree in an interactive
 terminal form, including nested commands and their options. Use `Ctrl+S` to
 search, `Ctrl+T` to return to the command tree, `Ctrl+O` for command help, and
-`Ctrl+R` to close the form and run the selected command.
+`Ctrl+R` to close the form and run the selected command. Commands that are not
+on the small read-only inspection allowlist first show the exact command and
+ask for confirmation; this includes warehouse, archive, export and service
+operations.
 
 For the operator landing view, use `./start.sh dashboard`. It shows warehouse
 health, parse-failure pressure, and an oldest-first pending review worklist;

@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
-from trogon.typer import init_tui
 
 from pipeline import console as ui
 from pipeline import db, runner
@@ -22,6 +21,7 @@ from pipeline.registry import (
     resolve_run_order,
     resolve_run_waves,
 )
+from pipeline.tui import init_tui
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
@@ -34,8 +34,9 @@ app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
 app.add_typer(mirror_app, name="mirror")
-# Keep the TUI as another entry point over the existing command schema. This
-# means command validation and side effects remain in the tested CLI handlers.
+# Keep the TUI as another entry point over the existing command schema. The
+# project wrapper adds a confirmation boundary, while validation and side
+# effects remain in the tested CLI handlers.
 init_tui(app, name="pipeline")
 
 
