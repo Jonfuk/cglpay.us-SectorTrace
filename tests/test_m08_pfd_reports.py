@@ -220,7 +220,9 @@ def test_short_acronyms_are_excluded_from_matching():
 # --- personal data boundary --------------------------------------------------------------
 
 def test_public_report_table_has_no_deceased_name_column(conn):
-    columns = {r[1] for r in conn.execute("PRAGMA table_info(pfd_reports)")}
+    columns = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'pfd_reports'")}
     assert "deceased_name" not in columns
     assert "page_title_raw" not in columns
     # the coroner is a public official and IS captured
@@ -232,11 +234,14 @@ def test_full_report_text_is_not_in_the_public_table(conn):
     showed the deceased named in the body of every single report — so any
     export touching that column would have leaked a name.
     """
-    public_columns = {r[1] for r in conn.execute("PRAGMA table_info(pfd_reports)")}
+    public_columns = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'pfd_reports'")}
     assert "body_text" not in public_columns
 
-    restricted_columns = {r[1] for r in conn.execute(
-        "PRAGMA table_info(restricted_pfd_report_text)")}
+    restricted_columns = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'restricted_pfd_report_text'")}
     assert "body_text" in restricted_columns
 
 
