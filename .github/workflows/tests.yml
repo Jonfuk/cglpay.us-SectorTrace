@@ -67,14 +67,8 @@ jobs:
         run: uv run python -m pipeline docs-check
 
       - name: Tests
-        # Run WITHOUT the postgres extra, which is the configuration pyproject
-        # claims must keep working: "a fresh checkout, CI, and every test that
-        # does not name a backend open a file, and none of them should need a
-        # database driver on the machine". That claim is now tested rather than
-        # asserted — it was false, and had been since the PostgreSQL backend
-        # landed. One test module imported `pipeline.pg` at the top, psycopg is
-        # not installed here, and collection aborted before a single test ran.
-        # The whole offline suite went with it.
+        # PostgreSQL is a core dependency: the offline suite and the optional
+        # live suites use the same lockfile-resolved application environment.
         #
         # Failures are echoed back as `::error::` workflow commands, which
         # become annotations on the run. Annotations are readable without a
@@ -92,22 +86,3 @@ jobs:
           done
           tail -1 pytest.log | sed 's/^/::error::summary: /'
           exit $status
-
-      - name: Sync dependencies, with the PostgreSQL driver
-        run: uv sync --extra postgres
-
-      - name: Tests that need the driver
-        # The modules that behave differently when psycopg is importable, and
-        # only those: the full suite has already run above, and running all of
-        # it twice would buy nothing but minutes. The live suites are in the
-        # list and skip themselves — POSTGRES_TEST_URL is not set here, and
-        # nothing in CI reaches a database any more than it reaches a source.
-        run: |
-          uv run python -m pytest -q --tb=short \
-            tests/test_pg_row.py \
-            tests/test_backend_selection.py \
-            tests/test_sqldialect.py \
-            tests/test_postgres_live.py \
-            tests/test_pg_migration_live.py \
-            tests/test_pg_capabilities_live.py
-

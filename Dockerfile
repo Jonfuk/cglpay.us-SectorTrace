@@ -3,8 +3,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 WORKDIR /app
 
 # Keep the dependency layer cacheable. Railway supplies DATABASE_URL at run
-# time; PostgreSQL is therefore a deployment dependency even though SQLite is
-# still the default for a local checkout.
+# time; PostgreSQL is a core deployment dependency because it is the only
+# application database.
 #
 # The extra list is deliberate and closed: `nlp`, `docs`, `ocr` and `sheets`
 # are NOT installed here. `assistant` (BETA-107) is the local-analysis-host
@@ -18,14 +18,14 @@ WORKDIR /app
 ARG INSTALL_ASSISTANT=false
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --extra postgres --extra storage --extra graph \
+RUN uv sync --frozen --no-dev --no-install-project --extra storage --extra graph \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 COPY pipeline ./pipeline
 COPY deploy ./deploy
 COPY railway.toml ./railway.toml
 
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph \
+RUN uv sync --frozen --no-dev --extra storage --extra graph \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 ENV PATH="/app/.venv/bin:$PATH" \

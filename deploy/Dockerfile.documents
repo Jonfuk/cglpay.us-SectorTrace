@@ -41,7 +41,7 @@ ARG INSTALL_ASSISTANT=false
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra graph --extra nlp \
+    --extra storage --extra graph --extra nlp \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 COPY pipeline ./pipeline
@@ -54,7 +54,7 @@ COPY pipeline ./pipeline
 # defaults.
 COPY tests/fixtures/nlp ./tests/fixtures/nlp
 COPY tests/fixtures/assistant ./tests/fixtures/assistant
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph --extra nlp \
+RUN uv sync --frozen --no-dev --extra storage --extra graph --extra nlp \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 # These are the two document packages the PyMuPDF/OCRmyPDF batch actually

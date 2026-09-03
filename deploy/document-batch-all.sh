@@ -5,7 +5,7 @@
 set -euo pipefail
 
 git pull origin master
-uv sync --extra postgres --extra storage --extra documents
+uv sync --extra storage --extra documents
 uv run pipeline migrate
 
 batch_size="${DOCUMENT_BATCH_SIZE:-25}"
