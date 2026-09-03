@@ -1,10 +1,14 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
+  CatalogueResponse,
   ContractsResponse,
+  DocumentSearchResponse,
+  GeographyResponse,
   MetaResponse,
   PayResponse,
   ProviderRow,
   SummaryResponse,
+  TreatmentResponse,
 } from '~/types/api'
 
 // The typed public API client. It sits over the low-level same-origin
@@ -41,6 +45,14 @@ export interface PublicApi {
   contracts(options?: TransportOptions): Promise<ContractsResponse>
   /** `/api/v1/providers` — every provider with comparable counts. */
   providers(options?: TransportOptions): Promise<ProviderRow[]>
+  /** `/api/v1/geography` — one value per authority for a chosen metric. */
+  geography(options?: TransportOptions): Promise<GeographyResponse>
+  /** `/api/v1/treatment_metrics` — the treatment metric catalogue. */
+  treatment(options?: TransportOptions): Promise<TreatmentResponse>
+  /** `/api/v1/catalogue` — every dataset served, with counts and freshness. */
+  catalogue(options?: TransportOptions): Promise<CatalogueResponse>
+  /** `/api/v1/document_search` — full-text document search (requires `q`). */
+  documentSearch(options?: TransportOptions): Promise<DocumentSearchResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -55,5 +67,9 @@ export function usePublicApi(): PublicApi {
     pay: (options) => get<PayResponse>('/pay', options),
     contracts: (options) => get<ContractsResponse>('/contracts', options),
     providers: (options) => get<ProviderRow[]>('/providers', options),
+    geography: (options) => get<GeographyResponse>('/geography', options),
+    treatment: (options) => get<TreatmentResponse>('/treatment_metrics', options),
+    catalogue: (options) => get<CatalogueResponse>('/catalogue', options),
+    documentSearch: (options) => get<DocumentSearchResponse>('/document_search', options),
   }
 }

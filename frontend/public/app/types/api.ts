@@ -135,6 +135,98 @@ export interface ProviderRow {
   [key: string]: unknown
 }
 
+/** One authority value for the choropleth (`/api/v1/geography` → `features[]`).
+ *  Geometry is deliberately NOT included here — boundaries are a separate 14 MB
+ *  fetch (later served as PMTiles tiles). */
+export interface GeographyFeature {
+  ons_code: string | null
+  authority_name: string | null
+  region: string | null
+  value: number | null
+  financial_year: string | null
+  [key: string]: unknown
+}
+
+/** `/api/v1/geography` — one value per authority for a chosen metric. */
+export interface GeographyResponse {
+  metric: string
+  metric_label: string
+  year: string | number | null
+  unit: string | null
+  features: GeographyFeature[]
+  authority_mean: number | null
+  min: number | null
+  max: number | null
+  caveat: string | null
+  [key: string]: unknown
+}
+
+/** A treatment metric catalogue row (`/api/v1/treatment_metrics` → `metrics[]`).
+ *  Shown before any chart is drawn: definition, periods held, CI availability. */
+export interface TreatmentMetric {
+  key: string
+  name: string | null
+  topic: string | null
+  substance: string | null
+  unit: string | null
+  definition: string | null
+  has_confidence_interval: boolean
+  period_count: number
+  authority_count: number
+  england_available: boolean
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface TreatmentResponse {
+  metrics: TreatmentMetric[]
+  count: number
+  caveat: string | null
+  [key: string]: unknown
+}
+
+/** A catalogue dataset row (`/api/v1/catalogue` → `datasets[]`). */
+export interface CatalogueDataset {
+  dataset_id: string
+  title: string | null
+  publisher: string | null
+  official_url: string | null
+  evidence_layer_label: string | null
+  geography: string | null
+  cadence: string | null
+  row_count: number
+  last_retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface CatalogueResponse {
+  datasets: CatalogueDataset[]
+  evidence_layers: Record<string, string>
+  count: number
+  caveat: string | null
+  [key: string]: unknown
+}
+
+/** `/api/v1/document_search` — requires a `query`. Result rows carry their own
+ *  provenance; only the rendered columns are named. */
+export interface DocumentHit {
+  document_id?: string | number | null
+  title: string | null
+  source_system: string | null
+  document_type: string | null
+  published_date?: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface DocumentSearchResponse {
+  results?: DocumentHit[]
+  hits?: DocumentHit[]
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */
