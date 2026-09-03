@@ -435,6 +435,9 @@ def settings(tmp_path: Path, _pg_warehouse) -> Settings:
         contact_email="test@example.com",
         database_url=_pg_warehouse.url,
         database_ro_url=_pg_warehouse.ro_url,
+        # Deprecated compatibility field: keep every Settings path isolated
+        # even though PostgreSQL is the only warehouse backend now.
+        database_path=tmp_path / "warehouse.db",
         raw_archive_dir=tmp_path / "raw",
         migrations_dir=POSTGRES_MIGRATIONS_DIR,
         logs_dir=tmp_path / "logs",
