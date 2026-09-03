@@ -48,7 +48,12 @@ _UNRELATED = ("The committee noted the car park resurfacing programme and the "
 
 
 @pytest.fixture
-def corpus(conn, settings):
+def corpus(conn, settings, monkeypatch):
+    # The production stub is intentionally 256-wide, while migration 0071's
+    # canonical pgvector column is 384-wide.  Use a compatible temporary width
+    # here so this fixture exercises the required PostgreSQL ranking path.
+    monkeypatch.setattr(embeddings, "STUB_DIMENSION", embeddings.VECTOR_COLUMN_DIM)
+    monkeypatch.setattr(embeddings.StubEmbedder, "dimension", embeddings.VECTOR_COLUMN_DIM)
     _seed(conn, settings, "evrec", "committee_paper_promotion", "Workforce", _RECRUIT)
     _seed(conn, settings, "evbud", "committee_paper_promotion", "Finance", _BUDGET)
     _seed(conn, settings, "evcar", "cdp_document_promotion", "Estates", _UNRELATED)
