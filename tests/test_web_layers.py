@@ -64,7 +64,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
             "VALUES (?, ?, 'A Council', ?, 'Supplier Ltd', 'Treatment services', "
-            " ?, 'GBP', '2025-06-01', 'open', 'psr', 'https://find.example/n', "
+            " ?, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
             " '2026-08-01T00:00:00Z', 200, 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", ons_code, value))
 

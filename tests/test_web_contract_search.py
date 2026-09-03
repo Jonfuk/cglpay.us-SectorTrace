@@ -35,7 +35,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
             "VALUES (?, ?, ?, 'E08000025', ?, 'Treatment services', ?, 'GBP', "
-            " ?, 'open', 'psr', 'https://find.example/n', ?, 200, "
+            " ?, 'open', 0, 'https://find.example/n', ?, 200, "
             " 'find_a_tender', ?)",
             (f"n{i}", f"ocds-n{i}", buyer, supplier, 1_000_000 * (i + 1),
              f"2026-0{i + 1}-01", retrieved, f"sha{i}"))
