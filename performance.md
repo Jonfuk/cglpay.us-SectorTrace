@@ -73,7 +73,7 @@ and outstanding.
 |---|---|---|
 | Phase 0 — Measurement and safety | **Partial** | `pipeline performance` exposes the named suite interface and deterministic JSON metadata for wall time, CPU time, and digests; the existing web/write benchmark is wired into the `web` and `writes` suites. Full telemetry, browser measurements, mixed-load runs, PostgreSQL/Neo4j instrumentation, and the seven-day baseline remain outstanding. |
 | Phase 1 — PostgreSQL-only transition | **Complete** | PostgreSQL 18 is now the sole application/test warehouse: startup requires `DATABASE_URL`, the PostgreSQL migration tree is authoritative, psycopg/psycopg_pool/pgvector are core dependencies, required pgvector/pg_trgm/PostGIS extensions are enforced, SQL uses psycopg-native parameters, psycopg named rows replace the SQLite row wrapper, and SQLite backend/mirror/backup selection has been removed from the application path. The clean PostgreSQL suite, lint, and compilation gates pass. |
-| Phase 2 — Analysis and model-call reduction | **Partial** | Narrative source traversal uses stable keyset pagination; cross-domain linking uses an indexed SQL join; model request identity hashing and a shadow candidate-prefilter helper are present. The full bounded accumulator, prefilter recall gate, analysis-window manifest/retention flow, and one-writer model pipeline remain outstanding. |
+| Phase 2 — Analysis and model-call reduction | **Partial — implementation pending acceptance gates** | Stable keyset traversal now feeds PostgreSQL-backed incremental theme counts with bounded ordered evidence, compact resumable input manifests, and an active-only candidate queue; completed detail is digest-validated and removed, while failed detail has a seven-day purge. Model reuse is content-addressed across releases and model workers reuse clients while one database writer batches cache/audit/verifier/signal/cost writes. Exact links use a keyset-batched indexed SQL candidate join, health counts reuse deduplicated operational snapshots, and append-only lineage/final release manifests are exposed to admin diagnostics. Suppression remains disabled until a real adjudicated corpus is recorded and passes the 99%/100% gate; production-sized parity/benchmark and the complete PostgreSQL test gate also remain required. |
 | Phase 3 — Incremental NLP and semantic search | **Partial** | The versioned NLP stage-state/checkpoint helper exists. Complete stage wiring, dependency invalidation across all NLP stages, canonical pgvector storage, ontology kernels, Mojo parity, and semantic-search cutover remain outstanding. |
 | Phase 4 — Shared writes and ingestion memory | **Partial** | `BatchWriter`, batch upserts with unchanged-write suppression, streamed archive interfaces, one-pass HTTP archiving, and a streaming XLSX iterator are implemented. Full adoption across every ingestion/document path and the PDF/CSV/prediction batch flows remain outstanding. |
 | Phase 5 — Archive, graph, PostgreSQL, and backend | **Partial** | Graph projection uses keyset pagination and projected columns; relationship writes use grouped `UNWIND`; the web server has bounded workers/queue rejection; public cache misses use single-flight coordination; operational snapshot and durable worker-queue primitives exist. Full archive audits, PostgreSQL maintenance, cross-process invalidation, worker cutover, and all listed operational gates remain outstanding. |
@@ -302,6 +302,40 @@ Phase 1 work.
 - Replace `_link_run`’s global pair scan with an indexed SQL candidate join constrained by release, canonical subject, differing domain, relationship rules, and date window. Pass candidates through the existing validation contract and retain every currently eligible link.
 - Batch link inserts and use stable left/right ordering to prevent duplicate candidate generation. Do not reduce links to nearest or aggregate relationships.
 - Deduplicate analysis health source tables and reuse operational row-count snapshots instead of issuing repeated exact counts.
+
+#### Phase 2 implementation record — beta candidate
+
+Migrations `0094`, `0095`, and the centrally coordinated `0101` contract add
+operational snapshots, compact analysis state, content-addressed response
+reuse, append-only lineage, and immutable final analytical/published release
+manifests. `analysis_windows` remains only as a compatibility/detail table for
+work that was active or failed at migration time; new narrative runs persist
+candidate identifiers and checkpoints instead of passage rows. Terminal detail
+is deleted only after the output digest is recomputed and matches, and the
+worker purges failed detail after `FAILED_ANALYSIS_DETAIL_RETENTION_DAYS`.
+
+`pipeline analysis prefilter-eval CORPUS --corpus-version VERSION
+--adjudicated-by REVIEWER --record` records an immutable gate result. The
+committed offline regression fixture exercises the mechanism and currently
+scores 12/12 positive examples (100% overall) and 4/4 critical examples
+(100% critical), but it is deliberately not represented as the production
+adjudicated corpus. `ANALYSIS_PREFILTER_SUPPRESSION_ENABLED` defaults to false;
+even an explicit true value cannot suppress passages unless the persisted
+result for the exact rule digest meets both recall bars.
+
+This record does **not** mark Phase 2 complete. Acceptance still requires a
+representative human-adjudicated corpus, same-dataset before/after parity for
+themes/signals/verifiers/links/audits, a production-sized memory/call/SQL
+benchmark, and the complete PostgreSQL offline suite.
+
+The reproducible acceptance procedure is documented in
+`docs/analysis-phase2-acceptance.md`. `pipeline analysis benchmark-once`
+instruments one queued run, `acceptance-capture` records stable semantic
+counts/set/order digests and exact model-call diagnostics, and
+`acceptance-compare` fails unless both captures use the same ordered inputs and
+the correctness outputs retain count, set, and order parity. Measurement names
+explicitly distinguish Python allocator/RSS high-water observations and
+client-side SQL calls from unavailable server-side telemetry.
 
 ### Phase 3 — Incremental NLP, semantic search, and Mojo
 
@@ -743,10 +777,10 @@ migration plan is in `vue-plan.md`; this phase records the performance and deliv
   columns, validation state, and compatibility views needed during cutover.
 - Migration `0100_job_worker_state`: durable job queue, sequenced events, leases/checkpoints, and
   warehouse data-version state used by the separate worker and web cache.
-- Reserve the following future schema ownership with the integration lane; do not create these
+- Schema ownership is coordinated through the integration lane; do not create or redefine these
   migrations independently in parallel branches:
-  - `0101_evidence_lineage_and_releases` for canonical lineage edges and immutable analytical-release
-    manifests;
+  - `0101_evidence_lineage_and_releases` is now owned and implemented by the Phase 2 integration
+    contract for canonical lineage edges and immutable analytical/published-release manifests;
   - `0102_temporal_change_and_evidence_state` for validity/observation periods, supersession,
     source-change records, and orthogonal evidence-quality assertions;
   - `0103_collection_attempts_and_quarantine` for expected/negative collection outcomes and

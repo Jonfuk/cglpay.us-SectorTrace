@@ -93,7 +93,8 @@ def save_snapshot(conn, snapshot: HealthSnapshot, *, release_id: str | None = No
         "INSERT INTO analysis_health_snapshots (health_snapshot_id, release_id, domain_id, source_table, "
         "collected_at, collection_success, freshness_at, content_hash, parse_success, expected_schema_json, "
         "observed_schema_json, row_count, document_count, embedding_coverage, outlier_rate, extractor_agreement, "
-        "verifier_pass_rate, cost_micros, latency_ms, cache_hits, signal_yield) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "verifier_pass_rate, cost_micros, latency_ms, cache_hits, signal_yield) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (release_id, source_table) WHERE release_id IS NOT NULL DO NOTHING",
         (snapshot_id, release_id, domain_id, data["source_table"], data["collected_at"],
          None if data["collection_success"] is None else int(data["collection_success"]), data["freshness_at"],
          data["content_hash"], None if data["parse_success"] is None else int(data["parse_success"]),

@@ -59,7 +59,7 @@ def _document_reference(row):
 def analysis_worker(
     once: bool = typer.Option(False, "--once", help="Claim one run and exit when it finishes."),
     poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls."),
-    batch_size: int = typer.Option(100, min=1, help="Analysis windows processed per batch."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
     comparison_workers: int | None = typer.Option(None, "--comparison-workers", min=1,
                                                    help="CPU processes for structured comparisons; auto by default."),
     worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
@@ -114,6 +114,129 @@ def analysis_health(
                "max_age_seconds": threshold}
     typer.echo(__import__("json").dumps(payload, sort_keys=True))
     if age_seconds > threshold:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("prefilter-eval")
+def analysis_prefilter_eval(
+    corpus: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                  help="Adjudicated JSONL corpus."),
+    corpus_version: str = typer.Option(..., "--corpus-version",
+                                       help="Immutable corpus version label."),
+    adjudicated_by: str = typer.Option(..., "--adjudicated-by",
+                                       help="Named human reviewer or panel."),
+    record: bool = typer.Option(False, "--record",
+                                help="Persist the immutable gate result."),
+) -> None:
+    """Evaluate the narrative prefilter; suppression still needs explicit config opt-in."""
+    import json
+
+    from pipeline.analysis.prefilter import evaluate, save_result
+
+    rows = []
+    for number, line in enumerate(corpus.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"invalid JSON on line {number}: {exc}") from exc
+        if not isinstance(row, dict) or not isinstance(row.get("text"), str):
+            raise typer.BadParameter(f"line {number} must be an object with text")
+        if not isinstance(row.get("positive"), bool) or not isinstance(row.get("critical"), bool):
+            raise typer.BadParameter(
+                f"line {number} must carry boolean positive and critical labels")
+        rows.append(row)
+    try:
+        result = evaluate(rows, corpus_version=corpus_version)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    payload = {**result.__dict__, "recorded": False}
+    if record:
+        conn, _settings = _document_connection()
+        try:
+            payload["result_id"] = save_result(
+                conn, result, adjudicated_by=adjudicated_by)
+            conn.commit()
+            payload["recorded"] = True
+        finally:
+            conn.close()
+    typer.echo(json.dumps(payload, sort_keys=True, indent=2))
+    if not result.gate_passed:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("acceptance-capture")
+def analysis_acceptance_capture(
+    release_id: str = typer.Argument(..., help="Completed analytical release to capture."),
+    output: Path = typer.Option(..., "--output", help="Destination JSON snapshot."),
+) -> None:
+    """Capture deterministic Phase 2 parity inputs, outputs and diagnostics."""
+    import json
+
+    from pipeline.analysis.acceptance import release_snapshot, write_report
+
+    conn, _settings = _document_connection()
+    try:
+        report = release_snapshot(conn, release_id)
+    finally:
+        conn.close()
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "snapshot_digest": report["snapshot_digest"]}, sort_keys=True))
+
+
+@analysis_app.command("acceptance-compare")
+def analysis_acceptance_compare(
+    baseline: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                    help="Before snapshot JSON."),
+    candidate: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                     help="After snapshot JSON."),
+    output: Path = typer.Option(..., "--output", help="Destination comparison JSON."),
+) -> None:
+    """Require same-input count/set/order parity between two captures."""
+    import json
+
+    from pipeline.analysis.acceptance import compare_snapshots, write_report
+
+    try:
+        before = json.loads(baseline.read_text(encoding="utf-8"))
+        after = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise typer.BadParameter(f"invalid acceptance snapshot: {exc}") from exc
+    report = compare_snapshots(before, after)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "same_dataset": report["same_dataset"],
+                           "parity_passed": report["parity_passed"],
+                           "comparison_digest": report["comparison_digest"]}, sort_keys=True))
+    if not report["parity_passed"]:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("benchmark-once")
+def analysis_benchmark_once(
+    output: Path = typer.Option(..., "--output", help="Destination benchmark JSON."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
+    worker_id: str = typer.Option("phase2-acceptance", help="Worker label recorded with the run."),
+) -> None:
+    """Instrument one queued run; use only against an isolated acceptance database."""
+    import json
+
+    from pipeline.analysis.acceptance import benchmark_once, write_report
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+    finally:
+        conn.close()
+    report = benchmark_once(
+        settings, batch_size=batch_size, worker_id=worker_id)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output), "status": report["status"],
+                           "benchmark_digest": report["benchmark_digest"]}, sort_keys=True))
+    if report["status"] == "failed":
         raise typer.Exit(code=1)
 
 

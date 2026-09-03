@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import re
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
+from pipeline.analysis.prefilter import RULES_VERSION
+from pipeline.analysis.prefilter import matches as _prefilter_matches
 from pipeline.analysis.signals import Signal, new_signal
 
 _SENTENCE_RE = re.compile(r"[^.!?]+(?:[.!?]|$)", re.S)
 _CONTRADICTION_RE = re.compile(r"\b(?:not|no|without|never|did not|isn't|wasn't)\b", re.I)
-NARRATIVE_PREFILTER_VERSION = "lexical-v1-shadow"
-_PREFILTER_TERMS = frozenset({
-    "shortage", "vacancy", "vacancies", "workload", "pressure", "retention",
-    "recruitment", "recruit", "pay", "salary", "staffing", "workforce",
-    "capacity", "demand", "waiting", "backlog", "commission", "service",
-})
+NARRATIVE_PREFILTER_VERSION = RULES_VERSION
+
+
+def theme_key_for_text(text: str) -> str:
+    words = [word.lower() for word in re.findall(r"[a-z][a-z-]{4,}", (text or "").strip())]
+    return Counter(words).most_common(1)[0][0] if words else "outlier"
 
 
 def narrative_candidate_prefilter(text: str, *, enabled: bool = False) -> bool:
@@ -27,8 +29,7 @@ def narrative_candidate_prefilter(text: str, *, enabled: bool = False) -> bool:
     """
     if not enabled:
         return True
-    words = set(re.findall(r"[a-z][a-z-]{2,}", text.casefold()))
-    return bool(words & _PREFILTER_TERMS)
+    return _prefilter_matches(text)
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,81 @@ def candidate_to_signal(candidate: NarrativeCandidate, *, release_id: str,
                       confidence_contract=confidence)
 
 
+class ThemeAccumulator:
+    """Incremental theme counts with bounded, stable evidence sampling."""
+
+    def __init__(self, *, novelty_threshold: float = .85,
+                 recurrence_bar: dict[str, int] | None = None,
+                 max_evidence_per_theme: int | None = None,
+                 max_evidence_total: int | None = None,
+                 state: dict[str, Any] | None = None) -> None:
+        self.novelty_threshold = novelty_threshold
+        self.bar = {"passages": 10, "documents": 5, "subjects": 3} | (recurrence_bar or {})
+        self.max_evidence_per_theme = (None if max_evidence_per_theme is None else
+                                       max(0, int(max_evidence_per_theme)))
+        self.max_evidence_total = (None if max_evidence_total is None else
+                                   max(0, int(max_evidence_total)))
+        self.groups: dict[str, dict[str, Any]] = {}
+        self.retained_evidence = 0
+        if state:
+            self.retained_evidence = int(state.get("retained_evidence", 0))
+            for key, raw in (state.get("groups") or {}).items():
+                self.groups[key] = {
+                    "items": list(raw.get("items") or []),
+                    "passage_count": int(raw.get("passage_count", 0)),
+                    "documents": set(raw.get("documents") or []),
+                    "subjects": set(raw.get("subjects") or []),
+                }
+
+    def add(self, passage: dict[str, Any]) -> None:
+        text_value = str(passage.get("text") or "").strip()
+        key = theme_key_for_text(text_value)
+        group = self.groups.setdefault(
+            key, {"items": [], "passage_count": 0, "documents": set(), "subjects": set()})
+        group["passage_count"] += 1
+        if passage.get("document_id"):
+            group["documents"].add(passage["document_id"])
+        if passage.get("subject_id"):
+            group["subjects"].add(passage["subject_id"])
+        if ((self.max_evidence_per_theme is None or
+             len(group["items"]) < self.max_evidence_per_theme) and
+                (self.max_evidence_total is None or
+                 self.retained_evidence < self.max_evidence_total)):
+            group["items"].append({**passage, "representative_quote": text_value[:240]})
+            self.retained_evidence += 1
+
+    def state(self) -> dict[str, Any]:
+        return {
+            "retained_evidence": self.retained_evidence,
+            "groups": {
+                key: {**group, "documents": sorted(group["documents"]),
+                      "subjects": sorted(group["subjects"])}
+                for key, group in self.groups.items()
+            },
+        }
+
+    def themes(self) -> list[dict[str, Any]]:
+        result = []
+        for key, group in self.groups.items():
+            passage_count = group["passage_count"]
+            documents = group["documents"]
+            subjects = group["subjects"]
+            is_outlier = key == "outlier" or passage_count == 1
+            similarity = 0.0 if is_outlier else min(.84, .5 + 1 / max(passage_count, 1))
+            result.append({
+                "theme_key": key, "passage_count": passage_count,
+                "document_count": len(documents), "subject_count": len(subjects),
+                "novelty_similarity": similarity, "outlier": is_outlier,
+                "passages": group["items"],
+                "status": "promotion_ready" if
+                passage_count >= self.bar["passages"] and
+                len(documents) >= self.bar["documents"] and
+                len(subjects) >= self.bar["subjects"] and
+                (0.0 if is_outlier else .5) < self.novelty_threshold else "shadow",
+            })
+        return result
+
+
 def discover_themes(passages: Iterable[dict[str, Any]], *, novelty_threshold: float = .85,
                     recurrence_bar: dict[str, int] | None = None,
                     max_evidence_per_theme: int | None = None,
@@ -171,32 +247,17 @@ def discover_themes(passages: Iterable[dict[str, Any]], *, novelty_threshold: fl
     in each theme's evidence payload. A progress callback can keep a worker's
     liveness visible during large scans.
     """
-    bar = {"passages": 10, "documents": 5, "subjects": 3} | (recurrence_bar or {})
-    groups: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"items": [], "passage_count": 0, "documents": set(), "subjects": set()})
-    evidence_per_theme = (None if max_evidence_per_theme is None else
-                          max(0, int(max_evidence_per_theme)))
-    evidence_total = None if max_evidence_total is None else max(0, int(max_evidence_total))
-    retained_evidence = 0
+    accumulator = ThemeAccumulator(
+        novelty_threshold=novelty_threshold, recurrence_bar=recurrence_bar,
+        max_evidence_per_theme=max_evidence_per_theme,
+        max_evidence_total=max_evidence_total)
     started = time.monotonic()
     last_progress = started
     processed = 0
     reported = 0
     for passage in passages:
         processed += 1
-        text = str(passage.get("text") or "").strip()
-        words = [w.lower() for w in re.findall(r"[a-z][a-z-]{4,}", text)]
-        key = Counter(words).most_common(1)[0][0] if words else "outlier"
-        group = groups[key]
-        group["passage_count"] += 1
-        if passage.get("document_id"):
-            group["documents"].add(passage["document_id"])
-        if passage.get("subject_id"):
-            group["subjects"].add(passage["subject_id"])
-        if (evidence_per_theme is None or len(group["items"]) < evidence_per_theme) and \
-                (evidence_total is None or retained_evidence < evidence_total):
-            group["items"].append({**passage, "representative_quote": text[:240]})
-            retained_evidence += 1
+        accumulator.add(passage)
         now = time.monotonic()
         if progress_callback and now - last_progress >= max(0.1, progress_interval_seconds):
             progress_callback(processed)
@@ -204,18 +265,4 @@ def discover_themes(passages: Iterable[dict[str, Any]], *, novelty_threshold: fl
             last_progress = now
     if progress_callback and processed and reported != processed:
         progress_callback(processed)
-    themes = []
-    for key, group in groups.items():
-        items = group["items"]
-        passage_count = group["passage_count"]
-        documents = group["documents"]
-        subjects = group["subjects"]
-        is_outlier = key == "outlier" or passage_count == 1
-        themes.append({"theme_key": key, "passage_count": passage_count,
-                       "document_count": len(documents), "subject_count": len(subjects),
-                       "novelty_similarity": 0.0 if is_outlier else min(.84, .5 + 1 / max(passage_count, 1)),
-                       "outlier": is_outlier, "passages": items,
-                       "status": "promotion_ready" if passage_count >= bar["passages"] and
-                       len(documents) >= bar["documents"] and len(subjects) >= bar["subjects"] and
-                       (0.0 if is_outlier else .5) < novelty_threshold else "shadow"})
-    return themes
+    return accumulator.themes()

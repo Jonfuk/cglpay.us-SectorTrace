@@ -56,7 +56,7 @@ def _worker_schema() -> str:
 
     Isolation between parallel workers is by schema, not by database, because
     the test role has no CREATEDB (see pipeline/pg.py) and one migrated schema
-    per worker costs the 94-migration build once rather than per test. Within a
+    per worker costs the full migration build once rather than per test. Within a
     worker, tests are isolated from each other by truncation, not by a fresh
     schema — no migration in this project seeds data, so a truncated schema is
     byte-for-byte a freshly migrated one.

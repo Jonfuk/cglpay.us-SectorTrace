@@ -48,37 +48,42 @@ def _cost_snapshot(conn, release_id: str, run_id: str | None = None) -> dict[str
         clause += " AND run_id = %s"
         params.append(run_id)
     row = conn.execute(
-        "SELECT COUNT(*) AS calls, COALESCE(SUM(cost_micros), 0) AS cost_micros "
+        "SELECT COUNT(*) AS calls, COUNT(*) FILTER (WHERE cached = 1) AS cache_hits, "
+        "COUNT(*) FILTER (WHERE cached = 0) AS billed_calls, "
+        "COALESCE(SUM(cost_micros) FILTER (WHERE cached = 0), 0) AS cost_micros "
         f"FROM analysis_model_calls WHERE {clause}", params).fetchone()
     if run_id:
         run = conn.execute("SELECT cost_micros FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
-        return {"model_calls": int(row["calls"]),
+        return {"model_calls": int(row["calls"]), "cache_hits": int(row["cache_hits"]),
+                "billed_calls": int(row["billed_calls"]),
                 "cost_micros": int(run["cost_micros"] if run else row["cost_micros"] or 0)}
-    return {"model_calls": int(row["calls"]), "cost_micros": int(row["cost_micros"] or 0)}
+    return {"model_calls": int(row["calls"]), "cache_hits": int(row["cache_hits"]),
+            "billed_calls": int(row["billed_calls"]),
+            "cost_micros": int(row["cost_micros"] or 0)}
 
 
-def _estimate_run(conn, selected: list[str]) -> tuple[int | None, int | None]:
+def _estimate_run(conn, selected: list[str], settings=None) -> tuple[int | None, int | None, dict[str, Any]]:
     """Forecast two model calls per available source row.
 
     This is deliberately a forecast, not a claim about work completed. A
     missing source table contributes nothing, and cost is only projected when
     the warehouse has a historical model-call rate to use.
     """
-    source_rows = 0
-    for domain_id in selected:
-        spec = domains.get_domain(domain_id)
-        for table in spec.source_tables:
-            try:
-                source_rows += int(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"])
-            except Exception:
-                continue
+    from pipeline.analysis.inventory import source_snapshot
+
+    tables = {table for domain_id in selected for table in domains.get_domain(domain_id).source_tables}
+    snapshot = source_snapshot(
+        conn, tables,
+        max_age_seconds=int(getattr(settings, "operational_snapshot_max_age_seconds", 900)),
+        refresh=True)
+    source_rows = snapshot["row_count"]
     if not source_rows:
-        return None, None
+        return None, None, snapshot
     calls = source_rows * 2
     average = conn.execute(
         "SELECT AVG(cost_micros) AS average FROM analysis_model_calls WHERE cost_micros IS NOT NULL"
     ).fetchone()["average"]
-    return calls, round(calls * float(average)) if average is not None else None
+    return calls, round(calls * float(average)) if average is not None else None, snapshot
 
 
 def _run_summary(conn, run_id: str) -> dict[str, Any]:
@@ -228,6 +233,12 @@ def graph(conn) -> dict[str, Any]:
 
 def models(conn) -> dict[str, Any]:
     return {"releases": [dict(row) for row in conn.execute("SELECT release_id, manifest_sha256, code_commit, created_at, status FROM analysis_releases ORDER BY created_at DESC LIMIT 20")],
+            "release_manifests": [dict(row) for row in conn.execute(
+                "SELECT release_manifest_id, release_id, release_kind, output_name, git_commit, "
+                "schema_version, warehouse_data_version, source_snapshot_sha256, "
+                "archive_manifest_sha256, model_configuration_sha256, created_at, "
+                "output_sha256, manifest_sha256 FROM release_manifests "
+                "ORDER BY created_at DESC LIMIT 20")],
             "programs": [dict(row) for row in conn.execute("SELECT * FROM analysis_program_versions ORDER BY created_at DESC LIMIT 100")]}
 
 
@@ -248,6 +259,19 @@ def operations(conn) -> dict[str, Any]:
     return {"health": [dict(row) for row in conn.execute("SELECT * FROM analysis_health_snapshots ORDER BY collected_at DESC LIMIT 100")],
             "proposals": [dict(row) for row in conn.execute("SELECT * FROM adaptation_proposals ORDER BY created_at DESC LIMIT 100")],
             "model_calls": [dict(row) for row in conn.execute("SELECT * FROM analysis_model_calls ORDER BY created_at DESC LIMIT 100")],
+            "input_manifests": [dict(row) for row in conn.execute(
+                "SELECT input_manifest_id, run_id, release_id, domain_id, input_count, "
+                "ordered_input_sha256, configuration_sha256, prefilter_version, candidate_count, "
+                "prefilter_result_sha256, suppression_enabled, "
+                "checkpoint_document_id, checkpoint_sequence, checkpoint_element_id, output_sha256, "
+                "status, detail_purged_at, updated_at FROM analysis_input_manifests "
+                "ORDER BY updated_at DESC LIMIT 100")],
+            "prefilter_gate": [dict(row) for row in conn.execute(
+                "SELECT corpus_version, corpus_sha256, rules_version, rules_sha256, thresholds_json, "
+                "result_sha256, positives, accepted_positives, critical_positives, accepted_critical, "
+                "critical_categories_json, overall_recall, critical_recall, "
+                "gate_passed, adjudicated_by, evaluated_at FROM analysis_prefilter_results "
+                "ORDER BY evaluated_at DESC LIMIT 20")],
             **runs(conn)}
 
 
@@ -256,7 +280,18 @@ def report(conn, release_id: str) -> dict[str, Any]:
     if manifest is None:
         raise KeyError(f"unknown analysis release {release_id!r}")
     from pipeline.analysis.linking import list_links
-    return {"release_manifest": manifest, "domains": domains_view(conn, release_id=release_id),
+    immutable = conn.execute(
+        "SELECT manifest_json FROM release_manifests WHERE release_id = %s "
+        "ORDER BY created_at DESC LIMIT 1", (release_id,)).fetchone()
+    lineage_counts = [dict(row) for row in conn.execute(
+        "SELECT object_kind, COUNT(*) AS count FROM lineage_objects WHERE restricted = 0 "
+        "GROUP BY object_kind ORDER BY object_kind")]
+    return {"release_manifest": manifest,
+            "immutable_release_manifest": json.loads(immutable["manifest_json"]) if immutable else None,
+            "lineage": {"object_counts": lineage_counts,
+                        "release_output_reference": f"{release_id}:analysis",
+                        "restricted_objects_excluded": True},
+            "domains": domains_view(conn, release_id=release_id),
             "signals": list_signals(conn, release_id=release_id),
             "structured": structured(conn, release_id=release_id)["structured"],
             "links": {"links": list_links(conn, release_id=release_id)},
@@ -290,13 +325,21 @@ def start_run(conn, settings, body: dict[str, Any]) -> dict[str, Any]:
     estimated_calls = body.get("estimated_calls")
     estimated_cost = body.get("estimated_cost_micros")
     if estimated_calls is None or estimated_cost is None:
-        forecast_calls, forecast_cost = _estimate_run(conn, selected)
+        forecast_calls, forecast_cost, source_snapshot = _estimate_run(conn, selected, settings)
         estimated_calls = estimated_calls if estimated_calls is not None else forecast_calls
         estimated_cost = estimated_cost if estimated_cost is not None else forecast_cost
+    else:
+        from pipeline.analysis.inventory import source_snapshot as capture_source_snapshot
+        source_snapshot = capture_source_snapshot(
+            conn, {table for domain_id in selected
+                   for table in domains.get_domain(domain_id).source_tables},
+            max_age_seconds=int(getattr(settings, "operational_snapshot_max_age_seconds", 900)),
+            refresh=True)
     manifest = releases.create_release(
         conn, settings, domains=selected,
         config={"run_kind": run_kind, "cost_ceiling_micros": ceiling,
-                "estimated_calls": estimated_calls, "estimated_cost_micros": estimated_cost})
+                "estimated_calls": estimated_calls, "estimated_cost_micros": estimated_cost,
+                "source_snapshot": source_snapshot})
     conn.execute(
         "INSERT INTO analysis_runs (run_id, release_id, run_kind, status, "
         "requested_domains_json, total_domains, estimated_calls, estimated_cost_micros, "
@@ -332,6 +375,13 @@ def resume_run(conn, run_id: str) -> dict[str, Any]:
     item = _run_summary(conn, run_id)
     if item["status"] not in {"cancelled", "paused", "failed", "interrupted"}:
         raise ValueError(f"analysis run {run_id} cannot resume from {item['status']}")
+    purged = conn.execute(
+        "SELECT input_manifest_id FROM analysis_input_manifests WHERE run_id = %s "
+        "AND status = 'failed' AND detail_purged_at IS NOT NULL LIMIT 1",
+        (run_id,)).fetchone()
+    if purged:
+        raise ValueError(
+            "analysis failed-detail retention has expired; start a new run from the retained manifest")
     now = utcnow()
     conn.execute(
         "UPDATE analysis_runs SET status = 'queued', current_stage = 'queued', "
@@ -354,6 +404,13 @@ def activate(conn, release_id: str) -> dict[str, Any]:
     incomplete = conn.execute("SELECT COUNT(*) AS count FROM analysis_domain_runs WHERE release_id = %s AND status NOT IN ('complete', 'unavailable')", (release_id,)).fetchone()["count"]
     if incomplete:
         raise ValueError("a release may activate only when every registered domain is complete or unavailable")
+    final_manifest = conn.execute(
+        "SELECT 1 FROM release_manifests WHERE release_id = %s "
+        "AND release_kind = 'analytical' LIMIT 1",
+        (release_id,),
+    ).fetchone()
+    if final_manifest is None:
+        raise ValueError("a release may activate only after its immutable analytical manifest is sealed")
     conn.execute("UPDATE analysis_releases SET status = 'inactive' WHERE status = 'active'")
     conn.execute("UPDATE analysis_releases SET status = 'active', activated_at = %s WHERE release_id = %s", (utcnow(), release_id))
     conn.commit()

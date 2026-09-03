@@ -66,15 +66,23 @@ def link_signals(left: dict[str, Any], right: dict[str, Any], *,
 
 
 def save_link(conn, link: dict[str, Any]) -> None:
-    conn.execute(
+    save_links(conn, [link])
+
+
+def save_links(conn, links: list[dict[str, Any]]) -> int:
+    if not links:
+        return 0
+    conn.executemany(
         "INSERT INTO cross_source_signal_links (link_id, release_id, left_signal_id, right_signal_id, "
         "relationship_type, subject_type, subject_id, period_start, period_end, join_reason_json, "
         "explanation, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (left_signal_id, right_signal_id, relationship_type) DO NOTHING",
-        (link["link_id"], link["release_id"], link["left_signal_id"], link["right_signal_id"],
-         link["relationship_type"], link["subject_type"], link["subject_id"],
-         link.get("period_start"), link.get("period_end"), json.dumps(link["join_reason"], sort_keys=True),
-         link.get("explanation"), utcnow()))
+        [(link["link_id"], link["release_id"], link["left_signal_id"], link["right_signal_id"],
+          link["relationship_type"], link["subject_type"], link["subject_id"],
+          link.get("period_start"), link.get("period_end"),
+          json.dumps(link["join_reason"], sort_keys=True), link.get("explanation"), utcnow())
+         for link in links])
+    return len(links)
 
 
 def list_links(conn, *, release_id: str | None = None, subject_id: str | None = None,

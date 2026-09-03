@@ -15,6 +15,7 @@ from pipeline.analysis.graph import (
     exact_entity_attachment,
     queue_release_projection,
 )
+from pipeline.analysis.lineage import paths as lineage_paths
 from pipeline.analysis.linking import link_signals
 from pipeline.analysis.models import (
     AnalysisModelClient,
@@ -202,24 +203,30 @@ def test_permanent_analysis_configuration_error_fails_fast(conn, settings):
 def test_analysis_cache_reuses_successful_fallback_model(conn, settings):
     release = create_release(conn, settings, domains=["da"])
     prompt = "cached fallback prompt"
-    prompt_sha = hashlib.sha256(prompt.encode()).hexdigest()
+    client = AnalysisModelClient(
+        settings, release_id=release["release_id"], run_id="run-cache-hit",
+        models={"scout": "primary/model"}, fallback_models={"scout": ["backup/model"]}, conn=conn)
+    request_sha = client.request_sha(prompt, role="scout")
     conn.execute(
-        "INSERT INTO analysis_model_calls (model_call_id, release_id, domain_id, window_id, model_id, "
-        "provider_id, prompt_sha256, response_json, cached, cost_micros, latency_ms, status, created_at) "
-        "VALUES ('cached-fallback-call', %s, 'da', 'window-1', 'backup/model', 'provider-1', %s, %s, 0, 17, 42, 'ok', %s)",
-        (release["release_id"], prompt_sha,
+        "INSERT INTO analysis_model_response_cache (request_sha256, response_sha256, response_json, "
+        "requested_model, actual_model, provider_id, created_at) VALUES (%s, %s, %s, "
+        "'primary/model', 'backup/model', 'provider-1', %s)",
+        (request_sha, hashlib.sha256(b'{"signal": null}').hexdigest(),
          '{"signal": null}', "2025-01-01T00:00:00+00:00"))
     conn.commit()
 
+    second_release = create_release(conn, settings, domains=["da"])
     client = AnalysisModelClient(
-        settings, release_id=release["release_id"], run_id="run-cache-hit",
+        settings, release_id=second_release["release_id"], run_id="run-cache-hit",
         models={"scout": "primary/model"}, fallback_models={"scout": ["backup/model"]}, conn=conn)
     assert client.generate_json(prompt, role="scout", domain_id="da", window_id="window-2") == {"signal": None}
     assert client.last_cached is True
     row = conn.execute(
-        "SELECT model_id, cached, cost_micros FROM analysis_model_calls "
+        "SELECT model_id, cached, cost_micros, request_sha256, response_cache_key "
+        "FROM analysis_model_calls "
         "WHERE run_id = 'run-cache-hit' ORDER BY created_at DESC LIMIT 1").fetchone()
-    assert dict(row) == {"model_id": "backup/model", "cached": 1, "cost_micros": 0}
+    assert dict(row) == {"model_id": "backup/model", "cached": 1, "cost_micros": 0,
+                         "request_sha256": request_sha, "response_cache_key": request_sha}
 
 
 def test_analysis_release_captures_model_fallback_order(conn, settings, monkeypatch):
@@ -371,6 +378,12 @@ def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
     assert conn.execute("SELECT COUNT(*) AS count FROM structured_signals WHERE signal_id IN "
                         "(SELECT signal_id FROM automated_signals WHERE release_id = %s)",
                         (started["release_id"],)).fetchone()["count"] == 1
+    signal_id = conn.execute(
+        "SELECT signal_id FROM automated_signals WHERE release_id = %s",
+        (started["release_id"],)).fetchone()["signal_id"]
+    trace = lineage_paths(conn, signal_id)
+    assert {row["used_object_kind"] for row in trace if row["used_object_kind"]} >= {
+        "retrieval", "source"}
 
 
 def test_analysis_worker_processes_narrative_domain(conn, settings):
@@ -472,12 +485,15 @@ def test_analysis_worker_pauses_narrative_run_when_models_are_exhausted(conn, se
 
 def test_analysis_worker_limits_narrative_model_concurrency_to_four(conn, settings):
     started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
-    state = {"active": 0, "maximum": 0, "calls": 0}
+    state = {"active": 0, "maximum": 0, "calls": 0, "clients": 0}
     state_lock = threading.Lock()
 
     class ConcurrentModelClient:
         def __init__(self, settings, **kwargs):
             self.conn = kwargs["conn"]
+            assert self.conn is None
+            with state_lock:
+                state["clients"] += 1
             self.last_cost_micros = 0
             self.last_cached = False
 
@@ -500,7 +516,44 @@ def test_analysis_worker_limits_narrative_model_concurrency_to_four(conn, settin
                 for index in range(8)]
     assert worker._extract_narrative_signals(
         conn, started["run_id"], "da", domain_registry()["da"], started["release_id"], passages)
-    assert state == {"active": 0, "maximum": 4, "calls": 8}
+    assert state == {"active": 0, "maximum": 4, "calls": 8, "clients": 4}
+
+
+def test_hard_cost_ceiling_forces_one_reused_model_client(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    state = {"active": 0, "maximum": 0, "calls": 0, "clients": 0}
+    state_lock = threading.Lock()
+
+    class SerialModelClient:
+        def __init__(self, settings, **kwargs):
+            assert kwargs["conn"] is None
+            self.last_cost_micros = 0
+            self.last_cached = False
+            with state_lock:
+                state["clients"] += 1
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            with state_lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+                state["calls"] += 1
+            time.sleep(0.01)
+            with state_lock:
+                state["active"] -= 1
+            return {"signal": None}
+
+    settings.analysis_model_concurrency = 4
+    worker = AnalysisWorker(
+        settings, worker_id="ceiling-fixture-worker", model_client_factory=SerialModelClient)
+    worker._budget = CallBudget(ceiling_micros=100)
+    worker._current_run_id = started["run_id"]
+    passages = [{"text": f"passage {index}", "subject_id": f"subject-{index}",
+                 "subject_type": "authority", "evidence_ref": f"element-{index}"}
+                for index in range(5)]
+    assert worker._extract_narrative_signals(
+        conn, started["run_id"], "da", domain_registry()["da"],
+        started["release_id"], passages)
+    assert state == {"active": 0, "maximum": 1, "calls": 5, "clients": 1}
 
 
 def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):

@@ -11,10 +11,12 @@ import hashlib
 import json
 import multiprocessing
 import os
+import queue
 import threading
 import time
 import uuid
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -23,20 +25,24 @@ import structlog
 
 from pipeline import db
 from pipeline.analysis import domains
+from pipeline.analysis import state as analysis_state
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
 from pipeline.analysis.graph import project_release, signal_store_from_settings
-from pipeline.analysis.linking import link_signals, save_link
+from pipeline.analysis.lineage import add_document_element_paths, add_edge, add_object
+from pipeline.analysis.linking import link_signals, save_links
 from pipeline.analysis.models import (
+    AUDIT_INSERT_SQL,
     AnalysisModelClient,
     AnalysisModelConfigurationError,
     AnalysisModelInvalidJSON,
     AnalysisModelUnavailable,
 )
 from pipeline.analysis.narrative import (
+    NARRATIVE_PREFILTER_VERSION,
     candidate_from_payload,
     candidate_to_signal,
-    discover_themes,
     extraction_prompt,
+    narrative_candidate_prefilter,
 )
 from pipeline.analysis.operations import (
     HealthSnapshot,
@@ -45,9 +51,15 @@ from pipeline.analysis.operations import (
     save_snapshot,
     utcnow,
 )
+from pipeline.analysis.prefilter import qualifying_gate
 from pipeline.analysis.prevalence import diagnostics, save_diagnostics
-from pipeline.analysis.releases import load_release
-from pipeline.analysis.store import record_theme, record_topic, save_structured_signals
+from pipeline.analysis.releases import finalise_manifest, load_release
+from pipeline.analysis.store import (
+    record_theme,
+    record_topic,
+    save_signals,
+    save_structured_signals,
+)
 from pipeline.analysis.structured import (
     categorical_signal,
     categorical_transitions,
@@ -215,6 +227,10 @@ class AnalysisWorker:
         conn = db.get_connection(self.settings)
         try:
             self._recover_runs(conn)
+            analysis_state.purge_failed_detail(
+                conn, retention_days=int(getattr(
+                    self.settings, "failed_analysis_detail_retention_days", 7)))
+            conn.commit()
             row = conn.execute(
                 "SELECT run_id FROM analysis_runs WHERE status = 'queued' "
                 "ORDER BY updated_at, started_at LIMIT 1").fetchone()
@@ -401,6 +417,28 @@ class AnalysisWorker:
                         continue
                     batch_items.append((signal, comparison))
                 written += save_structured_signals(conn, batch_items)
+                for signal, comparison in batch_items:
+                    output_node = add_object(
+                        conn, kind="analysis", canonical_id=signal.signal_id,
+                        processor_version="structured-comparison-v1",
+                        metadata={"release_id": run["release_id"], "domain_id": domain_id})
+                    for observation in (comparison["previous"], comparison["current"]):
+                        source_table = str(observation["source_table"])
+                        source_row_id = str(observation["source_row_id"])
+                        source_node = add_object(
+                            conn, kind="source", canonical_id=source_table)
+                        retrieval_node = add_object(
+                            conn, kind="retrieval",
+                            canonical_id=f"{source_table}:{source_row_id}",
+                            metadata={"source_table": source_table,
+                                      "source_row_id": source_row_id})
+                        add_edge(
+                            conn, generated_id=retrieval_node, used_id=source_node,
+                            activity="structured_row", activity_version="structured-comparison-v1")
+                        add_edge(
+                            conn, generated_id=output_node, used_id=retrieval_node,
+                            activity="deterministic_comparison",
+                            activity_version="structured-comparison-v1")
                 self._update_run(conn, run_id, current_domain=domain_id, current_stage="computing")
                 self._update_domain_progress(conn, run_id, domain_id,
                                               min(start + len(batch), len(observations)), written)
@@ -430,50 +468,65 @@ class AnalysisWorker:
             run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 return
-            # The old implementation materialised every signal and compared
-            # every pair. Join on the indexed identity keys first, keep a
-            # stable left/right domain ordering, and let the existing contract
-            # perform the final eligibility checks.
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS ix_automated_signals_link_candidates "
-                "ON automated_signals(release_id, subject_type, subject_id, domain_id, period_end)")
-            # PostgreSQL date subtraction returns an integer number of days,
-            # whereas SQLite's equivalent was expressed in seconds. Keep the
-            # comparison in the native unit so the link window is identical
-            # without asking EXTRACT to operate on an integer.
-            date_clause = ("l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
-                           "AND ABS(l.period_end::date - r.period_end::date) <= 365")
-            rows = conn.execute(
-                "SELECT l.*, r.signal_id AS _right_signal_id, r.domain_id AS _right_domain_id, "
-                "r.taxonomy_namespace AS _right_taxonomy_namespace, r.signal_type AS _right_signal_type, "
-                "r.subject_type AS _right_subject_type, r.subject_id AS _right_subject_id, "
-                "r.direction AS _right_direction, r.assertion_status AS _right_assertion_status, "
-                "r.period_start AS _right_period_start, r.period_end AS _right_period_end, "
-                "r.evidence_refs_json AS _right_evidence_refs_json, "
-                "r.derivation_method AS _right_derivation_method, "
-                "r.confidence_contract_json AS _right_confidence_contract_json "
-                "FROM automated_signals l JOIN automated_signals r ON "
-                "l.release_id = r.release_id AND l.subject_type = r.subject_type "
-                "AND l.subject_id = r.subject_id AND l.domain_id < r.domain_id "
-                f"AND {date_clause} WHERE l.release_id = %s ORDER BY l.signal_id, r.signal_id",
-                (run["release_id"],)).fetchall()
+            relationship = "narrative_structured_alignment"
+            registry = domains.domain_registry()
+            allowed_pairs = [
+                (left, right) for left in sorted(registry) for right in sorted(registry)
+                if left < right and relationship in registry[left].cross_source_rules and
+                relationship in registry[right].cross_source_rules
+            ]
+            if not allowed_pairs:
+                return
+            pair_clause = " OR ".join(
+                "(l.domain_id = %s AND r.domain_id = %s)" for _ in allowed_pairs)
+            pair_params = [value for pair in allowed_pairs for value in pair]
             self._update_run(conn, run_id, current_stage="connecting")
-            for raw in rows:
-                source = dict(raw)
-                right = {key.removeprefix("_right_"): value for key, value in source.items()
-                         if key.startswith("_right_")}
-                left = {key: value for key, value in source.items()
-                        if not key.startswith("_right_")}
-                # The aliases above carry all fields needed by link_signals;
-                # keep the conversion explicit so duplicate selected names
-                # cannot be interpreted differently by SQLite and PostgreSQL.
-                link = link_signals(
-                    left, right, left_spec=domains.get_domain(left["domain_id"]),
-                    right_spec=domains.get_domain(right["domain_id"]),
-                    relationship_type="narrative_structured_alignment", window_days=365)
-                if link:
-                    save_link(conn, link)
-            conn.commit()
+            last_left = ""
+            last_right = ""
+            while True:
+                rows = conn.execute(
+                    "SELECT l.*, r.signal_id AS _right_signal_id, r.domain_id AS _right_domain_id, "
+                    "r.taxonomy_namespace AS _right_taxonomy_namespace, r.signal_type AS _right_signal_type, "
+                    "r.subject_type AS _right_subject_type, r.subject_id AS _right_subject_id, "
+                    "r.direction AS _right_direction, r.assertion_status AS _right_assertion_status, "
+                    "r.period_start AS _right_period_start, r.period_end AS _right_period_end, "
+                    "r.evidence_refs_json AS _right_evidence_refs_json, "
+                    "r.derivation_method AS _right_derivation_method, "
+                    "r.confidence_contract_json AS _right_confidence_contract_json "
+                    "FROM automated_signals l JOIN automated_signals r ON "
+                    "l.release_id = r.release_id AND l.subject_type = r.subject_type "
+                    "AND l.subject_id = r.subject_id AND l.domain_id < r.domain_id "
+                    "AND l.period_end IS NOT NULL AND r.period_end IS NOT NULL "
+                    "AND l.period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
+                    "AND r.period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' "
+                    "AND CASE WHEN pg_input_is_valid(LEFT(l.period_end, 10), 'date'::regtype) "
+                    "AND pg_input_is_valid(LEFT(r.period_end, 10), 'date'::regtype) "
+                    "THEN ABS(LEFT(l.period_end, 10)::date - LEFT(r.period_end, 10)::date) <= 365 "
+                    "ELSE FALSE END "
+                    f"AND ({pair_clause}) WHERE l.release_id = %s "
+                    "AND (l.signal_id > %s OR (l.signal_id = %s AND r.signal_id > %s)) "
+                    "ORDER BY l.signal_id, r.signal_id LIMIT %s",
+                    (*pair_params, run["release_id"], last_left, last_left, last_right,
+                     self.batch_size)).fetchall()
+                if not rows:
+                    break
+                links = []
+                for raw in rows:
+                    source = dict(raw)
+                    right = {key.removeprefix("_right_"): value for key, value in source.items()
+                             if key.startswith("_right_")}
+                    left = {key: value for key, value in source.items()
+                            if not key.startswith("_right_")}
+                    link = link_signals(
+                        left, right, left_spec=domains.get_domain(left["domain_id"]),
+                        right_spec=domains.get_domain(right["domain_id"]),
+                        relationship_type=relationship, window_days=365)
+                    if link:
+                        links.append(link)
+                save_links(conn, links)
+                last_left = rows[-1]["signal_id"]
+                last_right = rows[-1]["_right_signal_id"]
+                conn.commit()
         finally:
             conn.close()
 
@@ -485,63 +538,77 @@ class AnalysisWorker:
             if row is None:
                 return
             self._update_run(conn, run_id, current_stage="monitoring")
-            for domain_id in requested:
-                spec = domains.get_domain(domain_id)
-                for table in spec.source_tables:
-                    observed_schema: dict[str, Any] = {}
-                    exists = True
-                    try:
-                        cursor = conn.execute(f"SELECT * FROM {table} LIMIT 0")
-                        description = getattr(cursor, "description", None) or []
-                        observed_schema = {str(item[0]): str(item[1] or "unknown") for item in description}
-                        count = int(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
-                    except Exception:
-                        exists, count = False, None
-                    current = {
+            from pipeline.analysis.inventory import table_snapshot
+
+            tables = sorted({table for domain_id in requested
+                             for table in domains.get_domain(domain_id).source_tables})
+            for table in tables:
+                snapshot = table_snapshot(
+                    conn, table, max_age_seconds=int(getattr(
+                        self.settings, "operational_snapshot_max_age_seconds", 900)))
+                observed_schema = snapshot["observed_schema"]
+                exists = bool(snapshot["exists"])
+                count = snapshot["row_count"]
+                current = {
                         "expected_schema": {"table": table},
                         "observed_schema": observed_schema,
                         "row_count": count,
                         "parse_success": exists,
                         "content_hash": None,
-                    }
-                    baseline_row = conn.execute(
+                }
+                baseline_row = conn.execute(
                         "SELECT expected_schema_json, observed_schema_json, row_count, parse_success, content_hash "
                         "FROM analysis_health_snapshots WHERE source_table = %s ORDER BY collected_at DESC LIMIT 1",
                         (table,)).fetchone()
-                    baseline = {}
-                    if baseline_row:
-                        baseline = {"expected_schema": json.loads(baseline_row["expected_schema_json"] or "{}"),
-                                    "observed_schema": json.loads(baseline_row["observed_schema_json"] or "{}"),
-                                    "row_count": baseline_row["row_count"],
-                                    "parse_success": bool(baseline_row["parse_success"]),
-                                    "content_hash": baseline_row["content_hash"]}
-                    save_snapshot(conn, HealthSnapshot(
-                        source_table=table, collected_at=utcnow(), collection_success=exists,
-                        parse_success=exists, expected_schema={"table": table},
-                        observed_schema=observed_schema, row_count=count),
-                        release_id=row["release_id"], domain_id=domain_id)
-                    for proposal in detect_drift(current, baseline):
-                        save_proposal(conn, proposal, release_id=row["release_id"], domain_id=domain_id)
+                baseline = {}
+                if baseline_row:
+                    baseline = {"expected_schema": json.loads(baseline_row["expected_schema_json"] or "{}"),
+                                "observed_schema": json.loads(baseline_row["observed_schema_json"] or "{}"),
+                                "row_count": baseline_row["row_count"],
+                                "parse_success": bool(baseline_row["parse_success"]),
+                                "content_hash": baseline_row["content_hash"]}
+                save_snapshot(conn, HealthSnapshot(
+                    source_table=table, collected_at=utcnow(), collection_success=exists,
+                    parse_success=exists, expected_schema={"table": table},
+                    observed_schema=observed_schema, row_count=count),
+                    release_id=row["release_id"], domain_id=None)
+                for proposal in detect_drift(current, baseline):
+                    save_proposal(conn, proposal, release_id=row["release_id"], domain_id=None)
             conn.commit()
         finally:
             conn.close()
 
     def _execute_narrative(self, run_id: str, domain_id: str, spec) -> None:
         conn = db.get_connection(self.settings)
-        passages: list[dict[str, Any]] = []
-        processed = 0
+        input_manifest = None
         try:
             run = conn.execute("SELECT release_id FROM analysis_runs WHERE run_id = %s", (run_id,)).fetchone()
             if run is None:
                 raise KeyError(run_id)
+            release_manifest = load_release(conn, run["release_id"]) or {}
+            suppression_requested = bool(getattr(
+                self.settings, "analysis_prefilter_suppression_enabled", False))
+            gate = qualifying_gate(conn, explicitly_enabled=suppression_requested)
+            suppression = gate is not None
+            input_manifest = analysis_state.get_or_create_manifest(
+                conn, run_id=run_id, release_id=run["release_id"], domain_id=domain_id,
+                source_tables=spec.source_tables,
+                configuration={"models": release_manifest.get("models", {}),
+                               "model_fallbacks": release_manifest.get("model_fallbacks", {}),
+                               "theme_evidence_per_theme": _THEME_EVIDENCE_PER_THEME,
+                               "theme_evidence_total": _THEME_EVIDENCE_TOTAL,
+                               "suppression_requested": suppression_requested,
+                               "suppression_enabled": suppression,
+                               "prefilter_result_sha256": (
+                                   gate["result_sha256"] if gate else None)},
+                prefilter_version=NARRATIVE_PREFILTER_VERSION,
+                prefilter_result_sha256=gate["result_sha256"] if gate else None,
+                suppression_enabled=suppression)
+            processed = int(input_manifest["input_count"] or 0)
             source_marks = ", ".join("%s" for _ in spec.source_tables)
-            # Keyset pagination keeps the database result set bounded and does
-            # not get slower as an overnight run advances through millions of
-            # elements. The element id is a deterministic tie-breaker for
-            # malformed source sequences.
-            last_document = None
-            last_sequence = None
-            last_element = None
+            last_document = input_manifest.get("checkpoint_document_id")
+            last_sequence = input_manifest.get("checkpoint_sequence")
+            last_element = input_manifest.get("checkpoint_element_id")
             while True:
                 if self._cancelled(run_id):
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
@@ -557,29 +624,37 @@ class AnalysisWorker:
                                    last_sequence, last_element])
                 batch = conn.execute(
                     "SELECT de.document_element_id, d.document_id, d.source_key, "
-                    "de.sequence, de.text FROM document_elements de "
+                    "de.sequence, de.text, de.text_sha256 FROM document_elements de "
                     "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
                     "JOIN document_records d ON d.document_id = dv.document_id "
                     f"WHERE {where} ORDER BY d.document_id, de.sequence, "
                     "de.document_element_id LIMIT %s", (*params, self.batch_size)).fetchall()
                 if not batch:
                     break
-                for row in batch:
+                accepted = []
+                theme_passages = []
+                batch_rows = [dict(row) for row in batch]
+                for offset, row in enumerate(batch_rows, start=processed + 1):
                     text = str(row["text"] or "").strip()
-                    passages.append({"text": text, "document_id": row["document_id"],
-                                     "subject_id": self._document_subject_id(row["source_key"], row["document_id"]),
-                                     "subject_type": spec.canonical_subject_keys[0],
-                                     "evidence_ref": row["document_element_id"]})
-                    conn.execute(
-                        "INSERT INTO analysis_windows (window_id, domain_run_id, domain_id, "
-                        "source_table, source_record_id, subject_type, subject_id, feature_json, status) "
-                        "SELECT %s, domain_run_id, %s, 'document_elements', %s, 'document', %s, %s, 'processed' "
-                        "FROM analysis_domain_runs WHERE run_id = %s AND domain_id = %s "
-                        "ON CONFLICT (domain_run_id, source_table, source_record_id) DO UPDATE SET "
-                        "feature_json = excluded.feature_json, status = excluded.status",
-                         (f"window-{uuid.uuid4()}", domain_id, row["document_element_id"],
-                          row["document_id"], json.dumps({"text_length": len(text)}), run_id, domain_id))
-                processed += len(batch)
+                    passage = {
+                        "text": text, "document_id": row["document_id"],
+                        "subject_id": self._document_subject_id(row["source_key"], row["document_id"]),
+                        "subject_type": spec.canonical_subject_keys[0],
+                        "evidence_ref": row["document_element_id"],
+                    }
+                    theme_passages.append(passage)
+                    matched = narrative_candidate_prefilter(text, enabled=True)
+                    if matched or not suppression:
+                        accepted.append((offset, row["document_element_id"], matched))
+                accumulator_state = analysis_state.accumulate_themes(
+                    conn, input_manifest["input_manifest_id"], theme_passages,
+                    first_ordinal=processed + 1,
+                    max_evidence_per_theme=_THEME_EVIDENCE_PER_THEME,
+                    max_evidence_total=_THEME_EVIDENCE_TOTAL)
+                input_manifest = analysis_state.checkpoint(
+                    conn, input_manifest, rows=batch_rows,
+                    accumulator_state=accumulator_state, accepted=accepted)
+                processed = int(input_manifest["input_count"])
                 self._update_run(conn, run_id, current_domain=domain_id, current_stage="windowing")
                 self._update_domain_progress(conn, run_id, domain_id, processed, 0)
                 conn.commit()
@@ -589,21 +664,16 @@ class AnalysisWorker:
                 last_sequence = tail["sequence"]
                 last_element = tail["document_element_id"]
 
-            # Do not hold the database write slot while the in-memory discovery
-            # pass scans a large domain. The heartbeat uses another connection
-            # and must be able to record liveness during this CPU-bound stage.
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="discovering")
             conn.commit()
-            themes = discover_themes(
-                passages,
-                max_evidence_per_theme=_THEME_EVIDENCE_PER_THEME,
-                max_evidence_total=_THEME_EVIDENCE_TOTAL,
-                progress_callback=lambda _processed: self._heartbeat("running"),
-            )
+            themes = analysis_state.accumulated_themes(
+                conn, input_manifest["input_manifest_id"])
             written = 0
             for topic_number, theme in enumerate(themes):
                 if self._cancelled(run_id):
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
+                theme["theme_id"] = "theme-" + hashlib.sha256(
+                    f"{run['release_id']}\0{domain_id}\0{theme['theme_key']}".encode()).hexdigest()
                 record_theme(conn, release_id=run["release_id"], domain_id=domain_id, theme=theme)
                 record_topic(conn, release_id=run["release_id"], domain_id=domain_id,
                              topic_number=topic_number, theme=theme)
@@ -612,12 +682,11 @@ class AnalysisWorker:
                     conn.commit()
                     self._heartbeat("running")
             self._update_run(conn, run_id, current_domain=domain_id, current_stage="extracting")
-            # Model calls use private connections so four passages can run in
-            # parallel; release this connection's write transaction before
-            # those writers begin.
             conn.commit()
             extraction_complete = self._extract_narrative_signals(
-                conn, run_id, domain_id, spec, run["release_id"], passages)
+                conn, run_id, domain_id, spec, run["release_id"],
+                analysis_state.candidate_batches(
+                    conn, input_manifest["input_manifest_id"], batch_size=self.batch_size))
             if not extraction_complete:
                 self._pause_for_retry(conn, run_id, domain_id,
                                       "model/provider availability exhausted; automatic retry scheduled")
@@ -633,10 +702,20 @@ class AnalysisWorker:
                                    subjects=subjects, pacc=None, emq=None))
             self._finish_domain(conn, run_id, domain_id, "complete", processed, written,
                                 prerequisite_status="ready", missing_tables=[], error_detail=None)
+            digest = analysis_state.output_digest(
+                conn, release_id=run["release_id"], domain_id=domain_id)
+            analysis_state.complete_and_purge(
+                conn, input_manifest["input_manifest_id"], expected_output_sha256=digest)
             conn.commit()
         except AnalysisCancelled:
             conn.rollback()
             self._finalise_cancelled(run_id)
+        except Exception:
+            conn.rollback()
+            if input_manifest is not None:
+                analysis_state.mark_failed(conn, input_manifest["input_manifest_id"])
+                conn.commit()
+            raise
         finally:
             conn.close()
 
@@ -646,7 +725,7 @@ class AnalysisWorker:
         return str(source_key or document_id).split("|", 1)[0]
 
     def _extract_narrative_signals(self, conn, run_id: str, domain_id: str, spec,
-                                   release_id: str, passages: list[dict[str, Any]]) -> bool:
+                                   release_id: str, passage_batches) -> bool:
         manifest = load_release(conn, release_id) or {}
         models = manifest.get("models", {})
         fallback_models = manifest.get("model_fallbacks", {})
@@ -657,27 +736,97 @@ class AnalysisWorker:
         # until their responses arrive. Keep that guarantee strict.
         if getattr(self, "_budget", CallBudget()).ceiling_micros > 0:
             requested_workers = 1
-        with ThreadPoolExecutor(max_workers=requested_workers,
-                                thread_name_prefix="analysis-model") as pool:
-            for start in range(0, len(passages), requested_workers):
+        if isinstance(passage_batches, list):
+            passage_batches = (passage_batches[start:start + self.batch_size]
+                               for start in range(0, len(passage_batches), self.batch_size))
+        audit_rows: queue.SimpleQueue = queue.SimpleQueue()
+        cache_rows: queue.SimpleQueue = queue.SimpleQueue()
+        response_cache: dict[str, dict[str, Any]] = {}
+        cache_lock = threading.Lock()
+        local = threading.local()
+
+        def cache_lookup(request_sha):
+            with cache_lock:
+                return response_cache.get(request_sha)
+
+        def cache_sink(row):
+            with cache_lock:
+                response_cache.setdefault(row["request_sha256"], row)
+                while len(response_cache) > 4096:
+                    response_cache.pop(next(iter(response_cache)))
+            cache_rows.put(row)
+
+        def client_for_thread():
+            if not hasattr(local, "client"):
+                local.client = self.model_client_factory(
+                    self.settings, release_id=release_id, run_id=run_id, models=models,
+                    fallback_models=fallback_models, conn=None,
+                    audit_sink=audit_rows.put, cache_lookup=cache_lookup, cache_sink=cache_sink)
+                with cache_lock:
+                    close = getattr(local.client, "close", None)
+                    if close:
+                        client_stack.callback(close)
+            return local.client
+
+        with ExitStack() as client_stack, ThreadPoolExecutor(
+                max_workers=requested_workers, thread_name_prefix="analysis-model") as pool:
+            for passages in passage_batches:
                 if self._cancelled(run_id):
                     raise AnalysisCancelled("analysis run cancelled at a batch boundary")
+                for passage in passages:
+                    # Candidate batches carry the canonical source key. Keep
+                    # accepting already-normalised passages used by callers
+                    # and tests without recalculating or weakening identity.
+                    if not passage.get("subject_id"):
+                        passage["subject_id"] = self._document_subject_id(
+                            passage.get("source_key"), passage["document_id"])
+                    passage.setdefault("subject_type", spec.canonical_subject_keys[0])
+                if self.model_client_factory is AnalysisModelClient:
+                    identity_client = AnalysisModelClient(
+                        self.settings, release_id=release_id, run_id=run_id,
+                        models=models, fallback_models=fallback_models, conn=None,
+                        audit_sink=lambda _row: None)
+                    request_keys = []
+                    for passage in passages:
+                        prompt = extraction_prompt(
+                            namespace=spec.taxonomy_namespace,
+                            subject_type=passage["subject_type"],
+                            subject_id=str(passage["subject_id"]), text=passage["text"])
+                        request_keys.extend(filter(None, (
+                            identity_client.request_sha(prompt, role="scout"),
+                            identity_client.request_sha(prompt, role="extractor"))))
+                    if request_keys:
+                        marks = ", ".join("%s" for _ in request_keys)
+                        for row in conn.execute(
+                                "SELECT * FROM analysis_model_response_cache "
+                                f"WHERE request_sha256 IN ({marks})", request_keys):
+                            response_cache[row["request_sha256"]] = dict(row)
+                        while len(response_cache) > 4096:
+                            response_cache.pop(next(iter(response_cache)))
                 futures = [pool.submit(
-                    self._extract_narrative_passage, passage, run_id, domain_id, spec,
-                    release_id, models, fallback_models)
-                    for passage in passages[start:start + requested_workers]]
-                for future in as_completed(futures):
+                    self._extract_narrative_passage, client_for_thread, passage,
+                    run_id, domain_id, spec, release_id) for passage in passages]
+                signals = []
+                completed_candidates = []
+                failed_candidates = []
+                fatal_error = None
+                for passage, future in zip(passages, futures, strict=True):
                     try:
                         extracted = future.result()
-                    except CostCeilingExceeded:
-                        raise
-                    except AnalysisModelConfigurationError:
-                        raise
+                    except (CostCeilingExceeded, AnalysisModelConfigurationError) as exc:
+                        fatal_error = fatal_error or exc
+                        failed_candidates.append((passage.get("candidate_id"), str(exc)))
+                        continue
                     except AnalysisModelUnavailable as exc:
                         log.warning("analysis_model_unavailable", run_id=run_id, domain_id=domain_id,
                                     error=str(exc))
                         model_unavailable = True
                         continue
+                    except Exception as exc:
+                        fatal_error = fatal_error or exc
+                        failed_candidates.append((passage.get("candidate_id"), str(exc)))
+                        continue
+                    completed_candidates.append(passage.get("candidate_id"))
                     if extracted is None:
                         continue
                     passage, candidate, second_candidate = extracted
@@ -686,58 +835,103 @@ class AnalysisWorker:
                         second_model=second_candidate)
                     if signal is None:
                         continue
-                    from pipeline.analysis.store import save_signal
-                    save_signal(conn, signal)
-                    conn.execute(
-                        "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, passed, score, reasons_json, created_at) "
-                        "VALUES (%s, %s, 'dual_model_exact_grounding', 1, 1.0, '[]', %s)",
-                        (f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()))
-                    conn.commit()
+                    signals.append(signal)
+                self._flush_model_rows(conn, cache_rows, audit_rows)
+                save_signals(conn, signals)
+                conn.executemany(
+                    "INSERT INTO analysis_verifier_results (verifier_result_id, signal_id, verifier_name, "
+                    "passed, score, reasons_json, created_at) VALUES (%s, %s, "
+                    "'dual_model_exact_grounding', 1, 1.0, '[]', %s)",
+                    [(f"verifier-{uuid.uuid4()}", signal.signal_id, utcnow()) for signal in signals])
+                element_lineage = add_document_element_paths(
+                    conn, [signal.evidence_refs[0] for signal in signals])
+                for signal in signals:
+                    output = add_object(conn, kind="analysis", canonical_id=signal.signal_id,
+                                        processor_version=NARRATIVE_PREFILTER_VERSION,
+                                        metadata={"release_id": release_id,
+                                                  "domain_id": domain_id})
+                    used = element_lineage.get(signal.evidence_refs[0])
+                    if used:
+                        add_edge(conn, generated_id=output, used_id=used,
+                                 activity="narrative_analysis",
+                                 activity_version=NARRATIVE_PREFILTER_VERSION)
+                analysis_state.mark_candidates(
+                    conn, [value for value in completed_candidates if value], "complete")
+                conn.executemany(
+                    "UPDATE analysis_candidates SET status = 'failed', error_detail = %s "
+                    "WHERE candidate_id = %s",
+                    [(error[:2000], candidate_id) for candidate_id, error in failed_candidates
+                     if candidate_id])
+                conn.execute(
+                    "UPDATE analysis_runs SET cost_micros = %s, updated_at = %s WHERE run_id = %s",
+                    (self._budget.spent_micros, utcnow(), run_id))
+                conn.commit()
+                if fatal_error is not None:
+                    raise fatal_error
                 if model_unavailable:
                     break
         if model_unavailable:
             self._update_run(conn, run_id, current_stage="discovering")
         return not model_unavailable
 
-    def _extract_narrative_passage(self, passage, run_id: str, domain_id: str, spec,
-                                   release_id: str, models: dict[str, str], fallback_models):
-        """Extract one passage on a private connection; the caller writes signals."""
-        conn = db.get_connection(self.settings)
+    def _extract_narrative_passage(self, client_factory, passage, run_id: str,
+                                   domain_id: str, spec, release_id: str):
+        """Extract one passage; model threads never own database connections."""
+        client = client_factory()
+        prompt = extraction_prompt(namespace=spec.taxonomy_namespace,
+                                   subject_type=passage["subject_type"],
+                                   subject_id=str(passage["subject_id"]), text=passage["text"])
         try:
-            client = self.model_client_factory(
-                self.settings, release_id=release_id, run_id=run_id, models=models,
-                fallback_models=fallback_models, conn=conn)
-            prompt = extraction_prompt(namespace=spec.taxonomy_namespace,
-                                       subject_type=passage["subject_type"],
-                                       subject_id=str(passage["subject_id"]), text=passage["text"])
-            try:
-                first = self._model_call_with_json_retry(
-                    client, prompt, role="scout", domain_id=domain_id,
-                    window_id=passage["evidence_ref"], run_id=run_id)
-                first_candidate = candidate_from_payload(
-                    first, namespace=spec.taxonomy_namespace,
-                    subject_type=passage["subject_type"],
-                    subject_id=str(passage["subject_id"]),
-                    evidence_ref=passage["evidence_ref"], model_output=first)
-                if first_candidate is None and getattr(
-                        self.settings, "claim_signal_skip_extractor_on_null", True):
-                    return None
-                second = self._model_call_with_json_retry(
-                    client, prompt, role="extractor", domain_id=domain_id,
-                    window_id=passage["evidence_ref"], run_id=run_id)
-            except AnalysisModelInvalidJSON as exc:
-                log.warning("analysis_model_invalid_json_skipped", run_id=run_id,
-                            domain_id=domain_id, window_id=passage["evidence_ref"], error=str(exc))
+            first = self._model_call_with_json_retry(
+                client, prompt, role="scout", domain_id=domain_id,
+                window_id=passage["evidence_ref"], run_id=run_id)
+            first_candidate = candidate_from_payload(
+                first, namespace=spec.taxonomy_namespace,
+                subject_type=passage["subject_type"],
+                subject_id=str(passage["subject_id"]),
+                evidence_ref=passage["evidence_ref"], model_output=first)
+            if first_candidate is None and getattr(
+                    self.settings, "claim_signal_skip_extractor_on_null", True):
                 return None
-            second_candidate = candidate_from_payload(
-                second, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
-                subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
-                model_output=second)
-            if first_candidate is None or second_candidate is None:
-                return None
-            return passage, first_candidate, second_candidate
-        finally:
-            conn.close()
+            second = self._model_call_with_json_retry(
+                client, prompt, role="extractor", domain_id=domain_id,
+                window_id=passage["evidence_ref"], run_id=run_id)
+        except AnalysisModelInvalidJSON as exc:
+            log.warning("analysis_model_invalid_json_skipped", run_id=run_id,
+                        domain_id=domain_id, window_id=passage["evidence_ref"], error=str(exc))
+            return None
+        second_candidate = candidate_from_payload(
+            second, namespace=spec.taxonomy_namespace, subject_type=passage["subject_type"],
+            subject_id=str(passage["subject_id"]), evidence_ref=passage["evidence_ref"],
+            model_output=second)
+        if first_candidate is None or second_candidate is None:
+            return None
+        return passage, first_candidate, second_candidate
+
+    @staticmethod
+    def _flush_model_rows(conn, cache_rows, audit_rows) -> None:
+        caches = []
+        while not cache_rows.empty():
+            caches.append(cache_rows.get())
+        conn.executemany(
+            "INSERT INTO analysis_model_response_cache (request_sha256, response_sha256, response_json, "
+            "requested_model, actual_model, provider_id, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT DO NOTHING",
+            [(row["request_sha256"], row["response_sha256"], row["response_json"],
+             row["requested_model"], row["actual_model"], row.get("provider_id"), row["created_at"])
+             for row in caches])
+        if caches:
+            keys = list(dict.fromkeys(row["request_sha256"] for row in caches))
+            marks = ", ".join("%s" for _ in keys)
+            stored = {row["request_sha256"]: row["response_sha256"] for row in conn.execute(
+                "SELECT request_sha256, response_sha256 FROM analysis_model_response_cache "
+                f"WHERE request_sha256 IN ({marks})", keys)}
+            if any(stored.get(row["request_sha256"]) != row["response_sha256"] for row in caches):
+                raise RuntimeError("content-addressed model response conflict")
+        audits = []
+        while not audit_rows.empty():
+            audits.append(audit_rows.get())
+        conn.executemany(AUDIT_INSERT_SQL, audits)
 
     def _model_call_with_json_retry(self, client, prompt: str, *, role: str,
                                     domain_id: str, window_id: str, run_id: str):
@@ -765,10 +959,6 @@ class AnalysisWorker:
         payload = client.generate_json(prompt, role=role, domain_id=domain_id, window_id=window_id)
         with self._budget_lock:
             budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
-            conn = client.conn
-            conn.execute("UPDATE analysis_runs SET cost_micros = %s, updated_at = %s WHERE run_id = %s",
-                         (budget.spent_micros, utcnow(), self._current_run_id))
-            conn.commit()
         return payload
 
     @staticmethod
@@ -844,6 +1034,18 @@ class AnalysisWorker:
             now = utcnow()
             self._update_run(conn, self_run_id, status=status, current_stage=stage,
                              completed_at=now if status in {"complete", "failed", "cancelled"} else None)
+            if status == "complete":
+                release = conn.execute(
+                    "SELECT release_id FROM analysis_runs WHERE run_id = %s",
+                    (self_run_id,)).fetchone()
+                if release:
+                    release_digest = analysis_state.output_digest(
+                        conn, release_id=release["release_id"])
+                    finalise_manifest(
+                        conn, release["release_id"], output_sha256=release_digest)
+            analysis_state.purge_failed_detail(
+                conn, retention_days=int(getattr(
+                    self.settings, "failed_analysis_detail_retention_days", 7)))
             conn.commit()
             return read_run(conn, self_run_id)
         finally:
@@ -887,6 +1089,9 @@ class AnalysisWorker:
                 "completed_at = COALESCE(completed_at, %s), error_detail = COALESCE(error_detail, %s) "
                 "WHERE run_id = %s AND status NOT IN ('complete', 'unavailable', 'failed')",
                 (now, f"{type(exc).__name__}: {exc}", run_id))
+            conn.execute(
+                "UPDATE analysis_input_manifests SET status = 'failed', updated_at = %s "
+                "WHERE run_id = %s AND status = 'active'", (now, run_id))
             conn.commit()
         finally:
             conn.close()

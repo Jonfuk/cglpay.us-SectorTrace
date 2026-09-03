@@ -1,0 +1,15 @@
+{"id":"p01","text":"The report records persistent workforce vacancies.","positive":true,"critical":false,"category":"workforce"}
+{"id":"p02","text":"Recruitment remained difficult throughout the year.","positive":true,"critical":false,"category":"workforce"}
+{"id":"p03","text":"Staffing shortages affected continuity of care.","positive":true,"critical":true,"category":"safeguarding"}
+{"id":"p04","text":"Unsafe workload pressure was escalated to the board.","positive":true,"critical":true,"category":"safeguarding"}
+{"id":"p05","text":"Waiting lists increased after demand rose.","positive":true,"critical":false,"category":"access"}
+{"id":"p06","text":"The service backlog was discussed by commissioners.","positive":true,"critical":false,"category":"access"}
+{"id":"p07","text":"Low pay was identified as a retention concern.","positive":true,"critical":false,"category":"pay"}
+{"id":"p08","text":"The advertised salary did not attract applicants.","positive":true,"critical":false,"category":"pay"}
+{"id":"p09","text":"Commission capacity could not meet local need.","positive":true,"critical":false,"category":"commissioning"}
+{"id":"p10","text":"Workforce pressure created an immediate clinical risk.","positive":true,"critical":true,"category":"clinical_risk"}
+{"id":"p11","text":"Vacancies left the safeguarding rota uncovered.","positive":true,"critical":true,"category":"safeguarding"}
+{"id":"p12","text":"Demand exceeded available service capacity.","positive":true,"critical":false,"category":"access"}
+{"id":"n01","text":"The meeting approved the minutes of the previous meeting.","positive":false,"critical":false,"category":null}
+{"id":"n02","text":"Members noted the publication date of the annual report.","positive":false,"critical":false,"category":null}
+{"id":"n03","text":"The chair invited questions before closing the item.","positive":false,"critical":false,"category":null}

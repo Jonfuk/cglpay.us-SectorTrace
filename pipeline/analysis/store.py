@@ -22,11 +22,17 @@ def save_signal(conn, signal: Signal) -> None:
 
 
 def save_signals(conn, signals: Iterable[Signal]) -> int:
-    count = 0
-    for signal in signals:
-        save_signal(conn, signal)
-        count += 1
-    return count
+    values = list(signals)
+    for signal in values:
+        get_domain(signal.domain_id)
+    conn.executemany(
+        "INSERT INTO automated_signals (signal_id, release_id, domain_id, taxonomy_namespace, "
+        "signal_type, subject_type, subject_id, direction, assertion_status, period_start, "
+        "period_end, evidence_refs_json, derivation_method, confidence_contract_json, "
+        "human_verified, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (signal_id) DO NOTHING",
+        [signal.db_values() for signal in values])
+    return len(values)
 
 
 def save_structured_signal(conn, signal: Signal, comparison: dict) -> str:
@@ -85,6 +91,10 @@ def signal_row(row) -> dict:
     item["evidence_refs"] = json.loads(item.pop("evidence_refs_json") or "[]")
     item["confidence_contract"] = json.loads(item.pop("confidence_contract_json") or "{}")
     item["human_verified"] = bool(item["human_verified"])
+    # The canonical signal identifier is also its append-only lineage lookup
+    # key. This keeps evidence views additive and avoids exposing restricted
+    # lineage metadata in the signal payload itself.
+    item["lineage_reference"] = item["signal_id"]
     return item
 
 
@@ -124,7 +134,11 @@ def record_theme(conn, *, release_id: str, domain_id: str, theme: dict) -> str:
     conn.execute(
         "INSERT INTO emerging_themes (theme_id, release_id, domain_id, theme_key, status, "
         "passage_count, document_count, subject_count, novelty_similarity, evidence_json, "
-        "promotion_reason, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "promotion_reason, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (theme_id) DO UPDATE SET status = excluded.status, "
+        "passage_count = excluded.passage_count, document_count = excluded.document_count, "
+        "subject_count = excluded.subject_count, novelty_similarity = excluded.novelty_similarity, "
+        "evidence_json = excluded.evidence_json, promotion_reason = excluded.promotion_reason",
         (theme_id, release_id, domain_id, theme.get("theme_key", "unknown"), status,
          theme.get("passage_count", 0), theme.get("document_count", 0),
          theme.get("subject_count", 0), theme.get("novelty_similarity"),
