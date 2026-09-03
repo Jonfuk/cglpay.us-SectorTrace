@@ -49,7 +49,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
             "VALUES (?, ?, 'Birmingham City Council', 'E08000025', ?, "
-            " 'Treatment services', ?, 'GBP', '2026-03-01', 'open', 'psr', "
+            " 'Treatment services', ?, 'GBP', '2026-03-01', 'open', 0, "
             " 'https://find.example/n', '2026-08-01T00:00:00Z', 200, "
             " 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", supplier, value))
@@ -566,10 +566,11 @@ def test_an_unknown_provider_timeline_is_refused(ro):
 
 def _seed_cqc_location(warehouse, location_id, **overrides):
     warehouse.execute(
-        "INSERT OR IGNORE INTO cqc_providers (provider_id, provider_key, provider_name, "
+        "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES ('1-125892604', 'change_grow_live', 'Change, Grow, Live', "
-        "'https://example.com', '2026-08-20T00:00:00Z', 200, 'test', 'abc')")
+        "'https://example.com', '2026-08-20T00:00:00Z', 200, 'test', 'abc') "
+        "ON CONFLICT (provider_id) DO NOTHING")
     row = {
         "location_id": location_id, "provider_id": "1-125892604",
         "provider_key": "change_grow_live", "location_name": "Test Location",
