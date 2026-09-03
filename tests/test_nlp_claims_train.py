@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from pipeline import db
 from pipeline.nlp import claims, claims_train
 from pipeline.nlp.claims_train import HeadResult, Metrics, _persist_category
 from tests.nlp_claims_support import STUB_MODEL_KEY, seed_labelled, seed_unlabelled_chunks
@@ -140,11 +141,9 @@ def test_retrain_keeps_one_selected_head_per_category(conn, tmp_path):
 
 
 def test_two_selected_rows_for_one_category_is_a_write_error(conn, tmp_path):
-    import sqlite3
-
     seed_labelled(conn, "vacancy_pressure", n_pos=25, n_neg=25, seed=5)
     claims_train.train(conn, categories=["vacancy_pressure"], artifact_root=tmp_path, **KW)
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(db.IntegrityError):
         conn.execute(
             "INSERT INTO claim_head_versions (model_version, category, predicate, model_type, "
             "config_sha256, corpus, corpus_cutoff, corpus_status, heldout_candidate_ids_json, "
