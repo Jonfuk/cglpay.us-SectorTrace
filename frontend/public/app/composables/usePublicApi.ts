@@ -1,12 +1,17 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
   CatalogueResponse,
+  ChangesResponse,
+  ClaimsResponse,
   ContractsResponse,
+  CqcResponse,
   DocumentSearchResponse,
   GeographyResponse,
   MetaResponse,
   PayResponse,
+  PfdResponse,
   ProviderRow,
+  RelationshipsResponse,
   SummaryResponse,
   TreatmentResponse,
 } from '~/types/api'
@@ -53,6 +58,16 @@ export interface PublicApi {
   catalogue(options?: TransportOptions): Promise<CatalogueResponse>
   /** `/api/v1/document_search` — full-text document search (requires `q`). */
   documentSearch(options?: TransportOptions): Promise<DocumentSearchResponse>
+  /** `/api/v1/pfd` — coroners' Prevention of Future Deaths corpus. */
+  pfd(options?: TransportOptions): Promise<PfdResponse>
+  /** `/api/v1/claims` — published claims with citations and caveats. */
+  claims(options?: TransportOptions): Promise<ClaimsResponse>
+  /** `/api/v1/cqc_locations` — CQC-registered locations. */
+  cqc(options?: TransportOptions): Promise<CqcResponse>
+  /** `/api/v1/relationships` — entity relationship neighbourhood. */
+  relationships(options?: TransportOptions): Promise<RelationshipsResponse>
+  /** `/api/v1/changes` — recorded warehouse change chronology. */
+  changes(options?: TransportOptions): Promise<ChangesResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -71,5 +86,10 @@ export function usePublicApi(): PublicApi {
     treatment: (options) => get<TreatmentResponse>('/treatment_metrics', options),
     catalogue: (options) => get<CatalogueResponse>('/catalogue', options),
     documentSearch: (options) => get<DocumentSearchResponse>('/document_search', options),
+    pfd: (options) => get<PfdResponse>('/pfd', options),
+    claims: (options) => get<ClaimsResponse>('/claims', options),
+    cqc: (options) => get<CqcResponse>('/cqc_locations', options),
+    relationships: (options) => get<RelationshipsResponse>('/relationships', options),
+    changes: (options) => get<ChangesResponse>('/changes', options),
   }
 }

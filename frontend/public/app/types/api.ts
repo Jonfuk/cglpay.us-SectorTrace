@@ -227,6 +227,97 @@ export interface DocumentSearchResponse {
   [key: string]: unknown
 }
 
+/** A Prevention of Future Deaths report row (`/api/v1/pfd` → `recent[]`). */
+export interface PfdReport {
+  report_ref: string | null
+  report_date: string | null
+  coroner_area: string | null
+  categories: string | null
+  report_url: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface PfdResponse {
+  recent?: PfdReport[]
+  totals?: Record<string, unknown>
+  caveats?: Record<string, string | null>
+  [key: string]: unknown
+}
+
+/** A published claim with its citations and caveats (`/api/v1/claims`). */
+export interface ClaimRow {
+  id: number | string
+  claim_text: string | null
+  caveats: string[]
+  citations: Array<Record<string, unknown>>
+  created_by: string | null
+  created_at: string | null
+  [key: string]: unknown
+}
+
+export interface ClaimsResponse {
+  claims: ClaimRow[]
+  caveat: string | null
+  [key: string]: unknown
+}
+
+/** A CQC location row (`/api/v1/cqc_locations` → `results[]`). */
+export interface CqcLocation {
+  location_id: string | null
+  location_name: string | null
+  provider_name: string | null
+  postal_code: string | null
+  region: string | null
+  registration_status: string | null
+  overall_rating: string | null
+  source_url: string | null
+  retrieved_at: string | null
+  [key: string]: unknown
+}
+
+export interface CqcResponse {
+  results: CqcLocation[]
+  total: number
+  without_coordinate?: number
+  caveat: string | null
+  [key: string]: unknown
+}
+
+/** A relationship edge (`/api/v1/relationships` → `edges[]`). */
+export interface RelationshipEdge {
+  relationship_id: string | null
+  subject_entity_id: string | null
+  object_entity_id: string | null
+  valid_from: string | null
+  valid_to: string | null
+  [key: string]: unknown
+}
+
+export interface RelationshipsResponse {
+  center: Record<string, unknown>
+  neighbours: Array<Record<string, unknown>>
+  edges: RelationshipEdge[]
+  [key: string]: unknown
+}
+
+/** A recorded change event (`/api/v1/changes` → `events[]`). */
+export interface ChangeEvent {
+  kind: string | null
+  at: string | null
+  source: string | null
+  evidence_type: string | null
+  entity: unknown
+  detail: unknown
+  [key: string]: unknown
+}
+
+export interface ChangesResponse {
+  events: ChangeEvent[]
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */

@@ -18,7 +18,12 @@ const nav: NavItem[] = [
   { to: '/providers', label: 'Providers' },
   { to: '/geography', label: 'Places' },
   { to: '/treatment', label: 'Treatment' },
+  { to: '/cqc', label: 'CQC' },
+  { to: '/pfd', label: 'PFD' },
+  { to: '/relationships', label: 'Relationships' },
+  { to: '/claims', label: 'Claims' },
   { to: '/documents', label: 'Documents' },
+  { to: '/changes', label: 'Changes' },
   { to: '/catalogue', label: 'Catalogue' },
   { to: '/api', label: 'API' },
 ]
