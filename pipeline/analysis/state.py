@@ -98,15 +98,8 @@ def accumulate_themes(conn, input_manifest_id: str, passages: list[dict[str, Any
                       first_ordinal: int, max_evidence_per_theme: int = 25,
                       max_evidence_total: int = 5_000) -> dict[str, int]:
     """Accumulate exact counts/distincts in PostgreSQL with bounded samples."""
-    from collections import Counter
-
-    from pipeline.analysis.narrative import theme_key_for_text
-
-    keyed = [(first_ordinal + index, theme_key_for_text(str(passage.get("text") or "")), passage)
-             for index, passage in enumerate(passages)]
-    counts = Counter(key for _ordinal, key, _passage in keyed)
-    first = {key: min(ordinal for ordinal, item_key, _passage in keyed if item_key == key)
-             for key in counts}
+    keyed, counts, first, documents, subjects = _theme_batch_summary(
+        passages, first_ordinal=first_ordinal)
     conn.executemany(
         "INSERT INTO analysis_theme_counts (input_manifest_id, theme_key, first_ordinal, passage_count) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (input_manifest_id, theme_key) DO UPDATE SET "
@@ -115,13 +108,13 @@ def accumulate_themes(conn, input_manifest_id: str, passages: list[dict[str, Any
     conn.executemany(
         "INSERT INTO analysis_theme_documents (input_manifest_id, theme_key, document_id) "
         "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-        list({(input_manifest_id, key, str(passage["document_id"]))
-              for _ordinal, key, passage in keyed if passage.get("document_id")}))
+        [(input_manifest_id, key, document_id)
+         for key, document_id in documents])
     conn.executemany(
         "INSERT INTO analysis_theme_subjects (input_manifest_id, theme_key, subject_id) "
         "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-        list({(input_manifest_id, key, str(passage["subject_id"]))
-              for _ordinal, key, passage in keyed if passage.get("subject_id")}))
+        [(input_manifest_id, key, subject_id)
+         for key, subject_id in subjects])
     total = int(conn.execute(
         "SELECT COUNT(*) AS count FROM analysis_theme_evidence WHERE input_manifest_id = %s",
         (input_manifest_id,)).fetchone()["count"])
@@ -141,6 +134,30 @@ def accumulate_themes(conn, input_manifest_id: str, passages: list[dict[str, Any
         "INSERT INTO analysis_theme_evidence (input_manifest_id, theme_key, ordinal, passage_json) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING", evidence)
     return {"theme_count": len(counts), "retained_evidence": total}
+
+
+def _theme_batch_summary(passages: list[dict[str, Any]], *, first_ordinal: int):
+    """Build deterministic batch aggregates in one bounded traversal."""
+    from collections import Counter
+
+    from pipeline.analysis.narrative import theme_key_for_text
+
+    keyed = []
+    counts: Counter[str] = Counter()
+    first: dict[str, int] = {}
+    documents: set[tuple[str, str]] = set()
+    subjects: set[tuple[str, str]] = set()
+    for index, passage in enumerate(passages):
+        ordinal = first_ordinal + index
+        key = theme_key_for_text(str(passage.get("text") or ""))
+        keyed.append((ordinal, key, passage))
+        counts[key] += 1
+        first.setdefault(key, ordinal)
+        if passage.get("document_id"):
+            documents.add((key, str(passage["document_id"])))
+        if passage.get("subject_id"):
+            subjects.add((key, str(passage["subject_id"])))
+    return keyed, counts, first, sorted(documents), sorted(subjects)
 
 
 def accumulated_themes(conn, input_manifest_id: str, *, novelty_threshold: float = .85,

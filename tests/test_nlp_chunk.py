@@ -1,6 +1,8 @@
 """pipeline/nlp/chunk.py — paragraph chunking of document_elements."""
 from __future__ import annotations
 
+import hashlib
+
 from pipeline.documents import repository
 from pipeline.documents.models import EvidenceReference, ParsedDocument, ParsedElement
 from pipeline.nlp import chunk as nlp_chunk
@@ -116,6 +118,32 @@ def test_run_writes_chunks_a_run_row_and_is_idempotent(conn, settings):
         (version_id,)).fetchall()]
     assert first_ids == second_ids  # content-derived id is stable across runs
     assert conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone().values().__iter__().__next__() == len(first_ids)
+
+
+def test_rechunk_preserves_prior_content_addressed_rows(conn, settings):
+    version_id = _seed_version(conn, settings, _ELEMENTS)
+    assert nlp_chunk.chunk_version(conn, version_id) == 1
+    original = conn.execute(
+        "SELECT document_chunk_id,text FROM document_chunks WHERE superseded=0"
+    ).fetchone()
+    replacement_text = "Recruitment vacancies have fallen across teams."
+    conn.execute(
+        "UPDATE document_elements SET text=%s,text_sha256=%s "
+        "WHERE document_version_id=%s AND sequence=2",
+        (replacement_text, hashlib.sha256(replacement_text.encode()).hexdigest(), version_id),
+    )
+
+    assert nlp_chunk.chunk_version(conn, version_id) == 1
+    rows = conn.execute(
+        "SELECT document_chunk_id,text,superseded FROM document_chunks "
+        "WHERE document_version_id=%s ORDER BY created_at,document_chunk_id",
+        (version_id,),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0]["document_chunk_id"] == original["document_chunk_id"]
+    assert rows[0]["text"] == original["text"] and rows[0]["superseded"] == 1
+    assert rows[1]["document_chunk_id"] != original["document_chunk_id"]
+    assert replacement_text in rows[1]["text"] and rows[1]["superseded"] == 0
 
 
 def test_dry_run_writes_nothing(conn, settings):

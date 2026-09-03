@@ -141,6 +141,14 @@ def chunk_version(conn, document_version_id: str, nlp_run_id: str | None = None)
     elements = _elements(conn, document_version_id)
     chunks = build_chunks(elements)
     now = runs.utcnow()
+    # Retire the current ordinal rows before inserting their content-addressed
+    # replacements. Updating a row's primary key would both erase chunk
+    # history and break references held by downstream NLP tables.
+    conn.execute(
+        "UPDATE document_chunks SET superseded=1 WHERE document_version_id=%s "
+        "AND chunker_name=%s AND chunker_version=%s AND superseded=0",
+        (document_version_id, CHUNKER_NAME, CHUNKER_VERSION),
+    )
     for chunk in chunks:
         chunk_id = _chunk_id(document_version_id, chunk["chunk_index"], chunk["text_sha256"])
         conn.execute(
@@ -149,9 +157,9 @@ def chunk_version(conn, document_version_id: str, nlp_run_id: str | None = None)
             "element_start_id, element_end_id, preceding_heading_element_id, char_start, char_end, "
             "superseded, nlp_run_id, created_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s) "
-            "ON CONFLICT(document_version_id, chunker_name, chunker_version, chunk_index) DO UPDATE SET "
-            "document_chunk_id=excluded.document_chunk_id, text=excluded.text, "
-            "text_sha256=excluded.text_sha256, token_estimate=excluded.token_estimate, "
+            "ON CONFLICT(document_chunk_id) DO UPDATE SET "
+            "text=excluded.text, text_sha256=excluded.text_sha256, "
+            "token_estimate=excluded.token_estimate, "
             "page_start=excluded.page_start, page_end=excluded.page_end, "
             "element_start_id=excluded.element_start_id, element_end_id=excluded.element_end_id, "
             "preceding_heading_element_id=excluded.preceding_heading_element_id, "
