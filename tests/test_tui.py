@@ -17,7 +17,7 @@ def test_cli_exposes_tui_command() -> None:
 def test_tui_schema_contains_nested_commands_and_options() -> None:
     schema = introspect_click_app(get_group(cli_module.app))["root"]
 
-    assert {"graph", "documents", "nlp", "analysis", "mirror"}.issubset(
+    assert {"dashboard", "graph", "documents", "nlp", "analysis", "mirror"}.issubset(
         schema.subcommands
     )
     assert "search" in schema.subcommands["documents"].subcommands

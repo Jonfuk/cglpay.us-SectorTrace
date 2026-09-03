@@ -1985,6 +1985,14 @@ def web(
         close_read_pools()
 
 
+@app.command()
+def dashboard() -> None:
+    """Open the read-only operator dashboard in the terminal."""
+    from pipeline import tui_dashboard
+
+    tui_dashboard.run()
+
+
 _audit_counts = runner.audit_counts
 
 

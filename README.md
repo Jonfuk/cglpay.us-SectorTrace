@@ -72,6 +72,10 @@ terminal form, including nested commands and their options. Use `Ctrl+S` to
 search, `Ctrl+T` to return to the command tree, `Ctrl+O` for command help, and
 `Ctrl+R` to close the form and run the selected command.
 
+For the operator landing view, use `./start.sh dashboard`. It is read-only and
+shows warehouse health, parse-failure pressure, and an oldest-first pending
+review worklist; select a row to inspect its stored provenance.
+
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle
 ./start.sh export sheets     # ten CSV tabs of human-readable evidence, caveats above each header
