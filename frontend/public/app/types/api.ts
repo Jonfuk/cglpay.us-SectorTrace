@@ -318,6 +318,31 @@ export interface ChangesResponse {
   [key: string]: unknown
 }
 
+/** A publication-calendar row (`/api/v1/publication_calendar` → `datasets[]`).
+ *  Stated cadence is registry metadata; observed cadence is measured — the two
+ *  are separate fields and never combined. */
+export interface CalendarRow {
+  dataset_id: string
+  title: string | null
+  publisher: string | null
+  stated_cadence: string | null
+  cadence_basis: string | null
+  last_publication: string | null
+  next_expected: string | null
+  status: string | null
+  official_url: string | null
+  [key: string]: unknown
+}
+
+export interface CalendarResponse {
+  as_of: string
+  datasets: CalendarRow[]
+  counts?: { by_status?: Record<string, number>; by_basis?: Record<string, number> }
+  note?: string
+  caveat?: string
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */

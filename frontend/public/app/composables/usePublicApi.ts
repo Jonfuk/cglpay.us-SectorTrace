@@ -1,5 +1,6 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
+  CalendarResponse,
   CatalogueResponse,
   ChangesResponse,
   ClaimsResponse,
@@ -68,6 +69,8 @@ export interface PublicApi {
   relationships(options?: TransportOptions): Promise<RelationshipsResponse>
   /** `/api/v1/changes` — recorded warehouse change chronology. */
   changes(options?: TransportOptions): Promise<ChangesResponse>
+  /** `/api/v1/publication_calendar` — per-source release cadence and status. */
+  calendar(options?: TransportOptions): Promise<CalendarResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -91,5 +94,6 @@ export function usePublicApi(): PublicApi {
     cqc: (options) => get<CqcResponse>('/cqc_locations', options),
     relationships: (options) => get<RelationshipsResponse>('/relationships', options),
     changes: (options) => get<ChangesResponse>('/changes', options),
+    calendar: (options) => get<CalendarResponse>('/publication_calendar', options),
   }
 }

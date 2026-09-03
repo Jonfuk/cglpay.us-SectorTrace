@@ -24,6 +24,7 @@ const nav: NavItem[] = [
   { to: '/claims', label: 'Claims' },
   { to: '/documents', label: 'Documents' },
   { to: '/changes', label: 'Changes' },
+  { to: '/calendar', label: 'Calendar' },
   { to: '/catalogue', label: 'Catalogue' },
   { to: '/api', label: 'API' },
 ]
