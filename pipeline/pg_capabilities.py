@@ -8,9 +8,9 @@ operator classes that are meant to back it, checks whether they actually
 exist and were built the right way, and lists which query paths are running
 on their fallback right now because something is missing.
 
-Strictly read-only — `pg_catalog` / `information_schema` lookups only. No
-`CREATE EXTENSION`, no `CREATE INDEX`. PostgreSQL is the only application
-backend, so this is the active deployment gate rather than an optional probe.
+Strictly read-only — `pg_catalog` / `information_schema` lookups only; it
+performs no schema-changing SQL. PostgreSQL is the only application backend,
+so this is the active deployment gate rather than an optional probe.
 """
 from __future__ import annotations
 
