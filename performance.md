@@ -45,7 +45,7 @@ performance sweep does not silently discard the reasoning behind either the old 
 | SQLite by default, PostgreSQL optional | **Reverse: PostgreSQL 18 is the only application database.** | Removes runtime SQL translation, duplicate migrations, backend fallbacks, SQLite writer serialization, and compatibility schema constraints. Tiny operations must be batched or pooled because a network round trip remains slower than a local file operation. |
 | pgvector, pg_trgm, and PostGIS optional | **Reverse: require all three extensions.** | Removes sequential-scan and Python fallbacks and makes vector, fuzzy-search, and spatial plans predictable. |
 | PostgreSQL-to-SQLite mirror as a recovery path | **Reverse: use verified PostgreSQL-native backup and restore.** | Avoids duplicate storage and full mirror maintenance. Recovery must be proved by restore drills rather than assumed. |
-| No frontend framework or build step | **Reverse: adopt Vue 3, TypeScript, Vue Router, and Vite.** | Enables production template compilation, module tree shaking, route chunks, typed contracts, and consistent lifecycle cleanup, but introduces a bundle and reactivity budget that must be measured. |
+| No frontend framework or build step | **Reverse: adopt Nuxt 4, Vue 3, TypeScript, Nuxt UI, Tailwind CSS, and Vite.** | Adds file-based pages, layouts, accessible components, production template compilation, module tree shaking, route chunks, typed contracts, and consistent lifecycle cleanup. Static/client rendering preserves the Python-only runtime, but Nuxt UI/Tailwind overhead must earn its place against explicit bundle, reactivity, and memory budgets. |
 | All browser dependencies loaded globally | **Reverse: import dependencies at the route/component boundary.** | Removes unused D3/date-fns, replaces Fuse and Bootstrap JavaScript, and confines ECharts, Tabulator, MapLibre, and PMTiles to routes that use them. |
 | Neo4j is a derived graph projection | **Retain.** PostgreSQL remains canonical and Neo4j remains the deployed, rebuildable projection. | Preserve the original keyset, `UNWIND`, batching, queue, retry, and exact-parity improvements; do not make Neo4j authoritative. |
 | Pipeline jobs run in a web-process thread | **Reverse: use a dedicated worker process with PostgreSQL-backed job state.** | Removes CPU/memory/failure contention from the serving process while retaining one-at-a-time pipeline safeguards. |
@@ -61,6 +61,27 @@ test target. Pooling, batching, query consolidation, and co-locating the applica
 therefore become requirements rather than optional refinements.
 
 ## Implementation Roadmap
+
+### Implementation status — beta baseline
+
+The roadmap below remains the complete target. This status records only what is
+currently landed in beta; **partial** means that a supporting slice exists, not
+that the phase is complete. Items not listed as implemented remain unchanged
+and outstanding.
+
+| Phase | Status | Landed so far |
+|---|---|---|
+| Phase 0 — Measurement and safety | **Partial** | `pipeline performance` exposes the named suite interface and deterministic JSON metadata for wall time, CPU time, and digests; the existing web/write benchmark is wired into the `web` and `writes` suites. Full telemetry, browser measurements, mixed-load runs, PostgreSQL/Neo4j instrumentation, and the seven-day baseline remain outstanding. |
+| Phase 1 — PostgreSQL-only transition | **Complete** | PostgreSQL 18 is now the sole application/test warehouse: startup requires `DATABASE_URL`, the PostgreSQL migration tree is authoritative, psycopg/psycopg_pool/pgvector are core dependencies, required pgvector/pg_trgm/PostGIS extensions are enforced, SQL uses psycopg-native parameters, psycopg named rows replace the SQLite row wrapper, and SQLite backend/mirror/backup selection has been removed from the application path. The clean PostgreSQL suite, lint, and compilation gates pass. |
+| Phase 2 — Analysis and model-call reduction | **Partial** | Narrative source traversal uses stable keyset pagination; cross-domain linking uses an indexed SQL join; model request identity hashing and a shadow candidate-prefilter helper are present. The full bounded accumulator, prefilter recall gate, analysis-window manifest/retention flow, and one-writer model pipeline remain outstanding. |
+| Phase 3 — Incremental NLP and semantic search | **Partial** | The versioned NLP stage-state/checkpoint helper exists. Complete stage wiring, dependency invalidation across all NLP stages, canonical pgvector storage, ontology kernels, Mojo parity, and semantic-search cutover remain outstanding. |
+| Phase 4 — Shared writes and ingestion memory | **Partial** | `BatchWriter`, batch upserts with unchanged-write suppression, streamed archive interfaces, one-pass HTTP archiving, and a streaming XLSX iterator are implemented. Full adoption across every ingestion/document path and the PDF/CSV/prediction batch flows remain outstanding. |
+| Phase 5 — Archive, graph, PostgreSQL, and backend | **Partial** | Graph projection uses keyset pagination and projected columns; relationship writes use grouped `UNWIND`; the web server has bounded workers/queue rejection; public cache misses use single-flight coordination; operational snapshot and durable worker-queue primitives exist. Full archive audits, PostgreSQL maintenance, cross-process invalidation, worker cutover, and all listed operational gates remain outstanding. |
+| Phase 6 — Nuxt frontend delivery | **Not started** | The Nuxt 4/Vue/UI/Tailwind plan is recorded below and in `vue-plan.md`; no frontend cutover is claimed. |
+| Phase 7 — CI and regression protection | **Partial** | The new paths have regression coverage and the beta branch has passed the complete PostgreSQL suite plus lint/compile checks. PostgreSQL-native CI, xdist/serial partitioning, browser/build budgets, CodeQL, and repeated clean-run gates remain outstanding. |
+
+This table is descriptive only: it does not remove, reorder, or weaken any
+unimplemented requirement in the roadmap or rollout sequence.
 
 ### Phase 0 — Measurement, production telemetry, and safety
 
@@ -153,7 +174,106 @@ therefore become requirements rather than optional refinements.
   remote PostgreSQL service is used, record round-trip latency and make SQL statement counts an
   acceptance metric.
 
+#### Phase 1 implementation record — beta baseline
+
+The PostgreSQL-only cutover is complete on `beta` and is the frozen starting
+point for Phase 2. The application no longer selects a backend at runtime:
+`DATABASE_URL` is mandatory, PostgreSQL migrations are applied and recorded in
+the live schema, and production read paths require a separate
+`DATABASE_RO_URL` SELECT-only role. The local/test compose service and the
+documented PostgreSQL image family provision PostgreSQL 18 with pgvector,
+pg_trgm, and PostGIS; migration startup checks all three before applying DDL.
+
+The cutover also removed the runtime SQL dialect translator, the custom SQLite
+row wrapper, positional database-row interpretation, SQLite aggregate and
+backup/mirror paths, and the SQLite writer slot. Production SQL now uses
+psycopg-native `%s`/`%(name)s` parameters, named rows, PostgreSQL-native
+`string_agg`, `ON CONFLICT`, and PostgreSQL backup/restore verification.
+
+The configured benchmark was recorded as:
+
+```text
+sectortrace-mirror performance all --output beta-performance.json
+web          measured                     60.648s
+writes       measured                     23.499s
+analysis     measurement_not_configured    0.000s
+nlp          measurement_not_configured    0.000s
+semantic     measurement_not_configured    0.000s
+ontology     measurement_not_configured    0.000s
+documents    measurement_not_configured    0.000s
+archive      measurement_not_configured    0.000s
+graph        measurement_not_configured    0.000s
+postgres     measurement_not_configured    0.000s
+ci           measurement_not_configured    0.000s
+```
+
+Acceptance evidence on 2026-09-03: `uv run pytest --cache-clear -q`
+reported **3,146 passed, 8 skipped, 37 deselected** in 35m24s;
+`uv run ruff check pipeline tests` passed; and
+`uv run python -m compileall -q pipeline tests` passed. No new Phase 2 work is
+included in this cutover; the next implementation boundary is the existing
+Phase 2 analysis/model-call reduction section below.
+
+The additions from Phase 2 onward below are additive requirements for reproducibility, evidence
+state, and operational visibility. They do not alter, reorder, or expand the existing Phase 0 or
+Phase 1 work.
+
+#### Development concurrency and integration
+
+- Phase 0 and Phase 1 are strictly serial. Do not begin Phase 2+ implementation against the
+  pre-Phase-1 architecture. Start parallel development only after the PostgreSQL-only baseline has
+  passed its gates and has been captured as a frozen integration commit.
+- After that baseline, independent Phase 2–7 workstreams may develop concurrently from the same
+  validated commit in isolated branches, worktrees, or environments. Parallel development does
+  not permit out-of-order integration or deployment; the dependency-aware rollout below remains
+  authoritative.
+- “Isolated” includes mutable infrastructure, not only Git state. Each workstream receives
+  disposable state derived from the frozen baseline: its own PostgreSQL database or schema, archive
+  and cache namespace, temporary filesystem, Neo4j test database where needed, generated frontend
+  output directory, and benchmark-result namespace. Workers must not share mutable development
+  databases, Neo4j projections, archive/cache namespaces, generated outputs, or benchmark folders;
+  only the integration lane operates against the shared integration environment.
+- Use these workstream boundaries:
+
+| Workstream | May develop concurrently after Phase 1 | Required coordination |
+|---|---|---|
+| Analysis and release | Phase 2 bounded analysis, prefilter, model cache, window retirement, exact linking, lineage, and release manifests | Establishes lineage, release, document-version, and claim-version identities consumed by later streams. |
+| NLP and retrieval | Phase 3 pgvector/HNSW repository, hybrid retrieval, batching, N+1 removal, ontology trie, and Mojo parity infrastructure | Integrate temporal state, lineage references, release identities, and claim-level change tracking only after the Phase 2 contracts are fixed. |
+| Ingestion | Phase 4 writer adoption, streaming HTTP/CSV/workbooks, procurement, document persistence, and PDF fallback | Consumes centrally coordinated write, collection-attempt, and quarantine/replay contracts. |
+| Archive and graph | Phase 5 archive/cache and Neo4j projection work, separately if useful | PostgreSQL remains canonical; shared archive interfaces and migration changes go through integration. |
+| Frontend | Phase 6 public, admin, and specialist map/table work against stable API fixtures and OpenAPI contracts | Keep public/admin isolation and the final legacy replacement as one gated cutover. |
+| CI and integration | Phase 7 PostgreSQL fixtures, xdist/serial partitioning, contract checks, CodeQL, browser, Lighthouse, and bundle gates | The integration lane owns rebases, dependency-aware merges, parity reports, and final acceptance. |
+
+- Prefer roughly five to seven active engineering streams at once. Add another stream only when its
+  files, contracts, fixtures, and acceptance gates are sufficiently isolated to keep integration
+  overhead below the time saved by parallel work.
+- Publish versioned contract snapshots from the integration lane for lineage, analytical release,
+  document-version, claim-version, and public OpenAPI shapes. Downstream streams consume a named
+  snapshot rather than inferring an unfinished contract; changes are reviewed as additive,
+  compatible, deprecated, or breaking before dependent work adopts them.
+- Assign one integration owner for migration numbering, canonical schemas, shared repository and
+  API models, configuration, entity/lineage contracts, output-digest parity, and merge order. No
+  parallel worker may independently allocate a migration number or redefine a shared identity.
+- Keep final frontend cutover, production deployment, and embedding-table compaction serial. A
+  failed or incomplete stream returns to its own branch for correction; it does not force dependent
+  streams to consume an unstable contract.
+
 ### Phase 2 — Analysis architecture and model-call reduction
+
+#### Evidence lineage and analytical release manifests
+
+- Add a queryable, append-only lineage model covering source, retrieval, archive object, document
+  version, element, NLP output, claim, entity, relationship, analysis, and published output. Keep
+  PostgreSQL canonical and make any Neo4j representation a rebuildable derived projection. The
+  model should be conceptually compatible with the [W3C PROV family](https://www.w3.org/TR/prov-overview/)
+  without requiring a separate provenance store.
+- Give every analytical and published release an immutable whole-system manifest containing the
+  release ID, Git commit, schema and warehouse-data versions, source/archive snapshot and manifest
+  hashes, NLP/ontology/rule versions, embedding model and dimensions, entity-resolution and graph
+  projection versions, model provider/configuration digest, creation time, and output digest.
+- Make release manifests and lineage references available to diagnostics and evidence views so a
+  displayed result can be traced back to exact bytes, processing versions, and the output that was
+  published. Do not weaken the existing provenance-or-`NULL` rule or restricted-data boundary.
 
 - Replace the exhaustive narrative path with a keyset-paginated, bounded-memory pipeline:
   1. stream active document elements in stable document/sequence order;
@@ -184,6 +304,24 @@ therefore become requirements rather than optional refinements.
 - Deduplicate analysis health source tables and reuse operational row-count snapshots instead of issuing repeated exact counts.
 
 ### Phase 3 — Incremental NLP, semantic search, and Mojo
+
+#### Retrieval, temporal semantics, and source-change intelligence
+
+- Implement hybrid retrieval as separate lexical PostgreSQL full-text, `pg_trgm` fuzzy, and
+  pgvector semantic candidates, combined with a documented reciprocal-rank-fusion or equivalent
+  reranking policy. Preserve stable IDs, provenance, and deterministic tie-breaking; a retrieval
+  rank is not an evidence-quality or truth score. See the [pgvector hybrid-search guidance](https://github.com/pgvector/pgvector#hybrid-search).
+- Add explicit bitemporal evidence semantics: source-validity intervals where known, observed or
+  effective dates, retrieval timestamps, supersession links, and current/historical state. Preserve
+  prior evidence rather than overwriting it when a source changes.
+- Detect source changes at the archived-byte, document-version, paragraph/table, entity, and claim
+  levels where deterministically possible. Record new, unchanged, modified, removed, redirected,
+  and superseded states with hashes and provenance; never interpret a missing source or removed
+  passage as proof that the underlying fact no longer exists.
+- Add orthogonal evidence-quality assertions such as source authority, extraction quality,
+  corroboration state, temporal completeness, and review state. Keep each assertion separately
+  queryable and explainable; do not collapse them into a composite score or use them to override
+  evidence-layer separation.
 
 - Add a stage-state ledger keyed by stage, input identity/hash, processor version, model or ontology version, and configuration hash.
 - Make stages incremental with explicit invalidation:
@@ -248,6 +386,18 @@ active implementation roadmap while SQLite is removed:
   before the table swap. Do not introduce a second embedding copy into the backup format.
 
 ### Phase 4 — Shared write path and ingestion memory control
+
+#### Expected evidence and universal quarantine/replay
+
+- Record explicit collection attempts with scope, query or source identity, start/end timestamps,
+  result counts, failure class, and coverage state. Distinguish “no matching evidence returned” from
+  “the source was not searched, unavailable, or failed”; absence must never be promoted to a claim of
+  non-existence.
+- Unify parse failures, rejected candidates, failed stage inputs, archive mismatches, and other
+  irreducible bad items behind a quarantine/replay contract. Retain item identity, source/run/stage,
+  failure class, input/output hashes, first/last-seen timestamps, retry state, and relevant release
+  and lineage references. Provide list, inspect, and bounded retry semantics without auto-promotion;
+  replay must preserve the original bytes and failure history.
 
 - Introduce a shared `BatchWriter`:
   - commit after 1,000 rows or five seconds, whichever comes first;
@@ -360,131 +510,176 @@ active implementation roadmap while SQLite is removed:
 - Frontend assets, rendering, and browser performance move into Phase 6 rather than remaining out of
   scope.
 
-### Phase 6 — Vue 3, Vite, and frontend delivery
+#### Pipeline observability
 
-The framework transition applies to both browser surfaces in one coordinated release. Vue is not
-assumed to be faster merely because it replaces hand-written DOM code: the production build must
-earn the change against explicit transfer, rendering, interaction, cleanup, and memory budgets.
+- After worker separation, add OpenTelemetry traces and metrics for pipeline runs, jobs, stages,
+  database batches, model calls, archive operations, and graph projection. Correlate spans with
+  release, lineage, checkpoint, and quarantine identifiers while keeping structured logs as the
+  human-readable event record. See the [OpenTelemetry Python documentation](https://opentelemetry.io/docs/languages/python/).
+- Measure queue delay, stage duration, rows/bytes, retries, failures, model cost, archive latency,
+  projection lag, and checkpoint age without placing source content or restricted data in telemetry
+  attributes.
+
+### Phase 6 — Nuxt 4, Vue 3.6 Vapor, Nuxt UI, Tailwind, and frontend delivery
+
+The framework transition applies to both browser surfaces in one coordinated release and includes
+Vue 3.6 Vapor from the first Nuxt prototype. Nuxt is not assumed to be faster merely because it
+replaces hand-written DOM code: the production static build must earn the change against explicit
+transfer, rendering, interaction, cleanup, memory, and SEO budgets. The detailed product and
+migration plan is in `vue-plan.md`; this phase records the performance and delivery contract.
 
 #### Application and package structure
 
-- Create one frontend workspace with:
-  - a public Vue application;
-  - an admin Vue application;
-  - independent entry points, routers, TypeScript configurations, and dependency graphs;
-  - a deliberately small shared layer for safe transport, formatting, and presentational code.
-- Use Vue 3 Single-File Components, TypeScript, `<script setup lang="ts">`, the Composition API,
-  and Vue Router.
-- Use the runtime-only production build so browser bundles do not contain Vue's template compiler.
-- Do not add Pinia, Vue Query, Nuxt, server-side rendering, hydration, or a Vue component framework
-  in this sweep. Shareable state already has a durable home in the URL; local component/composable
-  state is sufficient until profiling demonstrates otherwise.
-- Use `createWebHashHistory()` so all existing `#/route?filters` links, bookmarks, filter state, and
-  server routing continue to work. See the
-  [Vue Router hash-history API](https://router.vuejs.org/api/functions/createwebhashhistory).
-- Migrate public and admin together and switch both entry points atomically. Keep the legacy
-  applications as test oracles during development, not as a parallel production mode.
-- Enforce the public/admin boundary at build time: the public entry and every transitive import must
-  be unable to import admin routes, restricted schemas, privileged clients, or operator-only
-  components.
+- Create one frontend workspace containing two independent Nuxt 4 applications:
+  - a public evidence-atlas application;
+  - an admin operations-control-room application.
+- Give each application independent Nuxt configuration, entry point, pages, layouts, middleware,
+  TypeScript types, components, composables, CSS, and dependency graph.
+- Use Nuxt 4, Vue 3.6 Single-File Components, TypeScript, `<script setup lang="ts">`, the
+  Composition API, Nuxt UI v4, and Tailwind CSS. Do not use Nuxt 3.
+- Enable `vue.vapor: true` in both Nuxt applications from the first prototype. Use
+  `<script setup vapor>` or `<template vapor>` for components selected by the compatibility and
+  performance gates; this is part of the initial migration, not a later rewrite.
+- Use Nuxt's VDOM/Vapor interop mode. Do not use `createVaporApp()`: Nuxt remains the application
+  root and the full application continues to use the VDOM runtime where interop requires it.
+- Make the Nuxt 4 VDOM migration, route parity, and static delivery the Phase 6 completion gate;
+  Vapor is an enabled but non-critical optimization track within that migration. If the pinned
+  Vue 3.6/Vapor combination or an interop dependency is unstable, retain the intended component
+  boundary and implement the affected components with VDOM so frontend delivery is not delayed.
+  Revisit Vapor only through the same measured gate; do not create a second frontend migration.
+- Use Nuxt file-based pages and layouts for route organization. Preserve existing hash URLs and
+  deep links initially with hash history or an explicit compatibility redirect layer; do not break
+  existing `#/route?filters` bookmarks during cutover.
+- Keep public and admin runtime imports isolated. The public bundle must not contain admin routes,
+  restricted schemas, privileged clients, or operator-only components.
+- Retain the legacy applications as test oracles during migration. Switch each surface only after
+  parity and performance gates pass.
+- Do not use Nuxt server routes as a second backend. The Python standard-library server remains the
+  only production runtime authority for APIs, security headers, evidence, writes, and restricted
+  data.
+
+#### Vapor and VDOM component boundary
+
+- Use Vapor for simple, performance-sensitive evidence cards, bounded result lists, filters, and
+  review rows where direct DOM updates and lower component memory use can be measured.
+- Retain VDOM components for Nuxt UI/Reka controls, third-party components, and any component that
+  depends on VNodes, the component public-instance proxy, Options API behavior, or another feature
+  unsupported by Vapor.
+- Keep the public and admin boundaries unchanged across both rendering modes. A Vapor component
+  must not import restricted schemas, privileged clients, or operator-only components.
+- Treat ECharts, Tabulator, MapLibre, and PMTiles as imperative integrations in lifecycle-safe
+  wrappers; rendering mode does not remove the requirement to instantiate, resize, cancel, and
+  dispose each instance explicitly.
+- Do not place Nuxt UI components inside Vapor components until the actual pinned dependency
+  versions pass the browser interop tests.
+
+#### Static rendering and deployment
+
+- Use Nuxt static generation/client-side data loading in the initial deployment. The Python image
+  must not run a Node/Nitro server.
+- Prerender stable shell, landing, API documentation, catalogue metadata, and selected content that
+  is safe to generate at build time.
+- Client-load changing warehouse-backed provider, authority, contract, treatment, claims, and
+  admin data. Never prerender restricted admin data or embed restricted responses in static assets.
+- Render stable titles, descriptions, canonical URLs, navigation, and evidence-state structure for
+  dynamic public pages, then fetch current values in the browser. This provides progressive SEO
+  without treating mutable warehouse data as static.
+- Generate and serve `200.html` and `404.html` SPA fallbacks for dynamic routes. Verify fallback
+  behavior through the existing Python server and Railway deployment.
+- Add a Node build stage to the Docker image, copy the two Nuxt static outputs into explicit public
+  and admin static namespaces, and keep Node out of the final runtime image.
+- Serve immutable content-hashed assets with one-year caching and HTML entry points with
+  `no-cache`. Keep delivery origin-only and retain the Python static-file fallback.
+- Require a reproducible frozen build through `npm ci` or the selected package-manager equivalent.
 
 #### State, data, and lifecycle rules
 
-- Keep route query parameters authoritative for shareable filters and preserve their current names,
-  normalization, defaults, ordering, reset behaviour, and deep-link semantics.
-- Preserve existing storage behaviour for theme, notebook, saved searches, recent pages, and
-  session scroll restoration. Version persisted structures and migrate or discard incompatible
-  client state explicitly.
-- Add separate typed public and admin API clients over a shared low-level same-origin transport.
-  Define TypeScript response interfaces and verify them against representative API fixtures.
-- Canonicalize request keys, deduplicate simultaneous identical requests, and cancel stale route or
-  filter requests with `AbortController`.
-- Keep the client response cache bounded and subordinate to URL and server data-version identity;
-  never let a framework cache become a second source of truth.
-- Store large immutable response arrays in `shallowRef`/`shallowReactive` structures and replace the
-  root on change rather than deep-proxying or mutating tens of thousands of nested values.
-- Wrap ECharts, Tabulator, MapLibre, and PMTiles objects with `markRaw`. Instantiate them on mount
-  and dispose instances, observers, resize handlers, global listeners, timers, and outstanding
-  fetches before unmount.
-- Do not render unbounded lists directly through Vue. Keep server pagination and use Tabulator or a
-  separately benchmarked virtual list when the displayed row count exceeds the viewport-scale
-  component path.
-- Use stable props and computed values. Apply `v-once`, `v-memo`, or component flattening only where
-  Vue profiling shows avoidable updates or excessive component instances.
-- Follow Vue's documented guidance for tree shaking, lazy chunks, large-list virtualization, and
-  reducing deep-reactivity overhead:
-  [Vue performance guidance](https://vuejs.org/guide/best-practices/performance).
+- Keep URL query parameters authoritative for shareable filters. Preserve current names,
+  normalization, defaults, ordering, reset behavior, and deep-link semantics.
+- Preserve theme, notebook, saved-search, recent-page, reviewer-preference, and scroll-restoration
+  behavior. Version persisted structures and explicitly migrate or discard incompatible state.
+- Add separate typed public and admin API clients over a low-level same-origin transport. Verify
+  response types against representative API fixtures and `/api/openapi.json`.
+- Canonicalize request keys, deduplicate identical requests, and cancel stale route/filter requests
+  with `AbortController`.
+- Keep any client cache bounded and subordinate to URL and server data-version identity. Nuxt or a
+  data library must never become a second source of truth.
+- Store large immutable response arrays in `shallowRef`/`shallowReactive` structures and replace
+  the root rather than deep-proxying tens of thousands of nested values.
+- Wrap ECharts, Tabulator, MapLibre, and PMTiles objects with `markRaw`. Instantiate on mount and
+  dispose instances, observers, resize handlers, global listeners, timers, and outstanding fetches
+  before unmount.
+- Do not render unbounded lists directly through Vue. Keep server pagination and use Tabulator or
+  a separately benchmarked virtual list for viewport-scale rendering.
+- Use stable props and computed values. Apply `v-once`, `v-memo` in VDOM components, or component
+  flattening only where Vue profiling identifies avoidable updates or excessive component
+  instances; do not use unsupported directives in Vapor components.
+- Add Pinia, VueUse, or TanStack Query only when profiling or demonstrated complexity justifies it;
+  do not add them to every route by default.
+- Follow [Vue performance guidance](https://vuejs.org/guide/best-practices/performance) for tree
+  shaking, lazy chunks, large lists, and deep-reactivity control.
 
-#### Components and behavioural parity
+#### Components and redesign
 
-- Build reusable, bounded components for:
-  - public and admin shells and navigation;
-  - accessible section/filter drawers;
-  - filters, chips, and typeaheads;
-  - evidence caveats and provenance;
-  - loading, unavailable, empty, stale, and error states;
-  - charts, tables, maps, exports, and pagination;
-  - admin health, review, job, analysis, and database panels.
-- Keep components coarse inside large tables and lists; avoid replacing one DOM row with a deep tree
-  of wrapper components.
-- Preserve route titles, headings, labels, focus movement, keyboard navigation, live regions,
-  mobile controls, scroll restoration, browser history, and export/share links.
+- Use Nuxt UI and its Reka UI primitives for accessible buttons, cards, badges, alerts, skeletons,
+  tabs, accordions, drawers, dialogs, popovers, menus, tooltips, selects, comboboxes, command
+  palettes, pagination, breadcrumbs, date controls, progress, and toast behavior.
+- Use Tailwind for layout and utility styling, but keep SectorTrace-specific tokens and components
+  in project source rather than adopting an unchanged dashboard template.
+- Build public components for evidence cards, evidence states, provenance, caveats, citations,
+  freshness, filters, comparisons, research journeys, saved searches, notebooks, charts, maps,
+  tables, exports, and unavailable/no-data states.
+- Build admin components for review queues, list/detail panes, decisions, bulk actions, evidence
+  sidecars, restricted gates, job status, analysis releases, lineage, schema browsing, SQL, command
+  palette, toasts, and keyboard help.
+- Expose evidence-quality assertions, temporal/supersession state, source-change findings,
+  collection-attempt coverage, release manifests, and lineage explanations as explicit UI states;
+  never imply that a missing or unreviewed item is false or absent.
+- Keep large table/list components coarse. Avoid replacing one table row with a deep tree of wrapper
+  components that increases update and memory cost.
+- Preserve route titles, headings, labels, focus movement, keyboard navigation, live regions, mobile
+  controls, scroll restoration, browser history, and export/share links.
 - Prohibit `v-html` for warehouse or source-derived values. Use escaped interpolation/text bindings
   and a link component that accepts only validated HTTP(S) destinations.
 - Preserve the existing rule that public content cannot query or render `restricted_` data.
 
-#### Vite build, tree shaking, and asset delivery
+#### Asset delivery and specialist libraries
 
-- Configure Vite with separate public and admin inputs, CSS code splitting, route-level dynamic
-  imports, content hashes, and a generated manifest. Follow Vite's documented backend-manifest
-  integration: [Vite backend integration](https://vite.dev/guide/backend-integration.html).
-- Lazy-load every route with Vue Router dynamic imports rather than `defineAsyncComponent` at the
-  route record itself. See [Vue Router lazy loading](https://router.vuejs.org/guide/advanced/lazy-loading.html).
-- Preserve the useful route splitting already present in the public application. Do not create a
-  large common chunk that pulls chart, table, map, or admin code into unrelated routes.
-- Remove unused D3 and date-fns production assets.
-- Remove Fuse and replace its small authority/provider typeaheads with a bounded normalized
-  token/substring scorer that retains current keyboard and result-order tests.
-- Remove Bootstrap JavaScript. Implement the section and filter drawers as accessible Vue
-  components with equivalent focus, Escape, backdrop, and responsive behaviour.
-- Compile only the Bootstrap Sass modules/classes still used after component migration. Retain the
-  chosen visual system rather than adding a Vue UI library.
-- Replace the complete ECharts build with modular imports for the series currently used: bar, line,
-  pie, scatter, graph, treemap, custom series, the canvas renderer, and only the referenced chart
-  components/features.
-- Import Tabulator through the table component only and register only the modules used by current
-  filtering, sorting, pagination, responsive layout, download, and clipboard behaviour.
-- Import MapLibre, PMTiles support, and map CSS only from the geography and CQC route chunks.
-- Commit `package.json`, the package lockfile, TypeScript/Vue source, Vite manifest, and verified
-  production `dist` output. Pin the build runtime and package graph through the lockfile.
-- Require `npm ci && npm run build` to reproduce committed `dist` without a diff. Node is a
-  development/CI requirement only; ordinary Python startup and deployed application containers
-  consume the committed output.
+- Configure separate Nuxt inputs, CSS splitting, route-level dynamic imports, content hashes, and
+  generated manifests. See [Vite backend integration](https://vite.dev/guide/backend-integration.html).
+- Lazy-load routes and keep chart, table, map, and admin code out of unrelated common chunks.
+- Remove unused D3 and date-fns production assets after parity verification.
+- Remove Bootstrap JavaScript and replace drawers with Nuxt UI/Reka-based accessible components.
+- Retain Bootstrap CSS only for classes still used, or remove it after the Tailwind redesign passes
+  visual and responsive parity checks.
+- Replace the complete ECharts build with modular imports for the chart series and renderer actually
+  used.
+- Import Tabulator only through table components and register only the modules used by current
+  filtering, sorting, pagination, responsive, download, and clipboard behavior.
+- Import MapLibre, PMTiles support, and map CSS only from geography and CQC route chunks.
+- Keep specialist libraries wrapped in lifecycle-safe Vue components rather than rewriting them
+  merely to make them “native Vue”.
+- Commit package manifests, the lockfile, TypeScript/Nuxt source, verified build manifests, and
+  production output if the deployment continues to consume committed static assets.
 - Disable production source maps and generate deterministic gzip and Brotli variants for immutable
   text assets.
-- Serve content-hashed assets with `public, max-age=31536000, immutable`; serve HTML with
-  `no-cache` so it cannot retain references to deleted chunks.
-- On self-hosted deployments, have Caddy serve the committed asset directory directly with range
-  and precompressed-file support. Retain a Python static-file fallback with cached metadata and
-  bytes for Railway/direct-app deployments.
-- Keep delivery origin-only. Do not add Cloudflare or another CDN/edge cache as part of this sweep.
 
 #### Versioned PMTiles boundaries
 
 - Preserve `/api/v1/boundaries` and its response shape for external API users and exports.
 - Generate a topology-preserving PMTiles archive whenever canonical authority boundaries change.
-- Include only public properties required by the map, and record source digest, boundary/data
-  version, generator version, feature count, bounds, zoom range, and output digest in a manifest.
+- Record source digest, boundary/data version, generator version, feature count, bounds, zoom range,
+  and output digest in a manifest.
 - Name the archive by content digest and serve it with byte-range and immutable-cache support.
-- Configure the Vue MapLibre component to request only visible vector tiles rather than downloading
-  the roughly 14 MB full-resolution national GeoJSON at map startup.
+- Configure the Nuxt MapLibre component to request visible vector tiles rather than downloading the
+  roughly 14 MB full-resolution national GeoJSON at map startup.
 - Verify feature identifiers/properties, national coverage, adjacency, absence of visible gaps or
-  overlaps at representative zooms, and deterministic archive regeneration.
+  overlaps at representative zooms, and deterministic regeneration.
 
 #### Frontend performance budgets
 
-- Public shared JavaScript, including Vue and Vue Router: at most 120 KiB gzip.
-- Shared CSS: at most 50 KiB gzip.
+- Public shared JavaScript, including Nuxt/Vue and routing: at most 120 KiB gzip.
+- Shared CSS, including Tailwind/Nuxt UI output: at most 50 KiB gzip.
 - Default overview-route JavaScript and CSS before API data: at most 375 KiB gzip.
 - Admin initial-route JavaScript and CSS: at most 200 KiB gzip.
 - Incremental MapLibre/PMTiles route payload: at most 400 KiB gzip.
@@ -492,13 +687,15 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
   non-chart route may request ECharts.
 - Preload no more than two above-the-fold font files.
 - Under one pinned Lighthouse mobile profile require LCP at most 2.5 seconds, CLS at most 0.1, and
-  total blocking time at most 200 ms. Use the current
-  [Core Web Vitals threshold rationale](https://web.dev/articles/defining-core-web-vitals-thresholds)
-  as the external reference while retaining the pinned local profile for comparable CI results.
-- Compare legacy and Vue routes after ten repeated navigation cycles. The Vue application must not
-  show monotonic retained-heap growth or leave detached chart/map/table nodes, active fetches,
-  timers, observers, or global listeners.
-- Require measured route interaction and filter-update latency to beat noise and show no material
+  total blocking time at most 200 ms. Retain the pinned local profile for comparable CI results.
+- Compare legacy vanilla routes, VDOM components, and Vapor components after ten repeated
+  navigation and interaction cycles. The migrated application must not show monotonic retained-heap
+  growth or leave detached chart/map/table nodes, active fetches, timers, observers, or global
+  listeners.
+- Require Vapor to show a measured benefit on its selected components, or to remain no worse than
+  the VDOM baseline within measurement noise. A Vapor result that fails the gate remains VDOM while
+  the rest of the coordinated migration proceeds.
+- Require route interaction and filter-update latency to beat measurement noise and show no material
   regression on unrelated routes.
 
 ### Phase 7 — CI and regression protection
@@ -516,8 +713,14 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
 - Run the parallel suite repeatedly before adoption and require ten consecutive clean runs without ordering-dependent failures.
 - Keep wall-clock assertions out of ordinary CI. CI performance tests enforce output digests, bounded memory structures, SQL/transaction counts, and complexity-sensitive operation counts; full timing comparisons remain controlled benchmarks.
 - Add TypeScript checking and Vue-aware linting over source files.
+- Add API contract tests that classify changes as additive, compatible, deprecated, or breaking.
+  Preserve existing `/api/v1` shapes and require an explicit compatibility decision before any
+  breaking change reaches either Nuxt client.
 - Add Vitest and Vue Test Utils coverage for components/composables and Playwright coverage for
   current Chromium, Firefox, and WebKit across both public and admin applications.
+- Add browser tests that exercise VDOM-to-Vapor and Vapor-to-VDOM composition, Nuxt UI controls
+  around Vapor components, and fail on console errors, hydration/interop warnings, or undisposed
+  third-party instances.
 - Add pinned Lighthouse runs, bundle-composition reports, compressed-size budgets, route-waterfall
   assertions, lifecycle/memory checks, and tests proving public bundles contain no admin or
   restricted-data modules.
@@ -540,6 +743,16 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
   columns, validation state, and compatibility views needed during cutover.
 - Migration `0100_job_worker_state`: durable job queue, sequenced events, leases/checkpoints, and
   warehouse data-version state used by the separate worker and web cache.
+- Reserve the following future schema ownership with the integration lane; do not create these
+  migrations independently in parallel branches:
+  - `0101_evidence_lineage_and_releases` for canonical lineage edges and immutable analytical-release
+    manifests;
+  - `0102_temporal_change_and_evidence_state` for validity/observation periods, supersession,
+    source-change records, and orthogonal evidence-quality assertions;
+  - `0103_collection_attempts_and_quarantine` for expected/negative collection outcomes and
+    quarantine/replay state.
+  The exact split may be revised during schema review, but numbering, identity definitions, and
+  compatibility views remain centrally coordinated.
 - New internal interfaces:
   - PostgreSQL-native connection/repository API using named rows and psycopg parameters;
   - `BatchWriter.write/flush/checkpoint`;
@@ -548,10 +761,14 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
   - archive put-from-stream/file returning `ArchiveObject`;
   - streaming workbook-row iterator;
   - PostgreSQL pgvector embedding repository;
+  - lineage and immutable analytical-release-manifest repository;
+  - hybrid lexical/fuzzy/semantic retrieval contract with deterministic rank fusion;
+  - collection-attempt and quarantine/replay interfaces;
   - separate typed public and admin API clients;
-  - Vue route/filter/storage composables;
-  - Vue chart, table, map, typeahead, provenance, and error-state component contracts;
-  - Vite manifest and immutable-asset resolver;
+  - Nuxt route/layout/middleware and filter/storage composables;
+  - Nuxt UI/Tailwind-based chart, table, map, typeahead, provenance, evidence, and error-state
+    component contracts;
+  - separate public/admin Nuxt manifests and immutable-asset resolver;
   - PMTiles build manifest and range-serving contract;
   - PostgreSQL-backed job queue and worker claim/checkpoint interface.
 - Principal settings:
@@ -571,14 +788,17 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
   - `JOB_EVENT_RETENTION_LINES=4000`
 - Remove SQLite database-path/backend-selection, mirror, and SQLite write-slot settings after the
   final cutover. Remove no Neo4j setting: Neo4j remains the deployed derived projection.
-- Frontend package/build configuration belongs in the Vite/TypeScript files and lockfile rather
+- Frontend package/build configuration belongs in the Nuxt/Vite/TypeScript files and lockfile rather
   than environment variables. Runtime configuration is limited to resolving the committed asset
-  manifest and current PMTiles digest.
+  manifest, current PMTiles digest, and public/admin base URLs.
 - Public `/api/v1` success response shapes remain unchanged. Admin health responses may add performance, snapshot-age, staleness, and refresh-error fields.
 
 ## Verification and Rollout
 
-- Implement and merge one phase at a time, capturing before/after reports against the same commit-adjacent dataset.
+- Develop independent Phase 2–7 streams concurrently only after the frozen Phase 1 baseline, but
+  integrate and deploy them through dependency-aware gates while capturing before/after reports
+  against the same commit-adjacent dataset. The rollout order below remains serial where it changes
+  shared schemas, contracts, production assets, or runtime ownership.
 - Before removing SQLite, run the existing SQLite/PostgreSQL equivalence and migration checks one
   final time against the retained dataset and record the digest as the cutover baseline. After the
   clean break, require PostgreSQL migration/restore equivalence, rollback behaviour, dry-run
@@ -586,23 +806,41 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
 - Compare analysis manifests, themes, signals, verifier results, cross-source link sets, and model-audit records before and after the redesign.
 - Assert the narrative prefilter’s 99% overall and 100% critical-category recall before enabling suppression.
 - Require exact semantic-search IDs/order with score tolerance `1e-6`.
+- Verify hybrid retrieval candidate provenance, deterministic rank fusion, stable result IDs/order,
+  and no contamination of evidence-quality or truth semantics by retrieval ranking.
+- Verify lineage is complete for representative source-to-published-output paths and that an
+  analytical release can be reproduced from its manifest, hashes, and pinned processing versions.
+- Verify temporal/supersession state and source-change classifications across unchanged, modified,
+  removed, redirected, and unavailable-source fixtures without converting absence into a claim.
+- Verify collection-attempt coverage and quarantine list/inspect/retry behavior, including original
+  byte preservation, bounded retries, failure history, and the no-auto-promotion rule.
 - Require row-for-row ontology/context outputs, including Unicode, punctuation, overlapping aliases, plural folding, negation, and termination cues.
 - Verify incremental NLP reruns perform no derived writes for unchanged inputs and correctly invalidate every affected downstream stage after controlled changes.
 - Test large-download interruption, archive checksum capability fallback, 304 restoration, audit mismatch handling, CSV resume, and workbook/PDF fallback.
 - Test web cold/warm paths, concurrent cache misses, saturation, queue rejection, database-pool exhaustion, compression variants, and cache invalidation.
 - Test worker crash/restart, advisory-lock exclusion, `SKIP LOCKED` claims, sequenced log polling,
   checkpoint resume, and cross-process cache-version invalidation.
+- Verify every parallel workstream uses isolated mutable databases, archive/cache namespaces,
+  generated outputs, and benchmark results, while only the integration lane uses shared state.
+- Verify versioned lineage, release-manifest, document-version, claim-version, and public-API
+  contract snapshots are reproducible and that dependent streams do not consume unstable contracts.
 - Validate Neo4j projection restartability, exact node/edge/link/path/property parity, projection lag,
   and individual error recovery from failed `UNWIND` batches.
 - Test every existing public/admin route, hash URL, query parameter, bookmark, browser-storage
   structure, keyboard interaction, focus transition, loading/error state, and export link against
   the legacy interface before the coordinated Vue cutover.
+- Test Nuxt static generation, `200.html`/`404.html` fallbacks, stable public metadata, dynamic
+  client-loaded evidence pages, admin client-only data, and absence of a Node/Nitro runtime in the
+  production image.
 - Assert that route network waterfalls obey the ECharts/Tabulator/MapLibre/PMTiles boundaries and
   all compressed bundle budgets.
 - Test PMTiles byte ranges, cache headers, deterministic regeneration, map feature/property parity,
   representative zooms, and fallback behaviour while retaining `/api/v1/boundaries` unchanged.
 - Run ten repeated Vue navigation cycles under heap and detached-node observation and fail on
   monotonic retained-memory growth or undisposed third-party instances.
+- Verify Phase 6 can complete its Nuxt/VDOM parity and static-delivery gates with selected components
+  held in VDOM when Vapor or an interop dependency fails its compatibility or measured-benefit gate;
+  this fallback must not create a second frontend migration.
 - Deploy in this order:
   1. PostgreSQL/frontend telemetry and PostgreSQL test infrastructure;
   2. PostgreSQL-only application path and mandatory extension checks;
@@ -625,10 +863,11 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
 - Neo4j remains the production derived graph projection; PostgreSQL remains its canonical source.
 - Python remains mandatory and authoritative; Mojo is optional, rollback-safe, and limited to
   deterministic kernels that pass exact parity gates.
-- Vue 3, TypeScript, Vue Router, and Vite replace both browser applications in one coordinated
-  release. Pinia, Vue Query, Nuxt, SSR, hydration, and Vue component frameworks are excluded.
-- Node is required only for frontend development and reproducible builds. Committed production
-  assets keep normal Python startup and deployment independent of Node.
+- Nuxt 4, Vue 3.6 with Vapor, TypeScript, Nuxt UI, Tailwind CSS, and Vite replace both browser
+  applications in one coordinated release. Nuxt uses static/client rendering with VDOM/Vapor
+  interop initially; full SSR/Nitro remains a separately approved future deployment option.
+- Node is required for frontend development and reproducible builds only. The final production
+  container and ordinary Python startup remain independent of Node.
 - Deployment remains one public web instance plus separate worker processes. Assets remain
   origin-served; CDN and edge caching are excluded.
 - Exact analytical links, deterministic NLP outputs, provenance, idempotency, public/admin and
@@ -641,6 +880,9 @@ earn the change against explicit transfer, rendering, interaction, cleanup, and 
 - Approximate graph algorithms, OCR-engine replacement, evidence semantics, public API redesign,
   and geometry/name-matching quality rewrites remain excluded unless separately approved. PMTiles
   changes delivery and display geometry only; it does not replace canonical boundaries.
+- Evidence lineage, release manifests, temporal state, source-change intelligence, expected-evidence
+  records, quarantine/replay, and OpenTelemetry are additive operational/evidence controls; they do
+  not authorize composite evidence scoring, automatic promotion, or a new public API shape.
 
 ## Original-Plan Traceability
 
@@ -675,9 +917,71 @@ underlying measurement or acceptance rationale.
 | Table-specific autovacuum/analyze, bulk-load `ANALYZE`, evidence-led indexes, no heuristic global tuning | **Retained** | Phase 5 plus PostgreSQL-native opportunities in Phase 1. |
 | Eight web workers, queue 32, controlled 503, cache-before-connection, serialized/gzip cache, single flight | **Retained** | Phase 5. |
 | Operational snapshots and conditional persisted public payloads | **Retained** | Phase 5. |
-| Frontend/browser exclusion | **Superseded** | Phase 6 supplies the Vue 3/Vite/PMTiles implementation and budgets. |
+| Frontend/browser exclusion | **Superseded** | Phase 6 supplies the Nuxt 4/Vue 3/Nuxt UI/Tailwind/Vite/PMTiles implementation and budgets. |
 | Serial CI timing, xdist/loadscope, serial group, fixture reuse, ten clean runs, structural performance assertions | **Retained and expanded** | Phase 7 adds PostgreSQL isolation and Vue/browser/build gates. |
 | PostgreSQL-driver-only follow-up test step | **Superseded** | Phase 7 runs the complete suite once with PostgreSQL as the normal dependency. |
-| Migrations 0094–0098 and original internal interfaces/settings | **Retained and expanded** | Interfaces section preserves them, adapts 0098 to PostgreSQL-only, and adds 0099–0100 plus frontend/worker interfaces. |
+| Migrations 0094–0098 and original internal interfaces/settings | **Retained and expanded** | Interfaces section preserves them, adapts 0098 to PostgreSQL-only, and adds 0099–0100 plus centrally owned future 0101–0103 schema slots and frontend/worker interfaces. |
 | SQLite/PostgreSQL equivalence | **Superseded after one final gate** | Verification records the final cutover digest; subsequent regression testing is PostgreSQL-only. |
 | Analysis/NLP/semantic/download/archive/web/graph verification matrix | **Retained and expanded** | Verification adds worker, Vue, bundle, memory, PMTiles, PostgreSQL restore, and detailed Neo4j parity tests. |
+
+## Post-roadmap platform and package upgrade candidates
+
+This is an additive, non-blocking register for upgrades considered after the existing Phase 0–7
+roadmap. It does not create a new phase, reorder delivery, replace the PostgreSQL 18 baseline, or
+repeat the Vue/Vapor decision already made in Phase 6. Version numbers are a review-time snapshot;
+recheck the lockfile and release status before implementation.
+
+### PostgreSQL 19
+
+PostgreSQL 19 is a later candidate against the PostgreSQL 18 platform target. Potential benefits
+for this project include:
+
+- planner improvements for anti-joins, aggregation before joins, incremental sorts, and nullable
+  comparison expressions;
+- improved asynchronous I/O and automatic I/O-worker scaling for large scans;
+- parallel autovacuum and improved maintenance prioritisation;
+- concurrent `REPACK` for reclaiming bloat without blocking ordinary reads and writes;
+- faster text/CSV `COPY` ingestion and foreign-key checks;
+- lock, recovery, progress, and `EXPLAIN` I/O observability useful to the Phase 0 telemetry;
+- `WAIT FOR LSN` if read replicas are introduced and read-your-writes behavior is required.
+
+These are workload-dependent improvements, not guaranteed multipliers. SQL/PGQ does not replace
+Neo4j, which remains the derived graph projection. Test PostgreSQL 19 only on an isolated
+production-sized clone and accept it only after row-count, hash, API-output, analytical-link,
+semantic-search, backup/restore, web, ingestion, and worker parity checks pass. PostgreSQL 19 must
+not delay the PostgreSQL 18 cutover.
+
+See the official [PostgreSQL 19 release notes](https://www.postgresql.org/docs/release/19.0/).
+
+### Suggested package updates
+
+The following candidates were identified from the current `uv.lock` and should be handled as
+separate, reviewable maintenance changes:
+
+| Package | Review-time candidate | Benefit and gate |
+|---|---|---|
+| `psycopg` | 3.3.4 → 3.3.5 | Low-risk correctness fixes for prepared statements, `COPY`, JSONB/data errors, and duplicate named rows; run the PostgreSQL suite. |
+| `pydantic` | 2.13.4 → 2.13.5 | Patch-level reliability update; no performance claim; run settings and API validation tests. |
+| `python-dotenv` | 1.2.2 → 1.2.3 | Patch-level maintenance update; run startup/configuration tests. |
+| `boto3` | 1.43.72 → 1.43.87 | Storage-extra maintenance/security refresh; run archive backend tests. |
+| `ruff` | 0.16.2 → 0.16.5 | Development-only refresh; run lint without rewriting unrelated files. |
+| `google-auth` | 2.56.3 → 2.57.0 | Sheets-extra maintenance refresh; run the offline sheets tests. |
+| `pypdfium2` | 5.12.1 → 5.13.0 | OCR-extra maintenance refresh; run OCR/document fixture tests. |
+| `neo4j` | 6.2.0 → 6.3.0 | Measured upgrade; require exact projection parity, restartability, and failed-batch recovery. |
+| `docling` | 2.120.3 → 2.124.0 | Measured document-worker upgrade against the representative corpus and PyMuPDF/pdfplumber. |
+
+Hold the following versions or upgrade paths until their compatibility gates are resolved:
+
+- keep `httpx` on the 0.28.x line and add an eventual `<1` upper bound before HTTPX 1.0 becomes
+  stable;
+- keep the OpenAI client below 2 while the assistant remains an optional OpenRouter-compatible
+  feature;
+- do not move to `sentence-transformers` 6 or `transformers` 5 until the SetFit compatibility
+  constraint is replaced or removed;
+- do not move ONNX Runtime beyond the Python 3.10-compatible ceiling unless OCR moves to a
+  separately tested Python 3.11+ worker;
+- retain `odfpy` and the project’s streamed XML ODS reader because no newer `odfpy` release solves
+  the large-document memory problem.
+
+When the frontend lockfile is introduced, pin Vue 3.6, Nuxt 4, Nuxt UI, Tailwind CSS, and their
+Vapor-compatible toolchain as one tested version matrix, as required by Phase 6.
