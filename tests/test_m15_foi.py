@@ -309,9 +309,10 @@ def test_foi_requests_table_starts_empty(conn):
 
 def _seed_profile(conn, ons_code="E08000012"):
     conn.execute(
-        "INSERT OR IGNORE INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
+        "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?,'Liverpool','metropolitan_district','2020-01-01','x','x','u','t',200,'s','h')",
+        "VALUES (?,'Liverpool','metropolitan_district','2020-01-01','x','x','u','t',200,'s','h') "
+        "ON CONFLICT (ons_code) DO NOTHING",
         (ons_code,))
     conn.execute(
         "INSERT INTO authority_foi_profiles (ons_code, authority_name, home_page_url, "
@@ -336,9 +337,10 @@ def test_hand_verified_config_wins_over_the_fallback(conn):
     must not be replaced by a generic home page.
     """
     conn.execute(
-        "INSERT OR IGNORE INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
+        "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES ('E10000016','Kent','county','2020-01-01','x','x','u','t',200,'s','h')")
+        "VALUES ('E10000016','Kent','county','2020-01-01','x','x','u','t',200,'s','h') "
+        "ON CONFLICT (ons_code) DO NOTHING")
     conn.execute(
         "INSERT INTO authority_foi_profiles (ons_code, authority_name, home_page_url, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
