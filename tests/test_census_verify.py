@@ -13,11 +13,10 @@ it turned up:
 from __future__ import annotations
 
 import inspect
-import sqlite3
 
 import pytest
 
-from pipeline import census_verify
+from pipeline import census_verify, db
 from pipeline.web import census as census_web
 
 METRIC = {
@@ -36,7 +35,7 @@ METRIC = {
 }
 
 
-def _insert_metric(conn: sqlite3.Connection, **overrides) -> dict:
+def _insert_metric(conn: db.Connection, **overrides) -> dict:
     row = {**METRIC, **overrides}
     columns = ", ".join(row)
     marks = ", ".join(f":{name}" for name in row)
@@ -46,7 +45,7 @@ def _insert_metric(conn: sqlite3.Connection, **overrides) -> dict:
     return row
 
 
-def _insert_page(conn: sqlite3.Connection, year: int = 2024, page: int = 6,
+def _insert_page(conn: db.Connection, year: int = 2024, page: int = 6,
                   text: str = "…an 8% vacancy rate in the delivery workforce…") -> None:
     conn.execute(
         "INSERT INTO workforce_census_page_text "
@@ -74,12 +73,13 @@ def test_a_metric_cannot_be_verified_without_a_decision(conn, metric):
     This is the statement the generated worklist used to print at the top of
     every census_{year}_tables.md.
     """
-    with pytest.raises(sqlite3.IntegrityError) as raised:
+    with pytest.raises(db.IntegrityError) as raised:
         conn.execute(
             "UPDATE workforce_census_metrics SET verified = 1 "
             "WHERE census_year = 2024")
 
     assert "not verified without a human" in str(raised.value)
+    conn.rollback()
     assert conn.execute(
         "SELECT verified FROM workforce_census_metrics").fetchone()["verified"] == 0
 
@@ -88,7 +88,7 @@ def test_a_metric_cannot_be_inserted_already_verified(conn):
     """The other route in. A rule enforced on UPDATE alone is not enforced --
     a module, an import or the SQL box can write the row verified from the
     start."""
-    with pytest.raises(sqlite3.IntegrityError) as raised:
+    with pytest.raises(db.IntegrityError) as raised:
         _insert_metric(conn, verified=1)
     assert "not verified without a human" in str(raised.value)
 
@@ -141,7 +141,11 @@ def test_the_mechanism_records_no_payload_hash_of_its_own(conn):
     retrieved here, and a column named as though something had been is an
     invitation to fill it in.
     """
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(census_verifications)")}
+    columns = {row["column_name"] for row in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = ?",
+        ("census_verifications",),
+    )}
 
     for absent in ("payload_sha256", "fetched_url", "http_status", "archived_path"):
         assert absent not in columns, (
