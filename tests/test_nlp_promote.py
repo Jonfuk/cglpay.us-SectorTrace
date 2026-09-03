@@ -169,7 +169,7 @@ def test_gate_coverage_does_not_double_count_a_primary_pick(conn, settings):
     result = promote.run(conn, source_system="committee_paper_promotion")
     by_candidate = conn.execute(
         "SELECT raw_value, COUNT(*) c FROM review_queue "
-        "WHERE item_type='semantic_claim_candidate' GROUP BY raw_value HAVING c > 1"
+        "WHERE item_type='semantic_claim_candidate' GROUP BY raw_value HAVING COUNT(*) > 1"
     ).fetchall()
     assert by_candidate == []
     assert result["by_reason"].get("primary", 0) >= 1
