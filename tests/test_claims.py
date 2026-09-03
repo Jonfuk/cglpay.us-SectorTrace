@@ -38,7 +38,7 @@ def seed(conn):
         "amount, value_text, source_url, retrieved_at, http_status, source_system, "
         "payload_sha256) VALUES ('April 2026', '21 and over', "
         "'national_living_wage', 12.71, '12.71', 'https://gov.uk/rates', "
-        "'2026-01-01T00:00:00Z', 200, 'm17', 'a' * 64)")
+        "'2026-01-01T00:00:00Z', 200, 'm17', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')")
     conn.execute(
         "INSERT INTO workforce_census_reports (census_year, report_title, "
         "document_url, page_count, publisher, source_url, retrieved_at, "
@@ -166,7 +166,7 @@ def test_every_document_table_resolves_its_own_columns(conn):
         "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
         "http_status, source_system, payload_sha256) "
         "VALUES ('E06000001', 'Hartlepool', 'UA', 'North East', '2023-04-01', "
-        "'2023', '2024', 'u', 'now', 200, 'm00_geography', '0' * 64)")
+        "'2023', '2024', 'u', 'now', 200, 'm00_geography', '0000000000000000000000000000000000000000000000000000000000000000')")
     conn.execute(
         "INSERT INTO evidence_promotions (candidate_table, candidate_url, "
         "target_table, target_key, promoted_by, promoted_at, "
@@ -177,7 +177,7 @@ def test_every_document_table_resolves_its_own_columns(conn):
         "document_type, source_url, retrieved_at, http_status, source_system, "
         "payload_sha256) VALUES ('E06000001', 'https://d.example/1', "
         "'A strategy', 'strategy', 'https://d.example/1', '2026-01-01T00:00:00Z', "
-        "200, 'cdp_document_promotion', 'a' * 64)")
+        "200, 'cdp_document_promotion', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')")
     conn.execute(
         "INSERT INTO evidence_promotions (candidate_table, candidate_url, "
         "target_table, target_key, promoted_by, promoted_at, "
@@ -188,7 +188,7 @@ def test_every_document_table_resolves_its_own_columns(conn):
         "committee_name, report_title, source_url, retrieved_at, http_status, "
         "source_system, payload_sha256) VALUES ('E06000001', "
         "'https://p.example/1', 'Cttee', 'A paper', 'https://p.example/1', "
-        "'2026-01-01T00:00:00Z', 200, 'committee_paper_promotion', 'b' * 64)")
+        "'2026-01-01T00:00:00Z', 200, 'committee_paper_promotion', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')")
     conn.execute(
         "INSERT INTO evidence_promotions (candidate_table, candidate_url, "
         "target_table, target_key, promoted_by, promoted_at, "
@@ -199,7 +199,7 @@ def test_every_document_table_resolves_its_own_columns(conn):
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES ('E06000001', 'https://w.example/1', 'A request', 'successful', "
         "'https://w.example/1', '2026-01-01T00:00:00Z', 200, "
-        "'foi_request_promotion', 'c' * 64)")
+        "'foi_request_promotion', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc')")
     conn.commit()
 
     cases = [

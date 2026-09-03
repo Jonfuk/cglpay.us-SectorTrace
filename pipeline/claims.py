@@ -39,6 +39,8 @@ from datetime import datetime, timezone
 
 import structlog
 
+from pipeline import db
+
 log = structlog.get_logger()
 
 STATUSES = ("draft", "published", "rejected", "retracted")
@@ -538,7 +540,7 @@ def cite(conn: sqlite3.Connection, claim_id: int, evidence_table: str,
             "evidence_key, cited_by, cited_at, note) VALUES (?, ?, ?, ?, ?, ?)",
             (claim_id, evidence_table, evidence_key, cited_by.strip(), now, note))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except db.IntegrityError:
         conn.rollback()
         raise ClaimError("That evidence row is already cited on this claim.")
     log.info("claims.cited", claim_id=claim_id, table=evidence_table, by=cited_by)
@@ -608,7 +610,7 @@ def decide(conn: sqlite3.Connection, claim_id: int, decision: str,
         conn.execute(
             "UPDATE claims SET status = ? WHERE id = ?", (decision, claim_id))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except db.IntegrityError:
         conn.rollback()
         raise
     log.info("claims.decided", claim_id=claim_id, decision=decision,
