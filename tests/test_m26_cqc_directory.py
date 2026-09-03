@@ -25,10 +25,10 @@ def _allow_all_robots(httpx_mock) -> None:
 
 def _seed_provider(conn, provider_id: str = "1-125892604", provider_key: str = "change_grow_live") -> None:
     conn.execute(
-        "INSERT OR IGNORE INTO cqc_providers (provider_id, provider_key, provider_name, "
+        "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES (?, ?, 'Change, Grow, Live', 'https://example.com', "
-        "'2026-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "'2026-01-01T00:00:00Z', 200, 'test', 'abc') ON CONFLICT DO NOTHING",
         (provider_id, provider_key))
 
 
