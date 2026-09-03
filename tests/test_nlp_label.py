@@ -100,7 +100,8 @@ def test_run_is_idempotent(conn, settings):
     again = nlp_label.run(conn, source_system="committee_paper_promotion")
     count_2 = conn.execute(
         "SELECT COUNT(*) FROM document_topics WHERE match_method='ontology_v1'").fetchone().values().__iter__().__next__()
-    assert first["rows"] == again["rows"]
+    assert first["rows"] > 0 and again["rows"] == 0
+    assert again["skipped_unchanged"] > 0
     assert count_1 == count_2
 
 

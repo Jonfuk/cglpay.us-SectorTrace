@@ -20,6 +20,7 @@ import hashlib
 from dataclasses import dataclass
 
 from pipeline.nlp import claims
+from pipeline.nlp.embedding_repository import PostgresEmbeddingRepository
 from pipeline.nlp.gate import GATE_CATEGORIES, _label_for
 
 # Latest decision per candidate wins. A candidate can carry more than one
@@ -29,23 +30,28 @@ from pipeline.nlp.gate import GATE_CATEGORIES, _label_for
 # it through `gate._label_for`. A candidate the latest decision leaves
 # unlabelled for this category (e.g. approved for a different predicate) is
 # simply not an example for this category.
-_DECIDED_SQL = """
-SELECT c.claim_candidate_id      AS claim_candidate_id,
+_DECIDED_PAGE_SQL = """
+SELECT * FROM (
+SELECT DISTINCT ON (c.claim_candidate_id)
+       c.claim_candidate_id      AS claim_candidate_id,
        c.document_chunk_id       AS document_chunk_id,
        c.predicate               AS predicate,
        c.assertion_status        AS assertion_status,
        d.decision                AS decision,
        d.corrected_predicate     AS corrected_predicate,
        d.decided_at              AS decided_at,
-       dc.text                   AS text,
-       em.embedding              AS embedding
+       dc.text                   AS text
 FROM claim_candidate_decisions d
 JOIN document_claim_candidates c ON c.claim_candidate_id = d.claim_candidate_id
 JOIN document_chunks dc ON dc.document_chunk_id = c.document_chunk_id
-LEFT JOIN document_embeddings em
-       ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = %s
-ORDER BY d.decided_at, d.id
+WHERE c.claim_candidate_id > %s
+ORDER BY c.claim_candidate_id, d.decided_at DESC, d.id DESC
+) latest
+ORDER BY claim_candidate_id
+LIMIT %s
 """
+
+_READ_PAGE_SIZE = 2000
 
 
 @dataclass(frozen=True)
@@ -76,19 +82,25 @@ def labelled_examples(conn, category: str, *, embedder_model_key: str) -> list[E
                            f"({', '.join(GATE_CATEGORIES)}).")
     predicate = GATE_CATEGORIES[category]
 
-    latest: dict[str, dict] = {}
-    for row in conn.execute(_DECIDED_SQL, (embedder_model_key,)).fetchall():
-        latest[row["claim_candidate_id"]] = dict(row)  # ORDER BY decided_at, id -> last wins
-
     examples: list[Example] = []
-    for cand_id, row in latest.items():
-        label = _label_for(row, predicate)
-        if label is None:
-            continue
-        examples.append(Example(
-            candidate_id=cand_id, chunk_id=row["document_chunk_id"], text=row["text"] or "",
-            label=1 if label == "positive" else 0, decided_at=row["decided_at"] or "",
-            embedding=row["embedding"]))
+    after = ""
+    repository = PostgresEmbeddingRepository(conn)
+    while True:
+        page = conn.execute(_DECIDED_PAGE_SQL, (after, _READ_PAGE_SIZE)).fetchall()
+        if not page:
+            break
+        vectors = repository.vectors_for_chunks(
+            embedder_model_key, sorted({row["document_chunk_id"] for row in page}))
+        for row in page:
+            label = _label_for(row, predicate)
+            if label is None:
+                continue
+            examples.append(Example(
+                candidate_id=row["claim_candidate_id"],
+                chunk_id=row["document_chunk_id"], text=row["text"] or "",
+                label=1 if label == "positive" else 0, decided_at=row["decided_at"] or "",
+                embedding=vectors.get(row["document_chunk_id"])))
+        after = page[-1]["claim_candidate_id"]
     return examples
 
 
@@ -120,18 +132,6 @@ def corpus_cutoff(examples: list[Example]) -> str:
     return max((e.decided_at for e in examples if e.decided_at), default="")
 
 
-_PREDICT_POP_SQL = """
-SELECT dc.document_chunk_id AS document_chunk_id,
-       dc.text              AS text,
-       em.embedding         AS embedding
-FROM document_chunks dc
-JOIN document_embeddings em
-  ON em.document_chunk_id = dc.document_chunk_id AND em.model_key = %s
-WHERE dc.superseded = 0
-ORDER BY dc.document_chunk_id
-"""
-
-
 @dataclass(frozen=True)
 class PopulationRow:
     chunk_id: str
@@ -143,8 +143,8 @@ def predict_population(conn, *, embedder_model_key: str) -> list[PopulationRow]:
     """Every live chunk that has an embedding under `embedder_model_key`. The
     prediction target is the same for both model types, so the logreg and
     SetFit heads of a category score an identical population."""
-    return [PopulationRow(r["document_chunk_id"], r["text"] or "", r["embedding"])
-            for r in conn.execute(_PREDICT_POP_SQL, (embedder_model_key,)).fetchall()]
+    return [PopulationRow(chunk_id, text, vector) for chunk_id, text, vector
+            in PostgresEmbeddingRepository(conn).population(embedder_model_key)]
 
 
 def _deterministic_sample(rows: list[PopulationRow], *, tag: str, n: int,
@@ -158,6 +158,29 @@ def _deterministic_sample(rows: list[PopulationRow], *, tag: str, n: int,
     return pool[:n]
 
 
+def _deterministic_population_sample(conn, *, embedder_model_key: str, tag: str,
+                                     n: int, exclude: set[str]) -> list[PopulationRow]:
+    """Stable hash sample while retaining only ``n + page_size`` rows.
+
+    Classifier training needs a deterministic corpus sample, not a complete
+    in-memory corpus.  Each repository page is merged into the current best
+    ``n`` hashes, preserving the exact result of a full sort.
+    """
+    if n <= 0:
+        return []
+    selected: list[tuple[str, PopulationRow]] = []
+    repository = PostgresEmbeddingRepository(conn)
+    for page in repository.iter_population(embedder_model_key, page_size=_READ_PAGE_SIZE):
+        selected.extend(
+            (hashlib.sha256(
+                f"{claims.HELDOUT_SEED}|{tag}|{chunk_id}".encode("utf-8")
+             ).hexdigest(), PopulationRow(chunk_id, text, vector))
+            for chunk_id, text, vector in page if chunk_id not in exclude)
+        selected.sort(key=lambda item: item[0])
+        del selected[n:]
+    return [row for _, row in selected]
+
+
 def corpus_negatives(conn, category: str, *, embedder_model_key: str, n: int,
                      exclude: set[str]) -> list[Example]:
     """`n` random unlabelled chunks as synthetic negatives for `category`, so
@@ -165,8 +188,9 @@ def corpus_negatives(conn, category: str, *, embedder_model_key: str, n: int,
     review-queue artefact. `exclude` is every chunk that is already a
     reviewer-labelled example (any split). A sampled chunk is assumed
     non-affirming -- true well over 99% of the time at these base rates."""
-    rows = predict_population(conn, embedder_model_key=embedder_model_key)
-    sample = _deterministic_sample(rows, tag=f"corpusneg|{category}", n=n, exclude=exclude)
+    sample = _deterministic_population_sample(
+        conn, embedder_model_key=embedder_model_key,
+        tag=f"corpusneg|{category}", n=n, exclude=exclude)
     return [Example(candidate_id=f"corpusneg:{p.chunk_id}", chunk_id=p.chunk_id,
                     text=p.text, label=0, decided_at="", embedding=p.embedding)
             for p in sample]
@@ -178,5 +202,6 @@ def base_rate_sample(conn, category: str, *, embedder_model_key: str, n: int,
     predicted-positive rate on. Drawn with a different tag from
     `corpus_negatives`, so the base-rate check is never run on chunks the
     head trained on."""
-    rows = predict_population(conn, embedder_model_key=embedder_model_key)
-    return _deterministic_sample(rows, tag=f"baserate|{category}", n=n, exclude=exclude)
+    return _deterministic_population_sample(
+        conn, embedder_model_key=embedder_model_key,
+        tag=f"baserate|{category}", n=n, exclude=exclude)

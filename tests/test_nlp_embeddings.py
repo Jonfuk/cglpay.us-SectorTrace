@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import math
+import re
+from pathlib import Path
 
 from pipeline.documents import repository
 from pipeline.documents.models import EvidenceReference, ParsedDocument, ParsedElement
 from pipeline.nlp import chunk as nlp_chunk
 from pipeline.nlp import embeddings
+from pipeline.nlp.embedding_repository import (
+    PostgresEmbeddingRepository,
+    compact_legacy_table,
+    validate_restore_receipt,
+    vector_values,
+)
 
 
 def _seed_version(conn, settings, elements, *, evidence_id="ev-embed",
@@ -67,13 +75,15 @@ def test_backfill_vectors_uses_the_postgres_backend(conn, settings):
     assert result["written"] == 0
 
 
-def test_stub_run_does_not_write_embedding_vec(conn, settings):
-    # The stub is 256-wide while the production vector column is larger, so
-    # `run` must not attempt to write embedding_vec for this fixture model.
+def test_stub_run_writes_only_canonical_embedding_vec(conn, settings):
     _seed_version(conn, settings, _ELEMENTS)
     nlp_chunk.run(conn, source_system="committee_paper_promotion")
     result = embeddings.run(conn, model="stub")
     assert result["embedded"] > 0
+    row = conn.execute(
+        "SELECT embedding,embedding_vec FROM document_embeddings LIMIT 1").fetchone()
+    assert row["embedding"] is None
+    assert len(vector_values(row["embedding_vec"])) == embeddings.VECTOR_COLUMN_DIM
 
 
 def test_cosine_is_one_for_identical_and_near_zero_for_disjoint():
@@ -126,13 +136,13 @@ def test_run_embeds_live_chunks_and_registers_the_model(conn, settings):
     assert model["dimension"] == embeddings.STUB_DIMENSION
 
     rows = conn.execute(
-        "SELECT e.dimension, e.embedding, e.nlp_run_id FROM document_embeddings e "
+        "SELECT e.dimension, e.embedding_vec, e.nlp_run_id FROM document_embeddings e "
         "JOIN document_chunks c ON c.document_chunk_id = e.document_chunk_id "
         "WHERE c.superseded = 0").fetchall()
     assert rows
     for row in rows:
         assert row["dimension"] == embeddings.STUB_DIMENSION
-        assert len(embeddings.unpack(row["embedding"])) == embeddings.STUB_DIMENSION
+        assert len(vector_values(row["embedding_vec"])) == embeddings.STUB_DIMENSION
         assert row["nlp_run_id"] == result["run_id"]
 
 
@@ -180,3 +190,88 @@ def test_source_system_filter_scopes_the_run(conn, settings):
         "SELECT DISTINCT c.document_version_id FROM document_embeddings e "
         "JOIN document_chunks c ON c.document_chunk_id = e.document_chunk_id").fetchall()
     assert len(embedded_versions) == 1
+
+
+def test_repository_population_is_keyset_paged(conn, settings):
+    for suffix in ("a", "b", "c"):
+        _seed_version(conn, settings, _ELEMENTS, evidence_id=f"ev-page-{suffix}")
+    nlp_chunk.run(conn)
+    embeddings.run(conn, model="stub")
+    pages = list(PostgresEmbeddingRepository(conn).iter_population("embed:stub", page_size=2))
+    ids = [chunk_id for page in pages for chunk_id, _, _ in page]
+    assert pages and all(len(page) <= 2 for page in pages)
+    assert ids == sorted(ids) and len(ids) == len(set(ids))
+
+
+def test_repository_population_excludes_inactive_document_versions(conn, settings):
+    version_id = _seed_version(conn, settings, _ELEMENTS)
+    nlp_chunk.run(conn)
+    embeddings.run(conn, model="stub")
+    conn.execute("UPDATE document_versions SET is_active=0 WHERE document_version_id=%s",
+                 (version_id,))
+    conn.commit()
+    assert list(PostgresEmbeddingRepository(conn).iter_population("embed:stub")) == []
+
+
+def test_active_nlp_consumers_do_not_query_vector_storage_directly():
+    root = Path(__file__).resolve().parent.parent / "pipeline" / "nlp"
+    allowed = {"embedding_repository.py", "embeddings.py"}
+    offenders = []
+    for path in root.glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        direct_sql = re.search(
+            r"(?:FROM|JOIN|INSERT\s+INTO|UPDATE)\s+document_embeddings\b", source, re.I)
+        if path.name not in allowed and direct_sql:
+            offenders.append(path.name)
+    assert offenders == []
+
+
+def test_embedding_compaction_dry_run_rolls_back_every_change(conn, settings):
+    _seed_version(conn, settings, _ELEMENTS)
+    nlp_chunk.run(conn)
+    embeddings.run(conn, model="stub")
+    before = conn.execute("SELECT COUNT(*) AS count FROM document_embeddings").fetchone()["count"]
+    result = compact_legacy_table(conn, dry_run=True)
+    assert result["status"] == "dry_run" and result["rows"] == before
+    assert conn.execute(
+        "SELECT COUNT(*) AS count FROM document_embeddings").fetchone()["count"] == before
+    assert conn.execute(
+        "SELECT to_regclass(current_schema() || '.document_embeddings_compact') AS name"
+    ).fetchone()["name"] is None
+
+
+def test_embedding_compaction_apply_requires_restore_evidence(conn):
+    try:
+        compact_legacy_table(conn)
+    except RuntimeError as exc:
+        assert "isolated-restore receipt" in str(exc)
+    else:
+        raise AssertionError("unguarded embedding table swap was accepted")
+
+
+def test_restore_receipt_is_bound_to_exact_archive_bytes(tmp_path, monkeypatch):
+    import hashlib
+    import json
+
+    from pipeline import pgbackup
+
+    archive = tmp_path / "warehouse.sql.gz"
+    archive.write_bytes(b"fixture archive bytes")
+    monkeypatch.setattr(pgbackup, "verify_archive",
+                        lambda path: {"rows": 12, "tables": 3})
+    receipt = tmp_path / "restore-receipt.json"
+    receipt.write_text(json.dumps({
+        "from": str(archive.resolve()),
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "rows": 12, "tables": 3, "restored": "postgresql://redacted",
+        "restored_at": "2026-09-03T12:00:00+00:00",
+    }))
+    verified = validate_restore_receipt(archive, receipt)
+    assert verified["rows"] == 12 and verified["tables"] == 3
+    archive.write_bytes(b"changed")
+    try:
+        validate_restore_receipt(archive, receipt)
+    except RuntimeError as exc:
+        assert "backup bytes" in str(exc)
+    else:
+        raise AssertionError("receipt accepted different backup bytes")

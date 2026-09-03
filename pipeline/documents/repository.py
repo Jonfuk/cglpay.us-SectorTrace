@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from pipeline import evidence_state
 from pipeline.documents import titles
 from pipeline.documents.classify import topic_matches
 from pipeline.documents.models import EvidenceReference, ParsedDocument
@@ -40,6 +41,13 @@ def upsert_evidence(conn, reference: EvidenceReference) -> None:
     conn.execute(
         "INSERT INTO document_processing_states (evidence_id) VALUES (%s) "
         "ON CONFLICT(evidence_id) DO NOTHING", (reference.evidence_id,))
+    evidence_state.observe(
+        conn, layer="archived_byte", identity=evidence_state.logical_source_identity(reference),
+        evidence_hash=reference.payload_sha256, retrieved_at=reference.retrieved_at,
+        source_url=reference.source_url, payload_sha256=reference.payload_sha256,
+        provenance={"evidence_id": reference.evidence_id,
+                    "raw_object_path": reference.raw_object_path,
+                    "http_status": reference.http_status})
 
 
 def upsert_document(conn, reference: EvidenceReference, document_type: str, method: str,
@@ -138,10 +146,46 @@ def version_exists(conn, document_id: str, parser_name: str, parser_version: str
 def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: str,
                   source_artifact_id: str | None, quality_status: str, quality_metrics: dict,
                   quality_warnings: list[str], settings) -> str:
+    source = conn.execute(
+        "SELECT d.evidence_id,d.source_table,d.source_key,d.published_at,e.source_system,e.source_url,"
+        "e.retrieved_at,e.payload_sha256 FROM document_records d "
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id WHERE d.document_id=%s",
+        (document_id,)).fetchone()
+    logical_key = source["source_key"] or source["source_url"] or source["evidence_id"]
+    previous = conn.execute(
+        "SELECT dv.document_version_id,dv.text_sha256 FROM document_versions dv "
+        "JOIN document_records d ON d.document_id=dv.document_id "
+        "JOIN evidence_records e ON e.evidence_id=d.evidence_id "
+        "WHERE dv.is_active=1 AND e.source_system=%s AND COALESCE(d.source_table,'')=%s "
+        "AND COALESCE(NULLIF(d.source_key,''),NULLIF(e.source_url,''),e.evidence_id)=%s "
+        "ORDER BY dv.created_at DESC,dv.document_version_id DESC LIMIT 1",
+        (source["source_system"], source["source_table"] or "", logical_key)).fetchone()
+    previous_version_id = previous["document_version_id"] if previous else None
+    previous_elements = {
+        (row["sequence"], row["element_type"]): row["text_sha256"]
+        for row in conn.execute(
+            "SELECT de.sequence,de.element_type,de.text_sha256 FROM document_elements de "
+            "WHERE de.document_version_id=%s", (previous_version_id,)).fetchall()
+    }
+    previous_tables = {
+        row["sequence"]: hashlib.sha256((row["table_json"] or "").encode()).hexdigest()
+        for row in conn.execute(
+            "SELECT de.sequence,dt.table_json FROM document_tables dt "
+            "JOIN document_elements de ON de.document_element_id=dt.document_element_id "
+            "WHERE de.document_version_id=%s", (previous_version_id,)).fetchall()
+    }
     version_id = stable_id("document-version", f"{document_id}|{parsed.parser_name}|{parsed.parser_version}|{config_hash}")
     now = utcnow()
-    text_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
-    conn.execute("UPDATE document_versions SET is_active=0 WHERE document_id=%s", (document_id,))
+    document_text_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
+    # A changed archive object has a new immutable evidence/document id. Make
+    # activation follow the logical source key, retaining all prior versions
+    # but preventing historical source bytes from feeding live NLP/search.
+    conn.execute(
+        "UPDATE document_versions dv SET is_active=0 FROM document_records d,evidence_records e "
+        "WHERE dv.document_id=d.document_id AND d.evidence_id=e.evidence_id "
+        "AND dv.is_active=1 AND e.source_system=%s AND COALESCE(d.source_table,'')=%s "
+        "AND COALESCE(NULLIF(d.source_key,''),NULLIF(e.source_url,''),e.evidence_id)=%s",
+        (source["source_system"], source["source_table"] or "", logical_key))
     conn.execute(
         "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
         "parse_schema_version, source_artifact_id, config_hash, text_sha256, status, is_active, created_at) "
@@ -149,7 +193,7 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
         "ON CONFLICT(document_id, parser_name, parser_version, config_hash) DO UPDATE SET "
         "is_active=1, status='SUCCESS', text_sha256=excluded.text_sha256",
         (version_id, document_id, parsed.parser_name, parsed.parser_version, "1", source_artifact_id,
-         config_hash, text_hash, now),
+         config_hash, document_text_hash, now),
     )
     conn.execute("DELETE FROM document_elements WHERE document_version_id=%s", (version_id,))
     element_ids: dict[int, str] = {}
@@ -203,6 +247,64 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
         "quality_status=%s, active_document_version_id=%s, last_processed_at=%s, last_error=NULL "
         "WHERE evidence_id=(SELECT evidence_id FROM document_records WHERE document_id=%s)",
         (quality_status, version_id, now, document_id))
+    logical = f"{source['source_system']}|{source['source_table'] or ''}|" \
+              f"{logical_key}"
+    evidence_state.observe(
+        conn, layer="document_version", identity=logical, evidence_hash=document_text_hash,
+        retrieved_at=source["retrieved_at"], source_url=source["source_url"],
+        source_valid_from=evidence_state.known_date(source["published_at"]),
+        payload_sha256=source["payload_sha256"],
+        provenance={"document_id": document_id, "document_version_id": version_id,
+                    "parser_name": parsed.parser_name, "parser_version": parsed.parser_version,
+                    "previous_document_version_id": previous["document_version_id"] if previous else None})
+    current_keys: set[tuple[int, str]] = set()
+    for item in parsed.elements:
+        key = (item.sequence, item.element_type)
+        current_keys.add(key)
+        item_hash = hashlib.sha256((item.text or "").encode("utf-8")).hexdigest()
+        evidence_state.observe(
+            conn, layer="document_element", identity=f"{logical}|{item.sequence}|{item.element_type}",
+            evidence_hash=item_hash, retrieved_at=source["retrieved_at"],
+            source_valid_from=evidence_state.known_date(source["published_at"]),
+            source_url=source["source_url"], payload_sha256=source["payload_sha256"],
+            provenance={"document_version_id": version_id, "sequence": item.sequence,
+                        "element_type": item.element_type})
+    for sequence, element_type in sorted(set(previous_elements) - current_keys):
+        evidence_state.observe(
+            conn, layer="document_element", identity=f"{logical}|{sequence}|{element_type}",
+            evidence_hash=previous_elements[(sequence, element_type)] or hashlib.sha256(b"").hexdigest(),
+            retrieved_at=source["retrieved_at"], source_url=source["source_url"],
+            source_valid_from=evidence_state.known_date(source["published_at"]),
+            payload_sha256=source["payload_sha256"], explicit_state="removed",
+            provenance={"document_version_id": version_id,
+                        "meaning": "passage absent from this parsed source version; not proof the fact ended"})
+    current_table_sequences = set()
+    for table in parsed.tables:
+        current_table_sequences.add(table.element_sequence)
+        table_json = _json(table.rows)
+        evidence_state.observe(
+            conn, layer="document_table", identity=f"{logical}|table|{table.element_sequence}",
+            evidence_hash=hashlib.sha256(table_json.encode()).hexdigest(),
+            retrieved_at=source["retrieved_at"], source_url=source["source_url"],
+            source_valid_from=evidence_state.known_date(source["published_at"]),
+            payload_sha256=source["payload_sha256"],
+            provenance={"document_version_id": version_id,
+                        "element_sequence": table.element_sequence})
+    for sequence in sorted(set(previous_tables) - current_table_sequences):
+        evidence_state.observe(
+            conn, layer="document_table", identity=f"{logical}|table|{sequence}",
+            evidence_hash=previous_tables[sequence], retrieved_at=source["retrieved_at"],
+            source_valid_from=evidence_state.known_date(source["published_at"]),
+            source_url=source["source_url"], payload_sha256=source["payload_sha256"],
+            explicit_state="removed",
+            provenance={"document_version_id": version_id,
+                        "meaning": "table absent from this parsed source version; not proof the fact ended"})
+    evidence_state.assert_quality(
+        conn, layer="document_version", identity=logical, assertion_type="extraction_quality",
+        value=quality_status, status="asserted", method="document_quality.assess",
+        source_url=source["source_url"], payload_sha256=source["payload_sha256"],
+        provenance={"document_version_id": version_id, "metrics": quality_metrics,
+                    "warnings": quality_warnings})
     return version_id
 
 

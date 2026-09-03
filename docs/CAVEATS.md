@@ -357,17 +357,27 @@ anyone using it.
   cannot reach the `pdf_metadata` rung for versions parsed before the
   migration — that needs a reparse — so an old scanned PDF may sit at
   `filename` or `unknown` until it is reprocessed.
-- **Semantic search over these documents (BETA-034A, `/api/admin/search`,
+- **Hybrid search over these documents (BETA-034A, `/api/admin/search`,
   `pipeline nlp search`) returns leads, not findings.** A chunk is retrieved
-  because its wording, its embedding, or both are close to the query — an
+  because PostgreSQL full text, trigram similarity, its embedding, or a
+  deterministic reciprocal-rank fusion is close to the query — an
   embedding says two passages are similar, never that a statement in one is
-  true. A vector similarity score is not evidence strength and is never
-  counted, summed or compared across documents. Nothing the layer produces is
+  true. Candidate rank, vector similarity and the fused score are not evidence
+  strength, source authority, corroboration, extraction quality, or review
+  state, and are never counted, summed or compared across documents. Nothing the layer produces is
   attributed to a provider or promoted to a claim without a person going
   through the review queue → `graph_claims` path. The `stub` embedder is a
   deterministic offline stand-in for CI and development and retrieves poorly
   by design; only a run with the real model behind the `nlp` extra should be
   read as retrieval at all.
+- **Temporal/change state describes the stored source, not the world.** A
+  passage or table marked `removed` means only that deterministic parsing did
+  not find it in the newer archived source version. A missing/unavailable URL,
+  a removed passage, or a superseded candidate is never proof that the fact it
+  once described has ceased. Unknown validity/effective dates remain NULL.
+  Authority, extraction quality, corroboration, temporal completeness and
+  review state are separate assertions; there is deliberately no combined
+  evidence-quality score.
 - **Ontology topic tags (BETA-034C, `document_topics` rows with
   `match_method='ontology_v1'`) mark wording, not fact.** A row saying an
   element is about `workforce.recruitment_difficulty` means the phrase is

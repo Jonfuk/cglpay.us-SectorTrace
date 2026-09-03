@@ -105,7 +105,7 @@ def test_run_is_idempotent(conn, settings):
     n1 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone().values().__iter__().__next__()
     again = spans.run(conn, extractor="stub")
     n2 = conn.execute("SELECT COUNT(*) FROM document_concept_mentions").fetchone().values().__iter__().__next__()
-    assert first["mentions"] == again["mentions"] and n1 == n2
+    assert first["mentions"] > 0 and again["mentions"] == 0 and n1 == n2
 
 
 def test_dry_run_writes_nothing(conn, settings):

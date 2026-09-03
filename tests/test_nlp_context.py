@@ -120,7 +120,7 @@ def test_run_is_idempotent(conn, settings):
     n1 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone().values().__iter__().__next__()
     again = nlp_context.run(conn)
     n2 = conn.execute("SELECT COUNT(*) FROM document_assertions").fetchone().values().__iter__().__next__()
-    assert first["assertions"] == again["assertions"] and n1 == n2
+    assert first["assertions"] > 0 and again["assertions"] == 0 and n1 == n2
 
 
 def test_dry_run_writes_nothing(conn, settings):

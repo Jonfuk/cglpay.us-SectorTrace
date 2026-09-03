@@ -59,7 +59,7 @@ def _document_reference(row):
 def analysis_worker(
     once: bool = typer.Option(False, "--once", help="Claim one run and exit when it finishes."),
     poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls."),
-    batch_size: int = typer.Option(100, min=1, help="Analysis windows processed per batch."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
     comparison_workers: int | None = typer.Option(None, "--comparison-workers", min=1,
                                                    help="CPU processes for structured comparisons; auto by default."),
     worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
@@ -114,6 +114,129 @@ def analysis_health(
                "max_age_seconds": threshold}
     typer.echo(__import__("json").dumps(payload, sort_keys=True))
     if age_seconds > threshold:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("prefilter-eval")
+def analysis_prefilter_eval(
+    corpus: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                  help="Adjudicated JSONL corpus."),
+    corpus_version: str = typer.Option(..., "--corpus-version",
+                                       help="Immutable corpus version label."),
+    adjudicated_by: str = typer.Option(..., "--adjudicated-by",
+                                       help="Named human reviewer or panel."),
+    record: bool = typer.Option(False, "--record",
+                                help="Persist the immutable gate result."),
+) -> None:
+    """Evaluate the narrative prefilter; suppression still needs explicit config opt-in."""
+    import json
+
+    from pipeline.analysis.prefilter import evaluate, save_result
+
+    rows = []
+    for number, line in enumerate(corpus.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"invalid JSON on line {number}: {exc}") from exc
+        if not isinstance(row, dict) or not isinstance(row.get("text"), str):
+            raise typer.BadParameter(f"line {number} must be an object with text")
+        if not isinstance(row.get("positive"), bool) or not isinstance(row.get("critical"), bool):
+            raise typer.BadParameter(
+                f"line {number} must carry boolean positive and critical labels")
+        rows.append(row)
+    try:
+        result = evaluate(rows, corpus_version=corpus_version)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    payload = {**result.__dict__, "recorded": False}
+    if record:
+        conn, _settings = _document_connection()
+        try:
+            payload["result_id"] = save_result(
+                conn, result, adjudicated_by=adjudicated_by)
+            conn.commit()
+            payload["recorded"] = True
+        finally:
+            conn.close()
+    typer.echo(json.dumps(payload, sort_keys=True, indent=2))
+    if not result.gate_passed:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("acceptance-capture")
+def analysis_acceptance_capture(
+    release_id: str = typer.Argument(..., help="Completed analytical release to capture."),
+    output: Path = typer.Option(..., "--output", help="Destination JSON snapshot."),
+) -> None:
+    """Capture deterministic Phase 2 parity inputs, outputs and diagnostics."""
+    import json
+
+    from pipeline.analysis.acceptance import release_snapshot, write_report
+
+    conn, _settings = _document_connection()
+    try:
+        report = release_snapshot(conn, release_id)
+    finally:
+        conn.close()
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "snapshot_digest": report["snapshot_digest"]}, sort_keys=True))
+
+
+@analysis_app.command("acceptance-compare")
+def analysis_acceptance_compare(
+    baseline: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                    help="Before snapshot JSON."),
+    candidate: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                     help="After snapshot JSON."),
+    output: Path = typer.Option(..., "--output", help="Destination comparison JSON."),
+) -> None:
+    """Require same-input count/set/order parity between two captures."""
+    import json
+
+    from pipeline.analysis.acceptance import compare_snapshots, write_report
+
+    try:
+        before = json.loads(baseline.read_text(encoding="utf-8"))
+        after = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise typer.BadParameter(f"invalid acceptance snapshot: {exc}") from exc
+    report = compare_snapshots(before, after)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "same_dataset": report["same_dataset"],
+                           "parity_passed": report["parity_passed"],
+                           "comparison_digest": report["comparison_digest"]}, sort_keys=True))
+    if not report["parity_passed"]:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("benchmark-once")
+def analysis_benchmark_once(
+    output: Path = typer.Option(..., "--output", help="Destination benchmark JSON."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
+    worker_id: str = typer.Option("phase2-acceptance", help="Worker label recorded with the run."),
+) -> None:
+    """Instrument one queued run; use only against an isolated acceptance database."""
+    import json
+
+    from pipeline.analysis.acceptance import benchmark_once, write_report
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+    finally:
+        conn.close()
+    report = benchmark_once(
+        settings, batch_size=batch_size, worker_id=worker_id)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output), "status": report["status"],
+                           "benchmark_digest": report["benchmark_digest"]}, sort_keys=True))
+    if report["status"] == "failed":
         raise typer.Exit(code=1)
 
 
@@ -398,6 +521,7 @@ def nlp_chunk(
     source_system: str = typer.Option(None, help="Only versions from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum active document versions to (re)chunk"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Build chunks and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped inputs and invalidate dependants"),
 ) -> None:
     """(Re)chunk active parsed documents into `document_chunks`.
 
@@ -409,7 +533,8 @@ def nlp_chunk(
 
     conn, _ = _document_connection()
     try:
-        result = nlp_chunk_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        result = nlp_chunk_mod.run(conn, source_system=source_system, limit=limit,
+                                   dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -420,6 +545,7 @@ def nlp_label(
     source_system: str = typer.Option(None, help="Only chunked versions from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum chunked versions to (re)label"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Label and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped labels"),
 ) -> None:
     """Tag chunked elements against the SectorTrace ontology, writing
     provisional `document_topics` rows with `match_method='ontology_v1'`.
@@ -432,7 +558,8 @@ def nlp_label(
 
     conn, _ = _document_connection()
     try:
-        result = nlp_label_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        result = nlp_label_mod.run(conn, source_system=source_system, limit=limit,
+                                   dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -446,6 +573,7 @@ def nlp_spans(
     source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Extract and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped spans and invalidate dependants"),
 ) -> None:
     """Extract entity spans (PROVIDER, COMMISSIONER, SERVICE, SUBSTANCE,
     TREATMENT, ROLE, LOCATION, PROGRAMME) into `document_concept_mentions`.
@@ -458,7 +586,7 @@ def nlp_spans(
     conn, _ = _document_connection()
     try:
         result = nlp_spans_mod.run(conn, extractor=extractor, source_system=source_system,
-                                   limit=limit, dry_run=dry_run)
+                                   limit=limit, dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -469,6 +597,7 @@ def nlp_resolve(
     source_system: str = typer.Option(None, help="Only mentions on chunks from this source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum concept mentions to consider"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Re-resolve all scoped mentions"),
 ) -> None:
     """Resolve PROVIDER / COMMISSIONER concept mentions to registered
     entities, deterministically. Only an exact normalised name match writes a
@@ -478,7 +607,8 @@ def nlp_resolve(
 
     conn, _ = _document_connection()
     try:
-        result = nlp_resolve_mod.run(conn, source_system=source_system, limit=limit, dry_run=dry_run)
+        result = nlp_resolve_mod.run(conn, source_system=source_system, limit=limit,
+                                     dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -489,6 +619,7 @@ def nlp_relations(
     source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Assemble and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped relation candidates"),
 ) -> None:
     """Assemble machine (subject, predicate, object) claim candidates from
     034D spans + 034E assertions into `document_claim_candidates`.
@@ -502,7 +633,7 @@ def nlp_relations(
     conn, _ = _document_connection()
     try:
         result = nlp_relations_mod.run(conn, source_system=source_system, limit=limit,
-                                       dry_run=dry_run)
+                                       dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -844,6 +975,7 @@ def nlp_context(
     source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Classify and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped context assertions"),
 ) -> None:
     """Classify each entity span's assertion status (AFFIRMED / NEGATED /
     HISTORICAL / HYPOTHETICAL / CONDITIONAL / THIRD_PARTY / UNKNOWN) into
@@ -854,7 +986,7 @@ def nlp_context(
     conn, _ = _document_connection()
     try:
         result = nlp_context_mod.run(conn, detector=detector, source_system=source_system,
-                                     limit=limit, dry_run=dry_run)
+                                     limit=limit, dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -882,6 +1014,7 @@ def nlp_embed(
     source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
     limit: int = typer.Option(None, min=1, help="Maximum chunks to embed this run"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Embed and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Re-embed all scoped chunks"),
 ) -> None:
     """Embed live `document_chunks` into `document_embeddings`.
 
@@ -896,7 +1029,7 @@ def nlp_embed(
         result = embeddings.run(
             conn, model=model or settings.nlp_embedding_model,
             source_system=source_system, limit=limit,
-            batch_size=settings.nlp_embed_batch_size, dry_run=dry_run)
+            batch_size=settings.nlp_embed_batch_size, dry_run=dry_run, force=force)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -906,9 +1039,7 @@ def nlp_embed(
 def nlp_backfill_vectors(
     limit: int = typer.Option(None, min=1, help="Maximum rows to fill this run"),
 ) -> None:
-    """Fill `document_embeddings.embedding_vec` (pgvector, migration 0071) from
-    the stored `embedding` bytea, so semantic search uses the HNSW index
-    instead of a Python cosine sweep.
+    """Fill pre-cutover pgvector values from the legacy packed recovery column.
 
     PostgreSQL + pgvector only; a no-op otherwise. Resume-safe — re-run to
     finish an interrupted pass. The deploy runs this once after the app reports
@@ -925,10 +1056,37 @@ def nlp_backfill_vectors(
         conn.close()
 
 
+@nlp_app.command("compact-embeddings")
+def nlp_compact_embeddings(
+    backup_archive: Path = typer.Option(
+        None, "--backup-archive", help="Verified pre-change .sql.gz snapshot"),
+    restore_receipt: Path = typer.Option(
+        None, "--restore-receipt", help="Receipt emitted by an isolated `pipeline restore`"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Build and validate the replacement, then roll back"),
+) -> None:
+    """Maintenance-window removal of the legacy packed embedding copy.
+
+    Pause embedding, NLP, and analysis writers before invoking this command.
+    It refuses rows without a canonical 384-dimensional pgvector value and
+    takes the exclusive table lock only for the final short table swap.
+    """
+    from pipeline.nlp.embedding_repository import compact_legacy_table
+
+    conn, _ = _document_connection()
+    try:
+        result = compact_legacy_table(
+            conn, backup_archive=backup_archive, restore_receipt=restore_receipt,
+            dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
 @nlp_app.command("search")
 def nlp_search(
     query: str = typer.Argument(..., help="What to search for"),
-    mode: str = typer.Option("hybrid", help="keyword | semantic | hybrid"),
+    mode: str = typer.Option("hybrid", help="keyword | fuzzy | semantic | hybrid"),
     limit: int = typer.Option(10, min=1, max=100),
     source_system: str = typer.Option(None, help="Restrict to one evidence source_system"),
     model: str = typer.Option(None, help="Override the embedder for semantic/hybrid modes"),
@@ -943,6 +1101,38 @@ def nlp_search(
             conn, query, mode=mode, limit=limit, source_system=source_system,
             model=model or settings.nlp_embedding_model)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("benchmark-semantic")
+def nlp_benchmark_semantic(
+    queries: Path = typer.Option(
+        Path("tests/fixtures/nlp/retrieval_queries.json"), "--queries",
+        help="Deterministic JSON query corpus"),
+    model: str = typer.Option(None, help="Embedding model; defaults to configured model"),
+    depth: int = typer.Option(20, min=1, max=200),
+    warmups: int = typer.Option(1, min=0, max=20),
+    repetitions: int = typer.Option(5, min=1, max=100),
+    output: Path = typer.Option(None, "--output", help="Optional JSON report path"),
+) -> None:
+    """Measure HNSW latency and compare IDs/order/scores with exact pgvector."""
+    import json
+
+    from pipeline.nlp import semantic_benchmark
+
+    conn, settings = _document_connection()
+    try:
+        report = semantic_benchmark.run(
+            conn, queries_path=queries, model=model or settings.nlp_embedding_model,
+            depth=depth, warmups=warmups, repetitions=repetitions)
+        rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered, encoding="utf-8")
+        typer.echo(rendered, nl=False)
+        if not report["all_parity"]:
+            raise typer.Exit(code=1)
     finally:
         conn.close()
 
@@ -1462,6 +1652,8 @@ def restore(
         False, "--force",
         help="Required when a warehouse already exists. It is moved aside, "
               "not deleted."),
+    receipt: Path = typer.Option(
+        None, "--receipt", help="Write machine-verifiable isolated-restore evidence here"),
 ) -> None:
     """Put a backup back in place of the warehouse.
 
@@ -1473,6 +1665,11 @@ def restore(
     from pipeline import backup as backup_module
 
     configure_logging("backup")
+    if receipt is not None:
+        if receipt.exists():
+            typer.echo(f"{receipt} already exists; refusing to overwrite restore evidence", err=True)
+            raise typer.Exit(code=1)
+        receipt.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = backup_module.restore(Path(backup_file), get_settings(), force=force)
     except backup_module.BackupError as exc:
@@ -1481,6 +1678,21 @@ def restore(
 
     typer.echo(f"restored {result['from']} -> {result['restored']}")
     typer.echo(f"  {result['rows']:,} rows in {result['tables']} tables")
+    if receipt is not None:
+        import hashlib
+        import json
+
+        archive_path = Path(backup_file).resolve()
+        digest = hashlib.sha256()
+        with archive_path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        payload = {**result, "from": str(archive_path),
+                   "archive_sha256": digest.hexdigest(),
+                   "restored_at": datetime.now(timezone.utc).isoformat()}
+        receipt.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                           encoding="utf-8")
+        typer.echo(f"  restore receipt: {receipt}")
     if result["superseded"]:
         typer.echo(f"  previous warehouse kept at {result['superseded']}")
     if result.get("migrations_ahead_of_archive"):

@@ -34,6 +34,82 @@ def test_selected_head_scores_the_whole_embedded_population(conn, tmp_path):
     assert all(r["label"] in (0, 1) for r in rows)
 
 
+def test_prediction_persistence_uses_bounded_executemany_pages(conn, tmp_path, monkeypatch):
+    _train(conn, tmp_path)
+    monkeypatch.setattr(claims_predict, "PREDICTION_WRITE_BATCH_SIZE", 7)
+
+    class RecordingConnection:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.batch_sizes = []
+
+        def execute(self, *args, **kwargs):
+            return self.wrapped.execute(*args, **kwargs)
+
+        def executemany(self, sql, values):
+            values = list(values)
+            if "document_claim_predictions" in sql:
+                self.batch_sizes.append(len(values))
+            return self.wrapped.executemany(sql, values)
+
+        def commit(self):
+            return self.wrapped.commit()
+
+        def rollback(self):
+            return self.wrapped.rollback()
+
+        @property
+        def raw(self):
+            return self.wrapped.raw
+
+    recording = RecordingConnection(conn)
+    result = claims_predict.predict(recording, embedder_model_key=STUB_MODEL_KEY)
+    assert result["predictions"] == 50
+    assert recording.batch_sizes == [7, 7, 7, 7, 7, 7, 7, 1]
+
+
+def test_prediction_page_failure_rolls_back_only_that_page(conn, tmp_path, monkeypatch):
+    _train(conn, tmp_path)
+    monkeypatch.setattr(claims_predict, "PREDICTION_WRITE_BATCH_SIZE", 7)
+
+    class FailingConnection:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.prediction_batches = 0
+
+        @property
+        def raw(self):
+            return self.wrapped.raw
+
+        def execute(self, *args, **kwargs):
+            return self.wrapped.execute(*args, **kwargs)
+
+        def executemany(self, sql, values):
+            values = list(values)
+            if "document_claim_predictions" in sql:
+                self.prediction_batches += 1
+                if self.prediction_batches == 2:
+                    self.wrapped.execute(sql, values[0])
+                    raise RuntimeError("fixture prediction page failed")
+            return self.wrapped.executemany(sql, values)
+
+        def commit(self):
+            return self.wrapped.commit()
+
+        def rollback(self):
+            return self.wrapped.rollback()
+
+    with pytest.raises(RuntimeError, match="fixture prediction page failed"):
+        claims_predict.predict(FailingConnection(conn), embedder_model_key=STUB_MODEL_KEY)
+    assert conn.execute(
+        "SELECT COUNT(*) AS count FROM document_claim_predictions"
+    ).fetchone()["count"] == 7
+    assert conn.execute(
+        "SELECT status FROM nlp_runs WHERE stage=%s ORDER BY started_at DESC LIMIT 1",
+        ("claims-predict",),
+    ).fetchone()["status"] == "failed"
+
+
 def test_zero_selected_heads_is_a_logged_noop(conn):
     result = claims_predict.predict(conn, embedder_model_key=STUB_MODEL_KEY)
     assert result == {"heads": 0, "predictions": 0, "run_id": None}

@@ -73,9 +73,14 @@ if os.name == "nt":
 # GitHub rather than to a page that would not exist here. See _rewrite.
 UNPUBLISHED = (
     "admin-ui-plan.md",
+    "analysis-phase2-acceptance.md",
     "document-analysis.md",
+    "assistant.md",
+    "claim-predictions-spec.md",
+    "design-system.md",
     "m32-sab-site-crawl.md",
     "mysociety-access-request.md",
+    "m34-icb-board-papers.md",
     "public-portal-ui-spec.md",
     "public-ui-refinement-backlog.md",
     "review-queue-improvements.md",

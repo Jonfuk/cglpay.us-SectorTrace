@@ -417,6 +417,10 @@ class Settings(BaseSettings):
     analysis_retry_cooldown_seconds: float = 300.0
     analysis_stale_worker_seconds: float = 900.0
     analysis_model_concurrency: int = 4
+    # Suppression is a separate owner action. Even when true, the worker keeps
+    # shadow behaviour unless the exact persisted prefilter rules have passed
+    # the 99% overall / 100% critical recall gate.
+    analysis_prefilter_suppression_enabled: bool = False
     # 96 five-minute cooldowns cover a normal overnight window while keeping
     # a finite bound. Permanent configuration errors fail immediately.
     analysis_max_automatic_retries: int = 96

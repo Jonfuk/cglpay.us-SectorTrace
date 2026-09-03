@@ -11,13 +11,8 @@ def _now() -> str:
 
 
 def _ensure_table(conn) -> None:
-    """Bootstrap the additive table for pre-0094 warehouses as well."""
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS operational_snapshots ("
-        "snapshot_key TEXT PRIMARY KEY, payload_json TEXT NOT NULL, "
-        "captured_at TEXT NOT NULL, duration_ms REAL, source_version TEXT, "
-        "stale INTEGER NOT NULL DEFAULT 0, refresh_error TEXT)"
-    )
+    """Probe migration 0094 without attempting DDL on reader connections."""
+    conn.execute("SELECT 1 FROM operational_snapshots LIMIT 0")
 
 
 def save(conn, key: str, payload: Any, *, source_version: str | None = None,

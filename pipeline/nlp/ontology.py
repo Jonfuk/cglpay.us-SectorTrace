@@ -149,6 +149,7 @@ class Ontology:
     relations: dict[str, Relation]
     patterns: dict[str, tuple[Pattern, ...]]
     version: str
+    token_trie: dict = field(default_factory=dict, repr=False, compare=False)
 
     def concept(self, concept_id: str) -> Concept | None:
         return self.concepts.get(concept_id)
@@ -173,17 +174,20 @@ class Ontology:
         tokens = _fold_tokens(raw)
         found: list[Match] = []
         seen: set[tuple[str, int, int]] = set()
-        for concept in self.concepts.values():
-            for alias, alias_tokens in concept.alias_tokens:
-                width = len(alias_tokens)
-                if width == 0 or width > max_span or width > len(tokens):
-                    continue
-                for start in range(len(tokens) - width + 1):
-                    if tokens[start:start + width] == alias_tokens:
-                        key = (concept.id, start, start + width)
-                        if key not in seen:
-                            seen.add(key)
-                            found.append(Match(concept.id, alias, start, start + width))
+        # One pass through the text token stream. The old implementation
+        # scanned every alias over every start position (O(text * aliases));
+        # the versioned trie makes work proportional to actual token prefixes.
+        for start in range(len(tokens)):
+            node = self.token_trie
+            for end in range(start, min(len(tokens), start + max_span)):
+                node = node.get(tokens[end])
+                if node is None:
+                    break
+                for concept_id, alias in node.get("", ()):
+                    key = (concept_id, start, end + 1)
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(Match(concept_id, alias, start, end + 1))
         found.sort(key=lambda m: (m.start_token, m.end_token, m.concept_id))
         return found
 
@@ -194,6 +198,10 @@ class Ontology:
         for m in self.match(text):
             counts[m.concept_id] = counts.get(m.concept_id, 0) + 1
         return counts
+
+    def match_batch(self, texts) -> list[list[Match]]:
+        """Batch contract shared by Python and the optional packed Mojo ABI."""
+        return [self.match(text or "") for text in texts]
 
     def match_spans(self, text: str) -> list[ConceptSpan]:
         """Every ontology concept named in `text`, as CHARACTER spans into the
@@ -378,10 +386,27 @@ def load(root: Path | None = None) -> Ontology:
     schema_version, categories, concepts = _load_concepts(root)
     relations = _load_relations(root, categories)
     patterns = _load_patterns(root, concepts, relations)
+    trie: dict = {}
+    for concept in concepts.values():
+        for alias, alias_tokens in concept.alias_tokens:
+            node = trie
+            for token in alias_tokens:
+                node = node.setdefault(token, {})
+            node.setdefault("", []).append((concept.id, alias))
+    for node in _trie_nodes(trie):
+        if "" in node:
+            node[""] = tuple(sorted(node[""], key=lambda item: (item[0], item[1])))
     return Ontology(
         schema_version=schema_version, categories=categories, concepts=concepts,
         relations=relations, patterns=patterns,
-        version=_fingerprint(schema_version, concepts, relations, patterns))
+        version=_fingerprint(schema_version, concepts, relations, patterns), token_trie=trie)
+
+
+def _trie_nodes(root: dict):
+    yield root
+    for key, child in root.items():
+        if key and isinstance(child, dict):
+            yield from _trie_nodes(child)
 
 
 @lru_cache(maxsize=1)
