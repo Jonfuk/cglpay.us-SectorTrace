@@ -10,11 +10,10 @@ rather than a habit of the code above it.
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
-from pipeline import promote
+from pipeline import catalog, db, promote
 
 
 @pytest.fixture
@@ -67,7 +66,7 @@ def document(httpx_mock):
 
 def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
     """The trigger. Not a convention the code above is trusted to follow."""
-    with pytest.raises(sqlite3.IntegrityError, match="without a human"):
+    with pytest.raises(db.IntegrityError, match="without a human"):
         seeded.execute(
             "INSERT INTO cdp_documents (authority_ons_code, document_url, "
             "document_type, source_url, retrieved_at, http_status, source_system, "
@@ -87,7 +86,7 @@ def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
      "'E10000016', 'https://wdtk.com/request/9', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
 ])
 def test_every_evidence_table_is_guarded(seeded, table, columns, values):
-    with pytest.raises(sqlite3.IntegrityError, match="without a human"):
+    with pytest.raises(db.IntegrityError, match="without a human"):
         seeded.execute(f"INSERT INTO {table} ({columns}) VALUES ({values})")
 
 
@@ -246,7 +245,7 @@ def test_search_properties_do_not_travel_to_the_evidence(seeded, settings, httpx
     promote.promote(seeded, "committee_paper", "https://kent.gov.uk/paper.pdf",
                      promoted_by="Jon", settings=settings)
 
-    columns = {d[1] for d in seeded.execute("PRAGMA table_info(committee_papers)")}
+    columns = {d["name"] for d in catalog.columns_of(seeded, "committee_papers")}
     assert "matched_terms" not in columns
     row = seeded.execute("SELECT committee_name, report_title FROM committee_papers").fetchone()
     assert row["committee_name"] == "Health Committee"
