@@ -21,8 +21,7 @@ Documents are gated by the same `DOCUMENT_SEARCH_SOURCES` allowlist as
 """
 from __future__ import annotations
 
-import sqlite3
-
+from pipeline import catalog
 from pipeline.web.public_queries import (
     DOCUMENT_SEARCH_SOURCES,
     _one,
@@ -43,20 +42,20 @@ _NOTE = (
 )
 
 
-def _variants(conn: sqlite3.Connection, key: str) -> list[str]:
+def _variants(conn, key: str) -> list[str]:
     rows = _rows(conn,
                  "SELECT DISTINCT alias_raw FROM supplier_aliases "
                  "WHERE supplier_key = ? ORDER BY alias_raw", (key,))
     return [r["alias_raw"] for r in rows if r["alias_raw"]]
 
 
-def _entity_name(conn: sqlite3.Connection, key: str) -> str:
+def _entity_name(conn, key: str) -> str:
     row = (_one(conn, "SELECT canonical_name AS n FROM providers WHERE provider_key = ?", (key,))
            or _one(conn, "SELECT canonical_name AS n FROM supplier_aliases WHERE supplier_key = ? LIMIT 1", (key,)))
     return (row or {}).get("n") or key
 
 
-def find(conn: sqlite3.Connection, keys: list[str]) -> dict:
+def find(conn, keys: list[str]) -> dict:
     _public(["providers", "supplier_aliases", "document_elements",
               "document_versions", "document_records", "evidence_records",
               "pfd_provider_mentions", "pfd_reports", "tribunal_cases",
@@ -79,8 +78,7 @@ def find(conn: sqlite3.Connection, keys: list[str]) -> dict:
     # --- documents: one element that contains a variant of every key -------
     have_docs = all(variants[k] for k in keys)
     if have_docs:
-        present = {o["name"] for o in _rows(conn,
-                   "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+        present = {o["name"] for o in catalog.list_objects(conn)}
         if {"document_elements", "document_versions", "document_records",
                 "evidence_records"} <= present:
             placeholders = ",".join("?" * len(DOCUMENT_SEARCH_SOURCES))

@@ -189,24 +189,20 @@ def warehouse(conn: db.Connection, settings) -> dict:
 # still works without it — this names the fallback so "slow" or "missing" has
 # an explanation rather than a shrug.
 _EXTENSION_BACKS = {
-    "vector": "semantic-search ANN index (else an exact cosine sweep in Python)",
-    "pg_trgm": "fuzzy-name ranking and the portal contract text filter (else LIKE / difflib)",
-    "postgis": "geometry column and spatial index on authorities (else shapely centroids)",
+    "vector": "semantic-search ANN index",
+    "pg_trgm": "fuzzy-name ranking and the portal contract text filter",
+    "postgis": "geometry column and spatial index on authorities",
 }
 
 
 def extensions(conn: db.Connection) -> list[dict]:
     """The extensions the warehouse uses where the server provides them.
 
-    Empty on SQLite. On PostgreSQL, one row per name in
-    `db.WAREHOUSE_EXTENSIONS`: whether the server carries it at all
+    One row per name in `db.WAREHOUSE_EXTENSIONS`: whether the server carries it at all
     (`available`), whether it is installed in this database (`installed`), and
     the installed version. `pg_available_extensions` is readable by any role,
     so this needs none of the privilege `_postgres_integrity` goes without.
     """
-    if db.backend_of(conn) != "postgres":
-        return []
-
     names = db.WAREHOUSE_EXTENSIONS
     placeholders = ",".join("?" for _ in names)
     seen = {
@@ -236,12 +232,9 @@ def geometry_status(conn: db.Connection) -> dict | None:
     `authorities.geom` (migration 0070) is built from `geometry_geojson` by
     `pipeline/geo.py`. `with_geom` should equal `with_geojson`, and `invalid`
     should be zero — `ST_MakeValid` runs in the derivation, so a non-zero
-    count is a boundary PostGIS still cannot repair. Returns None on SQLite,
-    on a PostgreSQL server without PostGIS, or before migration 0070's column
-    exists.
+    count is a boundary PostGIS still cannot repair. Returns None before
+    migration 0070's column exists.
     """
-    if db.backend_of(conn) != "postgres" or not db.has_extension(conn, "postgis"):
-        return None
     has_column = conn.execute(
         "SELECT 1 FROM information_schema.columns "
         "WHERE table_schema = current_schema() "
@@ -574,7 +567,7 @@ def failures(conn: db.Connection, module: str | None = None,
 
 
 def integrity_check(settings) -> list[dict]:
-    """`PRAGMA integrity_check` plus a foreign-key sweep.
+    """Run the PostgreSQL constraint and foreign-key integrity sweep.
 
     Run as a job rather than inline: it walks every page of a 230 MB file and
     an HTTP request that takes forty seconds looks like a hung UI. Opened
@@ -582,39 +575,22 @@ def integrity_check(settings) -> list[dict]:
     """
     conn = queries.readonly_connection(settings)
     try:
-        if db.backend_of(conn) == "postgres":
-            return _postgres_integrity(conn)
-        integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
-        foreign_keys = [dict(zip(("table", "rowid", "parent", "fkid"), row))
-                         for row in conn.execute("PRAGMA foreign_key_check")]
+        return _postgres_integrity(conn)
     finally:
         conn.close()
 
-    return [{
-        "integrity": integrity,
-        "ok": integrity == ["ok"] and not foreign_keys,
-        "foreign_key_violations": foreign_keys[:200],
-        "foreign_key_violation_count": len(foreign_keys),
-        "checked": "every page of the file and every foreign key",
-        "not_checked": "",
-    }]
-
 
 def _postgres_integrity(conn) -> list[dict]:
-    """The half of `PRAGMA integrity_check` that PostgreSQL can answer.
+    """The PostgreSQL integrity sweep exposed by the health job.
 
-    Phase 1 refused this outright rather than return an ok nobody could
-    distinguish from a check, and left the work to the phase doing backup and
-    restore, on the grounds that both answer "is this warehouse intact?". This
-    is that work, and it is deliberately two thirds of it:
+    This deliberately reports exactly what it checks:
 
       * **Every foreign key is swept**, one generated anti-join per constraint
         — the analogue of `PRAGMA foreign_key_check`, and the check that would
         notice a restore or a load having produced orphans.
       * **Every constraint is asked whether it is validated.** A `NOT VALID`
         constraint is enforced for new rows and never checked against the old
-        ones, so it is a guarantee the schema claims and does not have. SQLite
-        cannot express that state and therefore cannot have it.
+        ones, so it is a guarantee the schema claims and does not have.
       * **Pages are not checked.** There is no in-database equivalent of
         walking the file: `pg_amcheck` is a separate binary, and the `amcheck`
         extension is not installed on this server — installing it needs

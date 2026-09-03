@@ -30,7 +30,7 @@ Three rules hold everywhere in this file:
 from __future__ import annotations
 
 import re
-import sqlite3
+import sqlite3  # type-only compatibility for legacy annotations
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Iterator
@@ -5010,8 +5010,8 @@ def document_search(conn: sqlite3.Connection, *, query: str,
         # publish.
         raise QueryError(f"unknown source_system {source_system!r}")
     limit = max(1, min(limit, 50))
-    # A negative offset would make PostgreSQL raise and SQLite silently walk
-    # backwards off the front of the ranked list; clamping keeps one behaviour.
+    # Clamp offsets so a malformed client request cannot produce a backend
+    # error or walk beyond the beginning of the ranked list.
     offset = max(0, int(offset))
 
     sources = (source_system,) if source_system else DOCUMENT_SEARCH_SOURCES
@@ -5020,46 +5020,29 @@ def document_search(conn: sqlite3.Connection, *, query: str,
     scope_sql, scope_params, type_sql, type_params = _document_scope_filters(
         document_type, year_from, year_to, since_retrieved_at)
 
-    is_sqlite = db.backend_of(conn) == "sqlite"
     _tail_cols = ("d.document_type, d.title, d.display_title, d.title_basis, "
                   "d.filename, d.published_at, "
                   "e.source_url, e.retrieved_at, e.source_system")
 
-    if is_sqlite:
-        frm = (
-            "FROM document_element_search s "
-            "JOIN document_records d ON d.document_id = s.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
-        )
-        cols = ("s.document_element_id, s.document_id, s.page_number, "
-                "s.element_type, s.text, " + _tail_cols)
-        # FTS5 `rank` is ascending (best first). A total order after it —
-        # document, page, element — makes `limit`/`offset` paging stable
-        # rather than dependent on the engine's row order for ties.
-        match = "document_element_search MATCH ?"
-        order = "ORDER BY rank, s.document_id, s.page_number, s.document_element_id"
-    else:
-        frm = (
-            "FROM document_elements de "
-            "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
-            "JOIN document_records d ON d.document_id = dv.document_id "
-            "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
-        )
-        cols = ("de.document_element_id, d.document_id, de.page_number, "
-                "de.element_type, de.text, " + _tail_cols)
-        # websearch_to_tsquery over plainto_tsquery: it accepts a reader's
-        # quotes, OR and -term without raising, and ts_rank_cd gives an honest
-        # relevance order where before there was none — the old query had no
-        # ORDER BY at all, so paging was whatever order the plan produced.
-        _tsv = "to_tsvector('simple', COALESCE(de.text, ''))"
-        _tsq = "websearch_to_tsquery('simple', ?)"
-        match = f"dv.is_active = 1 AND {_tsv} @@ {_tsq}"
-        order = (f"ORDER BY ts_rank_cd({_tsv}, {_tsq}) DESC, "
-                 "d.document_id, de.page_number, de.document_element_id")
+    frm = (
+        "FROM document_elements de "
+        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+        "JOIN document_records d ON d.document_id = dv.document_id "
+        "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
+    )
+    cols = ("de.document_element_id, d.document_id, de.page_number, "
+            "de.element_type, de.text, " + _tail_cols)
+    # `websearch_to_tsquery` accepts a reader's quotes, OR and -term without
+    # raising, and `ts_rank_cd` gives a deterministic relevance order.
+    _tsv = "to_tsvector('simple', COALESCE(de.text, ''))"
+    _tsq = "websearch_to_tsquery('simple', ?)"
+    match = f"dv.is_active = 1 AND {_tsv} @@ {_tsq}"
+    order = (f"ORDER BY ts_rank_cd({_tsv}, {_tsq}) DESC, "
+             "d.document_id, de.page_number, de.document_element_id")
 
     where = f"WHERE {match} AND e.source_system IN ({src_ph}){scope_sql}{type_sql}"
-    # PostgreSQL's ORDER BY repeats the tsquery bind; SQLite's does not.
-    order_binds = () if is_sqlite else (query,)
+    # PostgreSQL's ORDER BY repeats the tsquery bind.
+    order_binds = (query,)
     filt_params = (*scope_params, *type_params)
 
     sql = f"SELECT {cols} {frm} {where} {order} LIMIT ? OFFSET ?"
@@ -5086,10 +5069,9 @@ def document_search(conn: sqlite3.Connection, *, query: str,
                 facet_params)
             for facet in _DOCUMENT_SEARCH_FACETS
         }
-    except sqlite3.OperationalError as error:
-        # FTS5 MATCH raises on malformed query syntax (an unbalanced quote, a
-        # bare trailing operator) rather than returning no rows — a reader's
-        # search term is not a schema problem this route should crash on.
+    except db.Error as error:
+        # A reader's search term is not a schema problem this route should
+        # crash on, so turn parser/cancellation errors into a query error.
         raise QueryError(f"Could not search for {query!r}: {error}") from None
 
     terms = _search_terms(query)
