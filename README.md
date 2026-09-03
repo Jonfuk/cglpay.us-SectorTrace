@@ -67,6 +67,11 @@ around.
 ./start.sh backup --label pre-change
 ```
 
+`./start.sh tui` presents the same complete command tree in an interactive
+terminal form, including nested commands and their options. Use `Ctrl+S` to
+search, `Ctrl+T` to return to the command tree, `Ctrl+O` for command help, and
+`Ctrl+R` to close the form and run the selected command.
+
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle
 ./start.sh export sheets     # ten CSV tabs of human-readable evidence, caveats above each header
