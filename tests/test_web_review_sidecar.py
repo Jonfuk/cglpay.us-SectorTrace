@@ -33,9 +33,9 @@ def _authority(conn, ons_code, name):
 def _item(conn, item_type, raw_value, context=None):
     cur = conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, "
-        "created_at) VALUES ('m01_procurement', ?, ?, ?, '2026-08-01T00:00:00Z')",
+        "created_at) VALUES ('m01_procurement', ?, ?, ?, '2026-08-01T00:00:00Z') RETURNING id",
         (item_type, raw_value, json.dumps(context) if context else "{}"))
-    return cur.lastrowid
+    return cur.fetchone()[0]
 
 
 @pytest.fixture

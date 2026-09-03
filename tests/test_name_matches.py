@@ -1,10 +1,9 @@
 """Fuzzy-name suggestions for a review-queue item.
 
-Offline, so the ranking runs the `difflib` fallback path — the PostgreSQL
-`pg_trgm` path is exercised behind the `postgres` marker. What is pinned here
-is the shape and the ordering: the right target near the top, the score
-reported, nothing written, and an item type with no reference set answered
-rather than errored.
+The PostgreSQL-backed suite exercises the `pg_trgm` ranking path directly.
+What is pinned here is the shape and the ordering: the right target near the
+top, the score reported, nothing written, and an item type with no reference
+set answered rather than errored.
 """
 from __future__ import annotations
 
@@ -28,9 +27,9 @@ def _authority(conn, ons_code, name, kind="unitary", active_to=None):
 def _queue_item(conn, item_type, raw_value):
     cur = conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, created_at) "
-        "VALUES ('m01_procurement', ?, ?, '2026-08-01T00:00:00Z')",
+        "VALUES ('m01_procurement', ?, ?, '2026-08-01T00:00:00Z') RETURNING id",
         (item_type, raw_value))
-    return cur.lastrowid
+    return cur.fetchone()[0]
 
 
 @pytest.fixture
@@ -49,7 +48,7 @@ def test_unmatched_buyer_name_ranks_the_right_authority_first(warehouse):
     item_id = _queue_item(warehouse, "unmatched_buyer_name", "Herefordshire Council")
     result = name_matches.suggestions(warehouse, item_id)
 
-    assert result["method"] == "difflib"
+    assert result["method"] == "pg_trgm"
     assert result["query"] == "Herefordshire Council"
     assert result["matches"], "expected at least one candidate"
     top = result["matches"][0]

@@ -100,12 +100,14 @@ def suggestions(conn, item_id: int) -> dict:
 
 
 def _trgm_ranked(conn, table, id_col, name_col, extra, query):
-    where = f"WHERE {name_col} IS NOT NULL AND similarity({name_col}, ?) >= ?"
+    # psycopg sends an untyped placeholder as `unknown`; pg_trgm's overloaded
+    # function needs the search value resolved to text before it can plan.
+    where = f"WHERE {name_col} IS NOT NULL AND public.similarity({name_col}, ?::text) >= ?"
     if extra:
         where += f" AND {extra}"
     # Placeholders in text order: similarity() in SELECT, similarity() and the
     # floor in WHERE, then LIMIT.
     return conn.execute(
-        f"SELECT {id_col}, {name_col}, similarity({name_col}, ?) AS score "
+        f"SELECT {id_col}, {name_col}, public.similarity({name_col}, ?::text) AS score "
         f"FROM {table} {where} ORDER BY score DESC LIMIT ?",
         (query, query, _MIN_SCORE, _MAX_SUGGESTIONS)).fetchall()
