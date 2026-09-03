@@ -1,22 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { Column } from '~/components/AdminTable.vue'
+import { computed, ref } from 'vue'
 import type { CandidateCountsResponse, CandidateItem, CandidatesListingResponse } from '~/types/admin'
+import { TransportError } from '~/lib/transport'
 
-// Candidates — the discovery candidates awaiting a human decision. Read-only in
-// this stage: this is the surface the whole promotion phase exists to move, but
-// nothing is promoted without a person, so the promote/reject WRITE actions land
-// in a later, carefully-guarded stage. Parity target: legacy admin
+// Candidates — discovery candidates awaiting a human decision, with the
+// promote/reject actions. Nothing is promoted to evidence without a person:
+// every action records the named reviewer, promote is one-at-a-time (it fetches
+// and archives the document, so a list would make pretending cheap), and each
+// action is confirmed before it is sent. Parity target: legacy admin
 // `candidates.js`. The kind is URL-authoritative (?kind=).
 const api = useAdminApi()
 const filters = useFilterState()
+const reviewer = useReviewer()
+const toast = useToast()
 
 const kind = computed({
   get: () => (filters.get('kind') as string) ?? 'cdp_document',
   set: (v: string) => { void filters.set('kind', v || undefined) },
 })
 
-const { data: counts } = await useAsyncData<CandidateCountsResponse | null>(
+const { data: counts, refresh: refreshCounts } = await useAsyncData<CandidateCountsResponse | null>(
   'admin-candidate-counts',
   () => api.candidateCounts(),
   { default: () => null },
@@ -24,19 +27,58 @@ const { data: counts } = await useAsyncData<CandidateCountsResponse | null>(
 
 const kindNames = computed(() => Object.keys(counts.value?.kinds ?? {}))
 
-const { data, pending, error } = await useDataRoute<CandidatesListingResponse | null>(
+const { data, pending, error, refresh } = await useDataRoute<CandidatesListingResponse | null>(
   'admin-candidates',
   (f) => api.candidates({ query: { kind: (f.kind as string) || 'cdp_document', ...f } }),
 )
 
 const items = computed<CandidateItem[]>(() => data.value?.items ?? [])
 
-const columns: Column<CandidateItem>[] = [
-  { key: 'authority_name', label: 'Authority' },
-  { key: 'url', label: 'Source', link: true },
-  { key: 'verified', label: 'Promoted', numeric: true },
-  { key: 'rejected', label: 'Rejected', numeric: true },
-]
+// One in-flight action at a time per row, keyed by url.
+const busy = ref<string | null>(null)
+
+function requireReviewer(): boolean {
+  if (reviewer.isSet.value) return true
+  toast.add({ title: 'Set your reviewer name first', color: 'warning' })
+  return false
+}
+
+async function afterWrite() {
+  await Promise.all([refresh(), refreshCounts()])
+}
+
+async function promote(item: CandidateItem) {
+  if (!item.url || !requireReviewer()) return
+  if (!window.confirm(
+    `Promote this candidate into the evidence base?\n\n${item.url}\n\nThis fetches and archives the document. It is not automatic and cannot be batched.`,
+  )) return
+  busy.value = item.url
+  try {
+    await api.promoteCandidate({ kind: kind.value, url: item.url, promotedBy: reviewer.name.value })
+    toast.add({ title: 'Promoted', color: 'success' })
+    await afterWrite()
+  } catch (e) {
+    toast.add({ title: 'Promote failed', description: e instanceof TransportError ? e.message : String(e), color: 'error' })
+  } finally {
+    busy.value = null
+  }
+}
+
+async function reject(item: CandidateItem) {
+  if (!item.url || !requireReviewer()) return
+  const note = window.prompt(`Reject this candidate? Optional reason:\n\n${item.url}`)
+  if (note === null) return // cancelled
+  busy.value = item.url
+  try {
+    await api.rejectCandidate({ kind: kind.value, url: item.url, rejectedBy: reviewer.name.value, note: note || undefined })
+    toast.add({ title: 'Rejected', color: 'success' })
+    await afterWrite()
+  } catch (e) {
+    toast.add({ title: 'Reject failed', description: e instanceof TransportError ? e.message : String(e), color: 'error' })
+  } finally {
+    busy.value = null
+  }
+}
 
 useHead({ title: 'SectorTrace — Candidates' })
 </script>
@@ -46,8 +88,8 @@ useHead({ title: 'SectorTrace — Candidates' })
     <h1 class="text-2xl font-semibold">Candidates</h1>
     <p class="opacity-70 max-w-2xl text-sm">
       Discovery candidates awaiting a human decision. Nothing is promoted to
-      evidence without a person — this view is read-only; the promote/reject
-      actions arrive in a later stage.
+      evidence without a person; promote fetches and archives the document, one
+      at a time, recorded against the named reviewer.
     </p>
 
     <div v-if="kindNames.length" class="flex items-center gap-3">
@@ -71,8 +113,32 @@ useHead({ title: 'SectorTrace — Candidates' })
           {{ data?.total ?? items.length }} {{ data?.status ?? '' }} · {{ kind }}
         </span>
       </template>
-      <AdminTable v-if="items.length" :columns="columns" :rows="items" row-key="url" />
-      <StEmptyState v-else />
+
+      <StEmptyState v-if="!items.length" />
+      <ul v-else class="divide-y divide-black/5 dark:divide-white/5">
+        <li v-for="item in items" :key="item.url ?? ''" class="py-3 flex items-start gap-4">
+          <div class="min-w-0 flex-1 space-y-1">
+            <div class="text-sm font-medium">{{ item.authority_name ?? '—' }}</div>
+            <StLink :href="item.url">{{ item.url ?? '—' }}</StLink>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <UButton
+              size="xs"
+              color="primary"
+              :loading="busy === item.url"
+              :disabled="busy !== null"
+              @click="promote(item)"
+            >Promote</UButton>
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="outline"
+              :disabled="busy !== null"
+              @click="reject(item)"
+            >Reject</UButton>
+          </div>
+        </li>
+      </ul>
     </UCard>
   </section>
 </template>

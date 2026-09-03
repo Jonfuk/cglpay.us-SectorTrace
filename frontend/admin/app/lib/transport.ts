@@ -158,4 +158,40 @@ export class Transport {
     }
     return (await res.json()) as T
   }
+
+  /** POST JSON. This is a WRITE, so it is never deduplicated and never carries a
+   *  cache. It satisfies the server's write guard by construction: the
+   *  `application/json` content type is the CSRF guard (a cross-origin HTML form
+   *  cannot set it), and the browser attaches the same-origin `Origin` header
+   *  automatically. No CORS headers are ever involved — the API is same-origin
+   *  only. Writes are intentionally not retried: a promote fetches bytes from
+   *  the open web, so a blind retry could double an archived payload. */
+  async postJson<T>(path: string, payload: unknown): Promise<T> {
+    const url = `${this.base}${path}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload ?? {}),
+    })
+    if (!res.ok) {
+      let body: unknown
+      try {
+        body = await res.json()
+      } catch {
+        body = undefined
+      }
+      const message =
+        (body && typeof body === 'object' && 'error' in body
+          ? String((body as Record<string, unknown>).error)
+          : `POST ${url} failed: ${res.status}`)
+      throw new TransportError(message, res.status, url, body)
+    }
+    // Some write routes return an empty body on success.
+    const text = await res.text()
+    return (text ? JSON.parse(text) : {}) as T
+  }
 }

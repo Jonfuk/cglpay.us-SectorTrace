@@ -95,3 +95,28 @@ export interface ReviewItemsResponse {
   status?: string
   [key: string]: unknown
 }
+
+/** A census metric row awaiting verification (`/api/admin/census` → `items[]`). */
+export interface CensusItem {
+  key: string
+  census_year: number | null
+  metric: string | null
+  workforce_segment: string | null
+  value: number | string | null
+  unit: string | null
+  raw_text: string | null
+  verified: number
+  rejected: number
+  source?: { source_url?: string | null; retrieved_at?: string | null }
+  [key: string]: unknown
+}
+
+export interface CensusListingResponse {
+  status: string
+  year: number | null
+  total: number
+  offset: number
+  limit: number
+  items: CensusItem[]
+  [key: string]: unknown
+}
