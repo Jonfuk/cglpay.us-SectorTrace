@@ -24,11 +24,31 @@ POSTGRES_MIGRATIONS_DIR = MIGRATIONS_DIR / "postgres"
 # Point it at the local dev container (deploy/docker-compose.postgres.yml) or a
 # throwaway database on a shared server; never at the collection box's
 # warehouse.
-POSTGRES_TEST_URL = (os.environ.get("POSTGRES_TEST_URL") or "").strip() or None
+def _configured_url(name: str) -> str | None:
+    """A test-database URL from the environment, or failing that from `.env`.
+
+    The `.env` fallback matters: these are read with `os.environ.get`, and
+    `.env` is only ever read by pydantic-settings, so putting `POSTGRES_TEST_URL`
+    in `.env` — the obvious place, where the application's own database settings
+    live — would otherwise do nothing and error out of every test silently. The
+    variable names stay distinct from `DATABASE_URL`, so pointing the suite at a
+    database is a deliberate act, never an inherited application configuration.
+    """
+    value = os.environ.get(name)
+    if value and value.strip():
+        return value.strip()
+    from dotenv import dotenv_values
+
+    from_file = dotenv_values(Path(__file__).resolve().parent.parent / ".env")
+    value = (from_file or {}).get(name)
+    return value.strip() if value and value.strip() else None
+
+
+POSTGRES_TEST_URL = _configured_url("POSTGRES_TEST_URL")
 # Optional: a second role on the same test database for the read path. Left
 # unset, reads use the owner role, which is what the suite did for its whole
 # SQLite history — so nothing depends on it being present.
-POSTGRES_TEST_RO_URL = (os.environ.get("POSTGRES_TEST_RO_URL") or "").strip() or None
+POSTGRES_TEST_RO_URL = _configured_url("POSTGRES_TEST_RO_URL")
 
 
 def _worker_schema() -> str:

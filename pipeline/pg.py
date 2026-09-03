@@ -45,6 +45,7 @@ connection each time, which is 49ms nobody is measuring against a click.
 from __future__ import annotations
 
 import atexit
+import re
 import threading
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
@@ -54,6 +55,26 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import psycopg
 
 from pipeline.sqldialect import to_psycopg
+
+# Statements that do not write, for the `total_changes` accounting in `_count`
+# below. This lived in `pipeline/db.py` beside the SQLite write slot, which
+# used the same read/write test to decide whether to take the slot. The slot is
+# gone with SQLite; the change count is not — `runner.py` reports it per module
+# and `--dry-run` depends on it — so the test moved here, its only remaining
+# caller. Anything unrecognised is treated as a write: over-counting a read is
+# a wrong number, under-counting a write is a dry run that looks like it did
+# nothing, and only one of those hides a real change.
+_READ_PREFIXES = ("select", "pragma", "explain", "analyze", "analyse")
+_WRITE_IN_STATEMENT = re.compile(r"\b(insert|update|delete|replace)\b", re.IGNORECASE)
+
+
+def _is_write(sql: str) -> bool:
+    head = sql.lstrip()[:16].lower()
+    if head.startswith("with"):
+        # A CTE can end in either. `WITH x AS (...) SELECT` is a read;
+        # `WITH x AS (...) INSERT` is not.
+        return bool(_WRITE_IN_STATEMENT.search(sql))
+    return not head.startswith(_READ_PREFIXES)
 
 # How long a statement may run before the server cancels it. Only applied to
 # read connections, where it replaces SQLite's progress-handler deadline in
@@ -219,11 +240,8 @@ class PostgresConnection:
 
         `runner.py` reports it per module and `--dry-run` accounting depends
         on it. psycopg reports `rowcount` for SELECT as well, so only
-        statements that write are counted — the same `_is_write` test the
-        SQLite path uses to decide about the write slot.
+        statements that write are counted — see `_is_write` above.
         """
-        from pipeline.db import _is_write
-
         if _is_write(sql) and cursor.rowcount and cursor.rowcount > 0:
             self._total_changes += cursor.rowcount
 
