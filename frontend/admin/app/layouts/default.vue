@@ -7,14 +7,21 @@ interface NavItem {
   label: string
 }
 
+// Mirrors the legacy operator UI's tab groups so operator bookmarks and section
+// labels are preserved. Read-only views land first; write-action modules
+// (promote/reject/decide) follow in a later stage.
 const nav: NavItem[] = [
-  { to: '/', label: 'Mission control' },
-  { to: '/health', label: 'Health' },
-  { to: '/pipeline', label: 'Pipeline' },
+  { to: '/', label: 'Overview' },
   { to: '/review', label: 'Review' },
   { to: '/candidates', label: 'Candidates' },
-  { to: '/analysis', label: 'Analysis' },
+  { to: '/census', label: 'Census' },
+  { to: '/claims', label: 'Claims' },
+  { to: '/claimreview', label: 'Claim review' },
   { to: '/search', label: 'Search' },
+  { to: '/exports', label: 'Exports' },
+  { to: '/pipeline', label: 'Pipeline' },
+  { to: '/analysis', label: 'Analysis' },
+  { to: '/health', label: 'Health' },
 ]
 </script>
 

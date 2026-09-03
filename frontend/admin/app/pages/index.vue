@@ -1,19 +1,28 @@
 <script setup lang="ts">
-// Mission-control foundation. It confirms the admin data path (typed admin
-// client -> same-origin transport) reaches `/api/v1/meta`; the full operator
-// dashboards are ported in later stages against the legacy modules as oracles.
-interface MetaLike {
-  environment?: string
-  backend?: string
-  schema?: { latest_migration?: number | null }
-}
+import { computed } from 'vue'
+import type { CandidateCountsResponse, HealthResponse } from '~/types/admin'
 
+// Mission control — the operator's at-a-glance overview. It pulls the health
+// payload and candidate counts and surfaces the numbers an operator acts on:
+// unapplied migrations, undecided candidates awaiting a human decision.
 const api = useAdminApi()
-const { data: meta, pending, error } = await useAsyncData<MetaLike | null>(
-  'admin-meta',
-  () => api.v1<MetaLike>('/meta'),
+
+const { data: health, pending: healthPending } = await useAsyncData<HealthResponse | null>(
+  'admin-overview-health',
+  () => api.health(),
   { default: () => null },
 )
+const { data: counts, pending: countsPending } = await useAsyncData<CandidateCountsResponse | null>(
+  'admin-overview-counts',
+  () => api.candidateCounts(),
+  { default: () => null },
+)
+
+const unapplied = computed(() => health.value?.warehouse?.unapplied ?? [])
+const totalUndecided = computed(() => {
+  const kinds = counts.value?.kinds ?? {}
+  return Object.values(kinds).reduce((sum, k) => sum + (k.undecided ?? 0), 0)
+})
 
 useHead({ title: 'SectorTrace — Operations' })
 </script>
@@ -22,26 +31,53 @@ useHead({ title: 'SectorTrace — Operations' })
   <section class="space-y-6">
     <h1 class="text-2xl font-semibold">Mission control</h1>
 
-    <UCard>
-      <template #header>
-        <span class="text-sm font-medium">Warehouse identity</span>
-      </template>
-      <div v-if="pending" class="text-sm opacity-60">Loading…</div>
-      <div v-else-if="error" class="text-sm text-red-600">Unavailable.</div>
-      <dl v-else-if="meta" class="grid grid-cols-3 gap-4 text-sm">
-        <div>
-          <dt class="opacity-60">Environment</dt>
-          <dd class="font-mono">{{ meta.environment ?? '—' }}</dd>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <UCard>
+        <div class="text-xs uppercase tracking-wide opacity-60">Backend</div>
+        <div class="text-lg font-medium">
+          {{ healthPending ? '…' : (health?.warehouse?.backend ?? '—') }}
         </div>
-        <div>
-          <dt class="opacity-60">Backend</dt>
-          <dd class="font-mono">{{ meta.backend ?? '—' }}</dd>
+      </UCard>
+      <UCard>
+        <div class="text-xs uppercase tracking-wide opacity-60">Unapplied migrations</div>
+        <div class="text-lg font-medium">
+          <StatusPill
+            :label="healthPending ? '…' : unapplied.length"
+            :level="unapplied.length ? 'warn' : 'ok'"
+          />
         </div>
-        <div>
-          <dt class="opacity-60">Schema</dt>
-          <dd class="font-mono">{{ meta.schema?.latest_migration ?? '—' }}</dd>
+      </UCard>
+      <UCard>
+        <div class="text-xs uppercase tracking-wide opacity-60">Undecided candidates</div>
+        <div class="text-lg font-medium">
+          <StatusPill
+            :label="countsPending ? '…' : totalUndecided"
+            :level="totalUndecided ? 'warn' : 'neutral'"
+          />
         </div>
-      </dl>
-    </UCard>
+      </UCard>
+      <UCard>
+        <div class="text-xs uppercase tracking-wide opacity-60">Extensions</div>
+        <div class="text-lg font-medium">
+          {{ healthPending ? '…' : (health?.extensions?.filter((e) => e.installed).length ?? 0) }}
+          installed
+        </div>
+      </UCard>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <NuxtLink
+        to="/review"
+        class="text-sm border border-black/15 dark:border-white/15 rounded px-3 py-1 hover:bg-black/5 dark:hover:bg-white/5"
+      >Review queue →</NuxtLink>
+      <NuxtLink
+        to="/candidates"
+        class="text-sm border border-black/15 dark:border-white/15 rounded px-3 py-1 hover:bg-black/5 dark:hover:bg-white/5"
+      >Candidates →</NuxtLink>
+      <NuxtLink
+        to="/health"
+        class="text-sm border border-black/15 dark:border-white/15 rounded px-3 py-1 hover:bg-black/5 dark:hover:bg-white/5"
+      >Full health →</NuxtLink>
+    </div>
   </section>
 </template>
