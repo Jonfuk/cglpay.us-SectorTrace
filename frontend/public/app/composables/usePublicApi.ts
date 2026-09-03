@@ -1,5 +1,5 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
-import type { MetaResponse } from '~/types/api'
+import type { MetaResponse, SummaryResponse } from '~/types/api'
 
 // The typed public API client. It sits over the low-level same-origin
 // Transport (dedup + cancellation) and exposes evidence-shaped, typed calls.
@@ -27,6 +27,8 @@ export interface PublicApi {
   get<T>(path: string, options?: TransportOptions): Promise<T>
   /** `/api/v1/meta` — release and data-version identity. */
   meta(options?: TransportOptions): Promise<MetaResponse>
+  /** `/api/v1/summary` — landing-page figures with their caveats. */
+  summary(options?: TransportOptions): Promise<SummaryResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -37,5 +39,6 @@ export function usePublicApi(): PublicApi {
   return {
     get,
     meta: (options) => get<MetaResponse>('/meta', options),
+    summary: (options) => get<SummaryResponse>('/summary', options),
   }
 }

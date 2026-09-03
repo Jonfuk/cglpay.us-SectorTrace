@@ -29,6 +29,19 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  // Hermetic, origin-only builds — see public/nuxt.config.ts. Disable remote
+  // font providers so the build never reaches a font CDN.
+  fonts: {
+    providers: {
+      google: false,
+      bunny: false,
+      fontshare: false,
+      fontsource: false,
+      googleicons: false,
+      adobe: false,
+    },
+  },
+
   nitro: {
     prerender: {
       crawlLinks: false,

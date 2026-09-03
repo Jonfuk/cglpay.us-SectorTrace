@@ -39,6 +39,24 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  // Hermetic, origin-only builds. Nuxt UI pulls in @nuxt/fonts, whose default
+  // provider chain fetches faces from Google/Bunny/Fontshare/Fontsource CDNs at
+  // build time. That reaches the network during the build and would make a font
+  // CDN a delivery dependency — both disallowed here ("renders with the cable
+  // unplugged", origin-only). Disable every remote provider; the local provider
+  // (no network) remains, and SectorTrace ships its own woff2 faces as the
+  // legacy portal does.
+  fonts: {
+    providers: {
+      google: false,
+      bunny: false,
+      fontshare: false,
+      fontsource: false,
+      googleicons: false,
+      adobe: false,
+    },
+  },
+
   // Prerender the stable shell so first paint does not wait on JS to draw the
   // frame. Mutable warehouse data is always fetched in the browser — never
   // baked into a static asset.

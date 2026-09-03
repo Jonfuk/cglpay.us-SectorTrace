@@ -41,6 +41,42 @@ export interface MetaResponse {
   [key: string]: unknown
 }
 
+/** `/api/v1/summary` — the landing-page figures. Each block carries the caveat
+ *  that bounds how its figures may be read. Only the fields the overview route
+ *  consumes are typed here; the rest are preserved by the index signature. */
+export interface SummaryResponse {
+  providers: {
+    total: number
+    target: string | null
+  }
+  authorities: {
+    total: number
+    with_contracts: number
+    regions: Array<Record<string, unknown>>
+    regions_caveat: string | null
+  }
+  contracts: {
+    total_notices: number
+    total_value_gbp: number
+    direct_awards: number
+    psr_notices: number
+    matched_to_provider: number
+    value_is_concentrated?: boolean
+    caveat: string | null
+    sum_caveat: string | null
+  }
+  workforce: {
+    latest_census_year: number | null
+    all_unverified?: boolean
+    caveat: string | null
+  }
+  fingertips: {
+    latest_period: string | null
+    indicators_collected: number
+  }
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */
