@@ -55,10 +55,11 @@ def _seed_cqc_provider(conn, provider_id: str = "1-125892604") -> None:
     """cqc_locations has an FK to cqc_providers; the real module always writes
     the provider before its locations, so tests do the same."""
     conn.execute(
-        "INSERT OR IGNORE INTO cqc_providers (provider_id, provider_key, provider_name, "
+        "INSERT INTO cqc_providers (provider_id, provider_key, provider_name, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
         "VALUES (?, 'change_grow_live', 'Change, Grow, Live', 'https://example.com', "
-        "'2026-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "'2026-01-01T00:00:00Z', 200, 'test', 'abc') "
+        "ON CONFLICT (provider_id) DO NOTHING",
         (provider_id,))
 
 
