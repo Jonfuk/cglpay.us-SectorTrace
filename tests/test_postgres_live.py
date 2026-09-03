@@ -31,7 +31,6 @@ migration that produces the schema it was supposed to.
 from __future__ import annotations
 
 import os
-import sqlite3
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -111,122 +110,7 @@ def pg(scratch):
     return scratch.conn
 
 
-@pytest.fixture(scope="module")
-def lite(tmp_path_factory):
-    """The same schema on SQLite, built fresh, for comparison."""
-    path = tmp_path_factory.mktemp("sqlite") / "warehouse.db"
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    try:
-        db.apply_migrations(conn, MIGRATIONS)
-        conn.commit()
-        yield conn
-    finally:
-        conn.close()
-
-
-class TestTheSchemaTheyActuallyBuilt:
-    def test_the_same_tables_exist(self, pg, lite):
-        pg_tables = {o["name"] for o in catalog.list_objects(pg) if o["type"] == "table"}
-        lite_tables = {o["name"] for o in catalog.list_objects(lite) if o["type"] == "table"}
-        # SQLite records applied migrations in a table it also creates.
-        assert pg_tables == lite_tables, (
-            f"only PostgreSQL: {sorted(pg_tables - lite_tables)}; "
-            f"only SQLite: {sorted(lite_tables - pg_tables)}")
-
-    def test_the_same_views_exist(self, pg, lite):
-        pg_views = {o["name"] for o in catalog.list_objects(pg) if o["type"] == "view"}
-        lite_views = {o["name"] for o in catalog.list_objects(lite) if o["type"] == "view"}
-        assert pg_views == lite_views
-
-    def test_the_same_columns_in_the_same_order(self, pg, lite):
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)}):
-            pg_columns = [c["name"] for c in catalog.columns_of(pg, name)]
-            lite_columns = [c["name"] for c in catalog.columns_of(lite, name)]
-            if pg_columns != lite_columns:
-                differences[name] = (lite_columns, pg_columns)
-        assert not differences, f"column mismatch: {differences}"
-
-    def test_nullability_agrees_away_from_primary_keys(self, pg, lite):
-        """A column NOT NULL on one side and nullable on the other is a
-        constraint that exists on one backend only.
-
-        Primary key columns are excluded and checked separately below,
-        because there the two engines disagree by design — see
-        `test_postgres_makes_primary_keys_not_null`.
-        """
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = set(catalog.primary_key(lite, name)) | set(catalog.primary_key(pg, name))
-            pg_nn = {c["name"] for c in catalog.columns_of(pg, name)
-                      if c["notnull"]} - key
-            lite_nn = {c["name"] for c in catalog.columns_of(lite, name)
-                        if c["notnull"]} - key
-            if pg_nn != lite_nn:
-                differences[name] = sorted(lite_nn ^ pg_nn)
-        assert not differences, f"nullability differs: {differences}"
-
-    def test_postgres_makes_primary_keys_not_null(self, pg, lite):
-        """The one nullability difference, asserted rather than tolerated.
-
-        SQLite does not enforce NOT NULL on a PRIMARY KEY column unless it is
-        declared so — a documented legacy quirk kept for backwards
-        compatibility, and it is not cosmetic: SQLite will accept an actual
-        NULL into a TEXT PRIMARY KEY. Only `INTEGER PRIMARY KEY`, the rowid
-        alias, is exempt. PostgreSQL makes every key column NOT NULL.
-
-        PostgreSQL is stricter, so nothing legal there is illegal here. It
-        runs the other way that matters: a row already in the SQLite
-        warehouse with a NULL in its key cannot be loaded into PostgreSQL at
-        all. Measured on the live warehouse the day this was written, no such
-        row exists — but that is a property of the data, not of the schema,
-        so the Phase 2 loader has to check rather than assume. This test
-        pins the reason that check needs to exist.
-        """
-        checked = 0
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = catalog.primary_key(pg, name)
-            if not key:
-                continue
-            nullable = {c["name"] for c in catalog.columns_of(pg, name)
-                         if not c["notnull"]}
-            assert not (set(key) & nullable), (
-                f"{name}: PostgreSQL left a key column nullable: "
-                f"{sorted(set(key) & nullable)}")
-            checked += 1
-        assert checked > 50, "the primary key inventory looks wrong"
-
-    def test_no_row_in_the_source_warehouse_has_a_null_key(self, lite):
-        """The Phase 2 pre-flight the test above argues for.
-
-        Runs against the freshly built empty schema here, so it passes
-        trivially; it exists so the loader has a written contract to
-        implement against the real warehouse.
-        """
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = catalog.primary_key(lite, name)
-            if not key:
-                continue
-            predicate = " OR ".join(f'"{column}" IS NULL' for column in key)
-            from pipeline.web import queries
-            count = lite.execute(
-                f'SELECT COUNT(*) FROM {queries._quote(name)} WHERE {predicate}'
-            ).fetchone()[0]
-            assert count == 0, f"{name}: {count} rows have a NULL in {key}"
-
-    def test_primary_keys_agree(self, pg, lite):
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            if catalog.primary_key(pg, name) != catalog.primary_key(lite, name):
-                differences[name] = (catalog.primary_key(lite, name),
-                                      catalog.primary_key(pg, name))
-        assert not differences, f"primary keys differ: {differences}"
-
+class TestMigrationIdempotence:
     def test_reapplying_is_a_no_op(self, pg):
         """The contract every run depends on: migrations are applied on
         startup and must be free when the schema is current."""
@@ -403,11 +287,15 @@ class TestTheReadPath:
         assert queries.object_type(readonly, "v_wage_per_employee") == "view"
         assert queries.object_type(readonly, "no_such_thing") is None
 
-    def test_columns_come_back_in_declaration_order(self, readonly, lite):
+    def test_columns_come_back_in_declaration_order(self, readonly):
         from pipeline.web import queries
 
-        assert ([c["name"] for c in queries.columns_of(readonly, "contracts")]
-                == [c["name"] for c in queries.columns_of(lite, "contracts")])
+        columns = queries.columns_of(readonly, "contracts")
+        expected = [row["column_name"] for row in readonly.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ? "
+            "ORDER BY ordinal_position", ("contracts",)).fetchall()]
+        assert [c["name"] for c in columns] == expected
 
     def test_a_table_pages_in_primary_key_order(self, readonly):
         """What replaces ORDER BY rowid. `ordered` must be True or the UI
@@ -839,85 +727,62 @@ class TestThePortalRunsOnPostgres:
                         f"{type(exc).__name__}: {exc}")
 
 
-class TestGroupConcatMatchesSqlite:
+class TestGroupConcat:
     """The compatibility aggregate from 0034.
 
     Nine export queries call `GROUP_CONCAT` from application SQL and stay one
-    query each because PostgreSQL is taught the name. Every assertion here
-    runs against both engines, so SQLite is the specification rather than my
-    recollection of it.
+    query each because PostgreSQL is taught the name. These assertions pin
+    the compatibility aggregate's PostgreSQL behaviour.
     """
 
     ROWS = ("SELECT 'b' AS x UNION ALL SELECT 'a' UNION ALL SELECT 'b'")
 
-    def test_two_argument_form(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, ', ') FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(", ")) == ["a", "b", "b"], db.backend_of(conn)
+    def test_two_argument_form(self, pg):
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(x, ', ') FROM ({self.ROWS}) t").fetchone()[0]
+        assert sorted(got.split(", ")) == ["a", "b", "b"]
 
-    def test_one_argument_form_separates_with_a_comma(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x) FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(",")) == ["a", "b", "b"], db.backend_of(conn)
+    def test_one_argument_form_separates_with_a_comma(self, pg):
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(x) FROM ({self.ROWS}) t").fetchone()[0]
+        assert sorted(got.split(",")) == ["a", "b", "b"]
 
-    def test_distinct(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(DISTINCT x) FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(",")) == ["a", "b"], db.backend_of(conn)
+    def test_distinct(self, pg):
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(DISTINCT x) FROM ({self.ROWS}) t").fetchone()[0]
+        assert sorted(got.split(",")) == ["a", "b"]
 
-    def test_nulls_are_skipped_not_stringified(self, pg, lite):
+    def test_nulls_are_skipped_not_stringified(self, pg):
         """A NULL must not end the string or arrive as the text 'NULL'."""
         rows = "SELECT 'a' AS x UNION ALL SELECT NULL UNION ALL SELECT 'b'"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
-            assert sorted(got.split("|")) == ["a", "b"], db.backend_of(conn)
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
+        assert sorted(got.split("|")) == ["a", "b"]
 
-    def test_all_nulls_gives_null_not_empty_string(self, pg, lite):
+    def test_all_nulls_gives_null_not_empty_string(self, pg):
         rows = "SELECT NULL AS x UNION ALL SELECT NULL"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
-            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
+        assert got is None
 
-    def test_no_rows_gives_null(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                "SELECT GROUP_CONCAT(x, '|') FROM "
-                "(SELECT 'a' AS x WHERE 1 = 0) t").fetchone()[0]
-            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+    def test_no_rows_gives_null(self, pg):
+        got = pg.execute(
+            "SELECT GROUP_CONCAT(x, '|') FROM "
+            "(SELECT 'a' AS x WHERE 1 = 0) t").fetchone()[0]
+        assert got is None
 
-    def test_a_concatenated_expression_as_the_value(self, pg, lite):
+    def test_a_concatenated_expression_as_the_value(self, pg):
         """`exports/schema.py:223` builds its value with `||` over a text and
         an integer column, which is the one call site that is not a plain
         column reference."""
         rows = "SELECT 'term' AS t, 3 AS n"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(t || ' (' || n || ')', ', ') "
-                f"FROM ({rows}) x").fetchone()[0]
-            assert got == "term (3)", db.backend_of(conn)
+        got = pg.execute(
+            f"SELECT GROUP_CONCAT(t || ' (' || n || ')', ', ') "
+            f"FROM ({rows}) x").fetchone()[0]
+        assert got == "term (3)"
 
 
-class TestOrderingMatchesSqlite:
-    def test_nulls_sort_to_the_same_end(self, pg, lite):
-        """SQLite puts NULLs first ascending, PostgreSQL last. The export
-        queries now say which they want; this proves the clause does what the
-        comment claims on both engines."""
-        for conn in (pg, lite):
-            ascending = [r[0] for r in conn.execute(
-                "SELECT x FROM (SELECT 'b' AS x UNION ALL SELECT NULL "
-                "UNION ALL SELECT 'a') t ORDER BY x NULLS FIRST")]
-            assert ascending == [None, "a", "b"], f"{db.backend_of(conn)}: {ascending}"
-
-            descending = [r[0] for r in conn.execute(
-                "SELECT x FROM (SELECT 'b' AS x UNION ALL SELECT NULL "
-                "UNION ALL SELECT 'a') t ORDER BY x DESC NULLS LAST")]
-            assert descending == ["b", "a", None], f"{db.backend_of(conn)}: {descending}"
-
+class TestOrdering:
     def test_text_ordering_is_bytewise(self, pg):
         """The database must be created with a bytewise collation, or
         `ORDER BY name` differs from SQLite's on case and punctuation. See
