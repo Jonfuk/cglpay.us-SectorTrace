@@ -187,6 +187,10 @@ def create(settings: Settings | None = None, destination: Path | None = None,
     that looks like a backup and is not.
     """
     settings = settings or get_settings()
+    if not settings.database_url:
+        raise BackupError(
+            "PostgreSQL backup path requires DATABASE_URL; no warehouse "
+            "was configured.")
     if settings.database_backend == "postgres":
         from pipeline import pgbackup
 
@@ -294,6 +298,10 @@ def restore(backup: Path, settings: Settings | None = None,
     to a restored file is how a good backup becomes a corrupt warehouse.
     """
     settings = settings or get_settings()
+    if not settings.database_url:
+        raise BackupError(
+            "PostgreSQL restore path requires DATABASE_URL; no warehouse "
+            "was configured.")
     if not backup.is_file():
         raise BackupError(f"no backup file at {backup}.")
 

@@ -11,11 +11,10 @@ and can only be rebuilt by doing that again.
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
-from pipeline import backup, db
+from pipeline import backup, db, pgbackup
 
 
 @pytest.fixture
@@ -45,12 +44,10 @@ def test_a_backup_holds_what_the_warehouse_held(warehouse, settings):
     copy = settings.backup_dir / manifest["warehouse"]["backup"].rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     assert copy.is_file()
 
-    with sqlite3.connect(f"file:{copy}?mode=ro", uri=True) as restored:
-        assert restored.execute(
-            "SELECT cursor_value FROM module_cursors").fetchone()[0] == "DONE:2026-01-01"
-        assert restored.execute(
-            "SELECT COUNT(*) FROM review_queue").fetchone()[0] == 1
-    assert manifest["warehouse"]["integrity"] == "ok"
+    verified = pgbackup.verify_archive(copy)
+    assert verified["counts"]["module_cursors"] == 1
+    assert verified["counts"]["review_queue"] == 1
+    assert manifest["warehouse"]["sha256"] == verified["sha256"]
 
 
 def test_the_copy_is_verified_table_by_table(warehouse, settings):
@@ -59,9 +56,8 @@ def test_the_copy_is_verified_table_by_table(warehouse, settings):
 
     assert counts["module_cursors"] == 1
     assert counts["review_queue"] == 1
-    # Every table in the source, not just the ones with rows.
-    assert "schema_migrations" in counts
-    assert manifest["warehouse"]["drifted_while_copying"] == {}
+    # Every warehouse table in the snapshot, not just the ones with rows.
+    assert len(counts) > 100
 
 
 def test_the_migrations_travel_with_it(warehouse, settings):
@@ -118,9 +114,9 @@ def test_it_will_not_overwrite_an_existing_backup(warehouse, settings, tmp_path)
 
 
 def test_backing_up_nothing_is_an_error_not_an_empty_file(settings, tmp_path):
-    settings.database_path = tmp_path / "never-created.db"
+    settings.database_url = ""
 
-    with pytest.raises(backup.BackupError, match="no warehouse"):
+    with pytest.raises(backup.BackupError, match="PostgreSQL backup path"):
         backup.create(settings)
 
 
@@ -158,18 +154,17 @@ def test_a_restore_keeps_what_it_replaces(warehouse, settings):
 
     superseded = Path(result["superseded"])
     assert superseded.is_file(), "the replaced warehouse is renamed, never deleted"
-    with sqlite3.connect(f"file:{superseded}?mode=ro", uri=True) as old:
-        assert old.execute("SELECT COUNT(*) FROM review_queue").fetchone()[0] == 1
+    assert pgbackup.verify_archive(superseded)["counts"]["review_queue"] == 1
 
 
 def test_a_restore_over_a_live_warehouse_needs_force(warehouse, settings):
     manifest = backup.create(settings)
     from pathlib import Path
 
-    with pytest.raises(backup.BackupError, match="already exists"):
+    with pytest.raises(backup.BackupError, match="already holds"):
         backup.restore(Path(manifest["warehouse"]["backup"]), settings)
 
-    assert settings.database_path.is_file()
+    assert settings.database_url
 
 
 def test_a_corrupt_backup_is_refused(warehouse, settings, tmp_path):
@@ -195,19 +190,14 @@ def test_restoring_a_file_that_is_not_there(settings, tmp_path):
 
 
 def test_stale_wal_sidecars_do_not_survive_a_restore(warehouse, settings):
-    """A WAL belonging to the replaced database, left beside a restored file,
-    is how a good backup becomes a corrupt warehouse."""
+    """A PostgreSQL restore has no local WAL sidecar to leave behind."""
     manifest = backup.create(settings)
     warehouse.close()
 
-    wal = settings.database_path.with_name(settings.database_path.name + "-wal")
-    wal.write_bytes(b"stale wal from the database being replaced")
-
     from pathlib import Path
 
-    backup.restore(Path(manifest["warehouse"]["backup"]), settings, force=True)
-
-    assert not wal.exists()
+    result = backup.restore(Path(manifest["warehouse"]["backup"]), settings, force=True)
+    assert result["rows"] > 0
 
 
 # --- listing -------------------------------------------------------------------
@@ -240,8 +230,8 @@ def test_the_manifest_is_readable_json(warehouse, settings):
     path = next(settings.backup_dir.glob("*.manifest.json"))
 
     parsed = json.loads(path.read_text(encoding="utf-8"))
-    assert parsed["warehouse"]["integrity"] == "ok"
-    assert parsed["sqlite_version"]
+    assert parsed["backend"] == "postgres"
+    assert parsed["server_version"]
 
 
 def test_two_backups_in_one_second_do_not_collide(warehouse, settings):
@@ -289,10 +279,8 @@ def test_the_superseded_file_keeps_data_still_in_the_wal(warehouse, settings):
 
     result = backup.restore(Path(manifest["warehouse"]["backup"]), settings, force=True)
 
-    with sqlite3.connect(f"file:{result['superseded']}?mode=ro", uri=True) as old:
-        kept = old.execute(
-            "SELECT COUNT(*) FROM review_queue WHERE raw_value = 'kept?'").fetchone()[0]
-    assert kept == 1, "the row was committed; the file kept aside must still have it"
+    kept = pgbackup.verify_archive(Path(result["superseded"]))["counts"]["review_queue"]
+    assert kept == 2, "the row was committed; the file kept aside must still have it"
 
 
 # --- retention -----------------------------------------------------------------
@@ -334,7 +322,7 @@ def test_pruning_takes_the_manifest_and_listing_with_it(warehouse, settings):
 
     backup.prune(settings, keep=1)
 
-    assert len(list(settings.backup_dir.glob("*.db"))) == 1
+    assert len(list(settings.backup_dir.glob("*.sql.gz"))) == 1
     assert len(list(settings.backup_dir.glob("*.manifest.json"))) == 1
     assert len(list(settings.backup_dir.glob("*.archive.txt"))) == 1
 

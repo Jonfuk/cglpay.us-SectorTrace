@@ -52,6 +52,7 @@ import gzip
 import hashlib
 import json
 import re
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -374,7 +375,7 @@ def read_header(path: Path) -> dict:
                     return json.loads(text[len(_HEADER_MARKER):])
                 if not text.startswith("--"):
                     break
-    except OSError as exc:
+    except (OSError, zlib.error) as exc:
         raise BackupError(f"{path} cannot be read as a gzip archive: {exc}") from exc
     except ValueError as exc:
         raise BackupError(f"{path} has an unreadable header: {exc}") from exc
@@ -425,7 +426,7 @@ def verify_archive(path: Path) -> dict:
                     continue
                 digest.update(line)
                 rows += 1
-    except (OSError, EOFError) as exc:
+    except (OSError, EOFError, zlib.error) as exc:
         raise BackupError(
             f"{path} did not decompress to the end ({exc}). A gzip stream "
             "carries a checksum of its own contents, so this is a truncated "
