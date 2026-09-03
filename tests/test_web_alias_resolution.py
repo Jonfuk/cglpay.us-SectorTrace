@@ -9,12 +9,12 @@ name.
 from __future__ import annotations
 
 import inspect
-import sqlite3
 import threading
 
 import httpx
 import pytest
 
+from pipeline import catalog
 from pipeline.config import Settings
 from pipeline.web import alias_resolution
 from pipeline.web.queries import QueryError
@@ -38,7 +38,7 @@ def _review(conn, item_type, raw_value):
 
 
 @pytest.fixture
-def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
+def warehouse(conn):
     _authority(conn, "E06000019", "Herefordshire, County of")
     _authority(conn, "E08000025", "Birmingham City Council")
     _review(conn, "unmatched_buyer_name", "Hereford Council")
@@ -48,8 +48,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
 
 
 def test_the_table_and_view_exist(warehouse):
-    tables = {r[0] for r in warehouse.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
+    tables = {row["name"] for row in catalog.list_objects(warehouse)}
     assert "alias_decisions" in tables and "verified_aliases" in tables
 
 
