@@ -60,7 +60,8 @@ Error: tuple[type[BaseException], ...] = (_psycopg.Error,)
 DatabaseError: tuple[type[BaseException], ...] = (_psycopg.DatabaseError,)
 IntegrityError: tuple[type[BaseException], ...] = (
     _psycopg.IntegrityError, _psycopg.errors.RaiseException)
-OperationalError: tuple[type[BaseException], ...] = (_psycopg.OperationalError,)
+OperationalError: tuple[type[BaseException], ...] = (
+    _psycopg.OperationalError, _psycopg.errors.ReadOnlySqlTransaction)
 Warning: tuple[type[BaseException], ...] = (_psycopg.Warning,)
 
 

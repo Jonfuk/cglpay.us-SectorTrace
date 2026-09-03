@@ -455,6 +455,8 @@ def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dic
     sql = sql.strip().rstrip(";").strip()
     if not sql:
         raise QueryError("Nothing to run.")
+    if _has_statement_separator(sql):
+        raise QueryError("Only one SQL statement may be run at a time.")
 
     limit = max(1, min(int(limit), MAX_PAGE_SIZE))
     with deadline(conn):
@@ -489,6 +491,32 @@ def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dic
         "limit": limit,
         "truncated": truncated,
     }
+
+
+def _has_statement_separator(sql: str) -> bool:
+    """Whether ``sql`` contains a semicolon outside quoted/commented text."""
+    quote: str | None = None
+    i = 0
+    while i < len(sql):
+        char = sql[i]
+        if quote:
+            if char == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "-" and i + 1 < len(sql) and sql[i + 1] == "-":
+            newline = sql.find("\n", i + 2)
+            i = len(sql) if newline < 0 else newline
+            continue
+        elif char == ";":
+            return True
+        i += 1
+    return False
 
 
 # --- review queue -------------------------------------------------------------

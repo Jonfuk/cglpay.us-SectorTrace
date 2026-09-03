@@ -182,8 +182,8 @@ def _empty_warehouse_between_tests(_pg_warehouse, request):
         }
     finally:
         check.close()
-    missing = set(warehouse.tables) - present
-    if missing:
+    schema_changed = present != set(warehouse.tables)
+    if schema_changed:
         admin = pg.connect(warehouse.base_url, application_name="sectortrace-tests")
         try:
             quoted = '"' + warehouse.schema.replace('"', '""') + '"'
