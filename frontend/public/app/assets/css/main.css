@@ -1,0 +1,16 @@
+/* Nuxt UI v4 ships Tailwind CSS v4. A single import chain pulls Tailwind's
+ * utilities and the Nuxt UI layer; SectorTrace-specific tokens live below
+ * rather than in an unchanged dashboard template (Phase 6: keep project tokens
+ * in project source). */
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* SectorTrace design tokens. These mirror the legacy portal's identity so the
+ * migrated surface reads as the same product, not a framework default. Values
+ * are placeholders at the foundation stage and are reconciled against
+ * docs/design-system.md as routes are ported. */
+:root {
+  --st-ink: #14181f;
+  --st-paper: #f7f7f4;
+  --st-accent: #1d4ed8;
+}

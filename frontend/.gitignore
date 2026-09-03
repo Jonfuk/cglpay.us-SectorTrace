@@ -1,0 +1,21 @@
+# Node is a build-time dependency only. Nothing installed here belongs in the
+# repository; the committed deliverable is the pinned lockfile plus, at the
+# cutover stage, the generated static output copied into the Python image.
+node_modules/
+.nuxt/
+.output/
+.data/
+# `dist` is a symlink Nuxt creates to .output/public — ignore it as both a
+# directory and a symlink (a bare `dist/` misses the symlink form).
+dist/
+dist
+
+# Nuxt/Vite/TypeScript caches
+*.tsbuildinfo
+.eslintcache
+
+# Local env overrides — the production frontend takes no runtime env of its
+# own; base URLs and the asset manifest are resolved by the Python server.
+.env
+.env.*
+!.env.example
