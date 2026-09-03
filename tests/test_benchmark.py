@@ -61,8 +61,8 @@ class TestItRunsAgainstARealWarehouse:
     def test_a_report_has_every_section(self, conn, settings):
         conn.commit()
         report = benchmark.benchmark(settings)
-        assert report["environment"]["backend"] == "sqlite"
-        assert report["environment"]["server"].startswith("sqlite ")
+        assert report["environment"]["backend"] == "postgres"
+        assert report["environment"]["server"]
         assert "reads" in report and report["reads"]
         assert "write_throughput" in report
         assert "write_contention" in report
@@ -117,13 +117,13 @@ class TestItRunsAgainstARealWarehouse:
         written = json.loads(
             (tmp_path / "benchmarks" / report["written_to"].split("\\")[-1].split("/")[-1])
             .read_text(encoding="utf-8"))
-        assert written["environment"]["backend"] == "sqlite"
+        assert written["environment"]["backend"] == "postgres"
 
     def test_the_filename_carries_the_backend_and_the_time(self, conn, settings,
                                                             tmp_path):
         conn.commit()
         report = benchmark.benchmark(settings, writes=False, output_dir=tmp_path)
-        assert report["written_to"].endswith("-sqlite.json")
+        assert report["written_to"].endswith("-postgres.json")
 
 
 class TestItCannotDamageWhatItMeasures:
@@ -142,11 +142,11 @@ class TestItCannotDamageWhatItMeasures:
 
     def test_the_scratch_warehouse_is_not_the_real_one(self, settings):
         with benchmark.scratch_warehouse(settings) as scratch:
-            assert scratch.settings.database_path != settings.database_path
-            assert db.backend_of(scratch.conn) == "sqlite"
-            path = scratch.settings.database_path
-            assert path.is_file()
-        assert not path.is_file(), "the scratch warehouse outlived its context"
+            assert scratch.settings.database_url != settings.database_url
+            assert db.backend_of(scratch.conn) == "postgres"
+            scratch_schema = scratch.conn.execute("SELECT current_schema()").fetchone()[0]
+            assert scratch_schema != "public"
+        assert scratch_schema.startswith("bench_")
 
     def test_the_throughput_run_tidies_up(self, settings):
         with benchmark.scratch_warehouse(settings) as scratch:
