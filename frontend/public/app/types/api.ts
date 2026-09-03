@@ -429,6 +429,58 @@ export interface CompareResponse {
   [key: string]: unknown
 }
 
+/** `/api/v1/authorities/{ons_code}` — everything held about one authority. */
+export interface AuthorityResponse {
+  authority: {
+    ons_code: string | null
+    name: string | null
+    type: string | null
+    region: string | null
+  } | null
+  grant?: { rows: Array<Record<string, unknown>>; unit?: string }
+  budget?: { rows: Array<Record<string, unknown>>; unit?: string }
+  contracts?: Record<string, unknown>
+  caveats?: Record<string, string | null>
+  [key: string]: unknown
+}
+
+/** A co-occurrence record (`/api/v1/cooccurrence` → `results[]`). Co-occurrence
+ *  is location in one record, never an asserted relationship. */
+export interface CooccurrenceRecord {
+  record_type: string | null
+  record_id: string | null
+  title: string | null
+  source_system: string | null
+  text: string | null
+  link: string | null
+  [key: string]: unknown
+}
+
+export interface CooccurrenceResponse {
+  entities: Array<{ key: string; name: string | null; variant_count: number }>
+  results: CooccurrenceRecord[]
+  caveat?: string
+  [key: string]: unknown
+}
+
+/** A document table (`/api/v1/document_tables` → `tables[]`). */
+export interface DocumentTable {
+  document_table_id: string
+  page_number: number | null
+  row_count: number | null
+  column_count: number | null
+  extraction_status: string | null
+  preview: string[][]
+  [key: string]: unknown
+}
+
+export interface DocumentTablesResponse {
+  document: { document_id: string; title: string | null; source_url: string | null; retrieved_at: string | null } | null
+  tables: DocumentTable[]
+  note?: string
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */

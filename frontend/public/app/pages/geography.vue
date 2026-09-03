@@ -26,7 +26,11 @@ const features = computed<GeographyFeature[]>(() =>
 )
 
 const columns = computed<Column<GeographyFeature>[]>(() => [
-  { key: 'authority_name', label: 'Authority' },
+  {
+    key: 'authority_name',
+    label: 'Authority',
+    to: (row) => (row.ons_code ? `/authorities/${row.ons_code}` : null),
+  },
   { key: 'region', label: 'Region' },
   { key: 'value', label: data.value?.metric_label ?? 'Value', numeric: true },
   { key: 'financial_year', label: 'Year', mono: true },

@@ -23,6 +23,8 @@ const nav: NavItem[] = [
   { to: '/relationships', label: 'Relationships' },
   { to: '/claims', label: 'Claims' },
   { to: '/documents', label: 'Documents' },
+  { to: '/compare', label: 'Compare' },
+  { to: '/cooccurrence', label: 'Co-occurrence' },
   { to: '/changes', label: 'Changes' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/catalogue', label: 'Catalogue' },

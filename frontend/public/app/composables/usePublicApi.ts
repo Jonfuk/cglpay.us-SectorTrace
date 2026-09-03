@@ -1,10 +1,13 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
+  AuthorityResponse,
   CalendarResponse,
   CatalogueResponse,
   ChangesResponse,
   ClaimsResponse,
   CompareResponse,
+  CooccurrenceResponse,
+  DocumentTablesResponse,
   ContractsResponse,
   CoverageResponse,
   CqcResponse,
@@ -86,6 +89,12 @@ export interface PublicApi {
   discrepancies(options?: TransportOptions): Promise<DiscrepancyResponse>
   /** `/api/v1/compare` — parallel series for two or more entities. */
   compare(options?: TransportOptions): Promise<CompareResponse>
+  /** `/api/v1/authorities/{ons_code}` — one authority's full payload. */
+  authority(code: string, options?: TransportOptions): Promise<AuthorityResponse>
+  /** `/api/v1/cooccurrence` — records naming selected entities together. */
+  cooccurrence(options?: TransportOptions): Promise<CooccurrenceResponse>
+  /** `/api/v1/document_tables` — extracted tables for one document. */
+  documentTables(options?: TransportOptions): Promise<DocumentTablesResponse>
 }
 
 export function usePublicApi(): PublicApi {
@@ -116,5 +125,9 @@ export function usePublicApi(): PublicApi {
     diary: (options) => get<DiaryResponse>('/contract_diary', options),
     discrepancies: (options) => get<DiscrepancyResponse>('/discrepancies', options),
     compare: (options) => get<CompareResponse>('/compare', options),
+    authority: (code, options) =>
+      get<AuthorityResponse>(`/authorities/${encodeURIComponent(code)}`, options),
+    cooccurrence: (options) => get<CooccurrenceResponse>('/cooccurrence', options),
+    documentTables: (options) => get<DocumentTablesResponse>('/document_tables', options),
   }
 }
