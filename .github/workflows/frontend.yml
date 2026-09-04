@@ -53,6 +53,10 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
+      - name: Unit tests
+        working-directory: frontend/public
+        run: npm run test
+
       - name: Build both apps
         working-directory: frontend
         run: npm run build

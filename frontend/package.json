@@ -1,7 +1,7 @@
 {
   "name": "sectortrace-frontend",
   "private": true,
-  "description": "Phase 6 frontend workspace: two INDEPENDENT Nuxt 4 applications (public evidence atlas, admin operations control room). Each app has its own dependency graph, lockfile, and build; this root only orchestrates them. Node is a build-time dependency only — the production Python image never runs Node or Nitro.",
+  "description": "Phase 6 frontend workspace: two INDEPENDENT Nuxt 4 applications (public evidence atlas, admin operations control room). Each app has its own dependency graph, lockfile, and build; this root only orchestrates them. Node is a build-time dependency only \u2014 the production Python image never runs Node or Nitro.",
   "type": "module",
   "engines": {
     "node": ">=20.19.0 <23"
@@ -14,6 +14,7 @@
     "typecheck": "npm --prefix public run typecheck && npm --prefix admin run typecheck",
     "budgets": "node scripts/check-budgets.mjs",
     "verify": "npm run build && npm run budgets",
-    "clean": "rm -rf public/.nuxt public/.output public/dist admin/.nuxt admin/.output admin/dist"
+    "clean": "rm -rf public/.nuxt public/.output public/dist admin/.nuxt admin/.output admin/dist",
+    "test": "npm --prefix public run test"
   }
 }

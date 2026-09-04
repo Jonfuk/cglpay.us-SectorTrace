@@ -62,6 +62,20 @@ npm run typecheck        # nuxt typecheck per app
 and `404.html` SPA fallbacks so the Python server can answer any unprerendered
 deep link with the client shell.
 
+### Tests
+
+```bash
+cd frontend
+npm run test        # Vitest unit tests (public app)
+```
+
+Vitest covers the framework-agnostic units whose invariants matter: the
+transport (request-key canonicalisation, in-flight dedup, `AbortController`
+cancellation), `StLink` (only `http(s)` becomes a link; `javascript:`/`data:`/
+relative render as inert text), and `StStat` (null/undefined → em dash, never
+`0`). Composables that depend on Nuxt auto-imports are left to the browser/e2e
+gate. The CI `frontend` workflow runs typecheck → unit tests → build → budgets.
+
 ## Static output layout
 
 - Public: assets under `/_nuxt/**`, entry `index.html` (+ `200.html`/`404.html`).
