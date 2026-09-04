@@ -376,14 +376,16 @@ def run(ctx: ModuleContext) -> None:
                     conn, module_name, field, raw,
                     f"unreadable {field} value in {sheet_name!r} of {file_url}",
                     source_url=result.url)
-            for estimate in estimates:
-                db.upsert(conn, "skills_for_care_estimates", {
-                    **estimate,
-                    "file_url": file_url,
-                    **_provenance(result),
-                }, natural_key=["file_url", "year", "area_code", "sector",
-                                "service", "job_role_group", "job_role"])
-                written += 1
+            estimate_rows = [{
+                **estimate,
+                "file_url": file_url,
+                **_provenance(result),
+            } for estimate in estimates]
+            db.upsert_many(
+                conn, "skills_for_care_estimates", estimate_rows,
+                natural_key=["file_url", "year", "area_code", "sector",
+                             "service", "job_role_group", "job_role"])
+            written += len(estimate_rows)
 
             db.upsert(conn, "skills_for_care_files", {
                 "file_url": file_url,

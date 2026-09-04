@@ -600,18 +600,19 @@ def run(ctx: ModuleContext) -> None:
             db.record_parse_failure(conn, module_name, failure_field, raw, reason,
                                     source_url=source_url)
 
-        for file_row in findings.files:
-            db.upsert(conn, "council_spend_files", file_row,
-                      natural_key=["authority_ons_code", "file_url"])
-            files_written += 1
+        db.upsert_many(
+            conn, "council_spend_files", findings.files,
+            natural_key=["authority_ons_code", "file_url"])
+        files_written += len(findings.files)
 
-        for line in findings.lines:
-            provider_key = by_name.get(_normalise_name(line["payee"]))
-            db.upsert(conn, "council_spend", {
-                **line,
-                "provider_key": provider_key,
-            }, natural_key=["authority_ons_code", "file_url", "row_index"])
-            lines_written += 1
+        line_rows = [{
+            **line,
+            "provider_key": by_name.get(_normalise_name(line["payee"])),
+        } for line in findings.lines]
+        db.upsert_many(
+            conn, "council_spend", line_rows,
+            natural_key=["authority_ons_code", "file_url", "row_index"])
+        lines_written += len(line_rows)
 
         if not ctx.dry_run:
             conn.commit()
