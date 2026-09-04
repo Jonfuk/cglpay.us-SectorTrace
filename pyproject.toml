@@ -259,6 +259,7 @@ assistant = [
 dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
 ]
 
@@ -309,6 +310,7 @@ testpaths = ["tests"]
 markers = [
     "integration: hits live external sources, skipped by default",
     "maps: requires the optional offline PMTiles build dependencies",
+    "serial: shares process-global state and runs outside the xdist lane",
     "slow: needs a heavy optional model (e.g. a real SetFit fine-tune); skipped by default",
 ]
 addopts = "-m 'not integration and not slow'"

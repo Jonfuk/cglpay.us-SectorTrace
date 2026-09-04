@@ -89,30 +89,54 @@ jobs:
         # from the suite; this is the fast standalone signal.
         run: uv run python -m pipeline docs-check
 
-      - name: Tests
-        # PostgreSQL is a core dependency: the offline suite and the optional
-        # live suites use the same lockfile-resolved application environment.
-        #
-        # Failures are echoed back as `::error::` workflow commands, which
-        # become annotations on the run. Annotations are readable without a
-        # token; the raw logs are not, so a red build was otherwise a red
-        # light with no message attached to anyone without repo access.
+      - name: Parallel PostgreSQL tests
+        # Each xdist worker gets its own migrated schema in tests/conftest.py.
+        # loadscope keeps module-scoped fixtures together while allowing the
+        # independent modules to use all runner CPUs. The serial marker is
+        # reserved for tests that intentionally exercise process-global state.
         env:
-          # This is a disposable container created by the preceding step;
-          # tests still select their database through POSTGRES_TEST_URL and
-          # never inherit a production DATABASE_URL.
           POSTGRES_TEST_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
           DATABASE_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
           CONTACT_EMAIL: test@example.com
         run: |
+          mkdir -p artifacts
           set -o pipefail
-          uv run python -m pytest -q --tb=short > pytest.log 2>&1 && exit 0
+          uv run python -m pytest -q --tb=short -m "not serial" -n auto \
+            --dist loadscope --durations=50 --junitxml=artifacts/pytest-parallel.xml \
+            > artifacts/pytest-parallel.log 2>&1
           status=$?
-          echo "::group::pytest output"
-          cat pytest.log
-          echo "::endgroup::"
-          grep -E '^(FAILED|ERROR)' pytest.log | while read -r line; do
+          cat artifacts/pytest-parallel.log
+          grep -E '^(FAILED|ERROR)' artifacts/pytest-parallel.log | while read -r line; do
             echo "::error::$line"
           done
-          tail -1 pytest.log | sed 's/^/::error::summary: /'
           exit $status
+
+      - name: Serial PostgreSQL tests
+        if: always()
+        # Process-global counters, clocks, console handlers, and logging
+        # configuration are deliberately tested in one process. They are not
+        # part of the parallel lane, even though database schemas are isolated.
+        env:
+          POSTGRES_TEST_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
+          DATABASE_URL: postgresql://sectortrace_app:sectortrace_app_dev@localhost:5432/sectortrace
+          CONTACT_EMAIL: test@example.com
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          uv run python -m pytest -q --tb=short -m serial --durations=50 \
+            --junitxml=artifacts/pytest-serial.xml \
+            > artifacts/pytest-serial.log 2>&1
+          status=$?
+          cat artifacts/pytest-serial.log
+          grep -E '^(FAILED|ERROR)' artifacts/pytest-serial.log | while read -r line; do
+            echo "::error::$line"
+          done
+          exit $status
+
+      - name: Upload pytest timing artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-timings-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error

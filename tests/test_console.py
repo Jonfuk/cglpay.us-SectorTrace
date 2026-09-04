@@ -12,6 +12,8 @@ import pytest
 
 from pipeline import console as ui
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture(autouse=True)
 def _fresh_console(monkeypatch):

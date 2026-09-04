@@ -11,7 +11,11 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from pipeline.meters import DISK, NETWORK, Meter, compact_rate, human_bytes, reset_all
+
+pytestmark = pytest.mark.serial
 
 
 def test_a_meter_accumulates_a_total():
