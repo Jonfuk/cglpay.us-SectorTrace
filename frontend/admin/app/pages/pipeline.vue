@@ -14,7 +14,7 @@ const { data: modulesData, pending: modulesPending, error: modulesError, refresh
 const { data: jobsData, pending: jobsPending, refresh: refreshJobs } =
   await useAsyncData<JobsResponse | null>('admin-jobs', () => api.jobs(), { default: () => null })
 const { data: runsData, pending: runsPending, refresh: refreshRuns } =
-  await useAsyncData<RunsResponse | null>('admin-runs', () => api.runs(), { default: () => null })
+  await useAsyncData<RunsResponse | null>('admin-run-ledger', () => api.runLedger(), { default: () => null })
 
 const modules = computed<ModuleRow[]>(() => modulesData.value?.modules ?? [])
 const jobs = computed<JobHead[]>(() => jobsData.value?.jobs ?? [])
