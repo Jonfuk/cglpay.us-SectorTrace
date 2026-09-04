@@ -20,6 +20,7 @@ import type {
   PayResponse,
   PfdResponse,
   ProviderRow,
+  ProvidersResponse,
   ProviderTimelineResponse,
   RelationshipsResponse,
   SummaryResponse,
@@ -59,7 +60,7 @@ export interface PublicApi {
   /** `/api/v1/contracts` — procurement notices and rollups. */
   contracts(options?: TransportOptions): Promise<ContractsResponse>
   /** `/api/v1/providers` — every provider with comparable counts. */
-  providers(options?: TransportOptions): Promise<ProviderRow[]>
+  providers(options?: TransportOptions): Promise<ProvidersResponse>
   /** `/api/v1/geography` — one value per authority for a chosen metric. */
   geography(options?: TransportOptions): Promise<GeographyResponse>
   /** `/api/v1/treatment_metrics` — the treatment metric catalogue. */
@@ -111,7 +112,7 @@ export function usePublicApi(): PublicApi {
     summary: (options) => get<SummaryResponse>('/summary', options),
     pay: (options) => get<PayResponse>('/pay', options),
     contracts: (options) => get<ContractsResponse>('/contracts', options),
-    providers: (options) => get<ProviderRow[]>('/providers', options),
+    providers: (options) => get<ProvidersResponse>('/providers', options),
     geography: (options) => get<GeographyResponse>('/geography', options),
     treatment: (options) => get<TreatmentResponse>('/treatment_metrics', options),
     catalogue: (options) => get<CatalogueResponse>('/catalogue', options),

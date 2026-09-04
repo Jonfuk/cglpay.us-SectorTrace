@@ -99,7 +99,8 @@ def test_hnsw_ids_order_and_scores_match_exact_pgvector(corpus):
         "recruitment retention key workers vacancies"])[0]
     repository = PostgresEmbeddingRepository(corpus)
     indexed = repository.semantic_candidates(
-        query_vector=vector, model_key="embed:stub", filter_sql="", filter_params=[], depth=10)
+        query_vector=vector, model_key="embed:stub", filter_sql="", filter_params=[], depth=10,
+        exact_rerank=True)
     exact = repository.semantic_candidates(
         query_vector=vector, model_key="embed:stub", filter_sql="", filter_params=[], depth=10,
         exact_baseline=True)

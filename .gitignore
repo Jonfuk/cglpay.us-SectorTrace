@@ -95,3 +95,10 @@ nlp-cache/
 # Phase 6: built Nuxt assets are generated in the Docker frontend stage and
 # copied into the runtime image; never committed here.
 pipeline/web/static_nuxt/
+
+# Local Lighthouse JSON reports are generated from the static build and are
+# CI artefacts, not source.
+frontend/.lighthouse/
+
+# Repo-local npm bootstrap used on hosts that provide Node without npm.
+.tools/

@@ -47,7 +47,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync
+        run: uv sync --extra maps
 
       - name: Start PostgreSQL 18 test database
         # The application test suite is PostgreSQL-only. Build the same image

@@ -1,9 +1,12 @@
 # Phase 2 analysis acceptance
 
-Phase 2 remains incomplete until the same-data parity, adjudicated-prefilter,
-production-scale benchmark, and PostgreSQL test gates in `performance.md` have
-all passed. The commands below create reproducible JSON evidence; they do not
-turn a fixture run into production acceptance.
+Phase 2 has two deliberately separate acceptance lanes. The implementation
+may be accepted in **shadow-only mode** using the landed implementation and
+offline PostgreSQL/test gates; this lane does not require a human-adjudicated
+corpus or a live production-scale model run. A corpus is a separate
+release-safety gate required before the prefilter may suppress any passage.
+The optional commands below create reproducible diagnostic evidence; they do
+not turn a fixture run into production acceptance.
 
 ## Safety and isolation
 
@@ -13,7 +16,8 @@ copied from one frozen source snapshot. Do not point `DATABASE_URL` or
 same Git commit, schema, source rows, model configuration, and source/archive
 digests for the paired runs.
 
-The worker's prefilter is shadow-only unless both conditions are true:
+The worker's prefilter is shadow-only by default. It may suppress passages only
+when both conditions are true:
 
 1. `ANALYSIS_PREFILTER_SUPPRESSION_ENABLED=true` was an explicit operator
    choice; and
@@ -21,8 +25,10 @@ The worker's prefilter is shadow-only unless both conditions are true:
    threshold digests with at least 99% overall recall, 100% recall over all
    critical examples, and 100% recall within every named critical category.
 
-Do not record `tests/fixtures/analysis/narrative_prefilter_regression.jsonl` as
-the production adjudication. It is a transparent regression fixture, not a
+The absence of a corpus does not block shadow-only Phase 2 acceptance, but it
+does keep suppression disabled. Do not record
+`tests/fixtures/analysis/narrative_prefilter_regression.jsonl` as the
+production adjudication. It is a transparent regression fixture, not a
 representative human-reviewed corpus.
 
 ## Record the adjudicated gate
@@ -42,10 +48,12 @@ uv run pipeline analysis prefilter-eval adjudicated.jsonl \
 Keep suppression false if this exits non-zero. A persisted failed evaluation
 is evidence about the rules, not permission to suppress candidates.
 
-## Same-dataset before/after run
+## Optional same-dataset shadow diagnostics
 
-Queue one all-domain baseline release with suppression disabled. Instrument
-exactly that queued run:
+If resources permit, queue an all-domain baseline release with suppression
+disabled and instrument exactly that queued run. The acceptance database must
+be disposable and the source snapshot, Git commit, model configuration, and
+input digest must be frozen:
 
 ```bash
 uv run pipeline analysis benchmark-once \
@@ -58,7 +66,10 @@ uv run pipeline analysis acceptance-capture RELEASE_ID \
 ```
 
 Restore the identical database/source snapshot, retain the same pinned model
-configuration, enable suppression only after the gate above, and repeat:
+configuration, and keep suppression disabled for the candidate run. This
+compares the current shadow implementation with the baseline without claiming
+that an unqualified corpus has demonstrated safe model-call reduction. These
+measurements are diagnostic and are not required to accept shadow-only Phase 2:
 
 ```bash
 uv run pipeline analysis benchmark-once \
@@ -78,8 +89,31 @@ uv run pipeline analysis acceptance-compare \
 The comparison exits non-zero unless the ordered input digest matches and
 signals, themes, topics, verifier results, and links have equal counts, equal
 semantic sets, and equal output ordering. Model-audit and cost differences are
-reported as diagnostic deltas rather than correctness equality: reducing those
-calls is the intended optimization.
+reported as diagnostic deltas rather than correctness equality. The shadow
+lane records the available call/cache/SQL and memory measurements; it does not
+authorize suppression or claim a suppression-driven call reduction.
+
+## Optional suppression-release gate
+
+After a representative human reviewer has labelled the corpus, record it with
+`prefilter-eval --record`. Only then may an operator explicitly enable
+`ANALYSIS_PREFILTER_SUPPRESSION_ENABLED` and run a second paired comparison.
+That later run is a release-safety check, not a prerequisite for the
+shadow-only Phase 2 implementation acceptance.
+
+## Small offline prefilter diagnostic
+
+For a quick indication of the deterministic gate's CPU cost and potential
+candidate reduction, replay the transparent regression fixture locally:
+
+```bash
+uv run python scripts/benchmark_phase2_prefilter.py \
+  --output docs/benchmarks/phase2-prefilter-micro.json
+```
+
+This is deliberately not a production benchmark or an adjudicated corpus. It
+reports the possible model-call reduction only; suppression remains disabled
+until the optional human-review gate above passes.
 
 ## Measurement meanings
 

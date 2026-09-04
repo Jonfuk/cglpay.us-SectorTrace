@@ -1475,6 +1475,35 @@ def export(
     conn.close()
 
 
+@app.command("pmtiles")
+def pmtiles(
+    output_dir: Path = typer.Option(
+        None, "--output-dir",
+        help="Directory for the content-addressed archive and boundaries.json. "
+             "Defaults to frontend/public/public/map."),
+    min_zoom: int = typer.Option(0, "--min-zoom", min=0, max=14),
+    max_zoom: int = typer.Option(9, "--max-zoom", min=0, max=14),
+) -> None:
+    """Build deterministic PMTiles from canonical authority boundaries."""
+    from pipeline import pmtiles as pmtiles_module
+
+    configure_logging("pmtiles")
+    settings = get_settings()
+    destination = output_dir or (
+        Path(__file__).resolve().parent.parent / "frontend" / "public" / "public" / "map")
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        manifest = pmtiles_module.build_authority_archive(
+            conn, Path(destination), min_zoom=min_zoom, max_zoom=max_zoom)
+    except pmtiles_module.PmtilesError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+    typer.echo(__import__("json").dumps(manifest, sort_keys=True, indent=2))
+
+
 @app.command("resolve-answered")
 def resolve_answered(
     rule: str = typer.Option(None, help="Only this rule; default is all of them"),

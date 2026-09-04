@@ -296,8 +296,9 @@ def run(ctx: ModuleContext) -> None:
         else:
             searched += 1
 
+        candidate_rows = []
         for candidate in candidates:
-            db.upsert(conn, "cdp_document_candidates", {
+            candidate_rows.append({
                 "authority_ons_code": authority["ons_code"],
                 **candidate,
                 "discovered_at": datetime.now(timezone.utc).isoformat(),
@@ -306,9 +307,14 @@ def run(ctx: ModuleContext) -> None:
                 "verified": 0,
                 "verified_at": None,
                 "rejected": 0,
-            }, natural_key=["authority_ons_code", "candidate_url"],
-                preserve=db.DECISION_COLUMNS)
+            })
             candidates_found += 1
+
+        db.upsert_many(
+            conn, "cdp_document_candidates", candidate_rows,
+            natural_key=["authority_ons_code", "candidate_url"],
+            preserve=db.DECISION_COLUMNS,
+        )
 
         if not ctx.dry_run:
             conn.commit()

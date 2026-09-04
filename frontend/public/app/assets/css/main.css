@@ -1,16 +1,150 @@
-/* Nuxt UI v4 ships Tailwind CSS v4. A single import chain pulls Tailwind's
- * utilities and the Nuxt UI layer; SectorTrace-specific tokens live below
- * rather than in an unchanged dashboard template (Phase 6: keep project tokens
- * in project source). */
+/* Public SectorTrace atlas. Nuxt UI supplies accessible primitives; these
+ * tokens and the small set of atlas classes carry over the legacy portal's
+ * dark-first research-desk identity instead of exposing framework defaults. */
 @import "tailwindcss";
 @import "@nuxt/ui";
 
-/* SectorTrace design tokens. These mirror the legacy portal's identity so the
- * migrated surface reads as the same product, not a framework default. Values
- * are placeholders at the foundation stage and are reconciled against
- * docs/design-system.md as routes are ported. */
+@font-face { font-family: Manrope; src: url('/fonts/manrope-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: Manrope; src: url('/fonts/manrope-600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: Manrope; src: url('/fonts/manrope-700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk-500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Space Grotesk'; src: url('/fonts/space-grotesk-700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
 :root {
-  --st-ink: #14181f;
-  --st-paper: #f7f7f4;
-  --st-accent: #1d4ed8;
+  color-scheme: dark;
+  --st-bg: #08111f;
+  --st-surface: #101d2e;
+  --st-elevated: #17283d;
+  --st-ink: #f4f8ff;
+  --st-muted: #b2c0d3;
+  --st-dim: #8293aa;
+  --st-line: #24364d;
+  --st-line-strong: #38516f;
+  --st-teal: #21d4d0;
+  --st-amber: #fbbf24;
+  --st-green: #4ade80;
+  --st-red: #fb7185;
+  --st-purple: #a78bfa;
+  --st-focus: 2px solid var(--st-teal);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --st-bg: #f4f7fb;
+  --st-surface: #ffffff;
+  --st-elevated: #e8eef7;
+  --st-ink: #142238;
+  --st-muted: #4b6079;
+  --st-dim: #687e97;
+  --st-line: #d5dfeb;
+  --st-line-strong: #a9bdd4;
+}
+
+html { background: var(--st-bg); overflow-x: clip; }
+body {
+  margin: 0;
+  background: var(--st-bg);
+  color: var(--st-ink);
+  font: 15px/1.65 Manrope, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { color: var(--st-ink); font-family: 'Space Grotesk', Manrope, sans-serif; }
+h1 { letter-spacing: -0.045em; }
+h2 { letter-spacing: -0.03em; }
+a { color: var(--st-teal); }
+button, input, select, textarea { font: inherit; color: inherit; }
+input, select, textarea {
+  background: var(--st-bg);
+  border-color: var(--st-line-strong);
+  color: var(--st-ink);
+}
+input::placeholder { color: var(--st-dim); }
+:focus-visible { outline: var(--st-focus); outline-offset: 2px; }
+
+.atlas-nav-toggle { display: none; border: 1px solid var(--st-line-strong); border-radius: 6px; padding: 6px 10px; background: var(--st-elevated); color: var(--st-ink); }
+.atlas-nav a, .atlas-library a { color: var(--st-muted); text-decoration: none; }
+.atlas-nav a:hover, .atlas-library a:hover { color: var(--st-ink); }
+
+/* Tailwind utility classes used by the port need the same contrast on both
+ * Nuxt UI and the atlas palette. These selectors are intentionally narrow and
+ * do not change the admin application's separate stylesheet. */
+.border-black\/5, .border-black\/10, .border-black\/15 { border-color: var(--st-line) !important; }
+.dark\:border-white\/5, .dark\:border-white\/10, .dark\:border-white\/15 { border-color: var(--st-line) !important; }
+.bg-white { background-color: var(--st-surface) !important; }
+.text-gray-500, .text-gray-600, .opacity-60, .opacity-70 { color: var(--st-muted); }
+
+.atlas-hero {
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+  gap: 24px; padding: 28px; border: 1px solid var(--st-line-strong);
+  border-radius: 16px; background: radial-gradient(circle at 85% 15%, rgba(33,212,208,.15), transparent 42%), var(--st-surface);
+}
+.atlas-kicker, .atlas-eyebrow { color: var(--st-amber); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.atlas-hero h1 { max-width: 780px; margin: 10px 0 14px; font-size: clamp(32px, 5vw, 56px); line-height: 1.08; }
+.atlas-lede { max-width: 680px; color: var(--st-muted); font-size: 17px; }
+.atlas-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.atlas-button { display: inline-flex; align-items: center; border: 1px solid var(--st-line-strong); border-radius: 6px; padding: 7px 12px; color: var(--st-ink); background: var(--st-elevated); text-decoration: none; }
+.atlas-button.primary { border-color: var(--st-teal); background: var(--st-teal); color: #04121d; font-weight: 700; }
+.atlas-hero-aside { display: grid; align-content: center; gap: 12px; }
+.atlas-region { border-left: 3px solid var(--st-teal); padding: 12px 16px; background: rgba(33,212,208,.06); }
+.atlas-region strong { display: block; color: var(--st-teal); font-size: 30px; line-height: 1; }
+.atlas-region span { color: var(--st-muted); font-size: 13px; }
+.atlas-read-first { margin-top: 18px; color: var(--st-muted); }
+.atlas-read-first summary { cursor: pointer; color: var(--st-amber); }
+
+.atlas-section { margin-top: 32px; }
+.atlas-section-head { margin-bottom: 14px; }
+.atlas-section-head h2 { margin: 0 0 5px; font-size: 24px; }
+.atlas-section-head p { margin: 0; color: var(--st-muted); }
+.atlas-panel { border: 1px solid var(--st-line); border-radius: 10px; background: var(--st-surface); overflow: hidden; }
+.atlas-panel-head { padding: 14px 16px; border-bottom: 1px solid var(--st-line); }
+.atlas-panel-body { padding: 18px 16px; }
+.atlas-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.atlas-stat { min-width: 0; }
+.atlas-stat-value { color: var(--st-ink); font-family: 'Space Grotesk', sans-serif; font-size: 30px; font-weight: 700; line-height: 1.1; }
+.atlas-stat-label { color: var(--st-dim); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.atlas-stat-sub { margin-top: 4px; color: var(--st-muted); font-size: 13px; }
+.atlas-band { margin-top: 18px; }
+.atlas-band h3 { margin: 0 0 3px; font-size: 16px; }
+.atlas-band > p { margin: 0 0 10px; color: var(--st-muted); font-size: 13px; }
+.atlas-caveat { border-left: 3px solid var(--st-amber); padding: 8px 10px; color: var(--st-muted); background: rgba(251,191,36,.08); font-size: 13px; }
+.atlas-caveat span:first-child { color: var(--st-amber); }
+.atlas-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding: 18px; border: 1px solid var(--st-line-strong); border-radius: 10px; background: linear-gradient(120deg, rgba(33,212,208,.1), rgba(167,139,250,.06)); }
+.atlas-strip strong { display: block; color: var(--st-teal); font-family: 'Space Grotesk', sans-serif; font-size: 26px; line-height: 1; }
+.atlas-strip span { color: var(--st-muted); font-size: 13px; }
+.atlas-status-grid, .atlas-explore-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.atlas-flow { display: grid; gap: 10px; }
+.atlas-flow-row { display: grid; gap: 4px; }
+.atlas-flow-label { display: flex; justify-content: space-between; color: var(--st-muted); font-size: 13px; }
+.atlas-flow-bar { height: 8px; border-radius: 999px; background: var(--st-elevated); overflow: hidden; }
+.atlas-flow-fill { height: 100%; border-radius: inherit; background: var(--st-teal); }
+.atlas-flow-fill.never { background: var(--st-dim); }
+.atlas-source-list { display: grid; gap: 8px; }
+.atlas-source { display: flex; justify-content: space-between; gap: 10px; color: var(--st-muted); font-size: 13px; }
+.atlas-source b { color: var(--st-ink); font-weight: 600; }
+.atlas-explore-card { display: block; border: 1px solid var(--st-line); border-left: 3px solid var(--st-teal); border-radius: 8px; padding: 16px; background: var(--st-surface); color: var(--st-ink); text-decoration: none; }
+.atlas-explore-card:hover { border-color: var(--st-teal); background: var(--st-elevated); }
+.atlas-explore-card strong { display: block; font-family: 'Space Grotesk', sans-serif; font-size: 18px; }
+.atlas-explore-card span { display: block; margin-top: 4px; color: var(--st-muted); font-size: 13px; }
+.atlas-notice-list { display: grid; gap: 8px; }
+.atlas-notice { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; border-bottom: 1px solid var(--st-line); padding: 10px 0; }
+.atlas-notice:last-child { border-bottom: 0; }
+.atlas-notice strong { font-size: 14px; }
+.atlas-notice small { display: block; color: var(--st-muted); }
+.atlas-notice-value { color: var(--st-amber); font-family: ui-monospace, monospace; white-space: nowrap; }
+.atlas-footnote { color: var(--st-muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .atlas-hero { grid-template-columns: 1fr; }
+  .atlas-grid, .atlas-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .atlas-nav-toggle { display: inline-flex; margin-left: auto; }
+  .atlas-nav { display: none !important; flex-basis: 100%; }
+  .atlas-nav.is-open { display: flex !important; padding-top: 10px; }
+  .atlas-library { display: none !important; }
+  .atlas-library.is-open { display: flex !important; }
+}
+@media (max-width: 600px) {
+  .atlas-grid, .atlas-strip, .atlas-status-grid, .atlas-explore-grid { grid-template-columns: 1fr; }
+  .atlas-hero { padding: 20px; }
+  .atlas-notice { grid-template-columns: 1fr; }
 }

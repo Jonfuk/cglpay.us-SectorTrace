@@ -47,6 +47,14 @@ def run(conn, *, queries_path: Path, model: str | None = None, depth: int = 20,
     queries = _load_queries(queries_path)
     embedder = embeddings.get_embedder(model)
     repository = PostgresEmbeddingRepository(conn)
+    # The extension registers these settings when its library is loaded.  The
+    # benchmark must make the indexed candidate search reproducible rather
+    # than silently accepting a server-default recall setting; exact reranking
+    # below remains the correctness boundary.
+    conn.execute("SELECT NULL::public.vector OPERATOR(public.<=>) NULL::public.vector")
+    conn.execute("SET hnsw.ef_search=1000")
+    conn.execute("SET hnsw.max_scan_tuples=1000000")
+    conn.execute("SET hnsw.iterative_scan=strict_order")
     cases = []
     all_parity = True
     for item in queries:
@@ -66,7 +74,7 @@ def run(conn, *, queries_path: Path, model: str | None = None, depth: int = 20,
             started = time.perf_counter()
             indexed = repository.semantic_candidates(
                 query_vector=vector, model_key=embedder.model_key, filter_sql="",
-                filter_params=[], depth=depth)
+                filter_params=[], depth=depth, exact_rerank=True)
             timings.append((time.perf_counter() - started) * 1000)
         same_ids = [row[0] for row in indexed] == [row[0] for row in exact]
         max_delta = max((abs(a[1] - b[1]) for a, b in zip(indexed, exact)), default=0.0)

@@ -266,8 +266,9 @@ def _store_page(conn, module_name: str, *, provider_key: str, page_url: str,
     # accumulated, and the page row's count is what makes the two agree.
     conn.execute("DELETE FROM provider_pay_mentions WHERE page_url = %s", (page_url,))
 
+    mention_rows = []
     for index, mention in enumerate(mentions):
-        db.upsert(conn, "provider_pay_mentions", {
+        mention_rows.append({
             "page_url": page_url,
             "mention_index": index,
             "provider_key": provider_key,
@@ -280,7 +281,11 @@ def _store_page(conn, module_name: str, *, provider_key: str, page_url: str,
             "salary_basis": mention["salary_basis"],
             "match_basis": "site_owned",
             **prov,
-        }, natural_key=["page_url", "mention_index"])
+        })
+    db.upsert_many(
+        conn, "provider_pay_mentions", mention_rows,
+        natural_key=["page_url", "mention_index"],
+    )
 
     for sentence, raw in failures:
         db.record_parse_failure(

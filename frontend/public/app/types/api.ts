@@ -69,10 +69,32 @@ export interface SummaryResponse {
     latest_census_year: number | null
     all_unverified?: boolean
     caveat: string | null
+    metrics?: Array<{
+      metric?: string
+      workforce_segment?: string | null
+      value?: number | null
+      unit?: string | null
+      verified?: number
+    }>
   }
   fingertips: {
     latest_period: string | null
     indicators_collected: number
+  }
+  pipeline?: {
+    last_run?: string | null
+    sources?: Array<{
+      source_system?: string | null
+      last_retrieved?: string | null
+    }>
+  }
+  funnel?: {
+    discovered?: number | null
+    undecided?: number | null
+    promoted?: number | null
+    rejected?: number | null
+    evidence_rows?: number | null
+    caveat?: string | null
   }
   [key: string]: unknown
 }
@@ -90,6 +112,8 @@ export interface ContractNotice {
   date_published: string | null
   date_end: string | null
   procedure_type: string | null
+  /** Stable OCDS process key, when the notice publisher supplied one. */
+  ocid?: string | null
   source_url: string | null
   retrieved_at: string | null
   [key: string]: unknown
@@ -135,9 +159,15 @@ export interface ProviderRow {
   [key: string]: unknown
 }
 
+/** `/api/v1/providers` — the list endpoint wraps rows with a named key. */
+export interface ProvidersResponse {
+  providers: ProviderRow[]
+  [key: string]: unknown
+}
+
 /** One authority value for the choropleth (`/api/v1/geography` → `features[]`).
- *  Geometry is deliberately NOT included here — boundaries are a separate 14 MB
- *  fetch (later served as PMTiles tiles). */
+ *  Geometry is deliberately NOT included here — the map loads its separate,
+ *  content-addressed PMTiles archive. */
 export interface GeographyFeature {
   ons_code: string | null
   authority_name: string | null
@@ -247,13 +277,26 @@ export interface PfdResponse {
 }
 
 /** A published claim with its citations and caveats (`/api/v1/claims`). */
-export interface ClaimRow {
-  id: number | string
-  claim_text: string | null
-  caveats: string[]
-  citations: Array<Record<string, unknown>>
-  created_by: string | null
-  created_at: string | null
+  export interface ClaimRow {
+    id: number | string
+    claim_text: string | null
+    caveats: string[]
+    citations: Array<{
+      table?: string | null
+      key?: string | null
+      resolved?: {
+        label?: string | null
+        url?: string | null
+        source_url?: string | null
+        retrieved_at?: string | null
+      } | null
+      [key: string]: unknown
+    }>
+    created_by: string | null
+    created_at: string | null
+    published_by?: string | null
+    published_at?: string | null
+    note?: string | null
   [key: string]: unknown
 }
 

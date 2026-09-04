@@ -1,11 +1,8 @@
-<script setup vapor lang="ts">
-// A Vapor-mode component (Phase 6: Vapor enabled from the first prototype).
-// It is a simple, presentational, performance-insensitive leaf — exactly the
-// class the plan nominates for Vapor: no VNodes, no public-instance proxy, no
-// Options API, no Nuxt UI control inside it. If the pinned Vue 3.6 RC / Vapor
-// combination fails its interop or measured-benefit gate, dropping the `vapor`
-// attribute above turns this back into an ordinary VDOM component with no other
-// change — the migration does not depend on Vapor.
+<script setup lang="ts">
+// Keep this presentational leaf on the stable VDOM runtime until the pinned
+// Vue 3.6 RC Vapor interop passes a deployed browser smoke test. The migration
+// does not depend on Vapor, so the performance experiment can be re-enabled
+// here independently without risking the application root.
 defineProps<{
   revision: string | null
   migration: number | null

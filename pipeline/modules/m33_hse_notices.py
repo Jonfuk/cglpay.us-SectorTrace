@@ -221,6 +221,7 @@ def run(ctx: ModuleContext) -> None:
                         result.body.decode("utf-8", "replace")):
                     merged.setdefault(row["notice_number"], (row, result))
 
+            notice_rows: list[dict] = []
             for row, result in merged.values():
                 recipient = row.get("recipient_name", "")
                 if not is_organisation(recipient, tracked_variants=tracked):
@@ -241,7 +242,7 @@ def run(ctx: ModuleContext) -> None:
                     near_misses += 1
                     continue
 
-                db.upsert(conn, "hse_enforcement_notices", {
+                notice_rows.append({
                     "notice_number": row["notice_number"],
                     "recipient_name": recipient,
                     "provider_key": provider_key,
@@ -260,10 +261,14 @@ def run(ctx: ModuleContext) -> None:
                     "http_status": result.status_code,
                     "source_system": SOURCE_SYSTEM,
                     "payload_sha256": result.payload_sha256,
-                }, natural_key=["notice_number"])
+                })
                 written += 1
                 attributed += 1
 
+            db.upsert_many(
+                conn, "hse_enforcement_notices", notice_rows,
+                natural_key=["notice_number"],
+            )
             # One commit per provider — a unit of work — so the write slot is
             # released as each provider's notices land rather than held for
             # the whole run (CLAUDE.md settled decision 10).

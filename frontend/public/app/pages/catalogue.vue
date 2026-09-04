@@ -2,61 +2,20 @@
 import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
 import type { CatalogueDataset, CatalogueResponse } from '~/types/api'
-
-// Catalogue route. Every dataset the portal serves, with measured row counts
-// and freshness. No arithmetic crosses datasets and there is no headline total
-// — the catalogue lists layers side by side, it does not sum them. Parity
-// target: legacy `public/js/pages/catalogue.js`.
+type Row = Record<string, any>
+interface CatalogueDetail extends CatalogueDataset { module?: string; licence_statement?: string | null; licence_caution?: string | null; tables?: Row[]; caveat?: string | null }
 const api = usePublicApi()
-
-const { data, pending, error } = await useDataRoute<CatalogueResponse>(
-  'public-catalogue',
-  () => api.catalogue(),
-)
-
+const filters = useFilterState()
+const selectedId = computed(() => String(filters.get('dataset') ?? ''))
+const { data, pending, error } = await useDataRoute<CatalogueResponse>('public-catalogue', () => api.catalogue())
+const { data: detail, pending: detailPending, error: detailError } = await useAsyncData<CatalogueDetail | null>(() => `public-catalogue-${selectedId.value}`, () => selectedId.value ? api.get<CatalogueDetail>(`/catalogue/${encodeURIComponent(selectedId.value)}`) : Promise.resolve(null), { default: () => null, watch: [selectedId] })
 const datasets = computed<CatalogueDataset[]>(() => data.value?.datasets ?? [])
-
-const columns: Column<CatalogueDataset>[] = [
-  { key: 'title', label: 'Dataset' },
-  { key: 'publisher', label: 'Publisher' },
-  { key: 'evidence_layer_label', label: 'Layer' },
-  { key: 'geography', label: 'Geography' },
-  { key: 'row_count', label: 'Rows', numeric: true },
-  { key: 'last_retrieved_at', label: 'Last fetched', mono: true },
-  { key: 'official_url', label: 'Official source', link: true },
-]
-
+const columns: Column<CatalogueDataset>[] = [{ key: 'title', label: 'Dataset', to: (row) => row.dataset_id ? `/catalogue?dataset=${encodeURIComponent(row.dataset_id)}` : null }, { key: 'publisher', label: 'Publisher' }, { key: 'evidence_layer_label', label: 'Layer' }, { key: 'geography', label: 'Geography' }, { key: 'row_count', label: 'Rows', numeric: true }, { key: 'last_retrieved_at', label: 'Last fetched', mono: true }, { key: 'official_url', label: 'Official source', link: true }]
+const tableColumns: Column<Row>[] = [{ key: 'name', label: 'Warehouse table', mono: true }, { key: 'rows', label: 'Rows', numeric: true }, { key: 'last_retrieved_at', label: 'Last retrieved', mono: true }]
+function clear(): void { void filters.set('dataset', undefined) }
 useHead({ title: 'SectorTrace — Catalogue' })
 </script>
 
 <template>
-  <section class="space-y-6">
-    <div class="space-y-2">
-      <h1 class="text-2xl font-semibold">Catalogue</h1>
-      <p class="opacity-70 max-w-2xl">
-        Every dataset served, with live row counts and freshness. Layers sit
-        side by side; nothing is summed across them.
-      </p>
-    </div>
-
-    <div v-if="pending" class="text-sm opacity-60">Loading the catalogue…</div>
-    <StEmptyState v-else-if="error" variant="unavailable" />
-    <template v-else>
-      <UCard>
-        <template #header>
-          <span class="text-sm font-medium">{{ data?.count ?? datasets.length }} datasets</span>
-        </template>
-        <StEvidenceTable
-          v-if="datasets.length"
-          :columns="columns"
-          :rows="datasets"
-          row-key="dataset_id"
-        />
-        <StEmptyState v-else />
-        <template v-if="data?.caveat" #footer>
-          <StCaveat :text="data.caveat" />
-        </template>
-      </UCard>
-    </template>
-  </section>
+  <section class="space-y-8"><div class="atlas-hero"><div><p class="atlas-kicker">Dataset catalogue · sources and limitations</p><h1>Dataset catalogue</h1><p class="atlas-lede">Every dataset served, with its publisher, licence, cadence, evidence layer, holdings, and the limitation that matters before you quote it.</p></div><div class="atlas-hero-aside"><div class="atlas-region"><strong>{{ data?.count ?? datasets.length }}</strong><span>datasets</span></div></div></div><div v-if="pending" class="text-sm opacity-60">Loading the catalogue…</div><StEmptyState v-else-if="error" variant="unavailable" /><template v-else><section v-if="selectedId" class="atlas-section atlas-panel atlas-panel-body space-y-5"><button class="atlas-button" type="button" @click="clear">← All datasets</button><div v-if="detailPending" class="text-sm opacity-60">Loading dataset details…</div><StEmptyState v-else-if="detailError" variant="unavailable" /><template v-else-if="detail"><div class="atlas-section-head"><p class="atlas-kicker">{{ detail.evidence_layer_label }}</p><h2>{{ detail.title }}</h2></div><StCaveat :text="detail.caveat" /><StCaveat v-if="detail.licence_caution" :text="detail.licence_caution" /><dl class="grid gap-3 sm:grid-cols-2 text-sm"><div><dt class="opacity-60">Publisher</dt><dd>{{ detail.publisher ?? '—' }}</dd></div><div><dt class="opacity-60">Geography</dt><dd>{{ detail.geography ?? '—' }}</dd></div><div><dt class="opacity-60">Update cadence</dt><dd>{{ detail.cadence ?? '—' }}</dd></div><div><dt class="opacity-60">Collecting module</dt><dd class="font-mono">{{ detail.module ?? '—' }}</dd></div><div><dt class="opacity-60">Licence</dt><dd>{{ detail.licence_statement ?? detail.licence?.name ?? '—' }}</dd></div><div><dt class="opacity-60">Holdings</dt><dd>{{ detail.row_count?.toLocaleString('en-GB') ?? 0 }} rows · {{ detail.last_retrieved_at ?? 'not retrieved' }}</dd></div></dl><p><StLink :href="detail.official_url">{{ detail.official_url ?? 'No official URL' }}</StLink></p><div><h3>Warehouse holdings</h3><StEvidenceTable :columns="tableColumns" :rows="detail.tables ?? []" row-key="name" /></div></template></section><section v-else class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-section-head"><h2>All datasets</h2><p>{{ data?.caveat }}</p></div><StEvidenceTable v-if="datasets.length" :columns="columns" :rows="datasets" row-key="dataset_id" /><StEmptyState v-else /></section></template></section>
 </template>

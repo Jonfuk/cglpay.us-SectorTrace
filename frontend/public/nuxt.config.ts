@@ -34,7 +34,10 @@ export default defineNuxtConfig({
     // honours it, but the Nuxt config types still lag the RC and do not declare
     // the key yet. Remove this suppression once the typings include it.
     // @ts-expect-error vapor config typing lags the Vue 3.6 RC runtime
-    vapor: true,
+    // The deployed static smoke test exposed a mount failure with global Vapor
+    // interop. Keep the Nuxt application root on the stable VDOM runtime;
+    // the opt-in component remains available for a later isolated re-test.
+    vapor: false,
   },
 
   css: ['~/assets/css/main.css'],

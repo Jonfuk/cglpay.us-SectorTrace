@@ -978,6 +978,9 @@ class Handler(BaseHTTPRequestHandler):
         if not file_path.is_file():  # pragma: no cover - resolve already checked
             raise ApiError("Missing Nuxt asset", status=500)
 
+        if file_path.suffix.lower() == ".pmtiles":
+            return self._serve_nuxt_pmtiles(served)
+
         body = file_path.read_bytes()
         stat = file_path.stat()
         etag = f'W/"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
@@ -1006,6 +1009,87 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send(200, body, served.content_type,
                    etag=etag, cache_control=cache_control, csp=csp)
+
+    def _serve_nuxt_pmtiles(self, served: "nuxt_assets.Served") -> None:
+        """Serve a content-addressed PMTiles archive, including byte ranges.
+
+        MapLibre's PMTiles protocol reads the header and directories first, so
+        returning the whole archive for every request would throw away the
+        optimisation this asset exists to provide. The archive name is a full
+        SHA-256 digest, therefore a public immutable cache is safe here.
+        """
+        file_path = served.path
+        size = file_path.stat().st_size
+        etag = f'W/"{file_path.stat().st_mtime_ns:x}-{size:x}"'
+        cache_control = f"public, max-age={served.max_age}, immutable"
+        if self._matches_etag(etag):
+            self._responded = True
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("Vary", "Accept-Encoding")
+            self._send_security_headers()
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            return
+
+        byte_range = self._parse_byte_range(self.headers.get("Range"), size)
+        if self.headers.get("Range") and byte_range is None:
+            self._send(
+                416, b"", served.content_type, etag=etag,
+                cache_control=cache_control,
+                extra_headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+            )
+            return
+
+        if byte_range is None:
+            body = file_path.read_bytes()
+            self._send(
+                200, body, served.content_type, etag=etag,
+                cache_control=cache_control,
+                extra_headers={"Accept-Ranges": "bytes"},
+            )
+            return
+
+        start, end = byte_range
+        with file_path.open("rb") as stream:
+            stream.seek(start)
+            body = stream.read(end - start + 1)
+        self._send(
+            206, body, served.content_type, etag=etag,
+            cache_control=cache_control,
+            extra_headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes {start}-{end}/{size}",
+            },
+        )
+
+    @staticmethod
+    def _parse_byte_range(value: str | None, size: int) -> tuple[int, int] | None:
+        """Parse one RFC 9110 byte range; reject multi-ranges explicitly."""
+        if not value or not value.startswith("bytes=") or "," in value:
+            return None
+        spec = value[6:].strip()
+        if "-" not in spec:
+            return None
+        first, last = spec.split("-", 1)
+        try:
+            if first == "":
+                suffix = int(last)
+                if suffix <= 0 or size <= 0:
+                    return None
+                return max(0, size - suffix), size - 1
+            start = int(first)
+            if start < 0 or start >= size:
+                return None
+            end = size - 1 if last == "" else min(size - 1, int(last))
+            if end < start:
+                return None
+            return start, end
+        except ValueError:
+            return None
 
     def _matches_etag(self, etag: str) -> bool:
         """Whether the client already holds this version.

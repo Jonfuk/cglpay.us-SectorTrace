@@ -172,6 +172,11 @@ uv run pipeline nlp benchmark-semantic \
   --model stub --repetitions 7 --output semantic-benchmark.json
 ```
 
+The populated PostgreSQL 18 acceptance run on 2026-09-04 covered 167,779
+vectors and all eight committed query cases. Exact IDs, order, and scores
+matched in every case (maximum score delta `0.0`); the reproducible report is
+[`docs/benchmarks/20260904T045212Z-postgres-semantic.json`](benchmarks/20260904T045212Z-postgres-semantic.json).
+
 ### Single-copy embedding maintenance runbook
 
 1. Pause embedding, NLP and analysis writers and create the normal verified
@@ -195,9 +200,11 @@ The optional Mojo module follows [Mojo's documented pre-built Python extension
 boundary](https://mojolang.org/docs/manual/python/mojo-from-python/)
 (`mojo build ... --emit shared-lib`). CI always exercises Python
 fallback and invokes `scripts/build_mojo_nlp.py --if-available`; the build
-script refuses non-Linux/x86-64 hosts. The compiled smoke boundary remains
-parity-disabled, so even a successful build cannot accelerate ontology or
-context work until exact packed-output parity is implemented and approved.
+script refuses non-Linux/x86-64 hosts. The packed ontology matcher and context
+reducer are active only after that script verifies exact parity over every
+committed NLP fixture string, all assertion cases, and representative edge
+cases. Python retains ownership of the hand-maintained context regexes; Mojo
+receives the packed candidates and performs the deterministic reduction.
 
 ## What ships now (tranche 034B) — the ontology
 

@@ -414,11 +414,12 @@ def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: st
                                              failure.raw_fragment, failure.reason, result.url)
 
                 provenance = _provenance(result)
+                candidate_rows: list[dict] = []
                 for rec in records:
                     ons_code = rec["ons_code"]
                     if not ons_code or ons_code not in known:
                         continue
-                    db.upsert(conn, "foi_request_candidates", {
+                    candidate_rows.append({
                         "ons_code": ons_code,
                         "candidate_url": rec["request_url"],
                         "title": (rec["subject"] or "")[:300] or None,
@@ -444,10 +445,14 @@ def _collect_feed_candidates(client, conn, known: set[str], ctx, module_name: st
                         "verified_at": None,
                         "rejected": 0,
                         **provenance,
-                    }, natural_key=["ons_code", "candidate_url"],
-                        preserve=db.DECISION_COLUMNS)
+                    })
                     candidates += 1
 
+                db.upsert_many(
+                    conn, "foi_request_candidates", candidate_rows,
+                    natural_key=["ons_code", "candidate_url"],
+                    preserve=db.DECISION_COLUMNS,
+                )
                 if not ctx.dry_run:
                     conn.commit()
 
@@ -514,10 +519,12 @@ def run(ctx: ModuleContext) -> None:
         provenance = _provenance(result)
         profiles = parse_authorities_csv(
             result.body.decode("utf-8", errors="replace"), known)
-        for profile in profiles:
-            db.upsert(conn, "authority_foi_profiles", {**profile, **provenance},
-                       natural_key=["ons_code"])
-            profiles_written += 1
+        profile_rows = [{**profile, **provenance} for profile in profiles]
+        db.upsert_many(
+            conn, "authority_foi_profiles", profile_rows,
+            natural_key=["ons_code"],
+        )
+        profiles_written += len(profile_rows)
         if not ctx.dry_run:
             conn.commit()
         log.info("foi.profiles_written", count=profiles_written,
@@ -563,8 +570,9 @@ def run(ctx: ModuleContext) -> None:
             if not review_items:
                 logs_crawled += 1
 
+            candidate_rows = []
             for candidate in candidates:
-                db.upsert(conn, "foi_request_candidates", {
+                candidate_rows.append({
                     "ons_code": profile["ons_code"],
                     **candidate,
                     "discovered_at": datetime.now(timezone.utc).isoformat(),
@@ -574,9 +582,14 @@ def run(ctx: ModuleContext) -> None:
                     "verified": 0,
                     "verified_at": None,
                     "rejected": 0,
-                }, natural_key=["ons_code", "candidate_url"],
-                    preserve=db.DECISION_COLUMNS)
+                })
                 candidates_found += 1
+
+            db.upsert_many(
+                conn, "foi_request_candidates", candidate_rows,
+                natural_key=["ons_code", "candidate_url"],
+                preserve=db.DECISION_COLUMNS,
+            )
 
             if not ctx.dry_run:
                 conn.commit()

@@ -24,7 +24,10 @@ export default defineNuxtConfig({
   vue: {
     // See public/nuxt.config.ts: valid at runtime, config typing lags the RC.
     // @ts-expect-error vapor config typing lags the Vue 3.6 RC runtime
-    vapor: true,
+    // Keep the Nuxt application root on the stable VDOM runtime. The public
+    // app's deployed static smoke test exposed a mount failure with global
+    // Vapor interop, so this app follows the same cutover-safe path.
+    vapor: false,
   },
 
   css: ['~/assets/css/main.css'],

@@ -79,8 +79,9 @@ def test_packed_mojo_rows_decode_to_the_python_match_contract(monkeypatch):
 
     class Boundary:
         @staticmethod
-        def match_ontology(_utf8, _offsets, version):
+        def match_ontology(_utf8, _offsets, version, packed_trie):
             assert version == onto.version
+            assert packed_trie
             return (
                 tuple(row[0] for row in packed_rows),
                 tuple(row[1] for row in packed_rows),

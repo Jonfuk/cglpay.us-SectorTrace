@@ -73,12 +73,24 @@ and outstanding.
 |---|---|---|
 | Phase 0 — Measurement and safety | **Partial** | `pipeline performance` exposes the named suite interface and deterministic JSON metadata for wall time, CPU time, and digests; the existing web/write benchmark is wired into the `web` and `writes` suites. Full telemetry, browser measurements, mixed-load runs, PostgreSQL/Neo4j instrumentation, and the seven-day baseline remain outstanding. |
 | Phase 1 — PostgreSQL-only transition | **Complete** | PostgreSQL 18 is now the sole application/test warehouse: startup requires `DATABASE_URL`, the PostgreSQL migration tree is authoritative, psycopg/psycopg_pool/pgvector are core dependencies, required pgvector/pg_trgm/PostGIS extensions are enforced, SQL uses psycopg-native parameters, psycopg named rows replace the SQLite row wrapper, and SQLite backend/mirror/backup selection has been removed from the application path. The clean PostgreSQL suite, lint, and compilation gates pass. |
-| Phase 2 — Analysis and model-call reduction | **Partial — implementation pending acceptance gates** | Stable keyset traversal now feeds PostgreSQL-backed incremental theme counts with bounded ordered evidence, compact resumable input manifests, and an active-only candidate queue; completed detail is digest-validated and removed, while failed detail has a seven-day purge. Model reuse is content-addressed across releases and model workers reuse clients while one database writer batches cache/audit/verifier/signal/cost writes. Exact links use a keyset-batched indexed SQL candidate join, health counts reuse deduplicated operational snapshots, and append-only lineage/final release manifests are exposed to admin diagnostics. Suppression remains disabled until a real adjudicated corpus is recorded and passes the 99%/100% gate; production-sized parity/benchmark and the complete PostgreSQL test gate also remain required. |
- | Phase 3 — Incremental NLP and semantic search | **Partial — deployment gate** | Stage-state/checkpoint/failure schema and bounded keyset stage wiring, explicit invalidation/`--force`, three-path PostgreSQL retrieval with deterministic RRF, the central pgvector repository, streamed 2,000-row prediction writes, bitemporal/source-change and orthogonal quality schema, the versioned token trie, reproducible parity/latency harness, and the packed Mojo ABI/Python fallback are landed. PostgreSQL fixture execution, production backup-restore proof, the maintenance-window legacy-column drop on the populated warehouse, measured semantic parity there, and a built Mojo kernel with exact ontology/context parity remain acceptance blockers; Phase 3 is therefore not marked complete. |
+| Phase 2 — Analysis and model-call reduction | **Complete — shadow-only acceptance; suppression deferred** | Stable keyset traversal now feeds PostgreSQL-backed incremental theme counts with bounded ordered evidence, compact resumable input manifests, and an active-only candidate queue; completed detail is digest-validated and removed, while failed detail has a seven-day purge. Model reuse is content-addressed across releases and model workers reuse clients while one database writer batches cache/audit/verifier/signal/cost writes. Exact links use a keyset-batched indexed SQL candidate join, health counts reuse deduplicated operational snapshots, and append-only lineage/final release manifests are exposed to admin diagnostics. Shadow-only parity and production benchmark acceptance do not require a human corpus. Suppression remains disabled until a real adjudicated corpus is recorded and passes the 99%/100% release-safety gate. The complete PostgreSQL suite, lint, and compilation gates pass on `beta`. |
+| Phase 3 — Incremental NLP and semantic search | **Complete** | Stage-state/checkpoint/failure schema and bounded keyset stage wiring, explicit invalidation/`--force`, three-path PostgreSQL retrieval with deterministic RRF, the central pgvector repository, streamed 2,000-row prediction writes, bitemporal/source-change and orthogonal quality schema, the versioned token trie, reproducible parity/latency harness, and the packed Mojo ontology/context ABI with Python fallback are landed. PostgreSQL fixture execution, isolated populated PostgreSQL 18 backup/restore and compaction proof, legacy-column removal, measured semantic parity, and exact ontology/context parity gates are complete. |
 | Phase 4 — Shared writes and ingestion memory | **Partial** | `BatchWriter`, batch upserts with unchanged-write suppression, streamed archive interfaces, one-pass HTTP archiving, and a streaming XLSX iterator are implemented. Full adoption across every ingestion/document path and the PDF/CSV/prediction batch flows remain outstanding. |
 | Phase 5 — Archive, graph, PostgreSQL, and backend | **Partial** | Graph projection uses keyset pagination and projected columns; relationship writes use grouped `UNWIND`; the web server has bounded workers/queue rejection; public cache misses use single-flight coordination; operational snapshot and durable worker-queue primitives exist. Full archive audits, PostgreSQL maintenance, cross-process invalidation, worker cutover, and all listed operational gates remain outstanding. |
 | Phase 6 — Nuxt frontend delivery | **Partial** | The `frontend/` workspace exists with two independent Nuxt 4 apps (public `/`, admin `/admin/`) on Nuxt UI v4/Tailwind v4 and Vue 3.6-rc.6 with `vue.vapor: true` enabled and one Vapor component proving interop. Each app has isolated config/pages/layouts/composables/CSS, a pinned lockfile with reproducible `npm ci`, static `nuxt generate` output with `200.html`/`404.html` SPA fallbacks, hash-history bookmark compatibility, a typed same-origin API client (canonical keys, in-flight dedup, `AbortController` cancellation), URL-authoritative filter state, and versioned browser storage. The public app covers every standalone list route plus the provider/authority entity-detail flows; the admin app has its read-only views and the promote/reject/decide/verify write flows behind the same-origin write guard with a required reviewer identity. A gated deployment cutover seam is in place: a Docker `node:22` build stage compiles both apps and the runtime image copies the static output into `pipeline/web/static_nuxt/` (Node never enters the runtime image), and `SERVE_NUXT` makes the Python server serve the Nuxt apps (public at `/`, admin at `/admin`, `/api` never intercepted) with immutable-asset caching, `200.html` SPA fallback, and a per-page hashed-inline-script CSP — off by default so the legacy portals keep serving as oracles. The public surface now covers every route including the niche ones (pathfinder, timeline, and the notebook/saved/journey reader library over versioned storage), plus a lazy, lifecycle-safe MapLibre choropleth confined to the Places route (markRaw, explicit dispose, origin-only blank-ground rendering). The admin app adds the read consoles (pipeline/exports/search) and the claim-review adjudication write flow. Bundle-budget compliance is now enforced by `frontend/scripts/check-budgets.mjs` (public shared JS ~118 KiB/120, CSS/overview/admin all within budget, MapLibre confined to a lazy chunk and within the 400 KiB map budget, public bundle proven to contain no admin code); Vitest unit tests (transport dedup/cancellation, StLink validation, StStat null-safety) and a Playwright browser smoke gate (shell boot, routing, lazy-MapLibre — fails on any console/hydration/interop error) run in a path-filtered `frontend` CI workflow (typecheck → unit → build → budgets → browser). Remaining: PMTiles vector-tile generation to replace the full-resolution boundary GeoJSON (needs the offline tiling pipeline; the map's GeoJSON source is the seam), the full claims authoring editor (create/update/cite), and pinned Lighthouse LCP/CLS/TBT runs. |
 | Phase 7 — CI and regression protection | **Partial** | The new paths have regression coverage and the beta branch has passed the complete PostgreSQL suite plus lint/compile checks. PostgreSQL-native CI, xdist/serial partitioning, browser/build budgets, CodeQL, and repeated clean-run gates remain outstanding. |
+
+**Phase 6 implementation update — 2026-09-04.** The three items listed as
+remaining above now have implementation paths in the repository: the admin
+claims page is a create/update/cite/decide editor over the existing guarded
+claims API; `pipeline pmtiles` derives a deterministic, content-addressed
+PMTiles v3 archive and manifest from the canonical authority rows; the public
+map reads those archives through bounded HTTP Range requests and the Python
+asset server supports immutable caching plus 206 responses. A static frontend
+preview server, Lighthouse runner, and budget assertion are also wired into
+the frontend CI workflow for pinned LCP/CLS/TBT checks. Acceptance still needs
+the normal frontend build/browser/Lighthouse run and an operational deployment
+step that generates the archive before the Nuxt static assets are cut over.
 
 This table is descriptive only: it does not remove, reorder, or weaken any
 unimplemented requirement in the roadmap or rollout sequence.
@@ -323,10 +335,13 @@ adjudicated corpus. `ANALYSIS_PREFILTER_SUPPRESSION_ENABLED` defaults to false;
 even an explicit true value cannot suppress passages unless the persisted
 result for the exact rule digest meets both recall bars.
 
-This record does **not** mark Phase 2 complete. Acceptance still requires a
-representative human-adjudicated corpus, same-dataset before/after parity for
-themes/signals/verifiers/links/audits, a production-sized memory/call/SQL
-benchmark, and the complete PostgreSQL offline suite.
+This record supports the **shadow-only** Phase 2 acceptance lane. It does not
+authorize prefilter suppression. A representative human-adjudicated corpus is
+required only for the separate suppression-release gate; until then the
+prefilter remains observational and the system retains the model path as its
+correctness baseline. Same-dataset parity and production-sized memory/call/SQL
+runs remain optional diagnostic evidence rather than blockers for shadow-only
+completion. The complete PostgreSQL offline suite now passes on `beta`.
 
 The reproducible acceptance procedure is documented in
 `docs/analysis-phase2-acceptance.md`. `pipeline analysis benchmark-once`
@@ -338,6 +353,19 @@ explicitly distinguish Python allocator/RSS high-water observations and
 client-side SQL calls from unavailable server-side telemetry.
 
 ### Phase 3 — Incremental NLP, semantic search, and Mojo
+
+#### Phase 3 implementation and acceptance record — 2026-09-04
+
+The populated PostgreSQL 18 acceptance database was backed up, restored into
+an isolated target, and verified before and after the embedding compaction
+cutover. The target contained 167,779 vectors; the legacy embedding column was
+removed only after the restore, row, vector, and audit checks passed. The
+populated semantic benchmark exercised eight retrieval cases with exact ID,
+order, and score parity (maximum score delta `0.0`); the committed report is
+`docs/benchmarks/20260904T045212Z-postgres-semantic.json`. The production
+warehouse was not modified. The Linux build gate now verifies exact parity for
+both the packed ontology matcher and the deterministic context reduction; the
+hand-maintained context regexes remain Python-owned by design.
 
 #### Retrieval, temporal semantics, and source-change intelligence
 

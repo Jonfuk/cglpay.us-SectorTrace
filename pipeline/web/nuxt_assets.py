@@ -35,6 +35,7 @@ string juggling.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,7 @@ _CONTENT_TYPES = {
     ".woff": "font/woff",
     ".txt": "text/plain; charset=utf-8",
     ".map": "application/json; charset=utf-8",
+    ".pmtiles": "application/octet-stream",
 }
 
 
@@ -158,7 +160,8 @@ def _within(candidate: Path, base: Path) -> bool:
 def _is_hashed_asset(rel: str) -> bool:
     # Nuxt emits content-hashed assets under `_nuxt/`. Those, and only those,
     # are safe to mark immutable — their name changes when their bytes do.
-    return rel.startswith("_nuxt/") or "/_nuxt/" in rel
+    return (rel.startswith("_nuxt/") or "/_nuxt/" in rel
+            or re.fullmatch(r"map/boundaries-[0-9a-f]{64}\.pmtiles", rel) is not None)
 
 
 def _has_extension(rel: str) -> bool:

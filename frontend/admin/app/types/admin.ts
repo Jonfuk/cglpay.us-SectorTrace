@@ -198,3 +198,77 @@ export interface ClaimCandidatesResponse {
   caveat?: string
   [key: string]: unknown
 }
+
+/** A citation returned by the operator claims worklist. `resolved` is null
+ * when a later module run replaced the cited evidence row. */
+export interface ClaimCitation {
+  id?: number
+  claim_id?: number
+  evidence_table: string
+  evidence_key: string
+  cited_by: string
+  cited_at: string
+  note?: string | null
+  resolved?: {
+    label?: string | null
+    url?: string | null
+    source_url?: string | null
+    retrieved_at?: string | null
+  } | null
+  [key: string]: unknown
+}
+
+export interface ClaimDecision {
+  id?: number
+  claim_id?: number
+  decision: string
+  decided_by: string
+  decided_at: string
+  note?: string | null
+  [key: string]: unknown
+}
+
+export interface Claim {
+  id: number
+  claim_text: string
+  status: 'draft' | 'published' | 'rejected' | 'retracted' | string
+  caveats: string | null
+  created_by: string
+  created_at: string
+  note?: string | null
+  citations: ClaimCitation[]
+  decisions: ClaimDecision[]
+  [key: string]: unknown
+}
+
+export interface ClaimsResponse {
+  status: string
+  total: number
+  offset: number
+  limit: number
+  items: Claim[]
+  [key: string]: unknown
+}
+
+export interface ClaimCountsResponse {
+  draft: number
+  published: number
+  rejected: number
+  retracted: number
+  total: number
+  decisions?: ClaimDecision[]
+  [key: string]: unknown
+}
+
+export interface ClaimEvidenceRow {
+  key: string
+  label: string
+  url?: string | null
+  [key: string]: unknown
+}
+
+export interface ClaimEvidenceResponse {
+  tables: string[]
+  rows: ClaimEvidenceRow[]
+  [key: string]: unknown
+}
