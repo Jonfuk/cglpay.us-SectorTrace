@@ -101,6 +101,20 @@ After a representative human reviewer has labelled the corpus, record it with
 That later run is a release-safety check, not a prerequisite for the
 shadow-only Phase 2 implementation acceptance.
 
+## Small offline prefilter diagnostic
+
+For a quick indication of the deterministic gate's CPU cost and potential
+candidate reduction, replay the transparent regression fixture locally:
+
+```bash
+uv run python scripts/benchmark_phase2_prefilter.py \
+  --output docs/benchmarks/phase2-prefilter-micro.json
+```
+
+This is deliberately not a production benchmark or an adjudicated corpus. It
+reports the possible model-call reduction only; suppression remains disabled
+until the optional human-review gate above passes.
+
 ## Measurement meanings
 
 `benchmark-once` records observed values only:

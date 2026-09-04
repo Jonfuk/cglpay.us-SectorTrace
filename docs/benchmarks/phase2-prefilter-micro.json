@@ -1,0 +1,40 @@
+{
+  "baseline_enabled_false": {
+    "accepted_per_pass": 15,
+    "p50_ms": 28.361,
+    "p95_ms": 59.668,
+    "samples_ms": [
+      24.255,
+      26.52,
+      26.058,
+      30.767,
+      28.421,
+      28.361,
+      59.668
+    ]
+  },
+  "benchmark_version": "phase2-prefilter-micro-v1",
+  "caveat": "Fixture-only deterministic timing. Potential model-call reduction is not realised while suppression is disabled and this fixture is not human adjudication.",
+  "corpus": "tests\\fixtures\\analysis\\narrative_prefilter_regression.jsonl",
+  "corpus_is_production_adjudication": false,
+  "potential_candidate_reduction_fraction": 0.2,
+  "potential_model_calls_avoided_per_pass": 3,
+  "prefilter_cpu_overhead_fraction": 17.438039,
+  "prefilter_enabled_true": {
+    "accepted_per_pass": 12,
+    "p50_ms": 522.925,
+    "p95_ms": 665.757,
+    "samples_ms": [
+      598.236,
+      512.277,
+      522.925,
+      489.213,
+      459.915,
+      527.932,
+      665.757
+    ]
+  },
+  "repeat_per_sample": 10000,
+  "repetitions": 7,
+  "rows": 15
+}
