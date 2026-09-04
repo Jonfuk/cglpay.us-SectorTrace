@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from collections.abc import Iterable, Iterator
 from urllib.parse import urljoin
 
 import structlog
@@ -143,11 +144,40 @@ def _find_data_sheet(rows_by_name: dict[str, list[dict[str, str]]]) -> tuple[str
     return None
 
 
-def parse_estimates(rows: list[dict[str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
+def _find_data_sheet_stream(path_or_bytes) -> tuple[str, Iterator[dict[str, str]]] | None:
+    """Find the data sheet without materialising the workbook.
+
+    The first row is inspected with all columns because it defines the
+    publisher's vocabulary. Once that shape is known, the sheet is reopened
+    with only the columns this module stores. This keeps the appendix and
+    other report sheets out of memory and makes the large current-year file's
+    retained state proportional to the estimate rows, not its 313 columns.
+    """
+    for name in sheet_names(path_or_bytes):
+        rows = iter_sheet_stream(path_or_bytes, name)
+        try:
+            first = next(rows)
+        except StopIteration:
+            rows.close()
+            continue
+        header = {k: str(v).strip().lower() for k, v in first.items()}
+        if not {"area code", "job role", "hourly pay"} <= set(header.values()):
+            rows.close()
+            continue
+        wanted_labels = {value.lower() for value in DATA_HEADER_NAMES.values()}
+        keep = {letter for letter, label in header.items() if label in wanted_labels}
+        selected = iter_sheet_stream(path_or_bytes, name, keep=keep)
+        return name, selected
+    return None
+
+
+def _parse_estimates(rows: Iterable[dict[str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
     """The data sheet as estimate rows, plus parse failures.
 
-    Rows come from `iter_sheet` as {column letter: value}; the first row is
-    the header, which maps column letters to the workbook's column names.
+    Rows come from `iter_sheet_stream` as {column letter: value}; the first
+    row is the header, which maps column letters to the workbook's column
+    names. The iterator form means callers do not need to build a workbook-
+    sized list before parsing.
     Reads by column name from the header; a row missing the identifiers is
     skipped (total rows, blank rows, footnotes). `area_code` is kept
     verbatim — the workbook's own ONS code, never matched here.
@@ -157,9 +187,12 @@ def parse_estimates(rows: list[dict[str, str]]) -> tuple[list[dict], list[tuple[
     published in an unreadable form, which is a fact about the workbook, not
     a missing value.
     """
-    if not rows:
+    rows = iter(rows)
+    try:
+        first = next(rows)
+    except StopIteration:
         return [], []
-    header = {str(v).strip().lower(): k for k, v in rows[0].items()}
+    header = {str(v).strip().lower(): k for k, v in first.items()}
     names = {name: header[label.lower()] for name, label
              in DATA_HEADER_NAMES.items() if label.lower() in header}
     required = ("area_code", "area_level", "area", "sector", "service")
@@ -168,7 +201,7 @@ def parse_estimates(rows: list[dict[str, str]]) -> tuple[list[dict], list[tuple[
 
     out: list[dict] = []
     failures: list[tuple[str, str]] = []
-    for row in rows[1:]:
+    for row in rows:
         def cell(name: str) -> str:
             letter = names.get(name)
             if letter is None:
@@ -204,6 +237,16 @@ def parse_estimates(rows: list[dict[str, str]]) -> tuple[list[dict], list[tuple[
             "vacancy_rate": number("vacancy_rate"),
         })
     return out, failures
+
+
+def parse_estimates(rows: list[dict[str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Compatibility wrapper for callers with a materialised sheet."""
+    return _parse_estimates(rows)
+
+
+def parse_estimates_stream(rows: Iterable[dict[str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Parse one selected sheet while its XML iterator is still streaming."""
+    return _parse_estimates(rows)
 
 
 def _provenance(result) -> dict:
@@ -290,8 +333,7 @@ def run(ctx: ModuleContext) -> None:
                 continue
 
             try:
-                sheets = {name: list(iter_sheet_stream(result.body, name))
-                          for name in sheet_names(result.body)}
+                data_sheet = _find_data_sheet_stream(result.body)
             except (XlsxError, OSError, zipfile.BadZipFile) as exc:
                 db.record_parse_failure(
                     conn, module_name, "workbook", file_url,
@@ -309,7 +351,6 @@ def run(ctx: ModuleContext) -> None:
                     conn.commit()
                 continue
 
-            data_sheet = _find_data_sheet(sheets)
             if data_sheet is None:
                 db.record_parse_failure(
                     conn, module_name, "data_sheet", file_url,
@@ -328,8 +369,8 @@ def run(ctx: ModuleContext) -> None:
                     conn.commit()
                 continue
 
-            sheet_name, _rows = data_sheet
-            estimates, failures = parse_estimates(_rows)
+            sheet_name, rows = data_sheet
+            estimates, failures = parse_estimates_stream(rows)
             for field, raw in failures:
                 db.record_parse_failure(
                     conn, module_name, field, raw,
