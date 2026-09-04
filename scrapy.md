@@ -182,9 +182,13 @@ important distinction between collection, validation and promotion. It also
 prevents a process crash halfway through a large crawl from looking like a
 successful crawl that found nothing.
 
-The first pilot may use the existing module tables and writer functions behind
-an adapter if adding staging tables would delay learning. Staging is the
-preferred production design once the transport proves useful.
+Decision for the first pilot (2026-09-04): use the adapter-only path. The m34
+pilot returns the same fetch-only crawl shape as the existing module, but does
+not write existing evidence tables and does not introduce staging tables.
+This keeps the comparison reversible while transport parity is being measured;
+the production m34 writer remains HTTPX-backed. A staging design can still be
+introduced as a separate migration if a later production cutover needs durable
+run-scoped finalisation.
 
 ## Rate policy
 
@@ -299,6 +303,12 @@ At this point, Scrapy is an experimental transport, not the default.
 
 Port one source with clear crawl value, preferably `m34_icb_board_papers` or
 `m32_sab_site_reviews`.
+
+Status: the m34 adapter-only pilot is implemented in
+`pipeline/transports/pilots/m34_icb_board_papers_pilot.py`. Offline parity and
+provenance coverage are recorded in
+`docs/verification/m34-scrapy-pilot-verification.md`; the normal m34 module
+still uses HTTPX and no live source is called by CI.
 
 - Reuse existing URL discovery and parsers where practical.
 - Yield `FetchItem`, candidate, review and parse-failure items.
@@ -478,9 +488,10 @@ stop to report any design decision that requires owner approval.
 Later work should be split into separate reviewable tasks:
 
 1. approve the transport proof of concept;
-2. choose staging tables or the adapter-only persistence path;
-3. port one crawl-heavy module, with parity fixtures;
-4. run a watched live pilot and record coverage, timing, memory and archive
+2. choose staging tables or the adapter-only persistence path — decided for
+   this pilot: adapter-only;
+3. port one crawl-heavy module, with parity fixtures — m34 pilot complete;
+4. run the watched live m34 pilot and record coverage, timing, memory and archive
    fidelity;
 5. add `scrapy-playwright` only for demonstrated browser-dependent routes;
 6. port additional modules only after the pilot passes its acceptance gates.
