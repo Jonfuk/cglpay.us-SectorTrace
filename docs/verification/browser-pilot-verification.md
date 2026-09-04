@@ -2,8 +2,8 @@
 
 Status: offline scaffolding complete and live pages watched on 2026-09-04
 (Europe/London). Neither selected page showed a JavaScript-dependency signal;
-the `scrapy-playwright` integration itself produced no derived capture and
-needs follow-up before any browser migration decision.
+the Windows event-loop issue in the `scrapy-playwright` integration was fixed
+and both live rechecks now produce derived DOM captures.
 
 ## What this is
 
@@ -134,13 +134,21 @@ neither is a browser-migration candidate on this evidence. Chromium's peak
 RSS was about 0.76–0.78 GiB and its navigation was about 2–4 times slower,
 with 20–22 subrequests versus one HTTPX request per page.
 
-The comparison wrapper `fetch_via_scrapy_playwright()` was also invoked. It
-produced no derived DOM artefact in this environment: Liverpool returned a
-`DownloadFailedError`/connection-lost failure from the render leg, while the
-Kent call returned its intact original response with `derived_archive_ref`
-unset (`rendered=0`). The direct Chromium watch above confirms that the pages
-are reachable and renderable, so this is an integration follow-up for the
-experimental wrapper, not evidence of bot blocking or JavaScript dependency.
+The comparison wrapper `fetch_via_scrapy_playwright()` was initially unable
+to return a derived DOM because the Windows Scrapy callback loop directly
+awaited a Page owned by scrapy-playwright's dedicated Proactor loop. The
+wrapper now schedules Page operations on the owning loop, and the watched
+recheck succeeded for both pages:
+
+| Page | Original response | Derived DOM |
+| --- | --- | --- |
+| m09 Liverpool `/jsna` | 200; 23,019 bytes; SHA-256 `b27636c7826948a3f97d176e9c52fddbe4e4da0c35f85758a708d4d6ae5d34db` | `data/derived/authority_websites_cdp/fa7dcae4b0c0c082c4189fc24e69f9a72e9c7de9b72fdead3fd866635ca511c9.html`, `rendered_dom` |
+| m10 Kent ModernGov search | 200; 31,706 bytes; SHA-256 `bf40920231751bbbbde05991b9d519ae5ad0e874508ccfde932cfec24a788bc7` | `data/derived/council_committee_systems/6d13730aa606542988faa8507013c977905ef4a47005b8f1cab1b55eb011b369.html`, `rendered_dom` |
+
+The derived captures were written to the isolated, uncommitted live-recheck
+archive and are not committed. The direct browser measurements remain the
+relevant migration evidence: neither page gained useful parser results after
+rendering.
 
 No live browser measurement was added to CI. The raw captures remain in the
 isolated, uncommitted `data/live-verification/` worktree directory only.

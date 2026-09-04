@@ -61,6 +61,7 @@ exactly what "network restriction" means here).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import multiprocessing
 from dataclasses import dataclass, replace
@@ -80,6 +81,23 @@ from pipeline.transports.scrapy_transport import (
 from pipeline.transports.types import TransportResult
 
 log = structlog.get_logger()
+
+
+async def _call_page_on_its_loop(page, method: str):
+    """Await a Playwright coroutine on the loop that owns its Page.
+
+    scrapy-playwright uses a dedicated Proactor loop on Windows because
+    Playwright does not support the selector loop Scrapy installs. The Page
+    object therefore crosses from the handler's loop into the spider callback
+    loop; awaiting it directly raises "future belongs to a different loop".
+    """
+    operation = getattr(page, method)()
+    page_loop = getattr(getattr(page, "_impl_obj", None), "_loop", None)
+    current_loop = asyncio.get_running_loop()
+    if page_loop is None or page_loop is current_loop:
+        return await operation
+    future = asyncio.run_coroutine_threadsafe(operation, page_loop)
+    return await asyncio.wrap_future(future)
 
 
 class ScrapyPlaywrightDisabled(RuntimeError):
@@ -219,6 +237,12 @@ def _fetch_rendered_dom(
                        f"{settings.scrapy_runner_timeout_seconds}s") if timed_out
                       else f"runner exited without a result for this URL (exit code {process.exitcode})")
 
+    for capture in captures.values():
+        if capture.error:
+            log.warning("scrapy.playwright_capture_failed",
+                        url=capture.requested_url, error=capture.error,
+                        source_system=source_system)
+
     log.info("scrapy.playwright_finished", source_system=source_system, urls=len(requested),
               rendered=sum(1 for c in captures.values() if c.rendered_html is not None))
     return captures
@@ -335,28 +359,40 @@ def _spider_class():
             requested_url = response.meta.get("pipeline_requested_url", response.url)
             page = response.meta.get("playwright_page")
             rendered_html = None
+            error = None
             try:
                 if page is not None:
-                    rendered_html = await page.content()
+                    rendered_html = await _call_page_on_its_loop(page, "content")
+            except Exception as exc:  # noqa: BLE001 - preserve a per-URL failure
+                error = f"{type(exc).__name__}: {exc}"
             finally:
                 # Always closed — success or failure to read content —
                 # scrapy.md: "Browser pages must always close in success
                 # and error paths."
-                if page is not None and not page.is_closed():
-                    await page.close()
+                if page is not None:
+                    try:
+                        if not page.is_closed():
+                            await _call_page_on_its_loop(page, "close")
+                    except Exception as exc:  # noqa: BLE001 - cleanup must not hide result
+                        error = error or f"{type(exc).__name__}: {exc}"
 
             self.result_queue.put(RenderedCapture(
                 requested_url=requested_url, final_url=response.url,
-                status_code=response.status, rendered_html=rendered_html))
+                status_code=response.status, rendered_html=rendered_html, error=error))
 
         async def on_failure(self, failure):
             request = failure.request
             requested_url = request.meta.get("pipeline_requested_url", request.url)
             page = request.meta.get("playwright_page")
-            if page is not None and not page.is_closed():
-                await page.close()
+            error = f"{type(failure.value).__name__}: {failure.value}"
+            if page is not None:
+                try:
+                    if not page.is_closed():
+                        await _call_page_on_its_loop(page, "close")
+                except Exception as exc:  # noqa: BLE001 - cleanup must not hide failure
+                    error = f"{error}; page close: {type(exc).__name__}: {exc}"
             self.result_queue.put(RenderedCapture(
                 requested_url=requested_url, final_url=None, status_code=None,
-                rendered_html=None, error=f"{type(failure.value).__name__}: {failure.value}"))
+                rendered_html=None, error=error))
 
     return _RenderOnlySpider
