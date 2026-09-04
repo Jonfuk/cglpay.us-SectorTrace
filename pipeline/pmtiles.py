@@ -205,7 +205,9 @@ def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, by
     """Clip each authority to the tiles it intersects and encode MVT bytes."""
     import mapbox_vector_tile
     import mercantile
-    from shapely.geometry import box, shape
+    from shapely.errors import GEOSException
+    from shapely.geometry import MultiPolygon, box, shape
+    from shapely.ops import transform, unary_union
     from shapely.validation import make_valid
 
     tile_features: dict[tuple[int, int, int], list[dict]] = {}
@@ -255,13 +257,50 @@ def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, by
     def repair(geometry):
         return _polygonal(make_valid(geometry))
 
+    def quantize(geometry, bounds):
+        minx, miny, maxx, maxy = bounds
+        x_factor = EXTENT / (maxx - minx)
+        y_factor = EXTENT / (maxy - miny)
+
+        def round_coordinate(x, y, z=None):
+            return round(x_factor * (x - minx)), round(y_factor * (y - miny))
+
+        return transform(round_coordinate, geometry)
+
+    def quantized_polygonal(geometry, bounds):
+        # Repair MultiPolygon members independently. Repairing the whole
+        # quantised collection can fail in GEOS when one tiny member has
+        # collapsed to a different dimension than its neighbours.
+        if isinstance(geometry, MultiPolygon):
+            members = [quantized_polygonal(member, bounds) for member in geometry.geoms]
+            members = [member for member in members if member is not None]
+            if not members:
+                return None
+            merged = unary_union(members)
+            return _polygonal(merged)
+        quantized = quantize(geometry, bounds)
+        try:
+            repaired = make_valid(quantized)
+        except GEOSException:
+            return None
+        return _polygonal(repaired)
+
     encoded: dict[int, bytes] = {}
     for (zoom, x, y), features in sorted(tile_features.items()):
-
+        bounds = _tile_bounds(mercantile.Tile(x, y, zoom))
+        quantized_features = []
+        for feature in features:
+            # Quantisation happens before winding-order repair so collapsed
+            # slivers are removed as polygonal geometry rather than handed to
+            # mapbox-vector-tile as a Point inside a MultiPolygon.
+            geometry = quantized_polygonal(feature["geometry"], bounds)
+            if geometry is not None:
+                quantized_features.append({**feature, "geometry": geometry})
+        if not quantized_features:
+            continue
         encoded[_tile_id(zoom, x, y)] = mapbox_vector_tile.encode(
-            [{"name": LAYER_NAME, "features": features}],
+            [{"name": LAYER_NAME, "features": quantized_features}],
             default_options={
-                "quantize_bounds": _tile_bounds(mercantile.Tile(x, y, zoom)),
                 "extents": EXTENT,
                 "on_invalid_geometry": repair,
             },
