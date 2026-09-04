@@ -42,6 +42,22 @@ def pack_texts(texts) -> PackedTexts:
     return PackedTexts(bytes(data), tuple(offsets))
 
 
+def pack_ontology(ontology):
+    """Flatten the authoritative Python trie for the packed Mojo boundary.
+
+    Ontology loading and versioning stay in Python.  The optional extension
+    receives only the already-normalised alias rows, so it cannot silently
+    load a different vocabulary from disk; its native work is token scanning
+    and packed result construction.
+    """
+    concept_ids = sorted(ontology.concepts)
+    rows = []
+    for concept_ordinal, concept_id in enumerate(concept_ids):
+        for _alias, alias_tokens in ontology.concepts[concept_id].alias_tokens:
+            rows.append((concept_ordinal, " ".join(alias_tokens)))
+    return tuple(rows)
+
+
 def select(mode: str):
     """Return the optional extension, or None for the authoritative Python path."""
     global _FALLBACK_REPORTED
@@ -85,10 +101,11 @@ def ontology_matches(ontology, texts, *, mode: str = "auto"):
     if extension is None:
         return ontology.match_batch(texts)
     packed = pack_texts(texts)
-    # The compiled module receives the ontology's versioned packed trie. A
-    # future extension must expose this exact function and pass row-for-row
-    # parity before deployment.
-    result = extension.match_ontology(packed.utf8, packed.offsets, ontology.version)
+    # The compiled module receives the ontology version and its Python-owned,
+    # normalised alias rows. The build gate proves the native result against
+    # the authoritative matcher before the extension is allowed to activate.
+    result = extension.match_ontology(
+        packed.utf8, packed.offsets, ontology.version, pack_ontology(ontology))
     if not isinstance(result, tuple) or len(result) != 5:
         raise MojoIncompatible("Mojo ontology result does not match packed ABI v1")
     return _unpack_matches(ontology, texts, result)

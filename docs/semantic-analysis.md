@@ -200,9 +200,10 @@ The optional Mojo module follows [Mojo's documented pre-built Python extension
 boundary](https://mojolang.org/docs/manual/python/mojo-from-python/)
 (`mojo build ... --emit shared-lib`). CI always exercises Python
 fallback and invokes `scripts/build_mojo_nlp.py --if-available`; the build
-script refuses non-Linux/x86-64 hosts. The compiled smoke boundary remains
-parity-disabled, so even a successful build cannot accelerate ontology or
-context work until exact packed-output parity is implemented and approved.
+script refuses non-Linux/x86-64 hosts. The packed ontology matcher is active
+only after that script verifies exact row-for-row parity over every committed
+NLP fixture string and representative edge cases. Context detection remains
+Python-owned until it has a separate packed ABI and the same exact proof.
 
 ## What ships now (tranche 034B) — the ontology
 
