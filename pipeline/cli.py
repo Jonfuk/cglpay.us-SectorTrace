@@ -2002,6 +2002,22 @@ def sync_screen() -> None:
     tui_sync.run()
 
 
+@app.command("containers")
+def containers_screen() -> None:
+    """Open the Docker Compose container management screen."""
+    from pipeline import tui_containers
+
+    tui_containers.run()
+
+
+@app.command("run-all")
+def run_all_screen() -> None:
+    """Open the complete-run screen, defaulting to 14 concurrent modules."""
+    from pipeline import tui_run_all
+
+    tui_run_all.run()
+
+
 _audit_counts = runner.audit_counts
 
 

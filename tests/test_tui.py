@@ -2,7 +2,7 @@
 
 import asyncio
 
-from textual.widgets import Input, Static
+from textual.widgets import Input, Select, Static
 from trogon.introspect import introspect_click_app
 from trogon.widgets.command_tree import CommandTree
 from trogon.widgets.form import CommandForm
@@ -12,7 +12,9 @@ from typer.testing import CliRunner
 
 from pipeline import cli as cli_module
 from pipeline.tui import RunConfirmation, SafeTrogon, command_requires_confirmation
+from pipeline.tui_containers import ContainerManagerApp
 from pipeline.tui_dashboard import InformationModal, OperatorDashboard
+from pipeline.tui_run_all import RunAllApp
 from pipeline.tui_sync import BackupSyncApp
 
 
@@ -26,7 +28,7 @@ def test_cli_exposes_tui_command() -> None:
 def test_tui_schema_contains_nested_commands_and_options() -> None:
     schema = introspect_click_app(get_group(cli_module.app))["root"]
 
-    assert {"dashboard", "sync", "graph", "documents", "nlp", "analysis", "mirror"}.issubset(
+    assert {"dashboard", "sync", "containers", "run-all", "graph", "documents", "nlp", "analysis", "mirror"}.issubset(
         schema.subcommands
     )
     assert "search" in schema.subcommands["documents"].subcommands
@@ -168,5 +170,28 @@ def test_backup_sync_screen_mounts_without_starting_a_transfer(settings) -> None
             await pilot.pause()
             assert "DATABASE_URL:" in str(pilot.app.query_one("#endpoints", Static).render())
             assert not pilot.app.query_one("#replace").display
+
+    asyncio.run(exercise())
+
+
+def test_container_screen_mounts_without_running_docker(settings) -> None:
+    """Opening the container screen does not invoke Docker until refresh is chosen."""
+    async def exercise() -> None:
+        async with ContainerManagerApp(refresh_on_mount=False).run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert pilot.app.query_one("#action", Select).value == "status"
+            assert "Volume deletion" in str(
+                pilot.app.query_one("#guardrails", Static).render())
+
+    asyncio.run(exercise())
+
+
+def test_run_all_screen_defaults_to_fourteen_jobs(settings) -> None:
+    """The dedicated run-all form exposes its intended concurrency visibly."""
+    async def exercise() -> None:
+        async with RunAllApp(settings).run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert pilot.app.query_one("#jobs", Input).value == "14"
+            assert "waves" in str(pilot.app.query_one("#plan", Static).render())
 
     asyncio.run(exercise())

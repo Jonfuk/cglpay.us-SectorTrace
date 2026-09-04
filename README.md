@@ -61,6 +61,8 @@ around.
 ./start.sh                        # show CLI help
 ./start.sh tui                    # interactive terminal UI for the CLI
 ./start.sh sync                   # backup / sync cockpit
+./start.sh containers             # Docker Compose management cockpit
+./start.sh run-all                # complete run cockpit (--jobs 14 default)
 ./start.sh run all                # collect from every source, in dependency order
 ./start.sh run m01_procurement    # run one module
 ./start.sh run all --jobs 4       # collect concurrently across different hosts
@@ -94,6 +96,16 @@ and `BACKUP_S3_*`, and verified PostgreSQL replacement in either direction
 between `DATABASE_URL` and `DATABASE_SOURCE_URL`. PostgreSQL replacement
 backs up the populated target first; no operation merges two writable
 warehouses or deletes remote/local files.
+
+For administration of the local Compose stacks, use `./start.sh containers`.
+It can inspect status and recent logs, or start, stop, and restart a selected
+Compose stack/service after confirmation. It does not offer `down -v`, volume
+deletion, or arbitrary container removal.
+
+For the full collection, use `./start.sh run-all`. It shows the dependency
+waves before starting and defaults to `--jobs 14`; the form also exposes
+`--since`, `--limit`, the m01 source channel, and `--dry-run`. It uses the same
+runner and durable run ledger as the CLI and web operator UI.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle
