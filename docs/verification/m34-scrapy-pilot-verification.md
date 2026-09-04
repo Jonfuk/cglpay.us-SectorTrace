@@ -37,3 +37,35 @@ The next action is a manually watched live m34 sample for the verified
 Nottingham and Nottinghamshire ICB board page. Record request count, pages,
 documents, elapsed time, peak memory, failures, candidate ordering and archive
 hash/provenance checks before considering any production transport change.
+
+## Watched live sample
+
+Run date: 2026-09-04. Target:
+`https://notts.icb.nhs.uk/about-us/our-icb-board/`. The sample used the
+adapter-only pilot with the existing m34 bounds, a two-second Scrapy delay and
+one request per host. It was run manually from a one-off harness; it is not a
+CI test and did not write the database.
+
+Observed result:
+
+- elapsed time: 127.90 seconds;
+- Scrapy requests: 49 (20 bounded path probes plus 29 documents);
+- pages fetched: 3;
+- documents fetched: 29;
+- ceiling reached: no;
+- robots blocked / unreachable: no / no;
+- review items: none;
+- raw archive files: 47, totalling 297,000,876 bytes;
+- candidate payload hashes: 29 unique hashes;
+- provenance checks: 29/29 passed;
+- archived bytes matched fetched bytes: 29/29 passed;
+- peak monitored working set across the runner process tree: approximately
+  766 MB.
+
+The fetch and provenance gates passed, but the memory observation is material:
+the pilot retains fetched results until it returns the crawl, and this sample
+held several large board packs. Phase 2 is therefore **not approved for a
+production transport cutover yet**. The next engineering action is to profile
+and reduce peak memory (or tighten the pilot's document/response retention
+boundary), then repeat the watched sample before any writer or transport
+default changes.
