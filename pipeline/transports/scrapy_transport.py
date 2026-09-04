@@ -51,16 +51,38 @@ re-uses `pipeline.http.RobotsRules` (the RFC 9309 wildcard-aware parser) and
 interpretations for the same host would be a second thing to keep in sync
 and a second place for the "we honour robots.txt" claim to quietly stop
 being true; reusing the already-correct implementation removes that risk
-entirely, at the cost of a blocking `httpx` call to fetch `robots.txt` inside
-`process_request` (see `RobotsComplianceMiddleware`) — acceptable for a
-bounded handful of requests, and the thing to revisit before a real
-crawl-heavy module moves onto this path.
+entirely. The `robots.txt` fetch itself is `async def` over `httpx.AsyncClient`
+(Scrapy has awaited downloader-middleware methods since 2.13, and this
+project's minimum is 2.11 — the compatibility note on `_BoundedFetchSpider`
+applies here too), so it suspends on the same asyncio reactor Scrapy already
+runs rather than blocking the whole process for the length of the request.
+
+**Retries.** `RetryWithBackoffMiddleware` gives this transport the same
+shape of retry policy `pipeline.http` applies via tenacity — bounded
+attempts, exponential backoff, `Retry-After` honoured when a response
+carries one — because Scrapy's own `RetryMiddleware` (disabled here via
+`RETRY_ENABLED: False`) retries immediately with no per-attempt delay and no
+`Retry-After` support, neither of which meets CLAUDE.md's "Retry-After
+honoured" politeness requirement.
+
+**Robots overrides are recorded.** Exactly as `PipelineHTTPClient.get()`
+does, an override configured in `Settings.robots_exceptions` is written to
+`review_queue` once per (module, prefix) — not a new table, the same one
+every other module's overrides already land in — so the override stays
+visible in the audit trail rather than only in a log line. The write opens
+its own short-lived connection inside the subprocess (mirroring
+`pipeline.parallel`'s one-connection-per-worker discipline) only when an
+override actually fires; the common case, where robots.txt simply allows
+the fetch, never touches the database at all.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
+import json
 import multiprocessing
+import time
 from datetime import datetime, timezone
 from queue import Empty
 from typing import Sequence
@@ -126,6 +148,14 @@ def fetch_via_scrapy(
     person. `resolver` only affects a hostname that needs a DNS lookup — a
     literal IP in the URL resolves without one, which is how tests exercise
     the guard without needing the child process to see a patched resolver.
+
+    The queue is drained continuously while waiting rather than joined first
+    and drained after: a `multiprocessing.Queue` is backed by an OS pipe with
+    a finite buffer, and a subprocess blocked writing a large or numerous
+    result to a parent that is not yet reading is the textbook deadlock this
+    avoids. Bounded to a handful of small fetches, Phase 1 was unlikely to
+    hit that buffer — but "unlikely" is not the same claim `require_provenance`
+    makes about everything else here, so this drains as it goes.
     """
     if not settings.scrapy_enabled:
         raise ScrapyDisabled(
@@ -155,18 +185,40 @@ def fetch_via_scrapy(
     log.info("scrapy.runner_starting", source_system=source_system, module=module,
               urls=len(requested))
     process.start()
-    process.join(settings.scrapy_runner_timeout_seconds)
+
+    # Actively drained the whole time the process runs — see the docstring
+    # above for why a plain join()-then-drain risks a full pipe deadlocking
+    # the subprocess against a parent that isn't reading yet.
+    poll_interval = 0.2
+    deadline = time.monotonic() + settings.scrapy_runner_timeout_seconds
+    results: list[TransportResult] = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            results.append(queue.get(timeout=min(poll_interval, remaining)))
+            continue
+        except Empty:
+            pass
+        if not process.is_alive():
+            break
+
     timed_out = process.is_alive()
     if timed_out:
         process.terminate()
         process.join(5)
         log.warning("scrapy.runner_timeout", source_system=source_system, module=module,
                      urls=len(requested), timeout=settings.scrapy_runner_timeout_seconds)
+    else:
+        process.join(5)
 
-    results: list[TransportResult] = []
-    for _ in requested:
+    # The process has exited (or been killed) by this point, so anything it
+    # ever put is already flushed to the pipe — one last non-blocking pass
+    # catches whatever landed between the final Empty and the exit check.
+    while True:
         try:
-            results.append(queue.get(timeout=2))
+            results.append(queue.get_nowait())
         except Empty:
             break
 
@@ -217,10 +269,9 @@ def _run_bounded_crawl(queue, urls, source_system, module, settings: Settings,
             # with the HTTPX transport. See the module docstring.
             "ROBOTSTXT_OBEY": False,
             "COOKIES_ENABLED": False,
-            # Phase 1 is a minimal bounded runner, not a parity implementation
-            # of PipelineHTTPClient's tenacity retry/backoff policy. A source
-            # migrated onto this transport (Phase 2+) is exactly where a
-            # measured retry policy belongs.
+            # Scrapy's own RetryMiddleware retries immediately with no
+            # per-attempt delay and no Retry-After support — this project's
+            # own RetryWithBackoffMiddleware below replaces it.
             "RETRY_ENABLED": False,
             "AUTOTHROTTLE_ENABLED": False,
             "USER_AGENT": settings.user_agent,
@@ -231,6 +282,7 @@ def _run_bounded_crawl(queue, urls, source_system, module, settings: Settings,
                 "pipeline.transports.scrapy_transport.StructuredLoggingMiddleware": 100,
                 "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
                 "pipeline.transports.scrapy_transport.DestinationGuardMiddleware": 250,
+                "pipeline.transports.scrapy_transport.RetryWithBackoffMiddleware": 950,
                 "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 900,
             },
             "PIPELINE_SETTINGS": settings,
@@ -290,7 +342,13 @@ class RobotsComplianceMiddleware:
     def __init__(self, pipeline_settings: Settings) -> None:
         self._settings = pipeline_settings
         self._rules_cache: dict[str, RobotsRules] = {}
-        self._client = httpx.Client(timeout=10.0)
+        self._client = httpx.AsyncClient(timeout=10.0)
+        # Lazy and rare: opened only the first time an override actually
+        # fires, on this subprocess's own connection (pipeline.parallel's
+        # one-connection-per-worker discipline) — the ordinary case, where
+        # robots.txt simply allows the fetch, never touches the database.
+        self._review_conn = None
+        self._overrides_recorded: set[tuple[str, str]] = set()
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -300,16 +358,18 @@ class RobotsComplianceMiddleware:
         crawler.signals.connect(mw._closed, signal=signals.spider_closed)
         return mw
 
-    def _closed(self, spider) -> None:
-        self._client.close()
+    async def _closed(self, spider) -> None:
+        await self._client.aclose()
+        if self._review_conn is not None:
+            self._review_conn.close()
 
-    def _rules_for(self, url: str) -> RobotsRules:
+    async def _rules_for(self, url: str) -> RobotsRules:
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
         rules = self._rules_cache.get(origin)
         if rules is None:
             try:
-                response = self._client.get(
+                response = await self._client.get(
                     f"{origin}/robots.txt",
                     headers={"User-Agent": self._settings.user_agent},
                 )
@@ -320,16 +380,46 @@ class RobotsComplianceMiddleware:
             self._rules_cache[origin] = rules
         return rules
 
-    def process_request(self, request, spider):
+    def _record_override(self, spider, override: str) -> None:
+        """Mirrors `PipelineHTTPClient.get()`'s once-per-(module, prefix)
+        review item — an override that left no trace would be
+        indistinguishable from this transport simply not honouring
+        robots.txt. Best-effort: a review item is an audit convenience, not
+        the fetch itself, so a database problem here is logged and swallowed
+        rather than allowed to fail an otherwise successful crawl.
+        """
+        module = spider.module or spider.source_system
+        key = (module, override)
+        if key in self._overrides_recorded:
+            return
+        self._overrides_recorded.add(key)
+        try:
+            from pipeline import db
+
+            if self._review_conn is None:
+                self._review_conn = db.get_connection(self._settings)
+            db.record_review_item(
+                self._review_conn, module, "robots_override_in_use", override,
+                json.dumps({"note": "robots.txt disallows this prefix; fetched under an "
+                                    "explicit exception in Settings.robots_exceptions",
+                            "user_agent": self._settings.user_agent, "transport": "scrapy"}))
+            self._review_conn.commit()
+        except Exception:  # noqa: BLE001 - never let an audit write fail the crawl
+            log.warning("scrapy.robots_override_review_item_failed", module=module,
+                        override=override, exc_info=True)
+
+    async def process_request(self, request, spider):
         from scrapy.exceptions import IgnoreRequest
 
-        if self._rules_for(request.url).can_fetch(request.url):
+        rules = await self._rules_for(request.url)
+        if rules.can_fetch(request.url):
             return None
 
         override = self._settings.robots_override_for(request.url)
         if override is not None:
             log.warning("scrapy.robots_override", url=request.url, allowed_by=override,
                          source_system=spider.source_system, module=spider.module)
+            self._record_override(spider, override)
             return None
 
         detail = (f"robots.txt disallows fetching {request.url} as "
@@ -376,16 +466,127 @@ class DestinationGuardMiddleware:
         return None
 
 
+class RetryWithBackoffMiddleware:
+    """Bounded retries with exponential backoff and `Retry-After` support —
+    the same shape of policy `pipeline.http` applies via tenacity
+    (`_is_retryable`, `_wait_respecting_retry_after`), reimplemented here
+    because Scrapy's own `RetryMiddleware` (disabled via `RETRY_ENABLED:
+    False`) retries immediately with no per-attempt delay and no
+    `Retry-After` support — neither of which meets CLAUDE.md's "Retry-After
+    honoured" requirement.
+
+    Runs at a higher priority number than `ProvenanceArchiveMiddleware`
+    (950 vs 900), so for `process_response`/`process_exception` — which run
+    in descending priority order — this sees a retryable response or
+    exception *before* anything is archived. A response this middleware
+    decides to retry is never archived at all: `pipeline.http`'s tenacity
+    retries happen inside `PipelineHTTPClient._do_request`, before its own
+    `get()` hashes or archives anything, so only the final attempt's body is
+    ever written to the raw archive on that path either. Returning a new
+    `Request` here short-circuits the rest of the `process_response` chain
+    (Scrapy's contract: a `Request` result skips every remaining
+    middleware), which is what keeps an in-flight retry attempt out of the
+    archive.
+    """
+
+    RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504, 522, 524})
+
+    def __init__(self, pipeline_settings: Settings) -> None:
+        self._settings = pipeline_settings
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings.get("PIPELINE_SETTINGS"))
+
+    def _delay_seconds(self, attempt: int, retry_after: str | None) -> float:
+        """`attempt` is 1-indexed: the attempt about to be made. A numeric
+        `Retry-After` wins outright — the same precedence
+        `_wait_respecting_retry_after` gives it — and anything else (absent,
+        or an HTTP-date this project has never needed to parse) falls back
+        to exponential backoff.
+        """
+        if retry_after:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+        minimum = self._settings.scrapy_retry_backoff_min_seconds
+        maximum = self._settings.scrapy_retry_backoff_max_seconds
+        return min(maximum, max(minimum, minimum * (2 ** (attempt - 1))))
+
+    def _next_attempt(self, request):
+        """`(should_retry, attempt_number)` for this request, reading
+        `retry_times` the way Scrapy's own retry machinery does — 0 until
+        the first retry — so stats and logs from either would agree on the
+        count if both were ever compared.
+        """
+        retry_times = request.meta.get("retry_times", 0)
+        max_attempts = self._settings.scrapy_retry_max_attempts
+        if retry_times >= max_attempts - 1:
+            return False, retry_times
+        return True, retry_times + 1
+
+    def _retry_request(self, request, attempt: int):
+        new_meta = dict(request.meta)
+        new_meta["retry_times"] = attempt
+        return request.replace(meta=new_meta, dont_filter=True)
+
+    async def process_response(self, request, response, spider):
+        if response.status not in self.RETRYABLE_STATUS:
+            return response
+        should_retry, attempt = self._next_attempt(request)
+        if not should_retry:
+            log.warning("scrapy.retries_exhausted", url=request.url, status=response.status,
+                         attempts=attempt + 1, source_system=spider.source_system,
+                         module=spider.module)
+            return response
+
+        retry_after = response.headers.get(b"Retry-After")
+        delay = self._delay_seconds(attempt, retry_after.decode("latin-1") if retry_after else None)
+        log.info("scrapy.retrying", url=request.url, status=response.status, attempt=attempt,
+                  delay=delay, source_system=spider.source_system, module=spider.module)
+        await asyncio.sleep(delay)
+        return self._retry_request(request, attempt)
+
+    async def process_exception(self, request, exception, spider):
+        from scrapy.exceptions import IgnoreRequest
+
+        if isinstance(exception, IgnoreRequest):
+            # A robots or destination-guard refusal is not a transient
+            # failure — retrying it would just ask the same question again.
+            return None
+        failure_class, _ = _classify_twisted_failure(exception)
+        if failure_class not in (FailureClass.TIMEOUT, FailureClass.TRANSPORT_ERROR):
+            return None
+
+        should_retry, attempt = self._next_attempt(request)
+        if not should_retry:
+            log.warning("scrapy.retries_exhausted", url=request.url,
+                         error=f"{type(exception).__name__}: {exception}", attempts=attempt + 1,
+                         source_system=spider.source_system, module=spider.module)
+            return None
+
+        delay = self._delay_seconds(attempt, None)
+        log.info("scrapy.retrying", url=request.url,
+                  error=f"{type(exception).__name__}: {exception}", attempt=attempt, delay=delay,
+                  source_system=spider.source_system, module=spider.module)
+        await asyncio.sleep(delay)
+        return self._retry_request(request, attempt)
+
+
 class ProvenanceArchiveMiddleware:
     """Archives the exact response bytes and stamps retrieval provenance.
 
-    Runs last (highest priority number) among this project's middlewares, so
-    it only ever sees a response that robots/guard did not already refuse.
-    Stamped onto `request.meta` rather than `response.meta`: at the point
-    `process_response` runs, the engine has not yet bound `response.request`,
-    so `response.meta` (which proxies to `self.request.meta`) raises. Writing
-    to `request.meta` directly reaches the same dict once the spider callback
-    sees it — `response.meta` and `request.meta` really are the same object.
+    Runs last among this project's `process_response` middlewares (lowest
+    remaining priority number, so — since that chain runs in descending
+    order — everything else has already had a chance to intervene, most
+    importantly `RetryWithBackoffMiddleware` short-circuiting a retryable
+    response before it gets here). Stamped onto `request.meta` rather than
+    `response.meta`: at the point `process_response` runs, the engine has
+    not yet bound `response.request`, so `response.meta` (which proxies to
+    `self.request.meta`) raises. Writing to `request.meta` directly reaches
+    the same dict once the spider callback sees it — `response.meta` and
+    `request.meta` really are the same object.
     """
 
     def __init__(self, pipeline_settings: Settings) -> None:

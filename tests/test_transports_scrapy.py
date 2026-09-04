@@ -14,6 +14,7 @@ suite.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import http.server
 import threading
@@ -27,6 +28,7 @@ from pipeline.config import Settings
 from pipeline.transports.scrapy_transport import (
     DestinationGuardMiddleware,
     ProvenanceArchiveMiddleware,
+    RetryWithBackoffMiddleware,
     RobotsComplianceMiddleware,
     ScrapyDisabled,
     ScrapyNotInstalled,
@@ -34,6 +36,15 @@ from pipeline.transports.scrapy_transport import (
     fetch_via_scrapy,
 )
 from pipeline.transports.types import FailureClass
+
+
+def _run(coro):
+    """Run a coroutine returned by an `async def` middleware method from a
+    plain (sync) test function — no pytest-asyncio dependency needed for the
+    handful of call sites that exercise `process_request`/`process_response`/
+    `process_exception` directly.
+    """
+    return asyncio.run(coro)
 
 # --- a local, in-process fixture server --------------------------------------
 #
@@ -99,9 +110,11 @@ def robots_disallowing_server():
 @pytest.fixture
 def scrapy_settings(tmp_path: Path) -> Settings:
     """Settings for the Scrapy transport only — this runner takes no database
-    connection in Phase 1, so unlike the shared `settings` fixture this does
-    not need the PostgreSQL warehouse at all. `raw_archive_dir` is the only
-    writable path involved, and it is under `tmp_path`.
+    connection in Phase 1 unless a robots override actually fires (see
+    `test_robots_override_writes_a_review_item`, which uses the Postgres-backed
+    `settings`/`conn` fixtures instead), so unlike those this does not need the
+    warehouse at all. `raw_archive_dir` is the only writable path involved,
+    and it is under `tmp_path`.
     """
     return Settings(
         contact_email="test@example.com",
@@ -112,8 +125,77 @@ def scrapy_settings(tmp_path: Path) -> Settings:
         scrapy_download_delay_seconds=0.0,
         scrapy_download_timeout_seconds=5.0,
         scrapy_runner_timeout_seconds=30.0,
+        # One attempt, no retries: tests of a genuine, permanent failure
+        # (connection refused, a hung server) care about the *classification*,
+        # not about sitting through RetryWithBackoffMiddleware's backoff
+        # first. The retry tests below override this explicitly.
+        scrapy_retry_max_attempts=1,
         _env_file=None,
     )
+
+
+def _make_flaky_handler(fail_times: int):
+    """A handler that answers `/flaky` with 503 `fail_times` times, then 200.
+
+    State lives in a plain dict closed over by the class, not a class
+    attribute, so two tests using this factory never share a counter.
+    """
+    state = {"count": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/robots.txt":
+                status, body = 200, b"User-agent: *\nAllow: /\n"
+            elif self.path == "/flaky":
+                state["count"] += 1
+                status, body = ((503, b"try again") if state["count"] <= fail_times
+                                 else (200, b"third time lucky"))
+            else:
+                status, body = 404, b"unmapped path"
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    return Handler, state
+
+
+@pytest.fixture
+def flaky_server():
+    """`(base_url, state)` for a server whose `/flaky` path fails twice then
+    succeeds. `state["count"]` is readable after the crawl: the server runs
+    on a thread in this test process, and only the Scrapy crawl itself runs
+    in the spawned subprocess, so the parent process's view of `state` is
+    exactly what the subprocess's requests produced.
+    """
+    handler_cls, state = _make_flaky_handler(fail_times=2)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", state
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def always_failing_server():
+    """`(base_url, state)` for a server whose `/flaky` path always fails —
+    for proving retries give up rather than looping forever.
+    """
+    handler_cls, state = _make_flaky_handler(fail_times=10_000)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", state
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 # --- feature-flag / installation gates ---------------------------------------
@@ -331,6 +413,47 @@ def test_source_module_metadata_travels_with_every_result(fixture_server, scrapy
     assert result.module == "m99_example"
 
 
+def test_retries_recover_from_a_transient_5xx(flaky_server, scrapy_settings):
+    """End-to-end proof that RetryWithBackoffMiddleware is actually wired
+    into the crawl, not just correct in isolation: two 503s and then a 200
+    must come back as one successful result, with the retried attempts never
+    archived.
+    """
+    base_url, state = flaky_server
+    scrapy_settings.scrapy_retry_max_attempts = 5
+    scrapy_settings.scrapy_retry_backoff_min_seconds = 0.02
+    scrapy_settings.scrapy_retry_backoff_max_seconds = 0.05
+
+    [result] = fetch_via_scrapy([f"{base_url}/flaky"], source_system="test_scrapy",
+                                 settings=scrapy_settings)
+
+    assert result.ok is True
+    assert result.status_code == 200
+    assert result.body == b"third time lucky"
+    assert state["count"] == 3, "two failures plus the succeeding attempt"
+    result.require_provenance()
+
+    # Only the final, successful body was archived — not either 503 attempt.
+    archive_dir = scrapy_settings.raw_archive_dir / "test_scrapy"
+    assert [p.name for p in archive_dir.iterdir()] == [f"{result.payload_sha256}.txt"]
+
+
+def test_retries_give_up_after_the_configured_maximum(always_failing_server, scrapy_settings):
+    base_url, state = always_failing_server
+    scrapy_settings.scrapy_retry_max_attempts = 3
+    scrapy_settings.scrapy_retry_backoff_min_seconds = 0.02
+    scrapy_settings.scrapy_retry_backoff_max_seconds = 0.05
+
+    [result] = fetch_via_scrapy([f"{base_url}/flaky"], source_system="test_scrapy",
+                                 settings=scrapy_settings)
+
+    assert result.ok is False
+    assert result.failure_class is FailureClass.HTTP_ERROR
+    assert result.status_code == 503
+    assert state["count"] == 3, "exactly scrapy_retry_max_attempts attempts, then give up"
+    result.require_provenance()  # the final failed attempt's body is still archived
+
+
 # --- middleware unit tests: decision logic in isolation, no reactor ---------
 #
 # `pipeline.http.RobotsRules` already has its own wildcard-parsing test suite
@@ -345,14 +468,14 @@ class _FakeSpider:
 def test_robots_middleware_allows_a_request_with_no_robots_txt(scrapy_settings, monkeypatch):
     import httpx as httpx_lib
 
-    def no_robots_txt(self, url, headers=None):
+    async def no_robots_txt(self, url, headers=None):
         raise httpx_lib.ConnectError("no such host")
 
-    monkeypatch.setattr(httpx_lib.Client, "get", no_robots_txt)
+    monkeypatch.setattr(httpx_lib.AsyncClient, "get", no_robots_txt)
 
     mw = RobotsComplianceMiddleware(scrapy_settings)
     request = _FakeRequest("https://example.invalid/page")
-    assert mw.process_request(request, _FakeSpider()) is None
+    assert _run(mw.process_request(request, _FakeSpider())) is None
 
 
 def test_robots_middleware_raises_ignore_request_when_disallowed(scrapy_settings, monkeypatch):
@@ -363,12 +486,15 @@ def test_robots_middleware_raises_ignore_request_when_disallowed(scrapy_settings
         status_code = 200
         text = "User-agent: *\nDisallow: /blocked\n"
 
-    monkeypatch.setattr(httpx_lib.Client, "get", lambda self, url, headers=None: _Resp())
+    async def fake_get(self, url, headers=None):
+        return _Resp()
+
+    monkeypatch.setattr(httpx_lib.AsyncClient, "get", fake_get)
 
     mw = RobotsComplianceMiddleware(scrapy_settings)
     request = _FakeRequest("https://example.invalid/blocked/page")
     with pytest.raises(IgnoreRequest):
-        mw.process_request(request, _FakeSpider())
+        _run(mw.process_request(request, _FakeSpider()))
     assert request.meta["failure_class"] is FailureClass.ROBOTS_DISALLOWED
 
 
@@ -379,12 +505,76 @@ def test_robots_override_is_honoured_and_logged(scrapy_settings, monkeypatch):
         status_code = 200
         text = "User-agent: *\nDisallow: /feed/\n"
 
-    monkeypatch.setattr(httpx_lib.Client, "get", lambda self, url, headers=None: _Resp())
+    async def fake_get(self, url, headers=None):
+        return _Resp()
+
+    monkeypatch.setattr(httpx_lib.AsyncClient, "get", fake_get)
     scrapy_settings.robots_exceptions = ("https://example.invalid/feed/",)
 
     mw = RobotsComplianceMiddleware(scrapy_settings)
     request = _FakeRequest("https://example.invalid/feed/search.json")
-    assert mw.process_request(request, _FakeSpider()) is None
+    # No DATABASE_URL on `scrapy_settings`, so the review-item write this
+    # override triggers fails and is swallowed (logged, not raised) — see
+    # test_robots_override_writes_a_review_item below for the write itself.
+    assert _run(mw.process_request(request, _FakeSpider())) is None
+
+
+def test_robots_override_writes_a_review_item(settings, conn, monkeypatch):
+    """The Postgres-backed path: an override must land in `review_queue`,
+    the same table (and the same shape) `PipelineHTTPClient.get()` writes
+    to — not a new one.
+    """
+    import httpx as httpx_lib
+
+    class _Resp:
+        status_code = 200
+        text = "User-agent: *\nDisallow: /feed/\n"
+
+    async def fake_get(self, url, headers=None):
+        return _Resp()
+
+    monkeypatch.setattr(httpx_lib.AsyncClient, "get", fake_get)
+    settings.robots_exceptions = ("https://example.invalid/feed/",)
+
+    mw = RobotsComplianceMiddleware(settings)
+    request = _FakeRequest("https://example.invalid/feed/search.json")
+    spider = _FakeSpider()
+    assert _run(mw.process_request(request, spider)) is None
+    _run(mw._closed(spider))
+
+    rows = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'robots_override_in_use'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["raw_value"] == "https://example.invalid/feed/"
+    assert rows[0]["module"] == _FakeSpider.module
+
+
+def test_robots_override_is_recorded_once_per_module_and_prefix(settings, conn, monkeypatch):
+    """A second request past the same override must not duplicate the
+    review item — the natural key is (module, prefix), not one row per
+    fetch.
+    """
+    import httpx as httpx_lib
+
+    class _Resp:
+        status_code = 200
+        text = "User-agent: *\nDisallow: /feed/\n"
+
+    async def fake_get(self, url, headers=None):
+        return _Resp()
+
+    monkeypatch.setattr(httpx_lib.AsyncClient, "get", fake_get)
+    settings.robots_exceptions = ("https://example.invalid/feed/",)
+
+    mw = RobotsComplianceMiddleware(settings)
+    spider = _FakeSpider()
+    _run(mw.process_request(_FakeRequest("https://example.invalid/feed/a"), spider))
+    _run(mw.process_request(_FakeRequest("https://example.invalid/feed/b"), spider))
+    _run(mw._closed(spider))
+
+    rows = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type = 'robots_override_in_use'").fetchall()
+    assert len(rows) == 1
 
 
 def test_destination_guard_middleware_off_by_default():
@@ -436,6 +626,105 @@ def test_provenance_middleware_does_not_archive_an_empty_body(scrapy_settings):
     assert request.meta["payload_sha256"] == ""
     assert request.meta["raw_archive_ref"] is None
     assert not (scrapy_settings.raw_archive_dir / "test_source").exists()
+
+
+def _retry_settings(**overrides) -> Settings:
+    fields = dict(contact_email="test@example.com", scrapy_retry_max_attempts=3,
+                  scrapy_retry_backoff_min_seconds=1.0, scrapy_retry_backoff_max_seconds=8.0,
+                  _env_file=None)
+    fields.update(overrides)
+    return Settings(**fields)
+
+
+def test_delay_seconds_backs_off_exponentially_within_its_bounds():
+    mw = RetryWithBackoffMiddleware(_retry_settings())
+    assert mw._delay_seconds(1, None) == 1.0
+    assert mw._delay_seconds(2, None) == 2.0
+    assert mw._delay_seconds(3, None) == 4.0
+    assert mw._delay_seconds(4, None) == 8.0
+    assert mw._delay_seconds(5, None) == 8.0  # clamped at the maximum
+
+
+def test_delay_seconds_honours_a_numeric_retry_after_header():
+    # Backoff bounds deliberately far from the header value, so the
+    # assertion can only pass if Retry-After actually took precedence.
+    mw = RetryWithBackoffMiddleware(_retry_settings(scrapy_retry_backoff_min_seconds=10.0,
+                                                      scrapy_retry_backoff_max_seconds=20.0))
+    assert mw._delay_seconds(1, "0.5") == 0.5
+
+
+def test_delay_seconds_falls_back_to_backoff_for_an_unparseable_retry_after():
+    mw = RetryWithBackoffMiddleware(_retry_settings())
+    assert mw._delay_seconds(1, "Wed, 21 Oct 2026 07:28:00 GMT") == 1.0
+
+
+def test_retry_middleware_retries_a_retryable_status():
+    import scrapy
+
+    mw = RetryWithBackoffMiddleware(_retry_settings(scrapy_retry_backoff_min_seconds=0.01,
+                                                      scrapy_retry_backoff_max_seconds=0.02))
+    request = _FakeRequest("https://example.invalid/flaky")
+    response = _FakeResponse(request, status=503, body=b"try again", headers={})
+
+    result = _run(mw.process_response(request, response, _FakeSpider()))
+
+    assert isinstance(result, scrapy.Request)
+    assert result.meta["retry_times"] == 1
+
+
+def test_retry_middleware_ignores_a_non_retryable_status():
+    mw = RetryWithBackoffMiddleware(_retry_settings())
+    request = _FakeRequest("https://example.invalid/missing")
+    response = _FakeResponse(request, status=404, body=b"not found", headers={})
+
+    result = _run(mw.process_response(request, response, _FakeSpider()))
+
+    assert result is response
+
+
+def test_retry_middleware_gives_up_once_attempts_are_exhausted():
+    mw = RetryWithBackoffMiddleware(_retry_settings(scrapy_retry_max_attempts=2))
+    request = _FakeRequest("https://example.invalid/flaky")
+    request.meta["retry_times"] = 1  # one retry already made; max_attempts=2 allows no more
+    response = _FakeResponse(request, status=503, body=b"still failing", headers={})
+
+    result = _run(mw.process_response(request, response, _FakeSpider()))
+
+    assert result is response
+
+
+def test_retry_middleware_process_exception_retries_a_transport_error():
+    import scrapy
+    from twisted.internet.error import ConnectError
+
+    mw = RetryWithBackoffMiddleware(_retry_settings(scrapy_retry_backoff_min_seconds=0.01,
+                                                      scrapy_retry_backoff_max_seconds=0.02))
+    request = _FakeRequest("https://example.invalid/flaky")
+
+    result = _run(mw.process_exception(request, ConnectError("refused"), _FakeSpider()))
+
+    assert isinstance(result, scrapy.Request)
+    assert result.meta["retry_times"] == 1
+
+
+def test_retry_middleware_process_exception_does_not_retry_a_robots_refusal():
+    from scrapy.exceptions import IgnoreRequest
+
+    mw = RetryWithBackoffMiddleware(_retry_settings())
+    request = _FakeRequest("https://example.invalid/blocked")
+
+    result = _run(mw.process_exception(request, IgnoreRequest("nope"), _FakeSpider()))
+
+    assert result is None
+
+
+def test_retry_middleware_process_exception_ignores_an_unrecognised_exception():
+    mw = RetryWithBackoffMiddleware(_retry_settings())
+    request = _FakeRequest("https://example.invalid/odd")
+
+    result = _run(mw.process_exception(request, ValueError("not a network error"), _FakeSpider()))
+
+    assert result is None
 
 
 # --- minimal request/response doubles for the middleware unit tests ---------

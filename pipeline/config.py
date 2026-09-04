@@ -642,6 +642,18 @@ class Settings(BaseSettings):
     # fixture that never answers — or a real source that hangs — cannot block
     # the calling process indefinitely.
     scrapy_runner_timeout_seconds: float = 60.0
+    # RetryWithBackoffMiddleware's policy — chosen to match pipeline.http's
+    # tenacity policy (`stop_after_attempt(6)`, `wait_exponential(multiplier=1,
+    # min=1, max=30)`) attempt-for-attempt and second-for-second, since Scrapy's
+    # own built-in RetryMiddleware retries immediately with no per-attempt
+    # delay and no Retry-After support — neither of which meets CLAUDE.md's
+    # "Retry-After honoured" politeness requirement. 6 total attempts (this
+    # many minus 1 retries); backoff doubles from the minimum up to the
+    # maximum, or follows a numeric Retry-After header when the response
+    # carries one.
+    scrapy_retry_max_attempts: int = 6
+    scrapy_retry_backoff_min_seconds: float = 1.0
+    scrapy_retry_backoff_max_seconds: float = 30.0
 
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
