@@ -46,6 +46,7 @@ import csv
 import io
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
@@ -267,50 +268,87 @@ def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     return out, None
 
 
+def _xlsx_header_and_rows(body: bytes) -> tuple[dict[str, str], Iterator[dict[str, str]]] | None:
+    """Return the first non-empty header and a streaming view of the rest.
+
+    Spend workbooks sometimes carry several sheets, but the old parser kept
+    every sheet's rows before it started parsing. Inspecting one header first
+    lets the second pass retain only the four columns this module stores while
+    keeping the XML reader bounded to one sheet at a time.
+    """
+    names = sheet_names(body)
+    first_sheet = None
+    header: dict[str, str] | None = None
+    for name in names:
+        rows = iter_sheet_stream(body, name)
+        try:
+            candidate = next(rows)
+        except StopIteration:
+            rows.close()
+            continue
+        rows.close()
+        first_sheet = name
+        header = candidate
+        break
+    if first_sheet is None or header is None:
+        return None
+
+    wanted = _PAYEE_HEADERS + _AMOUNT_HEADERS + _PERIOD_HEADERS + _DESCRIPTION_HEADERS
+    keep = {letter for letter, value in header.items()
+            if _normalise_header(value) in wanted}
+
+    def data_rows() -> Iterator[dict[str, str]]:
+        skipped_header = False
+        for name in names:
+            for row in iter_sheet_stream(body, name, keep=keep):
+                if name == first_sheet and not skipped_header:
+                    skipped_header = True
+                    continue
+                yield row
+
+    return header, data_rows()
+
+
 def _parse_xlsx_ods(body: bytes, file_url: str, format_hint: str) -> tuple[list[dict], str | None]:
     """An XLSX or ODS spend file as line-item rows."""
     if format_hint == "xlsx":
         try:
-            # Consume one sheet at a time. The streaming reader drops parsed
-            # XML elements as it goes, avoiding a second workbook-sized object
-            # before the spend rows are normalised.
-            sheets = {name: list(iter_sheet_stream(body, name))
-                      for name in sheet_names(body)}
+            header_row = _xlsx_header_and_rows(body)
         except (XlsxError, OSError, ValueError) as exc:
             return [], f"could not read the workbook as xlsx: {exc}"
-        rows: list[list[str]] = []
-        for name, sheet in sheets.items():
-            if not sheet:
-                continue
-            rows.extend([list(row.values()) for row in sheet])
-        if not rows:
+        if header_row is None:
             return [], "the workbook has no rows"
-        header = rows[0]
-        payee_idx = _match_headers(header, _PAYEE_HEADERS)
-        amount_idx = _match_headers(header, _AMOUNT_HEADERS)
-        if payee_idx is None or amount_idx is None:
-            return [], (f"no payee column ({payee_idx is None}) or amount column "
-                        f"({amount_idx is None}) in the sheet header")
-        period_idx = _match_headers(header, _PERIOD_HEADERS)
-        desc_idx = _match_headers(header, _DESCRIPTION_HEADERS)
+        header, rows = header_row
+        columns = {_normalise_header(value): letter
+                   for letter, value in header.items()}
+
+        def column(synonyms: tuple[str, ...]) -> str | None:
+            for synonym in synonyms:
+                if _normalise_header(synonym) in columns:
+                    return columns[_normalise_header(synonym)]
+            return None
+
+        payee_col = column(_PAYEE_HEADERS)
+        amount_col = column(_AMOUNT_HEADERS)
+        if payee_col is None or amount_col is None:
+            return [], (f"no payee column ({payee_col is None}) or amount column "
+                        f"({amount_col is None}) in the sheet header")
+        period_col = column(_PERIOD_HEADERS)
+        desc_col = column(_DESCRIPTION_HEADERS)
         out: list[dict] = []
-        for raw in rows[1:]:
-            if len(raw) <= max(payee_idx, amount_idx):
-                continue
-            payee = (raw[payee_idx] or "").strip()
+        for raw in rows:
+            payee = (raw.get(payee_col) or "").strip()
             if not payee:
                 continue
-            amount_text = (raw[amount_idx] or "").strip()
+            amount_text = (raw.get(amount_col) or "").strip()
             out.append({
                 "payee": payee[:500],
                 "amount": _to_number(amount_text),
                 "amount_text": amount_text[:500] or None,
-                "period": (raw[period_idx].strip()[:120]
-                           if period_idx is not None and period_idx < len(raw)
-                           and raw[period_idx].strip() else None),
-                "description": (raw[desc_idx].strip()[:1000]
-                                if desc_idx is not None and desc_idx < len(raw)
-                                and raw[desc_idx].strip() else None),
+                "period": ((raw.get(period_col) or "").strip()[:120]
+                           if period_col is not None and raw.get(period_col) else None),
+                "description": ((raw.get(desc_col) or "").strip()[:1000]
+                                if desc_col is not None and raw.get(desc_col) else None),
             })
         return out, None
 
