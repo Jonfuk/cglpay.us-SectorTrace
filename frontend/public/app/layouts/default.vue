@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 // The public shell: masthead + primary navigation + routed content. The nav
 // mirrors the legacy portal's route set so deep links and section labels are
 // preserved through the migration. Routes are declared as data; pages are
@@ -42,6 +43,7 @@ const library: NavItem[] = [
 // title, so a "filtered view is a link" stays true.
 const saved = useSavedSearches()
 const notebook = useNotebook()
+const navOpen = ref(false)
 
 function currentTitle(): string {
   if (typeof document === 'undefined') return 'SectorTrace'
@@ -65,7 +67,14 @@ function noteView() {
         <NuxtLink to="/" class="font-semibold text-lg tracking-tight">
           SectorTrace
         </NuxtLink>
-        <nav class="flex flex-wrap gap-x-4 gap-y-1 text-sm flex-1">
+        <button
+          type="button"
+          class="atlas-nav-toggle"
+          :aria-expanded="navOpen"
+          aria-controls="atlas-primary-nav"
+          @click="navOpen = !navOpen"
+        >Sections <span aria-hidden="true">☰</span></button>
+        <nav id="atlas-primary-nav" class="atlas-nav flex flex-wrap gap-x-4 gap-y-1 text-sm flex-1" :class="{ 'is-open': navOpen }" @click="navOpen = false">
           <NuxtLink
             v-for="item in nav"
             :key="item.to"
@@ -91,7 +100,7 @@ function noteView() {
           >✎ Note</button>
         </div>
       </div>
-      <div class="mx-auto max-w-6xl px-4 pb-2 flex gap-x-4 text-xs">
+      <div class="atlas-library mx-auto max-w-6xl px-4 pb-2 flex gap-x-4 text-xs" :class="{ 'is-open': navOpen }">
         <NuxtLink
           v-for="item in library"
           :key="item.to"

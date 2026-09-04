@@ -62,6 +62,10 @@ input, select, textarea {
 input::placeholder { color: var(--st-dim); }
 :focus-visible { outline: var(--st-focus); outline-offset: 2px; }
 
+.atlas-nav-toggle { display: none; border: 1px solid var(--st-line-strong); border-radius: 6px; padding: 6px 10px; background: var(--st-elevated); color: var(--st-ink); }
+.atlas-nav a, .atlas-library a { color: var(--st-muted); text-decoration: none; }
+.atlas-nav a:hover, .atlas-library a:hover { color: var(--st-ink); }
+
 /* Tailwind utility classes used by the port need the same contrast on both
  * Nuxt UI and the atlas palette. These selectors are intentionally narrow and
  * do not change the admin application's separate stylesheet. */
@@ -133,6 +137,11 @@ input::placeholder { color: var(--st-dim); }
 @media (max-width: 900px) {
   .atlas-hero { grid-template-columns: 1fr; }
   .atlas-grid, .atlas-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .atlas-nav-toggle { display: inline-flex; margin-left: auto; }
+  .atlas-nav { display: none !important; flex-basis: 100%; }
+  .atlas-nav.is-open { display: flex !important; padding-top: 10px; }
+  .atlas-library { display: none !important; }
+  .atlas-library.is-open { display: flex !important; }
 }
 @media (max-width: 600px) {
   .atlas-grid, .atlas-strip, .atlas-status-grid, .atlas-explore-grid { grid-template-columns: 1fr; }
