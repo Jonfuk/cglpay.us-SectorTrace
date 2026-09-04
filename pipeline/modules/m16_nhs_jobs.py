@@ -541,6 +541,18 @@ def _provenance(result) -> dict:
     }
 
 
+def _write_advert_page(conn, adverts: list[dict], locations: list[dict]) -> None:
+    """Persist one result page in stable batches, keeping page commits intact."""
+    db.upsert_many(
+        conn, "nhs_job_adverts", adverts, natural_key=["job_reference"],
+        preserve=["searched_variant", "surfaced_by"],
+    )
+    db.upsert_many(
+        conn, "nhs_job_advert_locations", locations,
+        natural_key=["job_reference", "location_raw"],
+    )
+
+
 @register_module(
     "m16_nhs_jobs", supports_since=True,
     since_note="filters on the advert's posted date; adverts with an unreadable "
@@ -610,6 +622,8 @@ def run(ctx: ModuleContext) -> None:
 
                 returned_here += len(rows)
                 matched_on_this_page = 0
+                page_adverts: list[dict] = []
+                page_locations: list[dict] = []
 
                 for row in rows:
                     matched_key, match_basis = match_employer(row["employer_name_raw"])
@@ -650,7 +664,7 @@ def run(ctx: ModuleContext) -> None:
                             "a currency figure was present but could not be read",
                             source_url=result.url)
 
-                    db.upsert(conn, "nhs_job_adverts", {
+                    page_adverts.append({
                         "job_reference": row["job_reference"],
                         "provider_key": matched_key,
                         "provider_match_basis": match_basis,
@@ -669,19 +683,19 @@ def run(ctx: ModuleContext) -> None:
                         "searched_variant": variant,
                         "surfaced_by": SURFACED_BY_EMPLOYER,
                         **_provenance(result),
-                    }, natural_key=["job_reference"],
-                       preserve=["searched_variant", "surfaced_by"])
+                    })
                     adverts_written += 1
 
                     for location in row["locations"]:
-                        db.upsert(conn, "nhs_job_advert_locations", {
+                        page_locations.append({
                             "job_reference": row["job_reference"],
                             "location_raw": location,
-                        }, natural_key=["job_reference", "location_raw"])
+                        })
 
                     if ctx.limit and adverts_written >= ctx.limit:
                         break
 
+                _write_advert_page(conn, page_adverts, page_locations)
                 if not ctx.dry_run:
                     conn.commit()
 
@@ -772,6 +786,8 @@ def run(ctx: ModuleContext) -> None:
 
                 role_returned += len(rows)
                 matched_on_this_page = 0
+                page_adverts = []
+                page_locations = []
                 for row in rows:
                     matched_key, match_basis = match_employer(row["employer_name_raw"])
                     if matched_key is None:
@@ -795,7 +811,7 @@ def run(ctx: ModuleContext) -> None:
                             "a currency figure was present but could not be read",
                             source_url=result.url)
 
-                    db.upsert(conn, "nhs_job_adverts", {
+                    page_adverts.append({
                         "job_reference": row["job_reference"],
                         "provider_key": matched_key,
                         "provider_match_basis": match_basis,
@@ -814,19 +830,19 @@ def run(ctx: ModuleContext) -> None:
                         "searched_variant": f"keyword:{term}",
                         "surfaced_by": SURFACED_BY_ROLE,
                         **_provenance(result),
-                    }, natural_key=["job_reference"],
-                       preserve=["searched_variant", "surfaced_by"])
+                    })
                     role_adverts += 1
 
                     for location in row["locations"]:
-                        db.upsert(conn, "nhs_job_advert_locations", {
+                        page_locations.append({
                             "job_reference": row["job_reference"],
                             "location_raw": location,
-                        }, natural_key=["job_reference", "location_raw"])
+                        })
 
                     if ctx.limit and adverts_written + role_adverts >= ctx.limit:
                         break
 
+                _write_advert_page(conn, page_adverts, page_locations)
                 if not ctx.dry_run:
                     conn.commit()
                 if ctx.limit and adverts_written + role_adverts >= ctx.limit:
