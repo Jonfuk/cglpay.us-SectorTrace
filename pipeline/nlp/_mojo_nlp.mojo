@@ -3,14 +3,15 @@ from std.python.bindings import PythonModuleBuilder
 from std.os import abort
 
 
-def abi_version() -> PythonObject:
+def abi_version() raises -> PythonObject:
     return Python.int(1)
 
 
-def parity_approved() -> PythonObject:
+def parity_approved() raises -> PythonObject:
     # This boundary module is deliberately inactive until the packed trie
     # implementation returns exact row-for-row parity on the committed corpus.
-    return Python.bool(False)
+    var builtins = Python.import_module("builtins")
+    return builtins.bool(Python.int(0))
 
 
 @export
