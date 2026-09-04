@@ -334,6 +334,7 @@ def run(ctx: ModuleContext) -> None:
                 log.info("ashe.dataset_partial_failure", dataset=dataset_id,
                           failed_combinations=len(errors), rows_recovered=len(rows))
 
+            observation_rows: list[dict] = []
             for row in ctx.track(rows, f"{dataset_id} observations"):
                 dims = row["dimensions"] if isinstance(row["dimensions"], dict) else {}
                 code = dims.get(obs_dimension_param)
@@ -348,7 +349,7 @@ def run(ctx: ModuleContext) -> None:
                         conn, module_name, "observation", text,
                         f"observation for {code}/{geography}/{time_value} was not a number",
                         source_url=row["provenance"]["source_url"])
-                db.upsert(conn, "ons_ashe_observations", {
+                observation_rows.append({
                     "dataset_id": dataset_id,
                     "dataset_title": dataset_title,
                     "edition": EDITION,
@@ -367,10 +368,14 @@ def run(ctx: ModuleContext) -> None:
                     "value_text": text or None,
                     "unit_of_measure": row["unit_of_measure"],
                     **row["provenance"],
-                }, natural_key=[
-                    "dataset_id", "edition", "version", "hoursandearnings",
-                    "dimension_kind", "dimension_code", "geography_code", "time"])
+                })
                 written += 1
+            db.upsert_many(
+                conn, "ons_ashe_observations", observation_rows,
+                natural_key=[
+                    "dataset_id", "edition", "version", "hoursandearnings",
+                    "dimension_kind", "dimension_code", "geography_code", "time"],
+            )
             if not ctx.dry_run:
                 conn.commit()
 
