@@ -10,6 +10,7 @@ from pipeline import evidence_state
 from pipeline.documents import titles
 from pipeline.documents.classify import topic_matches
 from pipeline.documents.models import EvidenceReference, ParsedDocument
+from pipeline.writer import BatchWriter
 
 
 def utcnow() -> str:
@@ -114,14 +115,31 @@ def backfill_display_titles(conn, *, recompute: bool = False) -> dict:
     ids = [r["document_id"] for r in conn.execute(
         f"SELECT document_id FROM document_records {clause} ORDER BY document_id")]
     by_basis: dict[str, int] = {}
-    for document_id in ids:
-        source_title = conn.execute(
-            "SELECT title FROM document_records WHERE document_id = %s",
-            (document_id,)).fetchone()["title"]
-        _, basis = refresh_display_title(conn, document_id, source_title=source_title)
-        by_basis[basis] = by_basis.get(basis, 0) + 1
-        conn.commit()
-    return {"updated": len(ids), "by_basis": by_basis}
+    failures: list[tuple[str, BaseException]] = []
+
+    def write_batch(batch) -> None:
+        batch_basis: dict[str, int] = {}
+        for document_id in batch:
+            source_title = conn.execute(
+                "SELECT title FROM document_records WHERE document_id = %s",
+                (document_id,)).fetchone()["title"]
+            _, basis = refresh_display_title(conn, document_id, source_title=source_title)
+            batch_basis[basis] = batch_basis.get(basis, 0) + 1
+        for basis, count in batch_basis.items():
+            by_basis[basis] = by_basis.get(basis, 0) + count
+
+    def record_failure(document_id: str, exc: BaseException) -> None:
+        failures.append((document_id, exc))
+
+    writer = BatchWriter(conn, write_batch, on_row_error=record_failure)
+    writer.write_many(ids)
+    writer.close()
+    if failures:
+        document_id, exc = failures[0]
+        raise RuntimeError(
+            f"{len(failures)} document title backfill row(s) failed; "
+            f"first {document_id}: {type(exc).__name__}: {exc}") from exc
+    return {"updated": writer.rows_written, "by_basis": by_basis}
 
 
 def add_artifact(conn, reference: EvidenceReference, artifact_type: str, storage_path: str,
