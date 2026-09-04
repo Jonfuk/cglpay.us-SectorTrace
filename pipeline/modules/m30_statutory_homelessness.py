@@ -469,6 +469,7 @@ def run(ctx: ModuleContext) -> None:
                 "payload_sha256": file_result.payload_sha256,
             }
 
+            snapshot_rows: list[dict] = []
             for entry in extract_a1_rows(rows, anchor, columns):
                 ons_code = entry["ons_code"]
                 if ons_code not in known_authorities:
@@ -500,10 +501,13 @@ def run(ctx: ModuleContext) -> None:
                 record["households_in_area_thousands"] = to_float(raw_area)
                 record["households_in_area_thousands_text"] = raw_area or None
 
-                db.upsert(conn, "statutory_homelessness_snapshot", record,
-                          natural_key=["ons_code", "quarter_start"])
+                snapshot_rows.append(record)
                 written += 1
 
+            db.upsert_many(
+                conn, "statutory_homelessness_snapshot", snapshot_rows,
+                natural_key=["ons_code", "quarter_start"],
+            )
             quarters_processed += 1
             if not ctx.dry_run:
                 conn.commit()
