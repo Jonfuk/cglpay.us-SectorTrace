@@ -10,6 +10,7 @@ the only path that writes evidence.
 from __future__ import annotations
 
 import multiprocessing
+from dataclasses import replace
 from urllib.parse import urljoin, urlparse
 
 import structlog
@@ -36,14 +37,18 @@ def fetch_m34_pilot(
     from_registry: bool,
     since: str | None = None,
     settings: Settings,
+    retain_bodies: bool = True,
     guard_destination: bool = False,
     resolver=None,
 ) -> m34.IcbCrawl:
     """Run one bounded m34 crawl through Scrapy and return its fetch result.
 
     ``from_registry`` and ``since`` have the same meaning as the arguments to
-    ``m34.crawl_icb``.  The child process only fetches and archives bytes; it
-    never parses documents or writes a row.  A second invocation is safe
+    ``m34.crawl_icb``.  ``retain_bodies=False`` is for watched fetch/archive
+    measurements: the exact bytes remain in the content-addressed archive,
+    while the returned metadata does not retain a second copy of each large
+    board pack. The default keeps bodies for byte-level parser parity. The
+    child process never writes a database row. A second invocation is safe
     because the Scrapy reactor lives only for the child process.
     """
     if not settings.scrapy_enabled:
@@ -61,7 +66,7 @@ def fetch_m34_pilot(
     process = ctx.Process(
         target=_run_pilot_crawl,
         args=(queue, icb_name, seed_url, from_registry, since, settings,
-              guard_destination, resolver),
+              retain_bodies, guard_destination, resolver),
     )
     log.info("m34_pilot.starting", icb_name=icb_name, seed_url=seed_url)
     process.start()
@@ -92,7 +97,7 @@ def fetch_m34_pilot(
 
 def _run_pilot_crawl(queue, icb_name: str, seed_url: str, from_registry: bool,
                      since: str | None, settings: Settings,
-                     guard_destination: bool, resolver) -> None:
+                     retain_bodies: bool, guard_destination: bool, resolver) -> None:
     """Start the two-phase spider in a fresh interpreter."""
     try:
         from scrapy.crawler import CrawlerProcess
@@ -122,7 +127,8 @@ def _run_pilot_crawl(queue, icb_name: str, seed_url: str, from_registry: bool,
         process = CrawlerProcess(settings=crawler_settings, install_root_handler=False)
         process.crawl(
             _spider_class(), icb_name=icb_name, seed_url=seed_url,
-            from_registry=from_registry, since=since, result_queue=queue,
+            from_registry=from_registry, since=since, retain_bodies=retain_bodies,
+            result_queue=queue,
         )
         process.start()
     except Exception as exc:  # noqa: BLE001 - report an explicit crawl result
@@ -143,12 +149,13 @@ def _spider_class():
         name = "pipeline_m34_icb_board_papers_pilot"
 
         def __init__(self, icb_name, seed_url, from_registry, since,
-                     result_queue, **kwargs):
+                     retain_bodies, result_queue, **kwargs):
             super().__init__(**kwargs)
             self.icb_name = icb_name
             self.seed_url = seed_url
             self.from_registry = bool(from_registry)
             self.since = since
+            self.retain_bodies = bool(retain_bodies)
             self.result_queue = result_queue
             parsed_seed = urlparse(seed_url)
             self.origin = f"{parsed_seed.scheme}://{parsed_seed.netloc}"
@@ -315,6 +322,12 @@ def _spider_class():
             result = transport_result_from_response(
                 response, transport="scrapy", source_system=self.source_system,
                 module=self.module)
+            if not self.retain_bodies:
+                # ProvenanceArchiveMiddleware has already archived and hashed
+                # the exact bytes before this callback. The low-memory mode is
+                # fetch-only, so keeping another copy in the result queue would
+                # only make large board packs accumulate until spider close.
+                result = replace(result, body=b"")
             self.candidates.append((
                 result, response.meta.get("link_text", ""),
                 bool(response.meta.get("from_index")),
