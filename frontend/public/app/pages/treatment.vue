@@ -79,7 +79,11 @@ function chooseAuthority(event: Event): void {
 }
 function seriesRows(): FingertipsSeriesRow[] {
   const names = new Map(indicators.value.map((row) => [row.indicator_id, row.indicator_name]))
-  return series.value.map((row) => ({ ...row, indicator_name: names.get(row.indicator_id) ?? `Indicator ${row.indicator_id}` }))
+  return series.value.map((row, index) => ({
+    ...row,
+    indicator_name: names.get(row.indicator_id) ?? `Indicator ${row.indicator_id}`,
+    row_key: `${row.indicator_id}-${row.ons_code}-${row.time_period ?? index}`,
+  }))
 }
 
 useHead({ title: 'SectorTrace — Treatment data' })
@@ -118,7 +122,7 @@ useHead({ title: 'SectorTrace — Treatment data' })
           <label class="block max-w-xl text-sm"><span class="block mb-1 opacity-70">Local authority</span><select class="w-full rounded border px-3 py-2" aria-label="Local authority" :value="authorityCode ?? ''" @change="chooseAuthority"><option value="">All authorities</option><option v-for="authority in authorities" :key="authority.ons_code" :value="authority.ons_code">{{ authority.name }}{{ authority.region ? ` · ${authority.region}` : '' }}</option></select></label>
           <div class="atlas-caveat"><span>What must not be computed here</span> — prevalence and treatment numbers use different estimation methods and populations. This pipeline does not calculate unmet need by subtracting one from the other.</div>
           <div v-if="indicators.length" class="atlas-band"><h3>{{ indicators[0].indicator_name }}</h3><p>{{ indicators[0].unit || 'Unit published with the indicator' }} · {{ authorityCode ? 'Selected authority and England are shown.' : 'Authority values are shown with their published context.' }}</p></div>
-          <StEvidenceTable v-if="seriesRows().length" :columns="seriesColumns" :rows="seriesRows()" row-key="indicator_id" />
+          <StEvidenceTable v-if="seriesRows().length" :columns="seriesColumns" :rows="seriesRows()" row-key="row_key" />
           <StEmptyState v-else />
           <StCaveat v-if="data?.metrics.caveat" :text="data.metrics.caveat" />
         </div>
