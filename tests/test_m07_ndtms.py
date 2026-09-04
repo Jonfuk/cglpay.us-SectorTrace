@@ -420,16 +420,16 @@ def test_ndtms_tables_are_separate_from_workforce_tables(conn):
     """
     tables = {r["table_name"] for r in conn.execute(
         "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = 'public'")}
+        "WHERE table_schema = current_schema()")}
     assert "ndtms_la_statistics" in tables
     assert "workforce_census_metrics" in tables
 
     ndtms_cols = {r["column_name"] for r in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = 'ndtms_la_statistics'")}
+        "WHERE table_schema = current_schema() AND table_name = 'ndtms_la_statistics'")}
     census_cols = {r["column_name"] for r in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = 'workforce_census_metrics'")}
+        "WHERE table_schema = current_schema() AND table_name = 'workforce_census_metrics'")}
     # no shared measure columns that would invite a silent join
     assert "wte" not in ndtms_cols
     assert not (ndtms_cols & census_cols) - {

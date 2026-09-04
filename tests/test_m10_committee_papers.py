@@ -442,7 +442,7 @@ def test_the_matched_text_goes_only_to_the_restricted_table(conn, settings, http
 
     columns = {r["column_name"] for r in conn.execute(
         "SELECT column_name FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = 'committee_paper_candidates'")}
+        "WHERE table_schema = current_schema() AND table_name = 'committee_paper_candidates'")}
     assert "snippet" not in columns and "snippet_text" not in columns
 
 

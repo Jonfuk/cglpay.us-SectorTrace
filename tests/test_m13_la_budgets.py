@@ -205,7 +205,7 @@ def test_budget_view_does_not_join_to_the_grant(conn):
     """
     sql = conn.execute(
         "SELECT definition FROM pg_views "
-        "WHERE schemaname = 'public' AND viewname = 'v_la_public_health_budget'").fetchone()["definition"]
+        "WHERE schemaname = current_schema() AND viewname = 'v_la_public_health_budget'").fetchone()["definition"]
     assert "public_health_grants" not in sql
     assert "budget" in sql.lower()
 

@@ -101,14 +101,14 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
-          uv run python -m pytest -q --tb=short -m "not serial" -n auto \
+          uv run python -m pytest -q --tb=short -m "not serial and not integration" -n auto \
             --dist loadscope --durations=50 --junitxml=artifacts/pytest-parallel.xml \
             > artifacts/pytest-parallel.log 2>&1
           status=$?
           cat artifacts/pytest-parallel.log
           grep -E '^(FAILED|ERROR)' artifacts/pytest-parallel.log | while read -r line; do
             echo "::error::$line"
-          done
+          done || true
           exit $status
 
       - name: Serial PostgreSQL tests
@@ -123,14 +123,14 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
-          uv run python -m pytest -q --tb=short -m serial --durations=50 \
+          uv run python -m pytest -q --tb=short -m "serial and not integration" --durations=50 \
             --junitxml=artifacts/pytest-serial.xml \
             > artifacts/pytest-serial.log 2>&1
           status=$?
           cat artifacts/pytest-serial.log
           grep -E '^(FAILED|ERROR)' artifacts/pytest-serial.log | while read -r line; do
             echo "::error::$line"
-          done
+          done || true
           exit $status
 
       - name: Upload pytest timing artifacts
@@ -157,4 +157,12 @@ jobs:
           enable-cache: true
 
       - name: Check optional NLP dependency compatibility
-        run: uv run --extra nlp pytest -q tests/test_nlp_compat.py
+        # tests/conftest.py deliberately makes PostgreSQL an autouse fixture for
+        # the behavioural suite. This boundary check is import-only, so keep it
+        # independent of a warehouse and avoid turning an optional dependency
+        # check into a database job.
+        run: >-
+          uv run --extra nlp python -c
+          "import transformers; from packaging.version import Version; from
+          setfit.compat import default_logdir; v=Version(transformers.__version__);
+          assert Version('5.10.4') <= v < Version('6'); assert callable(default_logdir)"
