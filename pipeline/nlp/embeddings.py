@@ -32,6 +32,7 @@ from typing import Any
 
 from pipeline.nlp import models, runs, stage_state
 from pipeline.nlp.embedding_repository import PostgresEmbeddingRepository, vector_literal
+from pipeline.writer import BatchWriter
 
 STUB_MODEL_KEY = "embed:stub"
 STUB_DIMENSION = 384
@@ -468,6 +469,19 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
     after_chunk = None
     after_model = None
     size = max(1, batch_size)
+
+    def write_batch(rows) -> None:
+        _set_vector_search_path(conn)
+        conn.executemany(
+            "UPDATE document_embeddings SET embedding_vec = %s::public.vector "
+            "WHERE document_chunk_id = %s AND model_key = %s",
+            [
+                (vec_literal(unpack(row["embedding"])), row["document_chunk_id"], row["model_key"])
+                for row in rows
+            ],
+        )
+
+    writer = BatchWriter(conn, write_batch, max_rows=size, isolate_failures=False)
     while limit is None or written < limit:
         take = min(size, limit - written) if limit is not None else size
         params: list = [VECTOR_COLUMN_DIM]
@@ -482,18 +496,14 @@ def backfill_vectors(conn, *, batch_size: int = 2000, limit: int | None = None) 
             " ORDER BY document_chunk_id,model_key LIMIT %s", params).fetchall()
         if not chunk:
             break
-        _set_vector_search_path(conn)
-        conn.executemany(
-            "UPDATE document_embeddings SET embedding_vec = %s::public.vector "
-            "WHERE document_chunk_id = %s AND model_key = %s",
-            [
-                (vec_literal(unpack(r["embedding"])), r["document_chunk_id"], r["model_key"])
-                for r in chunk
-            ],
-        )
-        conn.commit()
+        writer.write_many(chunk)
+        # Keep the historical per-page resume boundary. The shared writer
+        # still owns the savepoint and commit, while a partial final page is
+        # flushed explicitly before the keyset advances.
+        writer.flush()
         written += len(chunk)
         after_chunk = chunk[-1]["document_chunk_id"]
         after_model = chunk[-1]["model_key"]
 
+    writer.close()
     return {"backend": "postgres", "pending": written, "written": written}
