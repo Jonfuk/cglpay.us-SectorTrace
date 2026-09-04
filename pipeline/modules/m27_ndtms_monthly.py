@@ -351,6 +351,7 @@ def run(ctx: ModuleContext) -> None:
                                            area_name, json.dumps({"dat_code": dat_code}))
 
                 provenance = _provenance(result)
+                stats_rows: list[dict] = []
                 for heading, rows in page.sections:
                     if len(rows) < 2:
                         continue
@@ -364,7 +365,7 @@ def run(ctx: ModuleContext) -> None:
                             raw = row[i]
                             if not raw.strip():
                                 continue
-                            db.upsert(conn, "ndtms_monthly_statistics", {
+                            stats_rows.append({
                                 "report_version_id": report_version_id,
                                 "report_month": report_month,
                                 "cohort": cohort,
@@ -378,10 +379,14 @@ def run(ctx: ModuleContext) -> None:
                                 "value": _to_number(raw),
                                 "value_text": raw.strip(),
                                 **provenance,
-                            }, natural_key=["report_version_id", "cohort", "dat_code", "section",
-                                             "substance_category", "time_period_raw"])
+                            })
                             stats_written += 1
 
+                db.upsert_many(
+                    conn, "ndtms_monthly_statistics", stats_rows,
+                    natural_key=["report_version_id", "cohort", "dat_code", "section",
+                                 "substance_category", "time_period_raw"],
+                )
                 if not ctx.dry_run:
                     conn.commit()
 
