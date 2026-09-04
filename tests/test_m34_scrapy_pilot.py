@@ -17,6 +17,7 @@ import pytest
 
 pytest.importorskip("scrapy")
 
+from pipeline.archive import FilesystemArchive
 from pipeline.config import Settings
 from pipeline.http import PipelineHTTPClient
 from pipeline.modules import m34_icb_board_papers as m34
@@ -153,3 +154,19 @@ def test_m34_pilot_disabled_by_default(tmp_path: Path):
             ICB_NAME, "https://example.invalid/board", from_registry=True,
             settings=settings,
         )
+
+
+def test_m34_pilot_can_release_bodies_after_archiving(
+        fixture_server, scrapy_settings):
+    seed_url = fixture_server().replace("/board", "/")
+    crawl = fetch_m34_pilot(
+        ICB_NAME, seed_url, from_registry=False, settings=scrapy_settings,
+        retain_bodies=False)
+
+    archive = FilesystemArchive(scrapy_settings.raw_archive_dir)
+    assert crawl.candidates
+    for fetched, _text, _from_index, _method in crawl.candidates:
+        assert fetched.body == b""
+        stored = archive.lookup(fetched.source_system, fetched.payload_sha256)
+        assert stored is not None
+        assert hashlib.sha256(stored.read_bytes()).hexdigest() == fetched.payload_sha256

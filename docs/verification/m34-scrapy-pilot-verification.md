@@ -31,12 +31,12 @@ socket fixture. It verifies:
 Result: **2 passed** (`uv run python -m pytest tests/test_m34_scrapy_pilot.py -q`).
 No test fetches a live source or writes a database row.
 
-## Remaining Phase 2 gate
+## Phase 2 live gate
 
-The next action is a manually watched live m34 sample for the verified
-Nottingham and Nottinghamshire ICB board page. Record request count, pages,
-documents, elapsed time, peak memory, failures, candidate ordering and archive
-hash/provenance checks before considering any production transport change.
+The first run below exposed high memory because the comparison mode retains
+document bodies. The pilot now has an explicit low-memory fetch/archive mode:
+the middleware still archives the exact response, while the returned result
+retains only its provenance metadata.
 
 ## Watched live sample
 
@@ -64,8 +64,30 @@ Observed result:
 
 The fetch and provenance gates passed, but the memory observation is material:
 the pilot retains fetched results until it returns the crawl, and this sample
-held several large board packs. Phase 2 is therefore **not approved for a
-production transport cutover yet**. The next engineering action is to profile
-and reduce peak memory (or tighten the pilot's document/response retention
-boundary), then repeat the watched sample before any writer or transport
-default changes.
+held several large board packs. At that point Phase 2 was **not approved for a
+production transport cutover**; the low-memory change and watched repeat are
+recorded below.
+
+## Watched repeat with low-memory mode
+
+Run date: 2026-09-04, same target and rate policy, with
+`retain_bodies=False`.
+
+- elapsed time: 127.59 seconds;
+- Scrapy requests: 49;
+- pages fetched: 3;
+- documents fetched: 29;
+- review items: none;
+- bodies retained in returned results: no;
+- candidate payload hashes: 29 unique hashes;
+- archive hash checks: 29/29 passed;
+- raw archive files: 47, totalling 297,000,876 bytes;
+- peak monitored working set across the runner process tree: approximately
+  122.8 MB.
+
+This repeat passes the watched fetch, ordering, provenance and memory gates
+for the fetch-only adapter. The default parity mode remains intentionally
+body-retaining for parser comparisons and measured 766 MB on the first run;
+that mode must not be used as an unbounded production crawl. A production
+cutover still requires an explicit parser/finalisation design that preserves
+the low-memory property, followed by owner review.
