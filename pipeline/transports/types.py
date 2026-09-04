@@ -61,8 +61,13 @@ class TransportResult:
     `body`/`payload_sha256`/`raw_archive_ref` are about the network response
     only. A browser-rendered DOM is a different artefact (scrapy.md's
     "browser/derived DOM distinction") and must never be assigned to `body`
-    here — a transport that also captures rendered output carries it
-    separately, in `transport_meta`, tagged as derived.
+    here. It gets its own typed fields — `derived_archive_ref`/`derived_kind`
+    — rather than living in `transport_meta` as this module first sketched:
+    a derived artefact is exactly the kind of thing "provenance or NULL"
+    means to be explicit about, and a dict key a future reader could
+    misspell without either side noticing is the wrong shape for it. Both
+    are `None` for every transport that has no browser leg — see
+    `pipeline.transports.browser_pilot` for the one that does.
     """
 
     transport: str
@@ -79,6 +84,14 @@ class TransportResult:
     body: bytes = b""
     payload_sha256: str = ""
     raw_archive_ref: str | None = None
+    # A derived artefact from the SAME fetch attempt — currently only a
+    # browser-rendered DOM (`derived_kind="rendered_dom"`), archived through
+    # `pipeline.archive.get_derived_archive()` rather than the raw archive.
+    # Never required by `require_provenance()`: most transports have no
+    # derived artefact at all, and that is a complete, ordinary result, not
+    # a missing one.
+    derived_archive_ref: str | None = None
+    derived_kind: str | None = None
     transport_meta: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

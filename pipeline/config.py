@@ -655,6 +655,27 @@ class Settings(BaseSettings):
     scrapy_retry_backoff_min_seconds: float = 1.0
     scrapy_retry_backoff_max_seconds: float = 30.0
 
+    # scrapy.md Phase 3: an experimental browser leg on top of the Scrapy
+    # transport, off by default independently of SCRAPY_ENABLED (both must be
+    # true — a browser pilot is a second, deliberate decision on top of
+    # "use Scrapy at all"). See pipeline/transports/browser_pilot.py.
+    scrapy_playwright_enabled: bool = False
+    # None lets Playwright's own lookup apply (PLAYWRIGHT_BROWSERS_PATH, or
+    # its packaged default) — set only to pin a specific browser binary, the
+    # way this checkout's own sandbox pins the pre-installed Chromium.
+    scrapy_playwright_executable_path: str | None = None
+    # Bounds so a browser pilot cannot open more than this many browser
+    # contexts/pages at once — "Scrapy runs should have bounded page/context
+    # counts and memory monitoring" is a hard requirement, not a suggestion,
+    # for anything that launches a real browser process.
+    scrapy_playwright_max_contexts: int = 1
+    scrapy_playwright_max_pages_per_context: int = 1
+    scrapy_playwright_navigation_timeout_seconds: float = 30.0
+    # Scrapy's own MEMUSAGE extension, turned on for this transport leg
+    # specifically: a browser process is the one part of this pipeline whose
+    # memory a single stuck page can genuinely blow up.
+    scrapy_playwright_memory_limit_mb: int = 512
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes

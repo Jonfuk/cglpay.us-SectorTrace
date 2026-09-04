@@ -286,3 +286,33 @@ def _verify_inventory(inventory: dict) -> dict:
 
 def get_archive(settings: Settings) -> Archive:
     return S3Archive(settings) if settings.archive_backend == "s3" else FilesystemArchive(settings.raw_archive_dir)
+
+
+def archive_derived_artifact(settings: Settings, source_system: str, sha256: str,
+                              content_type: str | None, body: bytes) -> str:
+    """Writes a derived artefact — never the exact bytes a source served, see
+    `pipeline.transports.types.TransportResult.derived_kind` — under
+    `DERIVED_ARCHIVE_DIR`, content-addressed exactly like the raw archive
+    (`FilesystemArchive.put`), but through its own small function rather
+    than that class: `FilesystemArchive`/`S3Archive` and the `data/raw/...`
+    shape `logical_path()`/`_parts()` parse are baked together, and widening
+    them to a second prefix is a larger, riskier change than a Phase 3
+    scaffolding pilot (a browser-rendered DOM, currently the only derived
+    artefact anything produces) should make to code every module's fetch
+    already depends on.
+
+    Filesystem only for now — `DERIVED_ARCHIVE_S3_*` (`Settings`) stays
+    reserved for whichever consumer moves derived storage to S3 first;
+    Phase 3 needs an archive reference, not full backend parity with
+    `get_archive()`.
+    """
+    if hashlib.sha256(body).hexdigest() != sha256:
+        raise ArchiveError("payload hash does not match archive key")
+    ext = mimetypes.guess_extension((content_type or "").split(";", 1)[0].strip()) or ".bin"
+    out_dir = settings.derived_archive_dir / source_system
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{sha256}{ext}"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+        DISK.add(len(body))
+    return f"data/derived/{source_system}/{sha256}{ext}"
