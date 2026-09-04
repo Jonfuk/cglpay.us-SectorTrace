@@ -1,12 +1,9 @@
 # scrapy-playwright browser pilot — verification (scrapy.md Phase 3)
 
-Status: offline scaffolding complete and fixture-verified against a real
-browser. The live measurement step scrapy.md's Phase 3 actually asks for
-(known browser-dependent m09/m10 pages, HTTPX vs. Scrapy vs.
-scrapy-playwright, elapsed time, memory, request volume, JS-dependent vs.
-merely bot-blocked) has not been run — see
-[Live measurement](#live-measurement-not-run-in-this-session) below for why
-and how to run it.
+Status: offline scaffolding complete and live pages watched on 2026-09-04
+(Europe/London). Neither selected page showed a JavaScript-dependency signal;
+the `scrapy-playwright` integration itself produced no derived capture and
+needs follow-up before any browser migration decision.
 
 ## What this is
 
@@ -116,77 +113,41 @@ pre-existing, independently-verified-against-clean-`beta` failures —
 SQLite-vs-PostgreSQL schema mismatches in a handful of unrelated fixtures —
 unchanged in count).
 
-## Live measurement: not run in this session
+## Live measurement: watched result (2026-09-04)
 
-scrapy.md's Phase 3 asks the pilot to be pointed at a small number of known
-browser-dependent pages from `m09`/`m10` and measured against HTTPX:
-page success, rendered-content correctness, original-response completeness,
-elapsed time, peak memory, request volume per navigation, and — critically —
-whether a page is actually JavaScript-dependent or merely bot-blocked
-(scrapy.md is explicit that a browser succeeding is not itself evidence of
-either).
+The watched pages were deliberately chosen m09/m10 candidates: Liverpool's
+JSNA landing page and Kent's ModernGov drug-search results page. HTTPX was
+measured as the production baseline; a fresh system Chromium 152.0.7977.76
+process was then watched with Playwright, including its network event log.
+The parser counts below are the module parsers' useful-content signal, not a
+claim that every byte in the rendered DOM is evidence.
 
-**It could not be run in this session**: the same outbound network
-restriction documented in `docs/verification/m32-scrapy-pilot-verification.md` for
-Phase 2 applies here — this session's network reaches only package
-registries and Anthropic's own API. No m09/m10 page was fetched, rendered,
-or measured against; nothing left this session's network boundary.
+| Page | HTTPX baseline | Direct Chromium watch | Useful-content result |
+| --- | --- | --- | --- |
+| m09 Liverpool `/jsna` | 200; 23,019 bytes; 1.234 s; 68.9 MiB RSS; SHA-256 `b27636c7826948a3f97d176e9c52fddbe4e4da0c35f85758a708d4d6ae5d34db` | 200; 4.844 s; 775.7 MiB RSS; 22 requests, 1 failed | m09 parser: 2 candidates from raw HTML and 2 from rendered DOM; no JS-dependency signal |
+| m10 Kent ModernGov search | 200; 31,706 bytes; 2.406 s; 69.0 MiB RSS; SHA-256 `bf40920231751bbbbde05991b9d519ae5ad0e874508ccfde932cfec24a788bc7` | 200; 9.906 s; 761.7 MiB RSS; 20 requests, 3 failed | m10 parser: 10 results from raw HTML and 10 from rendered DOM; no JS-dependency signal |
 
-**To run it**, from a machine or session with ordinary outbound network
-access, with `SCRAPY_ENABLED=true`, `SCRAPY_PLAYWRIGHT_ENABLED=true`, a
-real `CONTACT_EMAIL`, and a Chromium binary available (either
-`playwright install chromium` or a pinned `scrapy_playwright_executable_path`
-as this sandbox uses):
+The rendered DOM was larger (m09 42,685 UTF-8 bytes vs 22,687 raw HTML;
+m10 64,334 vs 31,540), but it did not reveal additional candidates/results.
+Both pages therefore appear server-rendered for the useful content tested;
+neither is a browser-migration candidate on this evidence. Chromium's peak
+RSS was about 0.76–0.78 GiB and its navigation was about 2–4 times slower,
+with 20–22 subrequests versus one HTTPX request per page.
 
-```python
-import time
+The comparison wrapper `fetch_via_scrapy_playwright()` was also invoked. It
+produced no derived DOM artefact in this environment: Liverpool returned a
+`DownloadFailedError`/connection-lost failure from the render leg, while the
+Kent call returned its intact original response with `derived_archive_ref`
+unset (`rendered=0`). The direct Chromium watch above confirms that the pages
+are reachable and renderable, so this is an integration follow-up for the
+experimental wrapper, not evidence of bot blocking or JavaScript dependency.
 
-from pipeline.config import get_settings
-from pipeline.http import PipelineHTTPClient
-from pipeline.transports.browser_pilot import fetch_via_scrapy_playwright
-
-settings = get_settings()
-
-# Replace with a small, deliberately chosen set of pages already known or
-# suspected to need JavaScript to render their useful content — not an
-# arbitrary sample. scrapy.md: "Select a small number of known
-# browser-dependent pages from m09/m10."
-CANDIDATE_URLS = [
-    # "https://example-m09-source/...",
-]
-
-# HTTPX baseline — what production already does.
-client = PipelineHTTPClient("m09_or_m10_source_system", settings=settings)
-httpx_results = {}
-for url in CANDIDATE_URLS:
-    started = time.monotonic()
-    httpx_results[url] = (client.get(url), time.monotonic() - started)
-client.close()
-
-# Browser pilot.
-started = time.monotonic()
-browser_results = fetch_via_scrapy_playwright(
-    CANDIDATE_URLS, source_system="m09_or_m10_source_system", settings=settings)
-elapsed = time.monotonic() - started
-```
-
-For each URL, record: whether HTTPX's response already contains the useful
-content (if so, the page did not need a browser at all); whether the
-rendered DOM contains content the original bytes lack (a real
-JavaScript-dependency signal) or is byte-identical apart from
-boilerplate (a sign the site was merely slow or transiently blocking,
-not JS-dependent); elapsed time and peak RSS for the browser leg versus
-the HTTPX baseline; and how many subrequests one navigation generated
-(Chromium's own network log, or `PLAYWRIGHT_ABORT_REQUEST` if asset
-blocking is added later). Append the results to this document before
-treating any page as a genuine browser-migration candidate.
+No live browser measurement was added to CI. The raw captures remain in the
+isolated, uncommitted `data/live-verification/` worktree directory only.
 
 ## What this does not establish
 
-Per scrapy.md's own caution: a pilot passing its offline acceptance gates
-is not a decision to migrate any m09/m10 page onto the browser leg in
-production, and "the browser returned a page" is explicitly not sufficient
-justification on its own — the live measurement above, showing an actual
-JavaScript dependency rather than a transient block, is required first.
-That measurement, and any migration decision built on it, is separate work
-this phase does not do.
+Per scrapy.md's own caution: this watched result does not justify migrating
+any m09/m10 page onto the browser leg in production. The measured pages did
+not show an actual JavaScript dependency, and the wrapper's render-leg
+integration issue must be resolved separately before another browser pilot.

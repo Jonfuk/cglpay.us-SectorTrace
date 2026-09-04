@@ -1,9 +1,9 @@
 # m32_sab_site_reviews Scrapy pilot — verification (scrapy.md Phase 2)
 
-Status: offline pilot complete and parity-verified. The live-sample step
-scrapy.md's acceptance gate also asks for has not been run — see
-[Live sample](#live-sample-not-run-in-this-session) below for why and how to
-run it.
+Status: offline pilot complete and live-sample measured on 2026-09-04
+(Europe/London). The bounded live document crawl passed parity; the homepage
+encoding difference recorded below remains a transport follow-up, not a reason
+to promote the pilot to production.
 
 ## What this is
 
@@ -102,58 +102,39 @@ worktree, unrelated to any of this work: SQLite-vs-PostgreSQL schema
 mismatches in a handful of test fixtures) and the same errors, unchanged in
 count.
 
-## Live sample: not run in this session
+## Live sample: watched result (2026-09-04)
 
-scrapy.md's Phase 2 acceptance gate also asks for the pilot to be run
-against a real site and compared with a live HTTPX run on the same site.
-That step was explicitly approved by the project owner for this session,
-targeting **Kent & Medway Safeguarding Adults Board**
-(`https://www.kmsab.org.uk`) — a board `m32_sab_site_reviews` already
-crawls regularly in production, whose robots.txt behaviour is already
-documented in `pipeline/config.py`'s `robots_exceptions` (the `/assets/`
-path, where SAR documents live, has an existing approved override; nothing
-else on the site is known to be restricted).
+The watched target was **Kent & Medway Safeguarding Adults Board**
+(`https://www.kmsab.org.uk`), using the existing `/assets/` robots exception.
+The run used the production HTTPX crawl and the comparison-only
+`fetch_m32_pilot()` crawl with the same bounded paths and document limits. The
+measurement harness wrote its uncommitted raw captures under the isolated
+worktree's `data/live-verification/`; no database rows were written and those
+captures are not part of CI or the beta commit.
 
-**It could not be run**: this session's outbound network is restricted to
-package registries and Anthropic's own API (confirmed via the proxy
-gateway's own status endpoint — `www.kmsab.org.uk` was refused with a 403
-at the CONNECT stage, before any TLS handshake or HTTP request reached the
-site). No request left this session's network boundary; nothing was
-fetched, archived, or sent anywhere. This is an environment restriction of
-the specific execution session this work was done in, not a property of the
-code, and not something authorization can route around.
+| Metric | HTTPX production crawl | Scrapy pilot |
+| --- | ---: | ---: |
+| Elapsed | 142.547 s | 196.828 s |
+| Peak process RSS | 85.9 MiB | 247.2 MiB |
+| Successful content requests | 73 | 77-estimate (37 pages + 40 documents) |
+| HTML pages fetched | 33 | 37 |
+| Candidate documents | 40 | 40 |
+| robots-blocked / unreachable / timed out | no / no / — | no / no / no |
 
-**To run it**, from a machine or session with ordinary outbound network
-access, with `SCRAPY_ENABLED=true` and a real `CONTACT_EMAIL` set:
+Parity across the 40 candidate documents was **yes** for document URLs,
+SHA-256 payloads, `from_index`, and classification outcomes. The HTTPX
+homepage capture was 15,599 bytes with SHA-256
+`8e75f1e43dfbf246e594ed65fe9861cdab0eff903af1c7f8babebc76efd83105`; the
+Scrapy capture was 5,654 bytes with SHA-256
+`fa1593ddd76d2d30dbfa0a9a00e5ccba8f6873b9643f9ff0c3889126d6888414` and was
+gzip-compressed. That explains the homepage hash/size mismatch and should be
+resolved or explicitly accepted before treating this transport as
+behaviour-preserving for HTML responses. It did not change the bounded PDF
+document set or its classifications in this watch.
 
-```python
-from pipeline.config import get_settings
-from pipeline.http import PipelineHTTPClient
-from pipeline.modules import m32_sab_site_reviews as m32
-from pipeline.transports.pilots.m32_sab_site_reviews_pilot import (
-    fetch_m32_pilot, classify_pilot_documents,
-)
-
-settings = get_settings()
-SAB_NAME = "Kent & Medway Safeguarding Adults Board"
-BASE_URL = "https://www.kmsab.org.uk"
-
-# HTTPX (what production already does)
-client = PipelineHTTPClient(m32.SOURCE_SYSTEM, settings=settings)
-try:
-    httpx_crawl = m32.crawl_board((SAB_NAME, BASE_URL), client)
-finally:
-    client.close()
-
-# Scrapy pilot
-pilot_crawl = fetch_m32_pilot(SAB_NAME, BASE_URL, settings=settings)
-documents = classify_pilot_documents(pilot_crawl, settings=settings, sab_name=SAB_NAME)
-```
-
-Neither call writes to the database. Compare `httpx_crawl.candidates`
-against `pilot_crawl.documents` / `documents` the same way
-`tests/test_m32_scrapy_pilot.py`'s parity tests do, and append the result to
-this document before treating the pilot as validated against a live source.
+Versions: Scrapy 2.18.0, scrapy-playwright 0.0.48, Playwright 1.62.0. The
+pilot was invoked explicitly with `SCRAPY_ENABLED` enabled; this remains a
+comparison-only measurement and is not wired into the registry or CI.
 
 ## What this does not establish
 
