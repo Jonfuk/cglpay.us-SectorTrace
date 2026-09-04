@@ -67,6 +67,12 @@ if (existsSync(publicDist)) {
   // Overview is the default route; its JS+CSS before data must fit 375 KiB.
   // Shared JS + all CSS is a safe upper bound (the overview page chunk is tiny).
   check('public overview route JS+CSS', sharedJs + css, 375)
+  // Incremental map payload: the lazy chunks that carry MapLibre, on top of the
+  // shared bundle. Budget 400 KiB gzip. Zero until the map chunk exists.
+  const mapChunks = allFiles(nuxtDir, '.js').filter((p) =>
+    readFileSync(p, 'utf8').toLowerCase().includes('maplibre'),
+  )
+  if (mapChunks.length) check('public map route incremental (MapLibre)', sum(mapChunks), 400)
 } else {
   failures.push('public build missing — run `npm run build` in frontend/public')
 }
@@ -106,17 +112,29 @@ if (existsSync(publicDist)) {
   }
 }
 
-// Specialist-library route boundaries: MapLibre/PMTiles/Tabulator/ECharts must
-// never land in a shared or unrelated chunk. Until their routes exist they must
-// be absent entirely; when they are added, this check tightens to per-route.
+// Specialist-library route boundaries: MapLibre/PMTiles/Tabulator/ECharts may
+// only ever appear in a LAZY route chunk, never in the shared chunks the entry
+// HTML loads — no route should pay for a library it does not use. A library in a
+// shared chunk fails the gate; a library confined to a lazy chunk passes and is
+// reported so the boundary stays visible.
+const SPECIALIST = ['maplibre', 'pmtiles', 'tabulator', 'echarts']
 for (const [name, dist] of [['public', publicDist], ['admin', adminDist]]) {
   if (!existsSync(dist)) continue
-  const text = jsText(dist)
-  for (const lib of ['maplibre-gl', 'pmtiles', 'tabulator', 'echarts']) {
-    if (text.toLowerCase().includes(lib)) {
-      // Not an automatic failure once map/table/chart routes exist; for now,
-      // their absence is the expected state and a presence is worth surfacing.
-      report.push(`WARN  ${name}: found "${lib}" — confirm it is confined to its route chunk`)
+  const sharedNames = new Set(sharedChunks(dist).map((p) => p.split('/').pop()))
+  const nuxtDir = join(dist, '_nuxt')
+  for (const lib of SPECIALIST) {
+    let inShared = false
+    let inLazy = false
+    for (const file of allFiles(nuxtDir, '.js')) {
+      if (!readFileSync(file, 'utf8').toLowerCase().includes(lib)) continue
+      if (sharedNames.has(file.split('/').pop())) inShared = true
+      else inLazy = true
+    }
+    if (inShared) {
+      failures.push(`${name}: "${lib}" is in a SHARED chunk — it must be lazy-loaded per route`)
+      report.push(`FAIL  ${name}: "${lib}" in shared chunk`)
+    } else if (inLazy) {
+      report.push(`PASS  ${name}: "${lib}" confined to a lazy route chunk`)
     }
   }
 }

@@ -16,6 +16,14 @@ const metric = computed({
   set: (v: string) => { void filters.set('metric', v || undefined) },
 })
 
+// Table vs map view. The map (MapLibre) is only mounted when chosen, so its
+// chunk is never fetched on the table view — keeping MapLibre off every path
+// that does not use it. The choice is URL-authoritative.
+const view = computed({
+  get: () => (filters.get('view') === 'map' ? 'map' : 'table'),
+  set: (v: string) => { void filters.set('view', v === 'map' ? 'map' : undefined) },
+})
+
 const { data, pending, error } = await useDataRoute<GeographyResponse>(
   'public-geography',
   (f) => api.geography({ query: f }),
@@ -44,9 +52,25 @@ useHead({ title: 'SectorTrace — Places' })
     <div class="space-y-2">
       <h1 class="text-2xl font-semibold">Places</h1>
       <p class="opacity-70 max-w-2xl">
-        One value per local authority. The map view (vector boundary tiles)
-        arrives in a later stage; the same values are shown here as a table.
+        One value per local authority, as a table or a choropleth of the
+        authority boundaries. The map colours each authority by the same value
+        the table shows.
       </p>
+    </div>
+
+    <div class="inline-flex rounded border border-black/15 dark:border-white/15 text-sm overflow-hidden">
+      <button
+        type="button"
+        class="px-3 py-1"
+        :class="view === 'table' ? 'bg-[var(--st-accent)] text-white' : 'opacity-70'"
+        @click="view = 'table'"
+      >Table</button>
+      <button
+        type="button"
+        class="px-3 py-1"
+        :class="view === 'map' ? 'bg-[var(--st-accent)] text-white' : 'opacity-70'"
+        @click="view = 'map'"
+      >Map</button>
     </div>
 
     <div v-if="pending" class="text-sm opacity-60">Loading authority values…</div>
@@ -59,7 +83,13 @@ useHead({ title: 'SectorTrace — Places' })
         <StStat label="Authorities" :value="features.length" />
       </div>
 
-      <UCard>
+      <GeographyMap
+        v-if="view === 'map'"
+        :features="features"
+        :metric-label="data?.metric_label"
+      />
+
+      <UCard v-else>
         <template #header>
           <span class="text-sm font-medium">{{ data?.metric_label ?? 'Authority values' }}</span>
         </template>
