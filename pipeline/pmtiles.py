@@ -176,6 +176,31 @@ def _tile_bounds(tile) -> tuple[float, float, float, float]:
     return bounds.west, bounds.south, bounds.east, bounds.north
 
 
+def _polygonal(geometry):
+    """Return only polygonal members of a repaired/intersected geometry.
+
+    A boundary can become a ``GeometryCollection`` containing a polygon plus
+    a point or line at a collapsed edge. Those lower-dimensional remnants are
+    valid Shapely results but cannot be encoded as an authority polygon in the
+    MVT layer, so discard them while preserving every polygonal component.
+    """
+    from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
+    from shapely.ops import unary_union
+
+    if geometry.is_empty:
+        return None
+    if isinstance(geometry, (Polygon, MultiPolygon)):
+        return geometry
+    if isinstance(geometry, GeometryCollection):
+        polygons = [member for member in geometry.geoms
+                    if isinstance(member, (Polygon, MultiPolygon)) and not member.is_empty]
+        if not polygons:
+            return None
+        merged = unary_union(polygons)
+        return merged if isinstance(merged, (Polygon, MultiPolygon)) and not merged.is_empty else None
+    return None
+
+
 def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, bytes]:
     """Clip each authority to the tiles it intersects and encode MVT bytes."""
     import mapbox_vector_tile
@@ -188,6 +213,9 @@ def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, by
         geometry = shape(row["geometry"])
         if not geometry.is_valid:
             geometry = make_valid(geometry)
+        geometry = _polygonal(geometry)
+        if geometry is None:
+            continue
         if geometry.is_empty:
             continue
         west, south, east, north = geometry.bounds
@@ -201,13 +229,16 @@ def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, by
             for tile in mercantile.tiles(west, south, east, north, [zoom]):
                 tile_box = box(*_tile_bounds(tile))
                 clipped = geometry.intersection(tile_box)
-                if clipped.is_empty:
+                clipped = _polygonal(clipped)
+                if clipped is None:
                     continue
                 # Reduce vertex pressure at the overview zooms while keeping
                 # topology valid. The source geometry itself is untouched.
                 tolerance = 360.0 / (EXTENT * (1 << (zoom + 1)))
                 if tolerance and not clipped.is_empty:
-                    clipped = clipped.simplify(tolerance, preserve_topology=True)
+                    clipped = _polygonal(clipped.simplify(tolerance, preserve_topology=True))
+                if clipped is None:
+                    continue
                 tile_features.setdefault((zoom, tile.x, tile.y), []).append({
                     "geometry": clipped,
                     "properties": {
@@ -217,14 +248,22 @@ def _build_tiles(rows: list[dict], min_zoom: int, max_zoom: int) -> dict[int, by
                     },
                 })
 
+    # Quantisation can collapse a very small polygon to a line or point.
+    # mapbox-vector-tile's default repair callback returns that lower-
+    # dimensional geometry, which then cannot be reassembled into a
+    # MultiPolygon. Filter repaired results at the encoder boundary too.
+    def repair(geometry):
+        return _polygonal(make_valid(geometry))
+
     encoded: dict[int, bytes] = {}
     for (zoom, x, y), features in sorted(tile_features.items()):
+
         encoded[_tile_id(zoom, x, y)] = mapbox_vector_tile.encode(
             [{"name": LAYER_NAME, "features": features}],
             default_options={
                 "quantize_bounds": _tile_bounds(mercantile.Tile(x, y, zoom)),
                 "extents": EXTENT,
-                "on_invalid_geometry": make_valid,
+                "on_invalid_geometry": repair,
             },
         )
     return encoded
