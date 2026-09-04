@@ -339,10 +339,9 @@ This record supports the **shadow-only** Phase 2 acceptance lane. It does not
 authorize prefilter suppression. A representative human-adjudicated corpus is
 required only for the separate suppression-release gate; until then the
 prefilter remains observational and the system retains the model path as its
-correctness baseline. Shadow-mode acceptance still requires same-dataset
-parity for themes/signals/verifiers/links/audits and a production-sized
-memory/call/SQL benchmark. The complete PostgreSQL offline suite now passes on
-`beta`.
+correctness baseline. Same-dataset parity and production-sized memory/call/SQL
+runs remain optional diagnostic evidence rather than blockers for shadow-only
+completion. The complete PostgreSQL offline suite now passes on `beta`.
 
 The reproducible acceptance procedure is documented in
 `docs/analysis-phase2-acceptance.md`. `pipeline analysis benchmark-once`

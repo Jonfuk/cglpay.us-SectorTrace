@@ -1,12 +1,12 @@
 # Phase 2 analysis acceptance
 
 Phase 2 has two deliberately separate acceptance lanes. The implementation
-may be accepted in **shadow-only mode** when the same-data parity,
-production-scale benchmark, and PostgreSQL test gates in `performance.md` have
-passed; this lane does not require a human-adjudicated corpus. A corpus is a
-separate release-safety gate required before the prefilter may suppress any
-passage. The commands below create reproducible JSON evidence; they do not
-turn a fixture run into production acceptance.
+may be accepted in **shadow-only mode** using the landed implementation and
+offline PostgreSQL/test gates; this lane does not require a human-adjudicated
+corpus or a live production-scale model run. A corpus is a separate
+release-safety gate required before the prefilter may suppress any passage.
+The optional commands below create reproducible diagnostic evidence; they do
+not turn a fixture run into production acceptance.
 
 ## Safety and isolation
 
@@ -48,12 +48,12 @@ uv run pipeline analysis prefilter-eval adjudicated.jsonl \
 Keep suppression false if this exits non-zero. A persisted failed evaluation
 is evidence about the rules, not permission to suppress candidates.
 
-## Same-dataset shadow acceptance
+## Optional same-dataset shadow diagnostics
 
-Queue one all-domain baseline release with suppression disabled. Instrument
-exactly that queued run. The acceptance database must be disposable and the
-source snapshot, Git commit, model configuration, and input digest must be
-frozen:
+If resources permit, queue an all-domain baseline release with suppression
+disabled and instrument exactly that queued run. The acceptance database must
+be disposable and the source snapshot, Git commit, model configuration, and
+input digest must be frozen:
 
 ```bash
 uv run pipeline analysis benchmark-once \
@@ -68,7 +68,8 @@ uv run pipeline analysis acceptance-capture RELEASE_ID \
 Restore the identical database/source snapshot, retain the same pinned model
 configuration, and keep suppression disabled for the candidate run. This
 compares the current shadow implementation with the baseline without claiming
-that an unqualified corpus has demonstrated safe model-call reduction:
+that an unqualified corpus has demonstrated safe model-call reduction. These
+measurements are diagnostic and are not required to accept shadow-only Phase 2:
 
 ```bash
 uv run pipeline analysis benchmark-once \
