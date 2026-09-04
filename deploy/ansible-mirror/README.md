@@ -71,6 +71,12 @@ things a mirror never does:
   app image, discarding any change made directly on the box. This box always
   runs the tip of the branch you named; there is no separate `git pull` step
   to remember, unlike a `dr_mirror`'s "Redeploying" section below.
+- **Whether to serve the generated Nuxt front end.** The beta wizard writes
+  `serve_nuxt: true` by default. That renders `SERVE_NUXT=true` into the
+  app's `.env`, so `/` and `/admin` use the generated Nuxt apps while `/api`
+  remains on the Python server. Answer no in the wizard, or set
+  `serve_nuxt: false` in `group_vars/all/zz-local.yml`, to keep the legacy
+  portals as parity oracles. Disaster-recovery mirrors default to false.
 - **Whether to reseed nightly too.** Default no. The three "how does the
   warehouse get here" sync paths below (snapshot / tunnel / URL) still apply
   — a beta box seeds from the same sources a mirror would — but by default

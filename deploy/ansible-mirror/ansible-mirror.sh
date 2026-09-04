@@ -178,7 +178,7 @@ BANNER
         2) mirror_role="beta" ;;
     esac
 
-    local deploy_git_branch="" recurring_sync="true"
+    local deploy_git_branch="" recurring_sync="true" serve_nuxt="false"
     if [ "$mirror_role" = "beta" ]; then
         echo
         echo "--- Which branch does this box build and run? -------------------"
@@ -200,6 +200,16 @@ BANNER
             recurring_sync="true"
         else
             recurring_sync="false"
+        fi
+
+        echo
+        echo "--- Serve the Nuxt front end ----------------------------------"
+        echo "The beta box is the cutover proving ground for the generated"
+        echo "public and admin Nuxt apps. The legacy portals remain the"
+        echo "parity oracle when this is off."
+        echo
+        if ask_yes_no "Serve Nuxt on this beta box?" "y"; then
+            serve_nuxt="true"
         fi
     fi
 
@@ -553,6 +563,7 @@ domain: $(yaml_quote "$domain")
 mirror_role: $(yaml_quote "$mirror_role")
 deploy_git_branch: $(yaml_quote "$deploy_git_branch")
 mirror_recurring_sync_enabled: $recurring_sync
+serve_nuxt: $serve_nuxt
 
 mirror_source_label: $(yaml_quote "$source_label")
 mirror_sync_mode: $(yaml_quote "$sync_mode")
