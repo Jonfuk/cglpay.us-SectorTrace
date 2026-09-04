@@ -157,6 +157,12 @@ export interface ProviderRow {
   [key: string]: unknown
 }
 
+/** `/api/v1/providers` — the list endpoint wraps rows with a named key. */
+export interface ProvidersResponse {
+  providers: ProviderRow[]
+  [key: string]: unknown
+}
+
 /** One authority value for the choropleth (`/api/v1/geography` → `features[]`).
  *  Geometry is deliberately NOT included here — the map loads its separate,
  *  content-addressed PMTiles archive. */

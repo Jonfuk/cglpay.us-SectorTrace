@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
-import type { ProviderRow } from '~/types/api'
+import type { ProviderRow, ProvidersResponse } from '~/types/api'
 
 const api = usePublicApi()
 const filters = useFilterState()
@@ -10,12 +10,12 @@ const search = computed({
   set: (value: string) => { void filters.set('q', value || undefined) },
 })
 
-const { data, pending, error } = await useDataRoute<ProviderRow[]>(
+const { data, pending, error } = await useDataRoute<ProvidersResponse>(
   'public-providers',
   () => api.providers(),
 )
 
-const allProviders = computed(() => data.value ?? [])
+const allProviders = computed(() => data.value?.providers ?? [])
 const rows = computed(() => {
   const needle = search.value.trim().toLowerCase()
   if (!needle) return allProviders.value
