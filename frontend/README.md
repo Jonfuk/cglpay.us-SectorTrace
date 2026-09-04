@@ -67,7 +67,16 @@ deep link with the client shell.
 ```bash
 cd frontend
 npm run test        # Vitest unit tests (public app)
+npm run test:e2e    # Playwright browser smoke tests (public app)
 ```
+
+The Playwright smoke gate serves the built `dist/` (no API) and drives it in a
+real Chromium to prove the shell boots with no console errors or hydration/
+interop warnings — the check that catches a broken Vapor/VDOM interop or a bad
+build that typecheck and unit tests miss. It covers the shell, navigating to a
+data route (and the hash bookmark it produces), and the map view lazy-loading
+MapLibre. The config uses a Chromium pre-installed in the image when present and
+falls back to Playwright's managed browser otherwise (CI installs it).
 
 Vitest covers the framework-agnostic units whose invariants matter: the
 transport (request-key canonicalisation, in-flight dedup, `AbortController`

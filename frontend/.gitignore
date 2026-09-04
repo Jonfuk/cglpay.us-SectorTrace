@@ -19,3 +19,8 @@ dist
 .env
 .env.*
 !.env.example
+
+# Playwright
+/public/playwright-report/
+/public/test-results/
+/public/blob-report/

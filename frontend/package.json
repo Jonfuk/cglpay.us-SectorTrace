@@ -15,6 +15,7 @@
     "budgets": "node scripts/check-budgets.mjs",
     "verify": "npm run build && npm run budgets",
     "clean": "rm -rf public/.nuxt public/.output public/dist admin/.nuxt admin/.output admin/dist",
-    "test": "npm --prefix public run test"
+    "test": "npm --prefix public run test",
+    "test:e2e": "npm --prefix public run test:e2e"
   }
 }
