@@ -430,6 +430,30 @@ def record_parse_failure(
     )
 
 
+def record_parse_failures(
+    conn: Connection,
+    module: str,
+    rows: Sequence[tuple[str | None, str | None, str | None, str]],
+) -> int:
+    """Batch :func:`record_parse_failure` without changing its idempotence.
+
+    The tuple order is ``(source_url, field_name, raw_fragment, reason)``.
+    Parse failures are quarantine metadata rather than evidence, so a failed
+    batch may be retried safely with the same natural key.
+    """
+    if not rows:
+        return 0
+    conn.executemany(
+        "INSERT INTO parse_failures (module, source_url, field_name, raw_fragment, reason, created_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (module, COALESCE(source_url, ''), COALESCE(field_name, ''), COALESCE(raw_fragment, '')) "
+        "DO UPDATE SET reason = excluded.reason",
+        [(module, source_url, field_name, raw_fragment, reason, _utcnow())
+         for source_url, field_name, raw_fragment, reason in rows],
+    )
+    return len(rows)
+
+
 def record_review_item(
     conn: Connection,
     module: str,
@@ -449,6 +473,30 @@ def record_review_item(
         "WHERE review_queue.status = 'pending'",
         (module, item_type, raw_value, context_json, _utcnow()),
     )
+
+
+def record_review_items(
+    conn: Connection,
+    module: str,
+    rows: Sequence[tuple[str, str, str | None]],
+) -> int:
+    """Batch :func:`record_review_item` while leaving decided rows untouched.
+
+    The tuple order is ``(item_type, raw_value, context_json)`` and mirrors
+    the single-row helper's natural key and pending-only update rule.
+    """
+    if not rows:
+        return 0
+    conn.executemany(
+        "INSERT INTO review_queue (module, item_type, raw_value, context_json, status, created_at) "
+        "VALUES (%s, %s, %s, %s, 'pending', %s) "
+        "ON CONFLICT (module, item_type, raw_value) DO UPDATE SET "
+        "context_json = excluded.context_json "
+        "WHERE review_queue.status = 'pending'",
+        [(module, item_type, raw_value, context_json, _utcnow())
+         for item_type, raw_value, context_json in rows],
+    )
+    return len(rows)
 
 
 def get_cursor(conn: Connection, module: str) -> str | None:

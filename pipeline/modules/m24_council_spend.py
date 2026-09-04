@@ -593,12 +593,14 @@ def run(ctx: ModuleContext) -> None:
             continue
 
         findings = outcome.value
-        for item_type, raw_value, context in findings.review_items:
-            db.record_review_item(conn, module_name, item_type, raw_value,
-                                  json.dumps(context))
-        for failure_field, raw, reason, source_url in findings.parse_failures:
-            db.record_parse_failure(conn, module_name, failure_field, raw, reason,
-                                    source_url=source_url)
+        db.record_review_items(
+            conn, module_name,
+            [(item_type, raw_value, json.dumps(context))
+             for item_type, raw_value, context in findings.review_items])
+        db.record_parse_failures(
+            conn, module_name,
+            [(source_url, failure_field, raw, reason)
+             for failure_field, raw, reason, source_url in findings.parse_failures])
 
         db.upsert_many(
             conn, "council_spend_files", findings.files,
