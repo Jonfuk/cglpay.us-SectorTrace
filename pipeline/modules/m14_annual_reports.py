@@ -236,17 +236,23 @@ def run(ctx: ModuleContext) -> None:
         reports_read += 1
 
         all_passages: list[dict] = []
+        passage_rows: list[dict] = []
         for page_number, page_text in pages:
             for passage in find_passages(page_text, page_number):
-                db.upsert(conn, "provider_report_passages", {
+                passage_rows.append({
                     "provider_key": provider_key,
                     "financial_year_end": row["financial_year_end"],
                     **passage,
                     **provenance,
-                }, natural_key=["provider_key", "financial_year_end", "topic",
-                                 "page_number", "matched_term"])
+                })
                 all_passages.append(passage)
                 passages_written += 1
+
+        db.upsert_many(
+            conn, "provider_report_passages", passage_rows,
+            natural_key=["provider_key", "financial_year_end", "topic",
+                         "page_number", "matched_term"],
+        )
 
         for topic, summary in summarise_disclosure(all_passages).items():
             db.upsert(conn, "provider_report_disclosure", {
