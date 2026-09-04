@@ -21,9 +21,26 @@ export interface HealthResponse {
 
 /** `/api/admin/modules` — module cursors and review/parse-failure counts. */
 export interface ModulesResponse {
+  modules?: ModuleRow[]
+  waves?: number
   cursors?: Array<Record<string, unknown>>
   review_queue?: Array<{ module: string; n: number }>
   parse_failures?: Array<{ module: string; n: number }>
+  [key: string]: unknown
+}
+
+export interface ModuleRow {
+  name: string
+  wave?: number | null
+  supports_since?: boolean
+  since_note?: string | null
+  depends_on?: string[]
+  depends_note?: string | null
+  missing_dependencies?: string[]
+  cursor_value?: string | null
+  cursor_updated_at?: string | null
+  pending_review?: number
+  parse_failures?: number
   [key: string]: unknown
 }
 
@@ -162,6 +179,10 @@ export interface ExportFile {
   name?: string
   path?: string
   size?: number
+  bytes?: number
+  group?: string
+  modified?: string
+  provenance?: string | null
   [key: string]: unknown
 }
 
@@ -270,5 +291,95 @@ export interface ClaimEvidenceRow {
 export interface ClaimEvidenceResponse {
   tables: string[]
   rows: ClaimEvidenceRow[]
+  [key: string]: unknown
+}
+
+/** `/api/admin/cockpit` — prioritised, operational next actions. */
+export interface CockpitCard {
+  key: string
+  title: string
+  priority: number
+  metric: number
+  reason: string
+  link: string
+  [key: string]: unknown
+}
+
+export interface CockpitResponse {
+  cards: CockpitCard[]
+  priority_labels?: Record<string, string>
+  top_priority?: number
+  attention?: number
+  note?: string
+  [key: string]: unknown
+}
+
+/** `/api/admin/mission-control` — module waves and durable run state. */
+export interface MissionControlModule {
+  name: string
+  depends_on?: string[]
+  missing_dependencies?: string[]
+  pending_review?: number
+  parse_failures?: number
+  cursor_updated_at?: string | null
+  last_run?: { status?: string | null; [key: string]: unknown } | null
+  [key: string]: unknown
+}
+
+export interface MissionControlResponse {
+  wave_count?: number
+  waves?: Array<{ wave: number; modules: MissionControlModule[] }>
+  active?: JobHead | null
+  queued?: JobHead[]
+  last_run?: RunRow | null
+  history?: RunRow[]
+  failure_summary?: Array<{ module: string; parse_failures: number; pending_review: number; last_status?: string | null }>
+  never_run?: string[]
+  note?: string
+  [key: string]: unknown
+}
+
+/** `/api/admin/jobs/{id}` — a job head plus its bounded log window. */
+export interface JobDetail extends JobHead {
+  log?: Array<{ at?: string; level?: string; text?: string }>
+  next?: number
+  summary?: Array<Record<string, unknown>>
+  args?: Record<string, unknown>
+  dropped?: number
+}
+
+export interface FreshnessRow {
+  table: string
+  rows: number
+  newest?: string | null
+  oldest?: string | null
+  [key: string]: unknown
+}
+
+export interface StorageRow {
+  path: string
+  backend?: string | null
+  files?: number
+  bytes?: number
+  exists?: boolean
+  newest?: string | null
+  mirror_lag?: { objects?: number; bytes?: number } | null
+  note?: string
+  [key: string]: unknown
+}
+
+export interface CoverageResponse {
+  tier?: string
+  authority_count?: number
+  upper_tier_types?: string[]
+  columns?: Array<{ label: string; table: string; module: string; covered?: number; missing?: boolean }>
+  authorities?: Array<{ ons_code: string; name: string; region?: string | null; cells: Record<string, number> }>
+  [key: string]: unknown
+}
+
+export interface FailuresResponse {
+  modules?: string[]
+  groups?: Array<{ n: number; module: string; field_name?: string | null; reason?: string | null }>
+  rows?: Array<{ raw_fragment?: string | null; module: string; field_name?: string | null; reason?: string | null; source_url?: string | null }>
   [key: string]: unknown
 }

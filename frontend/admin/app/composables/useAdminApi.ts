@@ -1,6 +1,7 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
   AnalysisOverviewResponse,
+  CockpitResponse,
   CandidateCountsResponse,
   CandidatesListingResponse,
   AdminSearchResponse,
@@ -11,6 +12,12 @@ import type {
   CensusListingResponse,
   ExportsResponse,
   HealthResponse,
+  MissionControlResponse,
+  FreshnessRow,
+  StorageRow,
+  CoverageResponse,
+  FailuresResponse,
+  JobDetail,
   JobsResponse,
   RunsResponse,
   ModulesResponse,
@@ -45,6 +52,10 @@ export interface AdminApi {
 
   /** `/api/admin/health` — warehouse/extension/graph/document status. */
   health(options?: TransportOptions): Promise<HealthResponse>
+  /** `/api/admin/cockpit` — prioritised operational actions. */
+  cockpit(options?: TransportOptions): Promise<CockpitResponse>
+  /** `/api/admin/mission-control` — module waves and run state. */
+  missionControl(options?: TransportOptions): Promise<MissionControlResponse>
   /** `/api/admin/modules` — module cursors and review/parse counts. */
   modules(options?: TransportOptions): Promise<ModulesResponse>
   /** `/api/admin/candidates/counts` — per-kind candidate counts. */
@@ -59,8 +70,14 @@ export interface AdminApi {
   census(options?: TransportOptions): Promise<CensusListingResponse>
   /** `/api/admin/jobs` — in-process job heads. */
   jobs(options?: TransportOptions): Promise<JobsResponse>
+  job(id: number, options?: TransportOptions): Promise<JobDetail>
   /** `/api/admin/runs` — the durable run ledger. */
   runs(options?: TransportOptions): Promise<RunsResponse>
+  runLedger(options?: TransportOptions): Promise<RunsResponse>
+  freshness(options?: TransportOptions): Promise<{ freshness: FreshnessRow[]; snapshot?: unknown }>
+  storage(options?: TransportOptions): Promise<{ storage: StorageRow[]; snapshot?: unknown }>
+  coverage(options?: TransportOptions): Promise<CoverageResponse>
+  failures(options?: TransportOptions): Promise<FailuresResponse>
   /** `/api/admin/exports` — export files and staleness. */
   exports(options?: TransportOptions): Promise<ExportsResponse>
   /** `/api/admin/search` — operator semantic/lexical search. */
@@ -102,6 +119,9 @@ export interface AdminApi {
   decideClaim(input: { claimId: number; decision: string; decidedBy: string; note?: string }): Promise<unknown>
   /** Return a decided claim to draft without deleting its history. */
   resetClaim(input: { claimId: number }): Promise<unknown>
+  startRun(input: { module: string; since?: string; limit?: number; jobs?: number; dryRun?: boolean }): Promise<JobDetail>
+  startIntegrityCheck(): Promise<JobDetail>
+  startExport(target: string): Promise<JobDetail>
 }
 
 export function useAdminApi(): AdminApi {
@@ -118,6 +138,8 @@ export function useAdminApi(): AdminApi {
     v1,
     api,
     health: (options) => admin<HealthResponse>('/health', options),
+    cockpit: (options) => admin<CockpitResponse>('/cockpit', options),
+    missionControl: (options) => admin<MissionControlResponse>('/mission-control', options),
     modules: (options) => admin<ModulesResponse>('/modules', options),
     candidateCounts: (options) => admin<CandidateCountsResponse>('/candidates/counts', options),
     candidates: (options) => admin<CandidatesListingResponse>('/candidates', options),
@@ -125,7 +147,13 @@ export function useAdminApi(): AdminApi {
     reviewItems: (options) => api<ReviewItemsResponse>('/review', options),
     census: (options) => admin<CensusListingResponse>('/census', options),
     jobs: (options) => admin<JobsResponse>('/jobs', options),
+    job: (id, options) => admin<JobDetail>(`/jobs/${id}`, options),
     runs: (options) => admin<RunsResponse>('/runs', options),
+    runLedger: (options) => admin<RunsResponse>('/run-ledger', options),
+    freshness: (options) => admin<{ freshness: FreshnessRow[]; snapshot?: unknown }>('/freshness', options),
+    storage: (options) => admin<{ storage: StorageRow[]; snapshot?: unknown }>('/storage', options),
+    coverage: (options) => admin<CoverageResponse>('/coverage', options),
+    failures: (options) => admin<FailuresResponse>('/failures', options),
     exports: (options) => admin<ExportsResponse>('/exports', options),
     search: (options) => admin<AdminSearchResponse>('/search', options),
     claimCandidates: (options) => admin<ClaimCandidatesResponse>('/claim-candidates', options),
@@ -209,5 +237,15 @@ export function useAdminApi(): AdminApi {
       }),
     resetClaim: (input) =>
       t.postJson('/api/admin/claims/reset', { claim_id: input.claimId }),
+    startRun: (input) =>
+      t.postJson('/api/admin/run', {
+        module: input.module,
+        ...(input.since ? { since: input.since } : {}),
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        ...(input.jobs !== undefined ? { jobs: input.jobs } : {}),
+        ...(input.dryRun ? { dry_run: true } : {}),
+      }) as Promise<JobDetail>,
+    startIntegrityCheck: () => t.postJson('/api/admin/check', {}) as Promise<JobDetail>,
+    startExport: (target) => t.postJson('/api/admin/export', { target }) as Promise<JobDetail>,
   }
 }
