@@ -1,17 +1,17 @@
 """The experimental scrapy-playwright browser leg (scrapy.md Phase 3).
 
-Fixture-backed against a real local `http.server` fixture AND a real,
-pre-installed Chromium (`/opt/pw-browsers/chromium` in this checkout's
-sandbox) — scrapy.md's definition of done for a browser pilot is a page that
+Fixture-backed against a real local `http.server` fixture AND a real browser
+binary — scrapy.md's definition of done for a browser pilot is a page that
 actually gets rendered, not a mocked Playwright API. Skipped outright if
-either `scrapy` or `scrapy_playwright` is not installed, or if the pinned
-Chromium binary this suite targets is not present (a `uv sync --extra
-scrapy` without the browser binary itself, e.g. no `playwright install`, or
-a machine other than this project's own sandbox).
+either `scrapy` or `scrapy_playwright` is not installed, or if no supported
+browser binary is present. The binary may be supplied by
+`PLAYWRIGHT_EXECUTABLE_PATH`, the checkout's Linux provision, or the standard
+Chrome/Edge locations on Windows.
 """
 from __future__ import annotations
 
 import http.server
+import os
 import threading
 import time
 from pathlib import Path
@@ -31,10 +31,29 @@ from pipeline.transports.browser_pilot import (
 from pipeline.transports.scrapy_transport import ScrapyDisabled
 from pipeline.transports.types import FailureClass
 
-CHROMIUM_PATH = "/opt/pw-browsers/chromium"
+
+def _first_existing_browser() -> str:
+    candidates = [Path("/opt/pw-browsers/chromium")]
+    for variable in ("PLAYWRIGHT_EXECUTABLE_PATH", "SCRAPY_PLAYWRIGHT_EXECUTABLE_PATH"):
+        if os.environ.get(variable):
+            candidates.insert(0, Path(os.environ[variable]))
+    program_files = os.environ.get("ProgramFiles")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if program_files:
+        candidates.extend([
+            Path(program_files) / "Google/Chrome/Application/chrome.exe",
+            Path(program_files) / "Microsoft/Edge/Application/msedge.exe",
+        ])
+    if local_app_data:
+        candidates.extend(
+            Path(local_app_data).glob("ms-playwright/chromium-*/chrome-win64/chrome.exe"))
+    return next((str(path) for path in candidates if path.is_file()), "")
+
+
+CHROMIUM_PATH = _first_existing_browser()
 
 pytestmark = pytest.mark.skipif(
-    not Path(CHROMIUM_PATH).exists(),
+    not CHROMIUM_PATH,
     reason="pinned Chromium binary not present on this machine",
 )
 

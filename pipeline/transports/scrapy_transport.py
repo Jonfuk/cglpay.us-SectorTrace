@@ -299,7 +299,7 @@ def _run_bounded_crawl(queue, urls, source_system, module, settings: Settings,
                 "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
                 "pipeline.transports.scrapy_transport.DestinationGuardMiddleware": 250,
                 "pipeline.transports.scrapy_transport.RetryWithBackoffMiddleware": 950,
-                "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 900,
+                "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 500,
             },
             "PIPELINE_SETTINGS": settings,
             "PIPELINE_GUARD_DESTINATION": guard_destination,
@@ -492,7 +492,7 @@ class RetryWithBackoffMiddleware:
     honoured" requirement.
 
     Runs at a higher priority number than `ProvenanceArchiveMiddleware`
-    (950 vs 900), so for `process_response`/`process_exception` — which run
+    (950 vs 500), so for `process_response`/`process_exception` — which run
     in descending priority order — this sees a retryable response or
     exception *before* anything is archived. A response this middleware
     decides to retry is never archived at all: `pipeline.http`'s tenacity
@@ -593,11 +593,12 @@ class RetryWithBackoffMiddleware:
 class ProvenanceArchiveMiddleware:
     """Archives the exact response bytes and stamps retrieval provenance.
 
-    Runs last among this project's `process_response` middlewares (lowest
-    remaining priority number, so — since that chain runs in descending
-    order — everything else has already had a chance to intervene, most
-    importantly `RetryWithBackoffMiddleware` short-circuiting a retryable
-    response before it gets here). Stamped onto `request.meta` rather than
+    Runs after Scrapy's response-decoding middleware and after this project's
+    retry middleware (the response chain runs in descending priority order).
+    That ordering matters: hashing at priority 900 would archive a gzip wire
+    body before `HttpCompressionMiddleware` decodes it, while HTTPX's
+    `response.content` contract exposes the decoded bytes. Stamped onto
+    `request.meta` rather than
     `response.meta`: at the point `process_response` runs, the engine has
     not yet bound `response.request`, so `response.meta` (which proxies to
     `self.request.meta`) raises. Writing to `request.meta` directly reaches

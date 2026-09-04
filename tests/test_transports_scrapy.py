@@ -15,6 +15,7 @@ suite.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import http.server
 import threading
@@ -59,6 +60,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     responses = {
         "/robots.txt": (200, {}, b"User-agent: *\nAllow: /\n"),
         "/ok": (200, {"Content-Type": "text/plain"}, b"hello from the fixture server"),
+        "/gzip": (
+            200,
+            {"Content-Type": "text/plain", "Content-Encoding": "gzip"},
+            gzip.compress(b"decoded fixture response"),
+        ),
         "/missing": (404, {}, b"not found"),
         "/empty": (200, {}, b""),
     }
@@ -278,6 +284,26 @@ def test_fixture_fetch_records_full_provenance(fixture_server, scrapy_settings):
 
     archived_path = scrapy_settings.raw_archive_dir / "test_scrapy" / f"{result.payload_sha256}.txt"
     assert archived_path.read_bytes() == result.body
+
+
+def test_compressed_response_is_decoded_before_provenance(
+        fixture_server, scrapy_settings):
+    """Scrapy's body contract matches HTTPX's decoded ``response.content``.
+
+    Provenance must run after HttpCompressionMiddleware; otherwise the wire
+    gzip bytes receive a different hash and are archived as though they were
+    the source payload returned to parsers.
+    """
+    url = f"{fixture_server}/gzip"
+    [result] = fetch_via_scrapy([url], source_system="test_scrapy", settings=scrapy_settings)
+
+    expected = b"decoded fixture response"
+    assert result.ok is True
+    assert result.body == expected
+    assert result.payload_sha256 == hashlib.sha256(expected).hexdigest()
+    archived_path = scrapy_settings.raw_archive_dir / "test_scrapy" / (
+        f"{result.payload_sha256}.txt")
+    assert archived_path.read_bytes() == expected
 
 
 def test_http_error_is_an_explicit_failure_not_an_empty_success(fixture_server, scrapy_settings):

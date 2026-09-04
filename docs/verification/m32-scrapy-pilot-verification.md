@@ -1,9 +1,9 @@
 # m32_sab_site_reviews Scrapy pilot — verification (scrapy.md Phase 2)
 
 Status: offline pilot complete and live-sample measured on 2026-09-04
-(Europe/London). The bounded live document crawl passed parity; the homepage
-encoding difference recorded below remains a transport follow-up, not a reason
-to promote the pilot to production.
+(Europe/London). The bounded live document crawl passed parity; its initial
+homepage encoding discrepancy was fixed and rechecked below. The pilot still
+remains comparison-only pending owner review.
 
 ## What this is
 
@@ -122,15 +122,14 @@ captures are not part of CI or the beta commit.
 | robots-blocked / unreachable / timed out | no / no / — | no / no / no |
 
 Parity across the 40 candidate documents was **yes** for document URLs,
-SHA-256 payloads, `from_index`, and classification outcomes. The HTTPX
-homepage capture was 15,599 bytes with SHA-256
-`8e75f1e43dfbf246e594ed65fe9861cdab0eff903af1c7f8babebc76efd83105`; the
-Scrapy capture was 5,654 bytes with SHA-256
-`fa1593ddd76d2d30dbfa0a9a00e5ccba8f6873b9643f9ff0c3889126d6888414` and was
-gzip-compressed. That explains the homepage hash/size mismatch and should be
-resolved or explicitly accepted before treating this transport as
-behaviour-preserving for HTML responses. It did not change the bounded PDF
-document set or its classifications in this watch.
+SHA-256 payloads, `from_index`, and classification outcomes. The first run
+found that provenance ran before Scrapy's `HttpCompressionMiddleware`, so the
+homepage was archived as 5,654 gzip bytes instead of the 15,599 decoded bytes
+used by HTTPX. `ProvenanceArchiveMiddleware` now runs after decompression
+(priority 500); a watched homepage recheck returned 15,599 bytes with the
+same SHA-256 as HTTPX:
+`8e75f1e43dfbf246e594ed65fe9861cdab0eff903af1c7f8babebc76efd83105`.
+The fix is covered by an offline gzip fixture test.
 
 Versions: Scrapy 2.18.0, scrapy-playwright 0.0.48, Playwright 1.62.0. The
 pilot was invoked explicitly with `SCRAPY_ENABLED` enabled; this remains a
