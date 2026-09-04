@@ -177,3 +177,24 @@ export interface AdminSearchResponse {
   hits?: Array<Record<string, unknown>>
   [key: string]: unknown
 }
+
+/** A claim candidate awaiting adjudication (`/api/admin/claim-candidates`). */
+export interface ClaimCandidate {
+  claim_candidate_id: string
+  predicate: string | null
+  subject_hint: string | null
+  object_literal: string | null
+  object_concept_id: string | null
+  assertion_status: string | null
+  evidence_span: string | null
+  status: string | null
+  created_at: string | null
+  [key: string]: unknown
+}
+
+export interface ClaimCandidatesResponse {
+  candidates: ClaimCandidate[]
+  total: number
+  caveat?: string
+  [key: string]: unknown
+}

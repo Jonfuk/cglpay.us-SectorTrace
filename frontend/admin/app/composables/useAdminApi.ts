@@ -4,6 +4,7 @@ import type {
   CandidateCountsResponse,
   CandidatesListingResponse,
   AdminSearchResponse,
+  ClaimCandidatesResponse,
   CensusListingResponse,
   ExportsResponse,
   HealthResponse,
@@ -61,6 +62,8 @@ export interface AdminApi {
   exports(options?: TransportOptions): Promise<ExportsResponse>
   /** `/api/admin/search` — operator semantic/lexical search. */
   search(options?: TransportOptions): Promise<AdminSearchResponse>
+  /** `/api/admin/claim-candidates` — the claim adjudication queue. */
+  claimCandidates(options?: TransportOptions): Promise<ClaimCandidatesResponse>
 
   // --- Writes. Each records a named human; nothing is promoted without one. ---
 
@@ -76,6 +79,8 @@ export interface AdminApi {
   verifyCensus(input: { key: string; verifiedBy: string; note?: string }): Promise<unknown>
   /** Reject one census row. */
   rejectCensus(input: { key: string; rejectedBy: string; note?: string }): Promise<unknown>
+  /** Decide one claim candidate. */
+  decideClaimCandidate(input: { claimCandidateId: string; decision: string; decidedBy: string }): Promise<unknown>
 }
 
 export function useAdminApi(): AdminApi {
@@ -102,6 +107,7 @@ export function useAdminApi(): AdminApi {
     runs: (options) => admin<RunsResponse>('/runs', options),
     exports: (options) => admin<ExportsResponse>('/exports', options),
     search: (options) => admin<AdminSearchResponse>('/search', options),
+    claimCandidates: (options) => admin<ClaimCandidatesResponse>('/claim-candidates', options),
 
     promoteCandidate: (input) =>
       t.postJson('/api/admin/candidates/promote', {
@@ -135,6 +141,12 @@ export function useAdminApi(): AdminApi {
         key: input.key,
         rejected_by: input.rejectedBy,
         ...(input.note ? { note: input.note } : {}),
+      }),
+    decideClaimCandidate: (input) =>
+      t.postJson('/api/admin/claim-candidates/decide', {
+        claim_candidate_id: input.claimCandidateId,
+        decision: input.decision,
+        decided_by: input.decidedBy,
       }),
   }
 }
