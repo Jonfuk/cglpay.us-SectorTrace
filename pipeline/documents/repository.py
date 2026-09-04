@@ -215,45 +215,59 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
     )
     conn.execute("DELETE FROM document_elements WHERE document_version_id=%s", (version_id,))
     element_ids: dict[int, str] = {}
+    element_values = []
+    topic_values = []
     for item in parsed.elements:
         element_id = stable_id("document-element", f"{version_id}|{item.sequence}")
         element_ids[item.sequence] = element_id
         text_hash = hashlib.sha256((item.text or "").encode("utf-8")).hexdigest() if item.text else None
-        conn.execute(
-            "INSERT INTO document_elements (document_element_id, document_version_id, parent_element_id, "
-            "element_type, sequence, page_number, heading_level, text, text_sha256, bbox_json, metadata_json) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        element_values.append(
             (element_id, version_id, None, item.element_type, item.sequence, item.page_number,
              item.heading_level, item.text, text_hash, _json(item.bbox) if item.bbox else None,
-             _json(item.metadata)),
-        )
+             _json(item.metadata)))
         # No FTS5 index to maintain here any more: PostgreSQL search is a
         # `tsvector` computed over document_elements.text at query time
         # (see `search` below and semantic_search), so the element row is the
-        # whole write.
+        # whole write. Compute topic matches during the same traversal so the
+        # parser output is not retained for a second pass.
         for topic, count in topic_matches(item.text or "").items():
-            conn.execute(
-                "INSERT INTO document_topics (document_element_id, topic, match_count, match_method) "
-                "VALUES (%s, %s, %s, 'keyword_v1')",
-                (element_id, topic, count))
-    for item in parsed.elements:
-        if item.parent_sequence is not None:
-            conn.execute("UPDATE document_elements SET parent_element_id=%s WHERE document_element_id=%s",
-                         (element_ids.get(item.parent_sequence), element_ids[item.sequence]))
+            topic_values.append((element_id, topic, count, "keyword_v1"))
+    conn.executemany(
+        "INSERT INTO document_elements (document_element_id, document_version_id, parent_element_id, "
+        "element_type, sequence, page_number, heading_level, text, text_sha256, bbox_json, metadata_json) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", element_values)
+    if topic_values:
+        conn.executemany(
+            "INSERT INTO document_topics (document_element_id, topic, match_count, match_method) "
+            "VALUES (%s, %s, %s, %s)", topic_values)
+    parent_values = [
+        (element_ids.get(item.parent_sequence), element_ids[item.sequence])
+        for item in parsed.elements if item.parent_sequence is not None
+    ]
+    if parent_values:
+        conn.executemany(
+            "UPDATE document_elements SET parent_element_id=%s WHERE document_element_id=%s",
+            parent_values)
+    table_values = []
     for table in parsed.tables:
         element_id = element_ids[table.element_sequence]
-        conn.execute(
-            "INSERT INTO document_tables (document_table_id, document_element_id, row_count, column_count, "
-            "table_json, markdown) VALUES (%s, %s, %s, %s, %s, %s)",
+        table_values.append(
             (stable_id("document-table", element_id), element_id, len(table.rows),
              max((len(row) for row in table.rows), default=0), _json(table.rows), table.markdown))
+    if table_values:
+        conn.executemany(
+            "INSERT INTO document_tables (document_table_id, document_element_id, row_count, column_count, "
+            "table_json, markdown) VALUES (%s, %s, %s, %s, %s, %s)", table_values)
+    link_values = []
     for link in parsed.links:
         element_id = element_ids[link.element_sequence]
-        conn.execute(
-            "INSERT INTO document_links (document_link_id, document_element_id, href, anchor_text) "
-            "VALUES (%s, %s, %s, %s)",
+        link_values.append(
             (stable_id("document-link", f"{element_id}|{link.href}"), element_id, link.href,
              link.anchor_text))
+    if link_values:
+        conn.executemany(
+            "INSERT INTO document_links (document_link_id, document_element_id, href, anchor_text) "
+            "VALUES (%s, %s, %s, %s)", link_values)
     conn.execute(
         "INSERT INTO document_quality (document_version_id, status, metrics_json, warnings_json, created_at) "
         "VALUES (%s, %s, %s, %s, %s) "
