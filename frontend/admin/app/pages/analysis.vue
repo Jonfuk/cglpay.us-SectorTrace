@@ -64,7 +64,11 @@ const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard |
       degraded: results.some((result) => result.status === 'rejected'),
     }
   },
-  { default: () => null },
+  { default: () => ({
+    overview: { active_release: null }, domains: [], coverage: [], signals: [],
+    structured: [], themes: [], links: [], graph: {}, models: {}, prevalence: [],
+    operations: { runs: [], proposals: [] }, degraded: true,
+  }) },
 )
 
 const overview = computed(() => data.value?.overview)
@@ -218,8 +222,8 @@ useHead({ title: 'SectorTrace — Analysis' })
     </div>
 
     <div v-if="pending" class="text-sm opacity-60">Loading analysis platform…</div>
-    <StEmptyState v-else-if="error" variant="unavailable" />
     <template v-else-if="data">
+      <p v-if="data.degraded || error" class="text-sm text-amber-700 dark:text-amber-300">Some analysis projections are temporarily unavailable; the control plane is showing the data that loaded. Refresh before taking an action.</p>
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <UCard v-for="(count, key) in (overview?.counts ?? {})" :key="key">
           <div class="text-2xl font-semibold">{{ count }}</div><div class="text-xs opacity-60 capitalize">{{ String(key).replaceAll('_', ' ') }}</div>
@@ -236,8 +240,6 @@ useHead({ title: 'SectorTrace — Analysis' })
         <div class="mt-4 flex flex-wrap gap-2"><label v-for="domain in domains" :key="domain.domain_id" class="flex items-center gap-2 text-xs border border-black/10 dark:border-white/10 rounded px-2 py-1"><input v-model="selectedDomains" type="checkbox" :value="domain.domain_id">{{ domain.domain_id }}</label></div>
         <p v-if="message" class="mt-3 text-sm" :class="messageLevel === 'bad' ? 'text-red-700 dark:text-red-300' : messageLevel === 'ok' ? 'text-green-700 dark:text-green-300' : 'opacity-70'">{{ message }}</p>
       </UCard>
-
-      <p v-if="data.degraded" class="text-sm text-amber-700 dark:text-amber-300">Some analysis projections are temporarily unavailable; the control plane is showing the data that loaded. Refresh before taking an action.</p>
 
       <UCard>
         <template #header><div class="flex items-center justify-between gap-3"><span class="text-sm font-medium">Current run</span><StatusPill :label="run?.status ?? 'none'" :level="level(run?.status)" /></div></template>
@@ -264,5 +266,6 @@ useHead({ title: 'SectorTrace — Analysis' })
       <div class="grid gap-6 lg:grid-cols-3"><UCard><template #header><span class="text-sm font-medium">Worker</span></template><StatusPill :label="overview?.executor ?? 'unknown'" :level="overview?.executor === 'worker_online' ? 'ok' : 'warn'" /><p class="mt-2 text-xs opacity-60">{{ value(overview?.worker as Row | undefined, 'worker_id') }} · {{ value(overview?.worker as Row | undefined, 'status') }}</p></UCard><UCard><template #header><span class="text-sm font-medium">Graph projection</span></template><div class="text-sm">{{ value(data.graph, 'pending') }} queued</div><p class="mt-2 text-xs opacity-60">Canonical claim isolation: {{ value(data.graph, 'canonical_claim_isolation') }}</p><UButton class="mt-3" size="xs" color="neutral" variant="outline" @click="rebuildGraph()">Queue latest graph</UButton></UCard><UCard><template #header><span class="text-sm font-medium">Output samples</span></template><div class="text-sm space-y-1"><div>{{ data.structured.length }} structured</div><div>{{ data.links.length }} links</div><div>{{ data.prevalence.length }} prevalence diagnostics</div><div>{{ data.coverage.length }} coverage domains</div></div></UCard></div>
       <p class="text-xs opacity-60">{{ overview?.quality_boundary }}</p>
     </template>
+    <StEmptyState v-else variant="unavailable" />
   </section>
 </template>
