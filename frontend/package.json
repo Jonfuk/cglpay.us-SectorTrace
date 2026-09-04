@@ -18,6 +18,6 @@
     "lighthouse:assert": "node scripts/check-lighthouse.mjs",
     "clean": "rm -rf public/.nuxt public/.output public/dist admin/.nuxt admin/.output admin/dist",
     "test": "npm --prefix public run test",
-    "test:e2e": "npm --prefix public run test:e2e"
+    "test:e2e": "npm --prefix public run test:e2e && npm --prefix admin run test:e2e"
   }
 }

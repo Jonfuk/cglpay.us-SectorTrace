@@ -1,17 +1,10 @@
 import { existsSync } from 'node:fs'
 import { defineConfig, devices } from '@playwright/test'
 
-// Playwright smoke gate for the built public app. It serves the generated
-// `dist/` (no API) and drives it in a real Chromium to prove the shell boots
-// with no console errors or hydration/interop warnings — the check that
-// catches a broken Vapor/VDOM interop or a bad build that typecheck and unit
-// tests miss.
-//
-// Prefer a Chromium pre-installed in the image (dev/CI images that bundle one),
-// pointing at its binary explicitly so the exact @playwright/test version does
-// not need a matching managed download. When that binary is absent (e.g. a
-// stock GitHub runner where CI runs `playwright install chromium`), fall back to
-// Playwright's managed browser by leaving executablePath unset.
+// The admin smoke gate uses the generated static app and the same dependency-
+// free server as the Lighthouse harness. Keeping this config in the admin app
+// makes its browser coverage independently runnable and preserves the physical
+// public/admin build boundary.
 const PINNED = process.env.PLAYWRIGHT_CHROMIUM_PATH
   || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 const CHROME = existsSync(PINNED) ? PINNED : undefined
@@ -23,7 +16,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: 'line',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: 'http://localhost:4174/admin/',
     trace: 'off',
   },
   projects: [
@@ -38,9 +31,10 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
-    command: 'node scripts/serve-dist.mjs',
-    port: 4173,
+    command: 'node ../scripts/serve-static.mjs',
+    port: 4174,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
+    env: { PORT: '4174' },
   },
 })

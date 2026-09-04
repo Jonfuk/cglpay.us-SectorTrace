@@ -3,7 +3,7 @@
 // keeping the benchmark independent of PostgreSQL and the Python web process.
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -21,7 +21,11 @@ const types = {
 }
 
 function inside(candidate, base) {
-  return candidate === base || candidate.startsWith(`${base}/`)
+  // `resolve` returns platform-native separators. Comparing its result with
+  // a URL-style slash made the Windows preview server reject every nested
+  // asset, leaving the otherwise healthy admin shell blank locally.
+  const fromBase = relative(base, candidate)
+  return fromBase === '' || (!fromBase.startsWith('..') && !isAbsolute(fromBase))
 }
 
 function resolveFile(urlPath) {

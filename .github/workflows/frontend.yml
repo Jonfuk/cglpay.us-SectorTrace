@@ -71,9 +71,9 @@ jobs:
       # A stock runner has no bundled Chromium, so install it here; the
       # playwright config falls back to this managed browser when the image's
       # pre-installed one is absent.
-      - name: Install Playwright Chromium
+      - name: Install Playwright browsers
         working-directory: frontend/public
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Expose Chromium to Lighthouse
         shell: bash
@@ -83,7 +83,7 @@ jobs:
           echo "CHROME_PATH=$chrome_path" >> "$GITHUB_ENV"
 
       - name: Browser smoke tests
-        working-directory: frontend/public
+        working-directory: frontend
         run: npm run test:e2e
 
       - name: Start static frontend server
