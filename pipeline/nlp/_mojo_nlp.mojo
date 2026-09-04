@@ -10,8 +10,8 @@ def abi_version() raises -> PythonObject:
 
 def parity_approved() raises -> PythonObject:
     # The packed ontology matcher is approved by scripts/build_mojo_nlp.py's
-    # fixture-wide row-for-row parity check. Context remains Python-owned until
-    # it has a separate packed ABI and the same exact proof.
+    # fixture-wide row-for-row parity check. Context cue regexes remain
+    # Python-owned, while its packed deterministic reduction has the same proof.
     var builtins = Python.import_module("builtins")
     return builtins.bool(Python.int(1))
 
@@ -91,6 +91,27 @@ def match_ontology(utf8: PythonObject, offsets: PythonObject,
         concept_column, start_column, end_column, count_column, ordinal_column))
 
 
+def select_context(candidates: PythonObject) raises -> PythonObject:
+    """Select the best Python-regex cue using a native packed reduction.
+
+    Regex matching stays in Python because the cue vocabulary is deliberately
+    hand-maintained there. Each row is (precedence, confidence, cue_start,
+    cue_end, status); this kernel owns only the deterministic reduction.
+    """
+    var best_index = -1
+    var best_precedence = 100
+    var best_confidence = -1.0
+    for index in range(len(candidates)):
+        var row = candidates[index]
+        var precedence = Int(py=row[0])
+        var confidence = Float64(py=row[1])
+        if precedence < best_precedence or (precedence == best_precedence and confidence > best_confidence):
+            best_index = index
+            best_precedence = precedence
+            best_confidence = confidence
+    return Python.int(best_index)
+
+
 @export
 def PyInit__mojo_nlp() abi("C") -> PythonObject:
     try:
@@ -98,6 +119,7 @@ def PyInit__mojo_nlp() abi("C") -> PythonObject:
         module.def_function[abi_version]("abi_version")
         module.def_function[parity_approved]("parity_approved")
         module.def_function[match_ontology]("match_ontology")
+        module.def_function[select_context]("select_context")
         return module.finalize()
     except error:
         abort(String("error creating SectorTrace Mojo NLP module: ", error))

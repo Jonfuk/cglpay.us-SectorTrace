@@ -111,6 +111,17 @@ def ontology_matches(ontology, texts, *, mode: str = "auto"):
     return _unpack_matches(ontology, texts, result)
 
 
+def context_select(candidates, *, mode: str = "auto") -> int | None:
+    """Select a cue candidate through the optional packed Mojo reducer."""
+    extension = select(mode)
+    if extension is None:
+        return None
+    index = int(extension.select_context(tuple(candidates)))
+    if index < 0 or index >= len(candidates):
+        raise MojoIncompatible("Mojo context result selected an invalid candidate")
+    return index
+
+
 def _unpack_matches(ontology, texts: list[str], packed_result):
     """Convert ABI-v1 columns into the same row shape as ``match_batch``.
 

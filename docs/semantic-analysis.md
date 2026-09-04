@@ -200,10 +200,11 @@ The optional Mojo module follows [Mojo's documented pre-built Python extension
 boundary](https://mojolang.org/docs/manual/python/mojo-from-python/)
 (`mojo build ... --emit shared-lib`). CI always exercises Python
 fallback and invokes `scripts/build_mojo_nlp.py --if-available`; the build
-script refuses non-Linux/x86-64 hosts. The packed ontology matcher is active
-only after that script verifies exact row-for-row parity over every committed
-NLP fixture string and representative edge cases. Context detection remains
-Python-owned until it has a separate packed ABI and the same exact proof.
+script refuses non-Linux/x86-64 hosts. The packed ontology matcher and context
+reducer are active only after that script verifies exact parity over every
+committed NLP fixture string, all assertion cases, and representative edge
+cases. Python retains ownership of the hand-maintained context regexes; Mojo
+receives the packed candidates and performs the deterministic reduction.
 
 ## What ships now (tranche 034B) — the ontology
 

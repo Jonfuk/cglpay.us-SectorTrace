@@ -238,21 +238,23 @@ class CueTagger:
     version = DETECTOR_VERSION
 
     def tag(self, sentence: str, span_start: int, span_end: int) -> Assertion:
-        best: tuple[int, float, re.Match, str] | None = (
-            None  # (precedence, confidence, cue, status)
-        )
+        candidates: list[tuple[int, float, re.Match, str]] = []
         for pattern, status, direction in _CUES:
             for cue in pattern.finditer(sentence):
                 gap = self._gap(sentence, cue, span_start, span_end, direction)
                 if gap is None or gap > _WINDOW:
                     continue
                 confidence = round(_STRENGTH[status] * (1.0 - min(gap, _WINDOW) / (_WINDOW * 3)), 4)
-                rank = (_PRECEDENCE[status], -confidence)
-                if best is None or rank < (best[0], -best[1]):
-                    best = (_PRECEDENCE[status], confidence, cue, status)
-        if best is None:
+                candidates.append((_PRECEDENCE[status], confidence, cue, status))
+        if not candidates:
             return Assertion("AFFIRMED", _AFFIRMED_CONFIDENCE, None, None, None)
-        _, confidence, cue, status = best
+        native_index = accelerator.context_select(
+            [(precedence, confidence, cue.start(), cue.end(), status)
+             for precedence, confidence, cue, status in candidates])
+        if native_index is None:
+            _, confidence, cue, status = min(candidates, key=lambda row: (row[0], -row[1]))
+        else:
+            _, confidence, cue, status = candidates[native_index]
         return Assertion(status, confidence, cue.group(0), cue.start(), cue.end())
 
     @staticmethod

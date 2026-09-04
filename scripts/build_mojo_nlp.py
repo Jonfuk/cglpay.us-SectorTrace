@@ -62,6 +62,40 @@ def _check_parity(module) -> None:
     print(f"verified exact Mojo ontology parity for {len(texts)} texts")
 
 
+def _check_context_parity(module) -> None:
+    from pipeline.nlp import accelerator, context
+
+    cases = json.loads(
+        (ROOT / "tests" / "fixtures" / "nlp" / "assertion_cases.json").read_text(
+            encoding="utf-8"))["cases"]
+    tagger = context.CueTagger()
+
+    def capture():
+        rows = []
+        for case in cases:
+            start = case["text"].lower().index(case["target"].lower())
+            result = tagger.tag(case["text"], start, start + len(case["target"]))
+            rows.append((result.status, result.confidence, result.cue_start, result.cue_end))
+        return rows
+
+    original_select = accelerator.select
+    try:
+        accelerator.select = lambda _mode: module
+        native = capture()
+        accelerator.select = lambda _mode: None
+        fallback = capture()
+    finally:
+        accelerator.select = original_select
+    if native != fallback:
+        for index, (left, right) in enumerate(zip(native, fallback, strict=True)):
+            if left != right:
+                raise SystemExit(
+                    f"Mojo context parity mismatch at {index}: {cases[index]['id']!r}; "
+                    f"expected {right!r}, got {left!r}")
+        raise SystemExit("Mojo context parity mismatch: result lengths differ")
+    print(f"verified exact Mojo context parity for {len(cases)} cases")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--if-available", action="store_true",
@@ -90,7 +124,8 @@ def main() -> int:
     if module.abi_version() != 1 or module.parity_approved() is not True:
         raise SystemExit("built Mojo boundary has an unexpected ABI/parity state")
     _check_parity(module)
-    print(f"built active ABI-v1 Mojo ontology boundary: {OUTPUT}")
+    _check_context_parity(module)
+    print(f"built active ABI-v1 Mojo ontology/context boundary: {OUTPUT}")
     return 0
 
 
