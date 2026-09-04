@@ -26,7 +26,10 @@ const toast = useToast()
 const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard | null>(
   'admin-analysis-dashboard',
   async () => {
-    const [overview, domains, coverage, signals, structured, themes, links, graph, models, prevalence, operations] = await Promise.all([
+    // The analysis endpoints are deliberately split by workload. A slow or
+    // unavailable optional projection must not hide the operator control
+    // plane: overview, domains and operations are still useful on their own.
+    const results = await Promise.allSettled([
       api.analysisOverview(),
       api.analysisDomains(),
       api.analysisCoverage(),
@@ -39,11 +42,24 @@ const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard |
       api.analysisPrevalence({ query: { limit: 20 } }),
       api.analysisOperations(),
     ])
+    const [overview, domains, coverage, signals, structured, themes, links, graph, models, prevalence, operations] = results
+    if (overview.status === 'rejected') throw overview.reason
+    const valueOr = <T>(result: PromiseSettledResult<T>, fallback: T): T =>
+      result.status === 'fulfilled' ? result.value : fallback
+    const domainsValue = valueOr(domains, { domains: [] as AnalysisDomain[] })
+    const coverageValue = valueOr(coverage, { coverage: [] as Row[] })
+    const signalsValue = valueOr(signals, { signals: [] as Row[] })
+    const structuredValue = valueOr(structured, { structured: [] as Row[] })
+    const themesValue = valueOr(themes, { themes: [] as Row[] })
+    const linksValue = valueOr(links, { links: [] as Row[] })
+    const modelsValue = valueOr(models, { releases: [] as AnalysisRelease[] })
+    const prevalenceValue = valueOr(prevalence, { prevalence: [] as Row[] })
+    const operationsValue = valueOr(operations, { runs: [], proposals: [] })
     return {
-      overview, domains: domains.domains, coverage: coverage.coverage,
-      signals: signals.signals, structured: structured.structured,
-      themes: themes.themes, links: links.links, graph, models,
-      prevalence: prevalence.prevalence, operations,
+      overview: overview.value, domains: domainsValue.domains, coverage: coverageValue.coverage,
+      signals: signalsValue.signals, structured: structuredValue.structured,
+      themes: themesValue.themes, links: linksValue.links, graph: valueOr(graph, {}), models: modelsValue,
+      prevalence: prevalenceValue.prevalence, operations: operationsValue,
     }
   },
   { default: () => null },
