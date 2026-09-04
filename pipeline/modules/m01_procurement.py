@@ -362,7 +362,7 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
     notice_web_url = published_notice_url(release, source_system)
 
     supplier_rows = _iter_supplier_rows(release)
-    rows_written = 0
+    contract_rows = []
     for supplier_row in supplier_rows:
         value_core = supplier_row["value_core"] if supplier_row["value_core"] is not None else tender_value.get("amount")
         value_max = supplier_row["value_max"] if supplier_row["value_max"] is not None else tender_value.get("amountGross")
@@ -376,7 +376,7 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
             if party and (party.get("identifier") or {}).get("scheme") == "GB-PPON":
                 supplier_ppon = party["identifier"].get("id")
 
-        db.upsert(conn, "contracts", {
+        contract_rows.append({
             "notice_id": notice_id,
             "supplier_id": supplier_row["supplier_id"],
             "ocid": ocid,
@@ -402,8 +402,12 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
             # these bytes came from. Migration 0032 says why both exist.
             "notice_web_url": notice_web_url,
             **provenance,
-        }, natural_key=["notice_id", "supplier_id"])
-        rows_written += 1
+        })
+    # A release can carry several award/supplier rows. Keep one statement
+    # shape for the whole release so procurement's high-volume path does not
+    # turn each supplier into its own parse/round-trip/commit unit.
+    rows_written = db.upsert_many(
+        conn, "contracts", contract_rows, natural_key=["notice_id", "supplier_id"])
 
     # Own-award values only (pre tender-estimate fallback) -- summing the
     # fallback would double-count the tender estimate as if it were an award
