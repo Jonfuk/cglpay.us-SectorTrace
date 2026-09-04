@@ -305,6 +305,57 @@ def _same_board(name_a: str | None, name_b: str | None) -> bool:
     return m28._sab_key(m28._place_of(name_a)) == m28._sab_key(m28._place_of(name_b))
 
 
+@dataclass(frozen=True)
+class Classification:
+    """One document's outcome under the hybrid gate, independent of the
+    database — a pure function of what was fetched and what the page context
+    said about it. Extracted from `run()` (BETA-Scrapy-Phase-2) so the
+    Scrapy pilot (`pipeline/transports/pilots/m32_sab_site_reviews_pilot.py`)
+    can share the exact same classification `run()` uses, rather than a
+    second copy that could quietly drift from it.
+    """
+
+    outcome: str  # "ingest" | "candidate" | "board_mismatch" | "duplicate_of_library"
+    text_board: str | None = None
+    reason: str | None = None  # only set for "candidate"
+
+
+def classify_document(*, document_url: str, link_text: str, body_text: str | None,
+                       from_index: bool, sab_name: str, sab_index: dict,
+                       duplicate_of_library: bool) -> Classification:
+    """The hybrid gate: ingest / candidate / board_mismatch / duplicate_of_library.
+
+    See the module docstring's HYBRID INGEST section for what each branch
+    means; this function only decides, it does not write anything.
+    """
+    text_board, _src = m28.resolve_sab_name(body_text, link_text, sab_index)
+    names_other_board = bool(text_board) and not _same_board(text_board, sab_name)
+    names_this_board = _same_board(text_board, sab_name)
+
+    haystack = f"{document_url} {link_text}"
+    strong_link = bool(_SAR_LINK_STRONG.search(haystack))
+    looks_template = bool(_TEMPLATE_RE.search(haystack))
+
+    if names_other_board:
+        return Classification("board_mismatch", text_board=text_board)
+
+    auto = (not looks_template) and (
+        (strong_link and names_this_board)
+        or (from_index and (names_this_board or not text_board)))
+
+    if not auto:
+        reason = ("looks like a template or form, not a review" if looks_template
+                  else "not on a confirmed SAR index page and the link is not unambiguous"
+                  if not from_index
+                  else "document text does not clearly name this board")
+        return Classification("candidate", text_board=text_board, reason=reason)
+
+    if duplicate_of_library:
+        return Classification("duplicate_of_library", text_board=text_board)
+
+    return Classification("ingest", text_board=text_board)
+
+
 def _year_for(*texts: str) -> int:
     """A publication year from the filename or link text, else the crawl
     year. Best-effort — sab_website rows carry no real library year."""
@@ -390,8 +441,6 @@ def run(ctx: ModuleContext) -> None:
             if _already_ingested(conn, document_url):
                 continue
 
-            duplicate_of_library = fetched.payload_sha256 in existing_sha
-
             body_text = body_source = None
             if ext == ".pdf":
                 body_text, body_source = m28._read_pdf(ctx, module_name, document_url, fetched)
@@ -403,47 +452,29 @@ def run(ctx: ModuleContext) -> None:
                     f"document is {ext}, not a PDF or DOCX; text was not extracted",
                     source_url=document_url)
 
-            text_board, _src = m28.resolve_sab_name(body_text, link_text, sab_index)
-            names_other_board = bool(text_board) and not _same_board(text_board, sab_name)
-            names_this_board = _same_board(text_board, sab_name)
+            duplicate_of_library = fetched.payload_sha256 in existing_sha
+            classification = classify_document(
+                document_url=document_url, link_text=link_text, body_text=body_text,
+                from_index=from_index, sab_name=sab_name, sab_index=sab_index,
+                duplicate_of_library=duplicate_of_library)
 
-            haystack = f"{document_url} {link_text}"
-            strong_link = bool(_SAR_LINK_STRONG.search(haystack))
-            looks_template = bool(_TEMPLATE_RE.search(haystack))
-
-            if names_other_board:
+            if classification.outcome == "board_mismatch":
                 db.record_review_item(
                     conn, module_name, "sab_site_sar_board_mismatch", document_url,
-                    json.dumps({"sab_name": sab_name, "text_names": text_board,
+                    json.dumps({"sab_name": sab_name, "text_names": classification.text_board,
                                  "link_text": link_text[:200]}))
                 continue
 
-            # Auto-ingest when the source is trustworthy enough that a person
-            # would only be rubber-stamping:
-            #   * an unambiguous "Safeguarding Adults Review" link whose text
-            #     also names this board (the original strict path), OR
-            #   * a document found on a confirmed SAR index page on this
-            #     board's own site whose text either names this board or
-            #     names no board at all (the loosening).
-            # Never a template/form, and never one naming a different board.
-            auto = (not looks_template) and (
-                (strong_link and names_this_board)
-                or (from_index and (names_this_board or not text_board)))
-
-            if not auto:
-                reason = ("looks like a template or form, not a review" if looks_template
-                          else "not on a confirmed SAR index page and the link is not unambiguous"
-                          if not from_index
-                          else "document text does not clearly name this board")
+            if classification.outcome == "candidate":
                 db.record_review_item(
                     conn, module_name, "sab_site_sar_candidate", document_url,
                     json.dumps({"sab_name": sab_name, "link_text": link_text[:200],
                                  "has_body_text": bool(body_text),
-                                 "from_index_page": from_index, "reason": reason}))
+                                 "from_index_page": from_index, "reason": classification.reason}))
                 board_candidate += 1
                 continue
 
-            if duplicate_of_library:
+            if classification.outcome == "duplicate_of_library":
                 db.record_review_item(
                     conn, module_name, "possible_duplicate_of_library_sar", document_url,
                     json.dumps({"sab_name": sab_name,

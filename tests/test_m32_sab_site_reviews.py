@@ -114,6 +114,80 @@ def test_same_board_ignores_the_board_suffix_and_case():
                                 "Islington Safeguarding Adults Board")
 
 
+# --- classify_document: the hybrid gate as a pure function -------------------
+#
+# `run()` above exercises this end to end through the database; these test
+# the decision itself in isolation — the same function the Scrapy pilot
+# (pipeline/transports/pilots/m32_sab_site_reviews_pilot.py) calls, so a
+# change here is a change both paths see at once rather than one only `run()`
+# happens to agree with today.
+
+_SAB_INDEX = {}  # resolve_sab_name falls back to link/body text alone
+
+
+def test_classify_document_ingests_a_strong_link_naming_this_board():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/Camden SAR Matthew.pdf",
+        link_text="Safeguarding Adults Review: Matthew",
+        body_text="Commissioned by Camden Safeguarding Adults Board.",
+        from_index=False, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=False)
+    assert result.outcome == "ingest"
+
+
+def test_classify_document_routes_a_weak_link_off_index_to_a_candidate():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/Matthew-learning-brief.pdf",
+        link_text="Learning brief: Matthew",
+        body_text="A learning brief from Camden Safeguarding Adults Board.",
+        from_index=False, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=False)
+    assert result.outcome == "candidate"
+    assert "not on a confirmed SAR index page" in result.reason
+
+
+def test_classify_document_ingests_from_index_despite_a_pseudonym_link():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/anne-2022.pdf",
+        link_text="Anne (2022)",
+        body_text="A Safeguarding Adults Review commissioned by Camden Safeguarding Adults Board.",
+        from_index=True, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=False)
+    assert result.outcome == "ingest"
+
+
+def test_classify_document_never_ingests_a_template_even_on_an_index_page():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/SAR-referral-form.docx",
+        link_text="SAR referral form",
+        body_text="", from_index=True, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=False)
+    assert result.outcome == "candidate"
+    assert "template" in result.reason
+
+
+def test_classify_document_flags_a_document_naming_a_different_board():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/Neighbour SAR.pdf",
+        link_text="Safeguarding Adults Review",
+        body_text="This Safeguarding Adults Review was commissioned by "
+                   "Islington Safeguarding Adults Board.",
+        from_index=False, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=False)
+    assert result.outcome == "board_mismatch"
+    assert result.text_board and "Islington" in result.text_board
+
+
+def test_classify_document_flags_a_byte_identical_library_duplicate():
+    result = m32.classify_document(
+        document_url="https://camden.example/d/Camden SAR Matthew.pdf",
+        link_text="Safeguarding Adults Review: Matthew",
+        body_text="Commissioned by Camden Safeguarding Adults Board.",
+        from_index=False, sab_name="Camden Safeguarding Adults Board",
+        sab_index=_SAB_INDEX, duplicate_of_library=True)
+    assert result.outcome == "duplicate_of_library"
+
+
 # --- the hybrid gate ------------------------------------------------------------
 
 def test_run_auto_ingests_a_strong_link_whose_text_names_the_board(httpx_mock, settings, conn, monkeypatch):

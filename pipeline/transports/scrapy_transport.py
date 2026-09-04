@@ -125,6 +125,54 @@ def available() -> bool:
     return True
 
 
+def drain_subprocess(process, queue, timeout_seconds: float,
+                      *, poll_interval: float = 0.2) -> tuple[list, bool]:
+    """Drain `queue` continuously while `process` runs, rather than joining
+    first and draining after: a `multiprocessing.Queue` is backed by an OS
+    pipe with a finite buffer, and a subprocess blocked writing to a parent
+    that is not yet reading is the textbook deadlock this avoids. Shared by
+    `fetch_via_scrapy` and any other spawned-crawl runner in this package
+    (see `pipeline/transports/pilots/`) — the drain discipline does not
+    depend on what a spider puts on the queue, only on there being a queue.
+
+    `process` must already be started. Blocks until it exits or
+    `timeout_seconds` elapses, terminating it in the latter case. Returns
+    `(items, timed_out)`; a timed-out or crashed process still returns
+    whatever it managed to put — the caller decides what a gap in that list
+    means for its own contract (`fetch_via_scrapy` synthesises an explicit
+    failure per missing URL; a different caller may want something else).
+    """
+    deadline = time.monotonic() + timeout_seconds
+    items: list = []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            items.append(queue.get(timeout=min(poll_interval, remaining)))
+            continue
+        except Empty:
+            pass
+        if not process.is_alive():
+            break
+
+    timed_out = process.is_alive()
+    if timed_out:
+        process.terminate()
+    process.join(5)
+
+    # The process has exited (or been killed) by this point, so anything it
+    # ever put is already flushed to the pipe — one last non-blocking pass
+    # catches whatever landed between the final Empty and the exit check.
+    while True:
+        try:
+            items.append(queue.get_nowait())
+        except Empty:
+            break
+
+    return items, timed_out
+
+
 def fetch_via_scrapy(
     urls: Sequence[str],
     *,
@@ -185,42 +233,10 @@ def fetch_via_scrapy(
     log.info("scrapy.runner_starting", source_system=source_system, module=module,
               urls=len(requested))
     process.start()
-
-    # Actively drained the whole time the process runs — see the docstring
-    # above for why a plain join()-then-drain risks a full pipe deadlocking
-    # the subprocess against a parent that isn't reading yet.
-    poll_interval = 0.2
-    deadline = time.monotonic() + settings.scrapy_runner_timeout_seconds
-    results: list[TransportResult] = []
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        try:
-            results.append(queue.get(timeout=min(poll_interval, remaining)))
-            continue
-        except Empty:
-            pass
-        if not process.is_alive():
-            break
-
-    timed_out = process.is_alive()
+    results, timed_out = drain_subprocess(process, queue, settings.scrapy_runner_timeout_seconds)
     if timed_out:
-        process.terminate()
-        process.join(5)
         log.warning("scrapy.runner_timeout", source_system=source_system, module=module,
                      urls=len(requested), timeout=settings.scrapy_runner_timeout_seconds)
-    else:
-        process.join(5)
-
-    # The process has exited (or been killed) by this point, so anything it
-    # ever put is already flushed to the pipe — one last non-blocking pass
-    # catches whatever landed between the final Empty and the exit check.
-    while True:
-        try:
-            results.append(queue.get_nowait())
-        except Empty:
-            break
 
     # Every requested URL gets a result. A timed-out or crashed subprocess
     # otherwise leaves a gap that looks, to a caller counting responses,
@@ -661,54 +677,84 @@ def _spider_class():
                 yield self._build_request(url)
 
         def parse(self, response):
-            requested_url = response.meta.get("pipeline_requested_url", response.url)
-            retrieved_at = response.meta.get("retrieved_at") or datetime.now(timezone.utc)
-            body = response.body or b""
-            status = response.status
-
-            if status >= 400:
-                ok, failure_class, detail = False, FailureClass.HTTP_ERROR, f"HTTP {status}"
-            elif not body:
-                ok, failure_class, detail = (
-                    False, FailureClass.EMPTY_RESPONSE, "response carried no body")
-            else:
-                ok, failure_class, detail = True, FailureClass.NONE, None
-
-            headers = {
-                key.decode("latin-1"): b",".join(values).decode("latin-1")
-                for key, values in response.headers.items()
-            }
-            self.result_queue.put(TransportResult(
-                transport="scrapy", source_system=self.source_system, module=self.module,
-                requested_url=requested_url, final_url=response.url, status_code=status,
-                retrieved_at=retrieved_at, ok=ok, failure_class=failure_class,
-                failure_detail=detail, headers=headers, body=body,
-                payload_sha256=response.meta.get("payload_sha256", ""),
-                raw_archive_ref=response.meta.get("raw_archive_ref"),
-                transport_meta={"scrapy_version": scrapy.__version__},
-            ))
+            self.result_queue.put(transport_result_from_response(
+                response, transport="scrapy", source_system=self.source_system,
+                module=self.module))
 
         def on_failure(self, failure):
-            from scrapy.exceptions import IgnoreRequest
-
-            request = failure.request
-            exc = failure.value
-            requested_url = request.meta.get("pipeline_requested_url", request.url)
-            retrieved_at = datetime.now(timezone.utc)
-
-            if isinstance(exc, IgnoreRequest):
-                failure_class = request.meta.get("failure_class", FailureClass.UNRECOGNISED)
-                detail = request.meta.get("failure_detail", str(exc))
-            else:
-                failure_class, detail = _classify_twisted_failure(exc)
-
-            self.result_queue.put(TransportResult(
-                transport="scrapy", source_system=self.source_system, module=self.module,
-                requested_url=requested_url, retrieved_at=retrieved_at, ok=False,
-                failure_class=failure_class, failure_detail=detail,
-            ))
+            self.result_queue.put(transport_result_from_failure(
+                failure, transport="scrapy", source_system=self.source_system,
+                module=self.module))
 
     return _BoundedFetchSpider
+
+
+def transport_result_from_response(response, *, transport: str, source_system: str,
+                                    module: str | None) -> TransportResult:
+    """A finished Scrapy response, read into this package's transport
+    contract. Factored out of `_BoundedFetchSpider.parse()` so any other
+    spider in this package (see `pipeline/transports/pilots/`) turns a
+    response into a `TransportResult` the same way — same status/empty-body
+    classification, same provenance fields read from `response.meta`.
+    """
+    requested_url = response.meta.get("pipeline_requested_url", response.url)
+    retrieved_at = response.meta.get("retrieved_at") or datetime.now(timezone.utc)
+    body = response.body or b""
+    status = response.status
+
+    if status >= 400:
+        ok, failure_class, detail = False, FailureClass.HTTP_ERROR, f"HTTP {status}"
+    elif not body:
+        ok, failure_class, detail = (
+            False, FailureClass.EMPTY_RESPONSE, "response carried no body")
+    else:
+        ok, failure_class, detail = True, FailureClass.NONE, None
+
+    headers = {
+        key.decode("latin-1"): b",".join(values).decode("latin-1")
+        for key, values in response.headers.items()
+    }
+    return TransportResult(
+        transport=transport, source_system=source_system, module=module,
+        requested_url=requested_url, final_url=response.url, status_code=status,
+        retrieved_at=retrieved_at, ok=ok, failure_class=failure_class,
+        failure_detail=detail, headers=headers, body=body,
+        payload_sha256=response.meta.get("payload_sha256", ""),
+        raw_archive_ref=response.meta.get("raw_archive_ref"),
+        transport_meta={"scrapy_version": _scrapy_version()},
+    )
+
+
+def transport_result_from_failure(failure, *, transport: str, source_system: str,
+                                   module: str | None) -> TransportResult:
+    """A Scrapy/Twisted `Failure` from an errback, read into this package's
+    transport contract. See `transport_result_from_response` — the same
+    factoring, for the failure side of a request.
+    """
+    from scrapy.exceptions import IgnoreRequest
+
+    request = failure.request
+    exc = failure.value
+    requested_url = request.meta.get("pipeline_requested_url", request.url)
+    retrieved_at = datetime.now(timezone.utc)
+
+    if isinstance(exc, IgnoreRequest):
+        failure_class = request.meta.get("failure_class", FailureClass.UNRECOGNISED)
+        detail = request.meta.get("failure_detail", str(exc))
+    else:
+        failure_class, detail = _classify_twisted_failure(exc)
+
+    return TransportResult(
+        transport=transport, source_system=source_system, module=module,
+        requested_url=requested_url, retrieved_at=retrieved_at, ok=False,
+        failure_class=failure_class, failure_detail=detail,
+    )
+
+
+def _scrapy_version() -> str:
+    import scrapy
+
+    return scrapy.__version__
 
 
 def _classify_twisted_failure(exc: BaseException) -> tuple[FailureClass, str]:
