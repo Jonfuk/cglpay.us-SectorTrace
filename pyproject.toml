@@ -140,6 +140,29 @@ graph = [
     "neo4j>=5.20",
 ]
 
+# An optional, disabled-by-default collection transport (scrapy.md, Phase
+# 0/1). `pipeline/transports/scrapy_transport.py` is not imported by
+# `pipeline/http.py`, `pipeline/registry.py`, `pipeline/runner.py`, or any
+# production module — a plain `uv sync` runs the whole pipeline exactly as
+# before, and `SCRAPY_ENABLED` (Settings, off by default) gates the runner
+# itself even once this extra is installed, so having the package on disk is
+# never enough to select it. See the module docstring for the rest.
+#
+# scrapy-playwright is declared here rather than left for a later browser
+# extra because scrapy.md's target architecture threads a `meta={"playwright":
+# True}` request through the same Scrapy engine — but installing this extra
+# pulls only the Python packages, never a browser binary: Playwright ships
+# its Chromium/Firefox/WebKit builds behind a separate `playwright install`
+# command, and nothing here calls it. That keeps "a normal installation does
+# not require browser binaries" true even with `uv sync --extra scrapy` run,
+# and a browser pilot (scrapy.md Phase 3) is the point at which an operator
+# would run `playwright install` on a worker image — never the ordinary
+# portal runtime, which does not install this extra at all.
+scrapy = [
+    "scrapy>=2.11",
+    "scrapy-playwright>=0.0.35",
+]
+
 # The semantic-analysis layer's model, local-only, first-use download,
 # excluded from the Railway image -- the same pattern as `documents` and
 # `ocr`. Nothing in `pipeline/nlp/` imports it at module load: chunking needs

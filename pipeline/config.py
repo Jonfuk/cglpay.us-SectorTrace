@@ -615,6 +615,67 @@ class Settings(BaseSettings):
     zenrows_premium_proxy: bool = False
     zenrows_proxy_country: str = "gb"
 
+    # scrapy.md's optional collection transport (Phase 0/1 proof of concept).
+    # Off by default, and off is load-bearing: nothing in `pipeline/registry.py`
+    # or any module selects a transport by this flag — it exists solely to gate
+    # `pipeline/transports/scrapy_transport.fetch_via_scrapy()`, which refuses
+    # to run at all while this is False. So `uv sync --extra scrapy` alone
+    # never fetches anything; a second, explicit decision is required, and a
+    # module still has to be migrated (a later phase) before this flag has any
+    # effect on real collection.
+    scrapy_enabled: bool = False
+    # A Scrapy source's own politeness decision, kept separate from
+    # `default_rate_limit_seconds` on purpose — scrapy.md says the two-second
+    # HTTPX interval is not a universal default for every transport, and a
+    # Scrapy source opts into its own delay deliberately rather than
+    # inheriting one silently.
+    scrapy_download_delay_seconds: float = 2.0
+    scrapy_concurrent_requests_per_domain: int = 1
+    # Scrapy's own per-request timeout (DOWNLOAD_TIMEOUT). Distinct from
+    # `scrapy_runner_timeout_seconds` below, which bounds the whole bounded
+    # crawl: this bounds one request within it, so a single slow host cannot
+    # eat the entire budget before the runner even gets to classify it as a
+    # timeout.
+    scrapy_download_timeout_seconds: float = 20.0
+    # The runner executes a crawl in its own subprocess (see
+    # scrapy_transport.py for why) and kills it if it outlives this, so a
+    # fixture that never answers — or a real source that hangs — cannot block
+    # the calling process indefinitely.
+    scrapy_runner_timeout_seconds: float = 60.0
+    # RetryWithBackoffMiddleware's policy — chosen to match pipeline.http's
+    # tenacity policy (`stop_after_attempt(6)`, `wait_exponential(multiplier=1,
+    # min=1, max=30)`) attempt-for-attempt and second-for-second, since Scrapy's
+    # own built-in RetryMiddleware retries immediately with no per-attempt
+    # delay and no Retry-After support — neither of which meets CLAUDE.md's
+    # "Retry-After honoured" politeness requirement. 6 total attempts (this
+    # many minus 1 retries); backoff doubles from the minimum up to the
+    # maximum, or follows a numeric Retry-After header when the response
+    # carries one.
+    scrapy_retry_max_attempts: int = 6
+    scrapy_retry_backoff_min_seconds: float = 1.0
+    scrapy_retry_backoff_max_seconds: float = 30.0
+
+    # scrapy.md Phase 3: an experimental browser leg on top of the Scrapy
+    # transport, off by default independently of SCRAPY_ENABLED (both must be
+    # true — a browser pilot is a second, deliberate decision on top of
+    # "use Scrapy at all"). See pipeline/transports/browser_pilot.py.
+    scrapy_playwright_enabled: bool = False
+    # None lets Playwright's own lookup apply (PLAYWRIGHT_BROWSERS_PATH, or
+    # its packaged default) — set only to pin a specific browser binary, the
+    # way this checkout's own sandbox pins the pre-installed Chromium.
+    scrapy_playwright_executable_path: str | None = None
+    # Bounds so a browser pilot cannot open more than this many browser
+    # contexts/pages at once — "Scrapy runs should have bounded page/context
+    # counts and memory monitoring" is a hard requirement, not a suggestion,
+    # for anything that launches a real browser process.
+    scrapy_playwright_max_contexts: int = 1
+    scrapy_playwright_max_pages_per_context: int = 1
+    scrapy_playwright_navigation_timeout_seconds: float = 30.0
+    # Scrapy's own MEMUSAGE extension, turned on for this transport leg
+    # specifically: a browser process is the one part of this pipeline whose
+    # memory a single stuck page can genuinely blow up.
+    scrapy_playwright_memory_limit_mb: int = 512
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes
