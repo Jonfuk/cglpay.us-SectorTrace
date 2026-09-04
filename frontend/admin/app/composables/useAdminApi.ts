@@ -1,6 +1,10 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
 import type {
   AnalysisOverviewResponse,
+  AnalysisDomain,
+  AnalysisModelsResponse,
+  AnalysisOperationsResponse,
+  AnalysisRun,
   CockpitResponse,
   CandidateCountsResponse,
   CandidatesListingResponse,
@@ -64,6 +68,17 @@ export interface AdminApi {
   candidates(options?: TransportOptions): Promise<CandidatesListingResponse>
   /** `/api/admin/analysis/overview` — analysis platform overview. */
   analysisOverview(options?: TransportOptions): Promise<AnalysisOverviewResponse>
+  analysisDomains(options?: TransportOptions): Promise<{ domains: AnalysisDomain[] }>
+  analysisCoverage(options?: TransportOptions): Promise<{ coverage: Array<Record<string, unknown>> }>
+  analysisSignals(options?: TransportOptions): Promise<{ signals: Array<Record<string, unknown>> }>
+  analysisThemes(options?: TransportOptions): Promise<{ themes: Array<Record<string, unknown>> }>
+  analysisStructured(options?: TransportOptions): Promise<{ structured: Array<Record<string, unknown>> }>
+  analysisLinks(options?: TransportOptions): Promise<{ links: Array<Record<string, unknown>> }>
+  analysisGraph(options?: TransportOptions): Promise<Record<string, unknown>>
+  analysisModels(options?: TransportOptions): Promise<AnalysisModelsResponse>
+  analysisPrevalence(options?: TransportOptions): Promise<{ prevalence: Array<Record<string, unknown>> }>
+  analysisOperations(options?: TransportOptions): Promise<AnalysisOperationsResponse>
+  analysisRuns(options?: TransportOptions): Promise<{ runs: AnalysisRun[] }>
   /** `/api/review` — the review queue. */
   reviewItems(options?: TransportOptions): Promise<ReviewItemsResponse>
   /** `/api/admin/census` — census metric rows awaiting verification. */
@@ -122,6 +137,13 @@ export interface AdminApi {
   startRun(input: { module: string; since?: string; limit?: number; jobs?: number; dryRun?: boolean }): Promise<JobDetail>
   startIntegrityCheck(): Promise<JobDetail>
   startExport(target: string): Promise<JobDetail>
+  startAnalysisRun(input: { runKind?: string; domains?: string[]; costCeilingMicros?: number }): Promise<AnalysisRun>
+  analysisRunAction(runId: string, action: 'cancel' | 'resume'): Promise<AnalysisRun>
+  activateAnalysisRelease(releaseId: string): Promise<unknown>
+  rollbackAnalysisRelease(releaseId: string, reason?: string): Promise<unknown>
+  promoteAnalysisTheme(themeId: string): Promise<unknown>
+  decideAnalysisProposal(proposalId: string, action: 'accept' | 'defer' | 'dismiss', reason?: string): Promise<unknown>
+  rebuildAnalysisGraph(releaseId?: string): Promise<unknown>
 }
 
 export function useAdminApi(): AdminApi {
@@ -144,6 +166,17 @@ export function useAdminApi(): AdminApi {
     candidateCounts: (options) => admin<CandidateCountsResponse>('/candidates/counts', options),
     candidates: (options) => admin<CandidatesListingResponse>('/candidates', options),
     analysisOverview: (options) => admin<AnalysisOverviewResponse>('/analysis/overview', options),
+    analysisDomains: (options) => admin<{ domains: AnalysisDomain[] }>('/analysis/domains', options),
+    analysisCoverage: (options) => admin<{ coverage: Array<Record<string, unknown>> }>('/analysis/coverage', options),
+    analysisSignals: (options) => admin<{ signals: Array<Record<string, unknown>> }>('/analysis/signals', options),
+    analysisThemes: (options) => admin<{ themes: Array<Record<string, unknown>> }>('/analysis/themes', options),
+    analysisStructured: (options) => admin<{ structured: Array<Record<string, unknown>> }>('/analysis/structured', options),
+    analysisLinks: (options) => admin<{ links: Array<Record<string, unknown>> }>('/analysis/links', options),
+    analysisGraph: (options) => admin<Record<string, unknown>>('/analysis/graph', options),
+    analysisModels: (options) => admin<AnalysisModelsResponse>('/analysis/models', options),
+    analysisPrevalence: (options) => admin<{ prevalence: Array<Record<string, unknown> }>('/analysis/prevalence', options),
+    analysisOperations: (options) => admin<AnalysisOperationsResponse>('/analysis/operations', options),
+    analysisRuns: (options) => admin<{ runs: AnalysisRun[] }>('/analysis/runs', options),
     reviewItems: (options) => api<ReviewItemsResponse>('/review', options),
     census: (options) => admin<CensusListingResponse>('/census', options),
     jobs: (options) => admin<JobsResponse>('/jobs', options),
@@ -247,5 +280,22 @@ export function useAdminApi(): AdminApi {
       }) as Promise<JobDetail>,
     startIntegrityCheck: () => t.postJson('/api/admin/check', {}) as Promise<JobDetail>,
     startExport: (target) => t.postJson('/api/admin/export', { target }) as Promise<JobDetail>,
+    startAnalysisRun: (input) => t.postJson('/api/admin/analysis/runs', {
+      run_kind: input.runKind || 'complete',
+      domains: input.domains,
+      cost_ceiling_micros: input.costCeilingMicros ?? 0,
+    }) as Promise<AnalysisRun>,
+    analysisRunAction: (runId, action) =>
+      t.postJson(`/api/admin/analysis/runs/${encodeURIComponent(runId)}/${action}`, {}) as Promise<AnalysisRun>,
+    activateAnalysisRelease: (releaseId) =>
+      t.postJson('/api/admin/analysis/releases/activate', { release_id: releaseId }),
+    rollbackAnalysisRelease: (releaseId, reason) =>
+      t.postJson('/api/admin/analysis/releases/rollback', { release_id: releaseId, reason: reason || null }),
+    promoteAnalysisTheme: (themeId) =>
+      t.postJson('/api/admin/analysis/themes/promote', { theme_id: themeId }),
+    decideAnalysisProposal: (proposalId, action, reason) =>
+      t.postJson(`/api/admin/analysis/proposals/${action}`, { proposal_id: proposalId, reason: reason || null }),
+    rebuildAnalysisGraph: (releaseId) =>
+      t.postJson('/api/admin/analysis/graph/rebuild', releaseId ? { release_id: releaseId } : {}),
   }
 }

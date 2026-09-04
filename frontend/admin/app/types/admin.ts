@@ -96,6 +96,69 @@ export interface AnalysisOverviewResponse {
   [key: string]: unknown
 }
 
+export interface AnalysisDomain {
+  domain_id: string
+  status?: string | null
+  prerequisite_status?: string | null
+  source_tables?: string[]
+  rows_processed?: number
+  rows_written?: number
+  [key: string]: unknown
+}
+
+export interface AnalysisRun {
+  run_id: string
+  run_kind?: string | null
+  status?: string | null
+  current_stage?: string | null
+  progress_percent?: number
+  completed_domains?: number
+  total_domains?: number
+  model_calls?: number
+  estimated_calls?: number | null
+  cost_micros?: number | null
+  estimated_cost_micros?: number | null
+  cost_ceiling_micros?: number | null
+  started_at?: string | null
+  updated_at?: string | null
+  error_detail?: string | null
+  domains?: Array<Record<string, unknown>>
+  [key: string]: unknown
+}
+
+export interface AnalysisProposal {
+  proposal_id: string
+  proposal_type?: string | null
+  domain_id?: string | null
+  status?: string | null
+  automatic_action?: string | null
+  admin_reason?: string | null
+  created_at?: string | null
+  decided_at?: string | null
+  [key: string]: unknown
+}
+
+export interface AnalysisRelease {
+  release_id: string
+  manifest_sha256?: string | null
+  code_commit?: string | null
+  created_at?: string | null
+  status?: string | null
+  [key: string]: unknown
+}
+
+export interface AnalysisOperationsResponse {
+  runs?: AnalysisRun[]
+  proposals?: AnalysisProposal[]
+  model_calls?: Array<Record<string, unknown>>
+  [key: string]: unknown
+}
+
+export interface AnalysisModelsResponse {
+  releases?: AnalysisRelease[]
+  [key: string]: unknown
+}
+
 /** A review-queue item (`/api/review` → `items[]`). */
 export interface ReviewItem {
   id: number
