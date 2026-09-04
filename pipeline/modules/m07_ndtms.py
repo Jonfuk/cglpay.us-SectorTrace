@@ -476,6 +476,7 @@ def run(ctx: ModuleContext) -> None:
 
             provenance = _provenance(file_result)
             la_sheets = 0
+            stats_rows: list[dict] = []
 
             for table in tables:
                 table_ref = table.getAttribute("name") or ""
@@ -517,7 +518,7 @@ def run(ctx: ModuleContext) -> None:
                             json.dumps({"publication": pub["publication_slug"],
                                          "table": table_ref}))
 
-                    db.upsert(conn, "ndtms_la_statistics", {
+                    stats_rows.append({
                         "publication_slug": pub["publication_slug"],
                         "table_ref": table_ref,
                         "area_name_raw": entry["area_name_raw"],
@@ -530,10 +531,14 @@ def run(ctx: ModuleContext) -> None:
                         "cohort": pub["cohort"],
                         "financial_year": pub["financial_year"],
                         **provenance,
-                    }, natural_key=["publication_slug", "table_ref", "area_name_raw",
-                                     "age_group", "time_period", "indicator"])
+                    })
                     stats_written += 1
 
+            db.upsert_many(
+                conn, "ndtms_la_statistics", stats_rows,
+                natural_key=["publication_slug", "table_ref", "area_name_raw",
+                             "age_group", "time_period", "indicator"],
+            )
             db.upsert(conn, "ndtms_publications", {
                 "publication_slug": pub["publication_slug"],
                 "cohort": pub["cohort"],
