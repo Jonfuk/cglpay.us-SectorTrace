@@ -64,6 +64,7 @@ const noticeColumns: Column<ContractNotice>[] = [
   { key: 'buyer_name', label: 'Buyer' },
   { key: 'supplier_name_raw', label: 'Supplier' },
   { key: 'title', label: 'Title' },
+  { key: 'ocid', label: 'Lifecycle', mono: true, to: (row) => row.ocid ? `/contracts/process/${encodeURIComponent(String(row.ocid))}` : null },
   { key: 'value_core', label: 'Published value', numeric: true },
   { key: 'procedure_type', label: 'Procedure' },
   { key: 'notice_link', label: 'Notice', link: true },

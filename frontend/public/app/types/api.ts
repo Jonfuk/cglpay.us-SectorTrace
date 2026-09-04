@@ -112,6 +112,8 @@ export interface ContractNotice {
   date_published: string | null
   date_end: string | null
   procedure_type: string | null
+  /** Stable OCDS process key, when the notice publisher supplied one. */
+  ocid?: string | null
   source_url: string | null
   retrieved_at: string | null
   [key: string]: unknown

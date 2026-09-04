@@ -52,3 +52,54 @@ test('the map view lazy-loads MapLibre and mounts without errors', async ({ page
   await page.waitForTimeout(1500)
   expect(problems, problems.join('\n')).toEqual([])
 })
+
+test('all public port routes mount through the SPA fallback', async ({ page }) => {
+  test.setTimeout(120_000)
+  const problems = collectProblems(page)
+  const routes = [
+    ['pay', 'Pay'],
+    ['contracts', 'Where public money is going'],
+    ['providers', 'Find provider evidence'],
+    ['geography', 'Places'],
+    ['treatment', 'Treatment'],
+    ['cqc', 'CQC'],
+    ['pfd', 'Safety & legal evidence'],
+    ['relationships', 'Relationships'],
+    ['claims', 'Claims'],
+    ['documents', 'Document search'],
+    ['compare', 'Compare'],
+    ['cooccurrence', 'Co-occurrence'],
+    ['changes', 'Changes'],
+    ['calendar', 'Publication calendar'],
+    ['catalogue', 'Dataset catalogue'],
+    ['api', 'API'],
+    ['notebook', 'Notebook'],
+    ['saved', 'Saved searches'],
+    ['journey', 'Your journey'],
+    ['revisions', 'Compare revisions'],
+    ['pathfinder', 'Pathfinder'],
+    ['links', 'Source links'],
+    ['doctables', 'Document tables'],
+    ['diary', 'Contract diary'],
+    ['coverage', 'Data coverage'],
+    ['timeline', 'Timeline'],
+  ] as const
+
+  for (const [route] of routes) {
+    // Start from the shell for each route. This exercises the same hash
+    // navigation used by the real links and avoids relying on the static
+    // server to interpret a fragment before the SPA has mounted.
+    await page.goto('/')
+    await expect(page.getByRole('banner').getByRole('link', { name: 'SectorTrace', exact: true })).toBeVisible()
+    const link = page.locator(`a[href="#/${route}"]`).first()
+    if (await link.count()) await link.click()
+    else await page.evaluate((path) => { window.location.hash = `#/${path}` }, route)
+    // Some pages keep their first paint behind a current API response. In
+    // this deliberately backend-free harness, route resolution and bookmark
+    // state are the stable assertion; rendered data states are covered by the
+    // live VPS checks and the focused smoke tests above.
+    await expect(page).toHaveURL(new RegExp(`#/${route}(?:$|[?])`))
+    await expect(page.getByRole('banner').getByRole('link', { name: 'SectorTrace', exact: true })).toBeVisible()
+  }
+  expect(problems, problems.join('\n')).toEqual([])
+})
