@@ -429,6 +429,7 @@ def run(ctx: ModuleContext) -> None:
                 db.record_review_item(conn, module_name, "charity_financial_history_unavailable",
                                        charity_number, json.dumps({"status": history.status_code}))
             else:
+                financial_write_rows: list[dict] = []
                 for row in json.loads(history.body):
                     period_end = (row.get("financial_period_end_date") or "")[:10]
                     if ctx.is_before_since(period_end):
@@ -438,7 +439,7 @@ def run(ctx: ModuleContext) -> None:
                                                  json.dumps(row)[:300], "missing period end date",
                                                  source_url=history.url)
                         continue
-                    db.upsert(conn, "charity_financials", {
+                    financial_write_rows.append({
                         "charity_number": charity_number,
                         "financial_year_end": period_end,
                         "ar_cycle_reference": row.get("ar_cycle_reference"),
@@ -450,8 +451,12 @@ def run(ctx: ModuleContext) -> None:
                         "exp_charitable_activities": row.get("exp_charitable_activities"),
                         "consolidated_account": 1 if row.get("consolidated_account") else 0,
                         **_provenance(history, SOURCE_API),
-                    }, natural_key=["charity_number", "financial_year_end"])
+                    })
                     financial_rows += 1
+                db.upsert_many(
+                    conn, "charity_financials", financial_write_rows,
+                    natural_key=["charity_number", "financial_year_end"],
+                )
 
             if not ctx.dry_run:
                 conn.commit()
