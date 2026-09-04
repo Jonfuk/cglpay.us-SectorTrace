@@ -3,17 +3,11 @@ import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
 import type { ProviderRow } from '~/types/api'
 
-// Providers route. Every provider with the counts that make them comparable.
-// Contract counts join through supplier aliases (a supplier's name in a notice
-// is whatever the buyer typed), so counting on raw names would undercount — the
-// API already handles that; the page renders the comparable counts. Parity
-// target: legacy `public/js/pages/providers.js`.
 const api = usePublicApi()
 const filters = useFilterState()
-
 const search = computed({
-  get: () => (filters.get('q') as string) ?? '',
-  set: (v: string) => { void filters.set('q', v || undefined) },
+  get: () => String(filters.get('q') ?? ''),
+  set: (value: string) => { void filters.set('q', value || undefined) },
 })
 
 const { data, pending, error } = await useDataRoute<ProviderRow[]>(
@@ -21,70 +15,62 @@ const { data, pending, error } = await useDataRoute<ProviderRow[]>(
   () => api.providers(),
 )
 
-// Client-side name filter over the bounded provider list (the endpoint returns
-// the full comparable set). URL-authoritative so the filtered view is a link.
-const rows = computed<ProviderRow[]>(() => {
-  const all = data.value ?? []
-  const q = search.value.trim().toLowerCase()
-  if (!q) return all
-  return all.filter((r) => (r.canonical_name ?? '').toLowerCase().includes(q))
+const allProviders = computed(() => data.value ?? [])
+const rows = computed(() => {
+  const needle = search.value.trim().toLowerCase()
+  if (!needle) return allProviders.value
+  return allProviders.value.filter((row) => String(row.canonical_name ?? '').toLowerCase().includes(needle))
 })
+const count = (row: ProviderRow, key: string): number => typeof row[key] === 'number' ? Number(row[key]) : 0
+const total = (key: string) => allProviders.value.reduce((sum, row) => sum + count(row, key), 0)
+const topProviders = computed(() => allProviders.value.slice(0, 8))
+const activeProviders = computed(() => allProviders.value.filter((row) => !row.status || row.status === 'active').length)
+const target = computed(() => allProviders.value.find((row) => row.is_target))
 
-// Columns are derived from the first row's keys beyond the name, so the table
-// reflects whatever comparable counts the API returns without hard-coding a
-// shape that could drift. Name first, then up to five count columns.
-const columns = computed<Column<ProviderRow>[]>(() => {
-  const first = (data.value ?? [])[0]
-  const cols: Column<ProviderRow>[] = [
-    {
-      key: 'canonical_name',
-      label: 'Provider',
-      to: (row) => (row.provider_key ? `/providers/${row.provider_key}` : null),
-    },
-  ]
-  if (!first) return cols
-  const numericKeys = Object.keys(first).filter(
-    (k) => k !== 'canonical_name' && k !== 'provider_key' && typeof first[k] === 'number',
-  )
-  for (const k of numericKeys.slice(0, 5)) {
-    cols.push({ key: k, label: k.replace(/_/g, ' '), numeric: true })
-  }
-  return cols
-})
+const providerColumns: Column<ProviderRow>[] = [
+  { key: 'canonical_name', label: 'Provider', to: (row) => row.provider_key ? `/providers/${row.provider_key}` : null },
+  { key: 'status', label: 'Status' },
+  { key: 'contract_count', label: 'Contracts', numeric: true },
+  { key: 'contract_value_gbp', label: 'Published value', numeric: true },
+  { key: 'cqc_locations', label: 'CQC locations', numeric: true },
+  { key: 'tribunal_count', label: 'Tribunals', numeric: true },
+  { key: 'nhs_job_advert_count', label: 'NHS adverts', numeric: true },
+  { key: 'charity_income_latest', label: 'Latest charity income', numeric: true },
+]
+const evidenceColumns: Column<ProviderRow>[] = [
+  { key: 'canonical_name', label: 'Provider', to: (row) => row.provider_key ? `/providers/${row.provider_key}` : null },
+  { key: 'cqc_locations', label: 'CQC', numeric: true },
+  { key: 'tribunal_count', label: 'Tribunals', numeric: true },
+  { key: 'contract_count', label: 'Contracts', numeric: true },
+  { key: 'nhs_job_advert_count', label: 'NHS adverts', numeric: true },
+]
 
 useHead({ title: 'SectorTrace — Providers' })
 </script>
 
 <template>
-  <section class="space-y-6">
-    <div class="space-y-2">
-      <h1 class="text-2xl font-semibold">Providers</h1>
-      <p class="opacity-70 max-w-2xl">
-        Providers and the counts that make them comparable. Contract counts are
-        matched through supplier aliases, so they are a floor, not a total.
-      </p>
+  <section class="atlas-hero">
+    <div>
+      <div class="atlas-kicker">Provider directory · entity evidence</div>
+      <h1>Find provider evidence</h1>
+      <p class="atlas-lede">Browse tracked organisations, then open a provider workbench to see the published evidence held for that identity.</p>
+      <details class="atlas-read-first"><summary>How to read provider coverage</summary><p>Counts describe records in this warehouse, not provider size, performance, or absence of an event.</p><p>Contract counts use verified supplier aliases. A missing match is not evidence that a provider was not involved.</p></details>
     </div>
-
-    <input
-      v-model.lazy="search"
-      type="search"
-      placeholder="Filter by name…"
-      class="text-sm border border-black/15 dark:border-white/15 rounded px-3 py-1.5 bg-transparent min-w-64"
-    >
-
-    <div v-if="pending" class="text-sm opacity-60">Loading providers…</div>
-    <StEmptyState v-else-if="error" variant="unavailable" />
-    <UCard v-else>
-      <template #header>
-        <span class="text-sm font-medium">{{ rows.length }} providers</span>
-      </template>
-      <StEvidenceTable
-        v-if="rows.length"
-        :columns="columns"
-        :rows="rows"
-        row-key="provider_key"
-      />
-      <StEmptyState v-else />
-    </UCard>
+    <div class="atlas-hero-aside"><div class="atlas-stat"><strong>{{ allProviders.length.toLocaleString('en-GB') }}</strong><span>tracked organisations</span></div><div class="atlas-stat"><strong>{{ activeProviders.toLocaleString('en-GB') }}</strong><span>active identities</span></div></div>
   </section>
+
+  <section v-if="pending" class="atlas-panel p-6">Loading provider evidence…</section>
+  <section v-else-if="error" class="atlas-panel p-6">Provider evidence is unavailable.</section>
+  <template v-else>
+    <section class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-eyebrow">Directory controls</div><div class="flex flex-wrap items-end gap-3 mt-3"><label class="text-sm">Filter by provider name<input v-model.lazy="search" type="search" class="block mt-1 px-2 py-1 min-w-64" placeholder="Search providers…"></label><span class="atlas-footnote">Showing {{ rows.length.toLocaleString('en-GB') }} of {{ allProviders.length.toLocaleString('en-GB') }}</span></div></section>
+
+    <section class="atlas-section"><div class="atlas-section-head"><h2>Provider directory</h2><p>Open a provider to see its evidence inventory, timeline, registrations, filings, and safety records.</p></div><div class="atlas-grid atlas-grid-4"><NuxtLink v-for="provider in topProviders" :key="String(provider.provider_key)" :to="`/providers/${provider.provider_key}`" class="atlas-panel atlas-panel-body atlas-card-link"><div class="atlas-eyebrow">{{ provider.is_target ? 'Campaign subject' : (provider.status && provider.status !== 'active' ? provider.status : 'Tracked identity') }}</div><h3>{{ provider.canonical_name }}</h3><p class="atlas-footnote">{{ count(provider, 'cqc_locations') }} CQC locations · {{ count(provider, 'contract_count') }} contracts</p></NuxtLink></div></section>
+
+    <section class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-section-head"><h2>Evidence held per provider</h2><p>Coverage by record type. A low count says what has been collected or matched, not what happened in the organisation.</p></div><div class="atlas-grid atlas-grid-4"><div class="atlas-stat"><strong>{{ total('cqc_locations').toLocaleString('en-GB') }}</strong><span>CQC locations</span></div><div class="atlas-stat"><strong>{{ total('contract_count').toLocaleString('en-GB') }}</strong><span>matched contract notices</span></div><div class="atlas-stat"><strong>{{ total('nhs_job_advert_count').toLocaleString('en-GB') }}</strong><span>NHS Jobs adverts</span></div><div class="atlas-stat"><strong>{{ total('tribunal_count').toLocaleString('en-GB') }}</strong><span>tribunal cases</span></div></div><StEvidenceTable class="mt-5" :columns="evidenceColumns" :rows="rows" row-key="provider_key" /></section>
+
+    <section class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-section-head"><h2>All providers</h2><p>The comparable provider view, including lifecycle status and the latest published financial or procurement context.</p></div><StEvidenceTable :columns="providerColumns" :rows="rows" row-key="provider_key" /><p v-if="!rows.length" class="atlas-footnote mt-4">No providers match this filter.</p></section>
+
+    <section v-if="target" class="atlas-section atlas-panel atlas-panel-body"><h2>Campaign subject</h2><p class="atlas-footnote">The campaign subject is identified in the provider register; the evidence counts below remain coverage measures.</p><NuxtLink :to="`/providers/${target.provider_key}`" class="atlas-button mt-3">Open {{ target.canonical_name }}</NuxtLink></section>
+    <section class="atlas-section atlas-panel atlas-panel-body"><h2>Reading the directory</h2><p class="atlas-caveat"><span aria-hidden="true">⚠</span> Contract totals are based on exact verified supplier aliases and published notice values. They are not provider revenue, payments, or sector spend.</p><p class="atlas-caveat"><span aria-hidden="true">⚠</span> CQC, tribunal, NHS Jobs, charity, and contract records are separate evidence layers. They are not combined into a provider score.</p></section>
+  </template>
 </template>
