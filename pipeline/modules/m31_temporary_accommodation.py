@@ -327,6 +327,8 @@ def run(ctx: ModuleContext) -> None:
             bb_by_code = {e["ons_code"]: e
                           for e in extract_ta1_rows(rows, anchor, bb_columns)}
 
+            snapshot_rows: list[dict] = []
+            breakdown_rows: list[dict] = []
             for entry in extract_ta1_rows(rows, anchor, columns):
                 ons_code = entry["ons_code"]
                 if ons_code not in known_authorities:
@@ -356,14 +358,13 @@ def run(ctx: ModuleContext) -> None:
                 record["households_in_area_thousands"] = to_float(raw_area)
                 record["households_in_area_thousands_text"] = raw_area or None
 
-                db.upsert(conn, "temporary_accommodation_snapshot", record,
-                          natural_key=["ons_code", "quarter_start"])
+                snapshot_rows.append(record)
                 written += 1
 
                 bb_entry = bb_by_code.get(ons_code)
                 for measure, _column in bb_columns.items():
                     raw = (bb_entry or {}).get(measure, "")
-                    db.upsert(conn, "temporary_accommodation_breakdowns", {
+                    breakdown_rows.append({
                         "ons_code": ons_code,
                         "quarter_start": pub["quarter_start"],
                         "quarter_label": pub["quarter_label"],
@@ -372,9 +373,17 @@ def run(ctx: ModuleContext) -> None:
                         "households": to_int(raw),
                         "households_text": raw or None,
                         **provenance,
-                    }, natural_key=["ons_code", "quarter_start", "measure"])
+                    })
                     breakdown_written += 1
 
+            db.upsert_many(
+                conn, "temporary_accommodation_snapshot", snapshot_rows,
+                natural_key=["ons_code", "quarter_start"],
+            )
+            db.upsert_many(
+                conn, "temporary_accommodation_breakdowns", breakdown_rows,
+                natural_key=["ons_code", "quarter_start", "measure"],
+            )
             quarters_processed += 1
             if not ctx.dry_run:
                 conn.commit()
