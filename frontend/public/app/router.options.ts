@@ -1,5 +1,16 @@
 import type { RouterConfig } from '@nuxt/schema'
-import { createWebHashHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
+
+function flattenContractLifecycle(routes: RouteRecordRaw[]): RouteRecordRaw[] {
+  const contracts = routes.find((route) => route.name === 'contracts')
+  const lifecycle = contracts?.children?.find((route) => route.name === 'contracts-process-ocid')
+  if (!contracts || !lifecycle) return routes
+
+  return [
+    ...routes.map((route) => route === contracts ? { ...route, children: undefined } : route),
+    { ...lifecycle, path: '/contracts/process/:ocid' },
+  ]
+}
 
 // The legacy portal addressed every route as `#/route?filters`, and those are
 // live bookmarks and shared links. Hash history keeps them resolving through
@@ -9,5 +20,9 @@ import { createWebHashHistory } from 'vue-router'
 // allows; hash history is chosen because it preserves the exact existing URLs
 // byte-for-byte.
 export default <RouterConfig>{
-  history: (base) => createWebHashHistory(base),
+  // Nuxt owns hash-history setup here. Supplying a second history factory
+  // makes Nuxt's `/#` base get encoded as part of the route path on a fresh
+  // deep link; hashMode preserves the legacy `#/route` bookmarks directly.
+  hashMode: true,
+  routes: flattenContractLifecycle,
 }

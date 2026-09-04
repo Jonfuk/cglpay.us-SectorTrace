@@ -103,3 +103,31 @@ test('all public port routes mount through the SPA fallback', async ({ page }) =
   }
   expect(problems, problems.join('\n')).toEqual([])
 })
+
+test('a procurement lifecycle deep link resolves its dynamic page', async ({ page }) => {
+  await page.route('**/api/v1/contracts', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ notices: [], total: 0, caveats: {}, value_concentration: {} }),
+    })
+  })
+  await page.route('**/api/v1/council_spend*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({}) })
+  })
+  await page.route('**/api/v1/contracts/process/ocds-test', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ocid: 'ocds-test',
+        buyer: { name: 'Test council' },
+        notice_count: 1,
+        date_range: { earliest: '2026-01-01T00:00:00Z', latest: '2026-01-01T00:00:00Z' },
+        stages: [{ stage: 'award', present: true, notices: [{ title: 'Test award', date_published: '2026-01-01' }] }],
+      }),
+    })
+  })
+
+  await page.goto('/#/contracts/process/ocds-test')
+  await expect(page.getByRole('heading', { name: 'Procurement lifecycle' })).toBeVisible()
+  await expect(page.getByText('Test council')).toBeVisible()
+})
