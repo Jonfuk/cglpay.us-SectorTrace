@@ -101,6 +101,32 @@ class DecisionConfirmation(ModalScreen[bool]):
         self.dismiss(event.button.id == "confirm")
 
 
+class InformationModal(ModalScreen[None]):
+    """Show a compact operational report without changing warehouse state."""
+
+    CSS = """
+    InformationModal { align: center middle; }
+    #information-dialog { width: 92; height: auto; max-height: 85%; border: round $primary; background: $surface; padding: 2; }
+    #information-body { height: auto; max-height: 1fr; overflow-y: auto; margin-bottom: 2; }
+    #information-actions { height: auto; align-horizontal: right; }
+    """
+
+    def __init__(self, title: str, body: Text) -> None:
+        super().__init__()
+        self.title = title
+        self.body = body
+
+    def compose(self) -> ComposeResult:
+        with Container(id="information-dialog"):
+            yield Static(Text(self.title, style="bold cyan"))
+            yield Static(self.body, id="information-body")
+            with Horizontal(id="information-actions"):
+                yield Button("Close", id="close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+
 class OperatorDashboard(App[None]):
     """A compact operator landing screen with audited review decisions."""
 
@@ -128,6 +154,10 @@ class OperatorDashboard(App[None]):
 
     BINDINGS = [
         Binding("r", "refresh", "Refresh"),
+        Binding("f", "focus_filter", "Filter"),
+        Binding("ctrl+x", "clear_filter", "Clear filter"),
+        Binding("d", "show_decisions", "Decisions"),
+        Binding("p", "show_failures", "Failures"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -137,6 +167,8 @@ class OperatorDashboard(App[None]):
         self._items: dict[str, dict[str, Any]] = {}
         self._selected_item_id: int | None = None
         self._pending_decision: tuple[int, str, str, str | None] | None = None
+        self._recent_decisions: list[dict[str, Any]] = []
+        self._failure_groups: list[dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -148,7 +180,10 @@ class OperatorDashboard(App[None]):
                 yield Static("", id="warehouse", classes="metric last", markup=False)
             with Horizontal(id="content"):
                 with Vertical(id="queue-panel", classes="panel"):
-                    yield Static("Pending review items", classes="panel-title", markup=False)
+                    yield Static("Pending review items", id="queue-title",
+                                 classes="panel-title", markup=False)
+                    yield Input(placeholder="Filter module, type, or value…",
+                                id="filter")
                     yield DataTable(id="queue", cursor_type="row")
                 with Vertical(id="detail-panel", classes="panel"):
                     yield Static("Selected item", classes="panel-title", markup=False)
@@ -176,8 +211,9 @@ class OperatorDashboard(App[None]):
             conn = queries.readonly_connection(self.settings)
             try:
                 overview = queries.overview(conn, self.settings)
-                review = queries.review_items(conn, status="pending", limit=25,
-                                              oldest_first=True)
+                review = queries.review_items(
+                    conn, status="pending", limit=25, oldest_first=True,
+                    search=self.query_one("#filter", Input).value.strip() or None)
             finally:
                 conn.close()
         except Exception as exc:  # noqa: BLE001 - the screen must explain an unavailable warehouse
@@ -193,6 +229,8 @@ class OperatorDashboard(App[None]):
         pending = facets["statuses"].get("pending", 0)
         failures = overview["parse_failures"]["total"]
         database = overview["database"]
+        self._recent_decisions = overview.get("recent_decisions", [])
+        self._failure_groups = overview["parse_failures"].get("groups", [])
 
         self.query_one("#pending", Static).update(
             _metric("Pending review", f"{pending:,}",
@@ -208,6 +246,10 @@ class OperatorDashboard(App[None]):
 
         table = self.query_one("#queue", DataTable)
         table.clear()
+        filter_text = self.query_one("#filter", Input).value.strip()
+        match_text = f"{review['total']:,} matching" if filter_text else "oldest-first"
+        self.query_one("#queue-title", Static).update(
+            f"Pending review items · {match_text}")
         self._items = {str(item["id"]): item for item in review["items"]}
         self._selected_item_id = None
         self._set_decision_controls(enabled=False)
@@ -244,6 +286,52 @@ class OperatorDashboard(App[None]):
             self._selected_item_id = int(item["id"])
             self._set_decision_controls(enabled=True)
             self.query_one("#details", Static).update(self._item_text(item))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "filter":
+            self.action_refresh()
+
+    def action_focus_filter(self) -> None:
+        self.query_one("#filter", Input).focus()
+
+    def action_clear_filter(self) -> None:
+        filter_input = self.query_one("#filter", Input)
+        filter_input.value = ""
+        self.action_refresh()
+
+    def action_show_decisions(self) -> None:
+        body = Text()
+        if not self._recent_decisions:
+            body.append("No recent decisions found.", style="dim")
+        else:
+            for decision in self._recent_decisions:
+                body.append(
+                    f"#{decision['item_id']}  {decision['decision']}  "
+                    f"by {decision['decided_by'] or '—'}  "
+                    f"{_when(decision['decided_at'])}\n",
+                    style="bold" if decision["decision"] == "approved" else None,
+                )
+                body.append(f"  {_short(decision['raw_value'], 100)}\n", style="dim")
+                if decision.get("note"):
+                    body.append(f"  note: {_short(decision['note'], 100)}\n")
+        self.push_screen(InformationModal("Recent review decisions", body))
+
+    def action_show_failures(self) -> None:
+        body = Text()
+        if not self._failure_groups:
+            body.append("No parse-failure groups found.", style="green")
+        else:
+            for failure in self._failure_groups:
+                body.append(
+                    f"{failure['n']:,} · {failure['module']} · "
+                    f"{failure['field_name'] or 'field unknown'}\n",
+                    style="bold",
+                )
+                body.append(f"  {_short(failure['reason'], 140)}\n", style="dim")
+                body.append(
+                    f"  first {_when(failure['first_seen'])} · "
+                    f"last {_when(failure['last_seen'])}\n")
+        self.push_screen(InformationModal("Grouped parse failures", body))
 
     def _set_decision_controls(self, *, enabled: bool) -> None:
         self.query_one("#reviewer", Input).disabled = not enabled

@@ -1,5 +1,8 @@
-"""Regression coverage for the generated terminal UI entry point."""
+"""Regression coverage for the generated and operator terminal UIs."""
 
+import asyncio
+
+from textual.widgets import Input, Static
 from trogon.introspect import introspect_click_app
 from trogon.widgets.command_tree import CommandTree
 from trogon.widgets.form import CommandForm
@@ -9,6 +12,7 @@ from typer.testing import CliRunner
 
 from pipeline import cli as cli_module
 from pipeline.tui import RunConfirmation, SafeTrogon, command_requires_confirmation
+from pipeline.tui_dashboard import InformationModal, OperatorDashboard
 
 
 def test_cli_exposes_tui_command() -> None:
@@ -92,3 +96,65 @@ def test_tui_execution_policy_defaults_to_confirmation() -> None:
     assert command_requires_confirmation(["root", "run"])
     assert command_requires_confirmation(["root", "documents", "search"])
     assert command_requires_confirmation([])
+
+
+def test_operator_dashboard_filters_queue_and_shows_reports(settings, monkeypatch) -> None:
+    """Keep the backup cockpit's read-only triage path fixture-backed."""
+    from pipeline.web import queries
+
+    calls: list[dict] = []
+    overview = {
+        "database": {"path": "postgresql://redacted", "tables": 3,
+                     "views": 1, "migrations": 2},
+        "review": {"statuses": {"pending": 1}},
+        "parse_failures": {
+            "total": 2,
+            "groups": [{"n": 2, "module": "m06", "field_name": "salary",
+                         "reason": "bad value", "first_seen": "2026-01-01T00:00:00",
+                         "last_seen": "2026-01-02T00:00:00"}],
+        },
+        "recent_decisions": [{
+            "item_id": 7, "decision": "approved", "decided_by": "reviewer",
+            "decided_at": "2026-01-02T00:00:00", "raw_value": "Provider A",
+            "note": "checked source",
+        }],
+    }
+    item = {"id": 7, "module": "m06", "item_type": "pay", "raw_value": "Provider A",
+            "context_json": "{}", "status": "pending", "created_at": "2026-01-01T00:00:00"}
+
+    class FakeConnection:
+        def close(self) -> None:
+            pass
+
+    def fake_review_items(conn, **kwargs):
+        calls.append(kwargs)
+        return {"items": [item], "total": 1, "limit": 25, "offset": 0}
+
+    monkeypatch.setattr(queries, "readonly_connection", lambda _: FakeConnection())
+    monkeypatch.setattr(queries, "overview", lambda *_: overview)
+    monkeypatch.setattr(queries, "review_items", fake_review_items)
+
+    async def exercise() -> None:
+        async with OperatorDashboard(settings).run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert calls[-1]["search"] is None
+
+            filter_input = pilot.app.query_one("#filter", Input)
+            filter_input.value = "m06"
+            pilot.app.action_refresh()
+            await pilot.pause()
+            assert calls[-1]["search"] == "m06"
+            assert "1 matching" in str(pilot.app.query_one("#queue-title", Static).render())
+
+            pilot.app.action_show_decisions()
+            await pilot.pause()
+            assert isinstance(pilot.app.screen, InformationModal)
+            assert "Provider A" in str(pilot.app.screen.query_one("#information-body", Static).render())
+            pilot.app.pop_screen()
+
+            pilot.app.action_show_failures()
+            await pilot.pause()
+            assert isinstance(pilot.app.screen, InformationModal)
+            assert "bad value" in str(pilot.app.screen.query_one("#information-body", Static).render())
+
+    asyncio.run(exercise())

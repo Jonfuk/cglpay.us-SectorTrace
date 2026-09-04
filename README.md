@@ -77,10 +77,14 @@ operations.
 
 For the operator landing view, use `./start.sh dashboard`. It shows warehouse
 health, parse-failure pressure, and an oldest-first pending review worklist;
-select a row to inspect its stored provenance. Enter a reviewer name and
-optional note to approve, reject or reset an item. Every decision is confirmed
-and recorded through the same audited review workflow as the web UI; it does
-not promote evidence or edit a canonical table.
+select a row to inspect its stored provenance. Press `f` to focus the queue
+filter, press Enter to apply it, and use Ctrl+X to clear it. `d` opens recent
+review decisions and `p` opens grouped parse failures. Enter a reviewer name
+and optional note to approve, reject or reset an item. Every decision is
+confirmed and recorded through the same audited review workflow as the web UI;
+it does not promote evidence or edit a canonical table. This is deliberately
+a fast backup for triage when the browser UI is inconvenient, not a replacement
+for its bulk review, pipeline controls, database browser or exports.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle
