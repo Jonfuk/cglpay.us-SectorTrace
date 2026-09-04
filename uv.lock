@@ -1645,21 +1645,22 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "0.36.2"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "click" },
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
+    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
+    { name = "httpx" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "requests" },
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7c/b7/8cb61d2eece5fb05a83271da168186721c450eb74e3c31f7ef3169fa475b/huggingface_hub-0.36.2.tar.gz", hash = "sha256:1934304d2fb224f8afa3b87007d58501acfda9215b334eed53072dd5e815ff7a", size = 649782, upload-time = "2026-02-06T09:24:13.098Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/97/2eb4abaa5b969ed385066a0496a3823b3ff467fc1082e2202955f1867d60/huggingface_hub-1.30.0.tar.gz", hash = "sha256:e6a6120bc8c8e2723d03648434ee247088cceb55ba7067e7d34d692cad5fdb57", size = 964291, upload-time = "2026-09-03T10:05:14.053Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/af/48ac8483240de756d2438c380746e7130d1c6f75802ef22f3c6d49982787/huggingface_hub-0.36.2-py3-none-any.whl", hash = "sha256:48f0c8eac16145dfce371e9d2d7772854a4f591bcb56c9cf548accf531d54270", size = 566395, upload-time = "2026-02-06T09:24:11.133Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/0e/3e45bbe0dd48f4e56b1d46649d342de853cd1c7e815323472ab62687f153/huggingface_hub-1.30.0-py3-none-any.whl", hash = "sha256:96ae0a8e99a234374a6fe43e989ebd21c04640b91ab2927e7e5773ba1131ca59", size = 796795, upload-time = "2026-09-03T10:05:12.21Z" },
 ]
 
 [[package]]
@@ -5872,7 +5873,7 @@ wheels = [
 
 [[package]]
 name = "setfit"
-version = "1.1.3"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "datasets" },
@@ -5884,9 +5885,9 @@ dependencies = [
     { name = "sentence-transformers", extra = ["train"] },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/f5/5dbca5ff076524daccf6a63062f8903d97c0c56c4a631f17730ae5723b1f/setfit-1.1.3.tar.gz", hash = "sha256:db54a7b6e86118343275cc70c39749f71e10aa226fef510543bcd7c8b00b9f19", size = 84459, upload-time = "2025-08-05T13:22:38.727Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/b7/9f22b2b9d54da2de429c350be6a0c9c7d6615e3c7e5f74ff86535abd68b0/setfit-1.2.0.tar.gz", hash = "sha256:ed87e37cb7a35b04dac398c55e2dc9642a4b098d64cdf4b91a91d55dbae1de43", size = 86769, upload-time = "2026-09-04T14:35:10.135Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/14/2e284bdb5e51052246235cc1e95658ea11855b99ca738492e06f7ec8512a/setfit-1.1.3-py3-none-any.whl", hash = "sha256:18affb2936cf4158885c49a1a828f4225f8d96b28224c13193ab268ab35ef76a", size = 75597, upload-time = "2025-08-05T13:22:37.421Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/82/32260de73fd4ad41c3f25cbd55911d393e5d0df9a22d9fa8616470861f91/setfit-1.2.0-py3-none-any.whl", hash = "sha256:dcf9292f073f47252c3fea73b141c4f43dc1d01789e0c8e2de017337e0428e34", size = 77131, upload-time = "2026-09-04T14:35:08.736Z" },
 ]
 
 [[package]]
@@ -6146,11 +6147,11 @@ requires-dist = [
     { name = "scrapy", marker = "extra == 'scrapy'", specifier = ">=2.11" },
     { name = "scrapy-playwright", marker = "extra == 'scrapy'", specifier = ">=0.0.35" },
     { name = "sentence-transformers", marker = "extra == 'nlp'", specifier = ">=3.0,<6" },
-    { name = "setfit", marker = "extra == 'nlp'", specifier = ">=1.1" },
+    { name = "setfit", marker = "extra == 'nlp'", specifier = ">=1.2" },
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "structlog", specifier = ">=24.1" },
     { name = "tenacity", specifier = ">=8.2" },
-    { name = "transformers", marker = "extra == 'nlp'", specifier = ">=4.51.3,<5" },
+    { name = "transformers", marker = "extra == 'nlp'", specifier = ">=5.10.4,<6" },
     { name = "trogon", specifier = ">=0.6" },
     { name = "typer", specifier = ">=0.12,<0.26" },
 ]
@@ -6419,10 +6420,9 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.57.6"
+version = "5.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
     { name = "huggingface-hub" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -6430,14 +6430,14 @@ dependencies = [
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "regex" },
-    { name = "requests" },
     { name = "safetensors" },
     { name = "tokenizers" },
     { name = "tqdm" },
+    { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/35/67252acc1b929dc88b6602e8c4a982e64f31e733b804c14bc24b47da35e6/transformers-4.57.6.tar.gz", hash = "sha256:55e44126ece9dc0a291521b7e5492b572e6ef2766338a610b9ab5afbb70689d3", size = 10134912, upload-time = "2026-01-16T10:38:39.284Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/f7/418169401560cec2b61512e6bf37b0cfb4c8e27700cfa868a1de073cb65d/transformers-5.13.1.tar.gz", hash = "sha256:1e2452d6778a7482158df5d5dacf6bf775d5b2fdcfce33caaf7f6b0e5f3e3397", size = 9196891, upload-time = "2026-07-11T09:15:50.845Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/b8/e484ef633af3887baeeb4b6ad12743363af7cce68ae51e938e00aaa0529d/transformers-4.57.6-py3-none-any.whl", hash = "sha256:4c9e9de11333ddfe5114bc872c9f370509198acf0b87a832a0ab9458e2bd0550", size = 11993498, upload-time = "2026-01-16T10:38:31.289Z" },
+    { url = "https://files.pythonhosted.org/packages/29/47/54eacf96b5c835bbd6ca631aa2740e7705ed63d9e3a8afd2d2cc6d09cae5/transformers-5.13.1-py3-none-any.whl", hash = "sha256:53f0ea8aa397e29244c2377ba981bcaf0c87adcf44fbdd447ef6306522afcacd", size = 11503977, upload-time = "2026-07-11T09:15:46.801Z" },
 ]
 
 [[package]]

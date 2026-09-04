@@ -184,21 +184,19 @@ scrapy = [
 # bake-off's logreg path without this extra; the SetFit path sits behind the
 # `slow` pytest marker. See docs/claim-predictions-spec.md.
 #
-# transformers is held below 5 and sentence-transformers below 6 for setfit's
-# sake: setfit 1.1.3 (its latest) still does
-# `from transformers.training_args import default_logdir`, a symbol
-# transformers 5 removed, so it fails to import against the 5.x line that
-# sentence-transformers 6 requires. This does NOT touch the always-on
-# app/Railway image: that one installs `postgres storage graph` only and
-# pulls no transformers at all. The `nlp` extra is the local
-# document-analysis worker's (deploy/Dockerfile.documents), which is the only
-# deployed image where transformers is installed -- so the pin is effectively
-# scoped to that worker. Lift it when setfit supports transformers 5.
+# SetFit 1.2.0 supports the Transformers 5 import layout, including the moved
+# `default_logdir` symbol. Keep the lower bound above the patched release for
+# CVE-2026-9856 and cap the major line so a future Transformers 6 migration is
+# deliberate. This does NOT touch the always-on app/Railway image: that one
+# installs `postgres storage graph` only and pulls no transformers at all. The
+# `nlp` extra is the local document-analysis worker's
+# (`deploy/Dockerfile.documents`), which is the only deployed image where
+# transformers is installed.
 nlp = [
     "sentence-transformers>=3.0,<6",
-    "transformers>=4.51.3,<5",
+    "transformers>=5.10.4,<6",
     "gliner>=0.2.13",
-    "setfit>=1.1",
+    "setfit>=1.2",
     "scikit-learn>=1.4",
 ]
 

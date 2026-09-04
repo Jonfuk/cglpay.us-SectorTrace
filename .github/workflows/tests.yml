@@ -140,3 +140,21 @@ jobs:
           name: pytest-timings-${{ github.run_id }}
           path: artifacts/
           if-no-files-found: error
+
+  nlp-compat:
+    # The NLP extra is optional at runtime and intentionally has its own job:
+    # it is a heavyweight document-analysis dependency tree, but its import
+    # boundary must still be exercised whenever the patched security line moves.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
+        with:
+          enable-cache: true
+
+      - name: Check optional NLP dependency compatibility
+        run: uv run --extra nlp pytest -q tests/test_nlp_compat.py
