@@ -16,6 +16,7 @@ from pipeline.documents.parsers import (
     HTMLParserAdapter,
     MSWordParser,
     ParserUnavailable,
+    PdfPlumberParser,
     PPTXParser,
     PyMuPDFParser,
     get_parser,
@@ -156,8 +157,29 @@ class DocumentService:
             (run_id, document_id, parser.name, parser.version, config_hash, started))
         tick = time.monotonic()
         try:
-            parsed = parser.parse(parser_input, inspection.mime_type)
+            fallback_reason = None
+            try:
+                parsed = parser.parse(parser_input, inspection.mime_type)
+            except Exception as primary_exc:
+                # A parser that is installed but cannot read one document is
+                # a document-class problem, not a reason to discard the whole
+                # batch. Keep PyMuPDF as the normal path and make the
+                # alternative parser, if available, explicit in quality
+                # metadata so later parity review can find every fallback.
+                if inspection.mime_type != "application/pdf" or parser.name not in {"pymupdf", "docling"}:
+                    raise
+                fallback = PdfPlumberParser()
+                try:
+                    parsed = fallback.parse(parser_input, inspection.mime_type)
+                except Exception:
+                    raise primary_exc
+                parser = fallback
+                fallback_reason = (
+                    f"primary parser {type(primary_exc).__name__} failed; "
+                    f"used {fallback.name} {fallback.version}")
             quality_status, metrics, warnings = assess(parsed, inspection.page_count)
+            if fallback_reason:
+                warnings.append(fallback_reason)
             version_id = repository.persist_parse(self.conn, document_id, parsed, config_hash, source_artifact_id,
                                                   quality_status, metrics, warnings, self.settings)
             # BETA-062: name the document from the best available signal now

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import io
 import subprocess
+import sys
+import types
 import zipfile
 
 import pytest
@@ -19,6 +21,7 @@ from pipeline.documents.parsers import (
     HTMLParserAdapter,
     MSWordParser,
     ParserUnavailable,
+    PdfPlumberParser,
     PPTXParser,
 )
 from pipeline.documents.quality import assess
@@ -188,6 +191,34 @@ def test_html_fallback_strips_markup_and_ignores_script_content():
         ("HEADING", "Committee report"),
         ("PARAGRAPH", "Published finding."),
     ]
+
+
+def test_pdfplumber_fallback_preserves_page_provenance(monkeypatch):
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            return self.text
+
+    class Pdf:
+        pages = [Page("Fallback page one"), Page("Fallback page two")]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    fake_pdfplumber = types.SimpleNamespace(
+        __version__="fixture-pdfplumber", open=lambda stream: Pdf())
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PdfPlumberParser().parse(b"fixture", "application/pdf")
+    assert parsed.parser_name == "pdfplumber"
+    assert [item.page_number for item in parsed.elements] == [1, 2]
+    assert [item.text for item in parsed.elements] == [
+        "Fallback page one", "Fallback page two"]
 
 
 def test_inspection_recovers_html_from_generic_archive_mime():
