@@ -172,6 +172,11 @@ uv run pipeline nlp benchmark-semantic \
   --model stub --repetitions 7 --output semantic-benchmark.json
 ```
 
+The populated PostgreSQL 18 acceptance run on 2026-09-04 covered 167,779
+vectors and all eight committed query cases. Exact IDs, order, and scores
+matched in every case (maximum score delta `0.0`); the reproducible report is
+[`docs/benchmarks/20260904T045212Z-postgres-semantic.json`](benchmarks/20260904T045212Z-postgres-semantic.json).
+
 ### Single-copy embedding maintenance runbook
 
 1. Pause embedding, NLP and analysis writers and create the normal verified
