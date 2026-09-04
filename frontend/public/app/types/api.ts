@@ -69,10 +69,32 @@ export interface SummaryResponse {
     latest_census_year: number | null
     all_unverified?: boolean
     caveat: string | null
+    metrics?: Array<{
+      metric?: string
+      workforce_segment?: string | null
+      value?: number | null
+      unit?: string | null
+      verified?: number
+    }>
   }
   fingertips: {
     latest_period: string | null
     indicators_collected: number
+  }
+  pipeline?: {
+    last_run?: string | null
+    sources?: Array<{
+      source_system?: string | null
+      last_retrieved?: string | null
+    }>
+  }
+  funnel?: {
+    discovered?: number | null
+    undecided?: number | null
+    promoted?: number | null
+    rejected?: number | null
+    evidence_rows?: number | null
+    caveat?: string | null
   }
   [key: string]: unknown
 }
