@@ -22,7 +22,8 @@ class BatchWriter(Generic[T]):
                  checkpoint: Callable[[], None] | None = None,
                  on_row_error: Callable[[T, BaseException], None] | None = None,
                  max_rows: int = 1000, max_seconds: float = 5.0,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 isolate_failures: bool = True, commit: bool = True):
         if max_rows < 1 or max_seconds <= 0:
             raise ValueError("max_rows must be positive and max_seconds must be positive")
         self.conn = conn
@@ -32,6 +33,8 @@ class BatchWriter(Generic[T]):
         self.max_rows = max_rows
         self.max_seconds = max_seconds
         self._clock = clock
+        self.isolate_failures = isolate_failures
+        self.commit = commit
         self._pending: list[T] = []
         self._opened_at: float | None = None
         self.rows_written = 0
@@ -67,10 +70,15 @@ class BatchWriter(Generic[T]):
         batch = self._pending
         written = 0
         try:
-            written = self._write_isolated(batch)
+            if self.isolate_failures:
+                written = self._write_isolated(batch)
+            else:
+                self.write_batch(batch)
+                written = len(batch)
             if self.checkpoint is not None:
                 self.checkpoint()
-            self.conn.commit()
+            if self.commit:
+                self.conn.commit()
         except BaseException:
             self.conn.rollback()
             raise

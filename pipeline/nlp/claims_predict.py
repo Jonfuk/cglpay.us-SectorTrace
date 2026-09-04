@@ -21,6 +21,7 @@ from pipeline.nlp import claims, runs
 from pipeline.nlp.claims_train import LogRegHead
 from pipeline.nlp.embedding_repository import PostgresEmbeddingRepository
 from pipeline.nlp.embeddings import unpack
+from pipeline.writer import BatchWriter
 
 PREDICTION_WRITE_BATCH_SIZE = 2000
 
@@ -131,6 +132,17 @@ def predict(conn, *, embedder_model_key: str = claims.DEFAULT_EMBEDDER_MODEL_KEY
             elif h["model_type"] != "logreg":  # pragma: no cover - schema CHECK-equivalent
                 raise ValueError(f"unknown model_type {h['model_type']!r}")
 
+            def write_batch(values) -> None:
+                # A prediction page is deliberately atomic. The shared
+                # writer supplies bounded flush/commit behaviour, while a
+                # malformed prediction page must still fail the head rather
+                # than silently dropping individual finding-aid rows.
+                conn.executemany(_UPSERT_PREDICTION, values)
+
+            writer = BatchWriter(
+                conn, write_batch, max_rows=PREDICTION_WRITE_BATCH_SIZE,
+                isolate_failures=False, commit=not dry_run)
+            reported = 0
             for page in repository.iter_population(
                     embedder_model_key, page_size=PREDICTION_WRITE_BATCH_SIZE):
                 if logreg is not None:
@@ -146,14 +158,14 @@ def predict(conn, *, embedder_model_key: str = claims.DEFAULT_EMBEDDER_MODEL_KEY
                     values.append((chunk_id, h["category"], h["model_version"],
                                    1 if value >= 0.5 else 0, round(value, 6),
                                    splits.get(chunk_id, "unlabelled"), run_id, now))
-                # One prediction page is atomic. A driver/batch failure rolls
-                # back this page while earlier committed checkpoints remain;
-                # the run ledger can then record the failing head cleanly.
-                with conn.raw.transaction():
-                    conn.executemany(_UPSERT_PREDICTION, values)
-                written += len(values)
-                if not dry_run:
-                    conn.commit()
+                writer.write_many(values)
+                # Full pages flush immediately; keep the run ledger accurate
+                # if a later page or model call fails before the final page is
+                # closed.
+                written += writer.rows_written - reported
+                reported = writer.rows_written
+            writer.close()
+            written += writer.rows_written - reported
     except Exception as exc:  # noqa: BLE001 - recorded on the run, then re-raised
         runs.finish_run(conn, run_id, status="failed", rows_written=written,
                         error=f"{type(exc).__name__}: {exc}")
