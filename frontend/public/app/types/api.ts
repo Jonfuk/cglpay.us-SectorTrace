@@ -275,13 +275,26 @@ export interface PfdResponse {
 }
 
 /** A published claim with its citations and caveats (`/api/v1/claims`). */
-export interface ClaimRow {
-  id: number | string
-  claim_text: string | null
-  caveats: string[]
-  citations: Array<Record<string, unknown>>
-  created_by: string | null
-  created_at: string | null
+  export interface ClaimRow {
+    id: number | string
+    claim_text: string | null
+    caveats: string[]
+    citations: Array<{
+      table?: string | null
+      key?: string | null
+      resolved?: {
+        label?: string | null
+        url?: string | null
+        source_url?: string | null
+        retrieved_at?: string | null
+      } | null
+      [key: string]: unknown
+    }>
+    created_by: string | null
+    created_at: string | null
+    published_by?: string | null
+    published_at?: string | null
+    note?: string | null
   [key: string]: unknown
 }
 

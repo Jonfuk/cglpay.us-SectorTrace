@@ -17,6 +17,12 @@ interface ProviderWorkspace extends ProviderTimelineResponse {
   pfd_mentions?: Row[]
   caveats?: Record<string, string | null>
 }
+interface LineageResponse {
+  edges?: Row[]
+  chain?: Row[]
+  identifiers?: Row[]
+  caveat?: string | null
+}
 
 const route = useRoute()
 const api = usePublicApi()
@@ -26,6 +32,11 @@ const { data, pending, error } = await useAsyncData<ProviderWorkspace | null>(
   () => `provider-${key.value}`,
   () => api.providerTimeline(key.value) as Promise<ProviderWorkspace>,
   { default: () => null, watch: [key] },
+)
+const { data: lineage } = await useAsyncData<LineageResponse | null>(
+  () => `provider-lineage-${key.value}`,
+  () => api.get<LineageResponse>(`/providers/${encodeURIComponent(key.value)}/lineage`),
+  { default: () => null, watch: [key], lazy: true },
 )
 
 const provider = computed(() => data.value?.provider)
@@ -39,6 +50,11 @@ const filings = computed(() => data.value?.filings ?? [])
 const tribunals = computed(() => data.value?.tribunal_cases ?? [])
 const edges = computed(() => data.value?.entity_edges ?? [])
 const disclosure = computed(() => data.value?.disclosure)
+const lineageEdges = computed(() => lineage.value?.edges ?? [])
+const lineageChain = computed(() => lineage.value?.chain ?? [])
+const lineageIdentifiers = computed(() => lineage.value?.identifiers ?? [])
+const lineageForward = computed(() => lineageEdges.value.filter((edge) => edge.direction !== 'predecessor'))
+const lineagePredecessors = computed(() => lineageEdges.value.filter((edge) => edge.direction === 'predecessor'))
 
 const links = computed(() => [
   { to: '/providers', label: 'All providers' },
@@ -136,7 +152,9 @@ useHead(() => ({ title: `SectorTrace — ${providerName.value}` }))
 
       <section id="inventory" class="atlas-section"><div class="atlas-section-head"><h2>Evidence inventory</h2><p>Counts describe records held for this provider, not its scale or performance.</p></div><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div v-for="item in inventory" :key="item.label" class="atlas-panel atlas-panel-body"><div class="atlas-stat-value">{{ item.count }}</div><div class="atlas-stat-label">{{ item.label }}</div><div class="atlas-stat-sub">records held</div></div></div></section>
 
-      <section id="lineage" class="atlas-section"><div class="atlas-section-head"><h2>Verified identity links</h2><p>Administrative identifiers connected to this provider, with the basis for each edge.</p></div><div class="atlas-panel atlas-panel-body space-y-4"><StEvidenceTable :columns="edgeColumns" :rows="edgeRows" row-key="row_key" /><StEmptyState v-if="!edgeRows.length" title="No identity links held" /><StCaveat :text="caveat('cqc_coverage')" /></div></section>
+      <section v-if="lineage && (lineageEdges.length || lineageChain.length > 1 || lineageIdentifiers.length)" id="lineage" class="atlas-section"><div class="atlas-section-head"><h2>Verified identity lineage</h2><p>The administrative record of this organisation’s identity; it does not describe continuity of services, staff, or contracts.</p></div><div class="atlas-panel atlas-panel-body space-y-4"><StCaveat :text="lineage.caveat" /><p v-if="lineageChain.length > 1" class="text-sm">{{ lineageChain.map((node) => node.canonical_name ?? node.provider_key).join(' → ') }}</p><ul v-if="lineageEdges.length" class="list-disc pl-5 text-sm"><li v-for="(edge, index) in lineageEdges" :key="index">{{ edge.direction === 'predecessor' ? `${edge.canonical_name ?? edge.provider_key} ${edge.relationship ?? 'predecessor'} this entity` : `${edge.relationship ?? 'lifecycle change'} ${edge.canonical_name ?? edge.provider_key ?? ''}` }} <span class="opacity-60">— {{ edge.basis }}</span></li></ul><p v-if="lineageIdentifiers.length" class="text-xs opacity-70">Verified identifiers: {{ lineageIdentifiers.map((item) => `${item.scheme} ${item.identifier}${item.role ? ` (${item.role})` : ''}`).join('; ') }}</p></div></section>
+
+      <section id="graph" class="atlas-section"><div class="atlas-section-head"><h2>Evidence graph links</h2><p>Other entity edges held for this provider. Name matches remain labelled as such and are not treated as verified relationships.</p></div><div class="atlas-panel atlas-panel-body"><StEvidenceTable :columns="edgeColumns" :rows="edgeRows" row-key="row_key" /><StEmptyState v-if="!edgeRows.length" title="No entity links held" /><StCaveat :text="caveat('cqc_coverage')" /></div></section>
 
       <section id="timeline" class="atlas-section"><div class="atlas-section-head"><h2>Evidence timeline</h2><p>{{ events.length }} dated records, newest first. Contract events link to the published notice where available.</p></div><div class="atlas-panel atlas-panel-body"><StEvidenceTable :columns="timelineColumns" :rows="timelineRows" row-key="row_key" /><StEmptyState v-if="!timelineRows.length" title="No dated evidence" /></div></section>
 

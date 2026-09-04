@@ -15,6 +15,14 @@ const metric = computed({
   set: (v: string) => { void filters.set('metric', v || undefined) },
 })
 
+const metricOptions = [
+  { value: 'grant_total', label: 'Public health grant total' },
+  { value: 'grant_per_head', label: 'Public health grant per head' },
+  { value: 'budget_public_health', label: 'Public health budget' },
+  { value: 'treatment_numbers', label: 'People in treatment' },
+  { value: 'contract_value', label: 'Published contract value' },
+]
+
 // Table vs map view. The map (MapLibre) is only mounted when chosen, so its
 // chunk is never fetched on the table view — keeping MapLibre off every path
 // that does not use it. The choice is URL-authoritative.
@@ -57,7 +65,20 @@ useHead({ title: 'SectorTrace — Places' })
       </p>
     </div>
 
-    <div class="inline-flex rounded border border-black/15 dark:border-white/15 text-sm overflow-hidden">
+    <div class="flex flex-wrap items-center gap-3">
+      <label class="text-sm flex items-center gap-2">
+        <span class="opacity-70">Measure</span>
+        <select
+          :value="metric || 'grant_total'"
+          class="rounded border border-black/15 dark:border-white/15 bg-transparent px-2 py-1"
+          @change="metric = ($event.target as HTMLSelectElement).value"
+        >
+          <option v-for="option in metricOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <div class="inline-flex rounded border border-black/15 dark:border-white/15 text-sm overflow-hidden">
       <button
         type="button"
         class="px-3 py-1"
@@ -70,6 +91,7 @@ useHead({ title: 'SectorTrace — Places' })
         :class="view === 'map' ? 'bg-[var(--st-accent)] text-white' : 'opacity-70'"
         @click="view = 'map'"
       >Map</button>
+      </div>
     </div>
 
     <div v-if="pending" class="text-sm opacity-60">Loading authority values…</div>

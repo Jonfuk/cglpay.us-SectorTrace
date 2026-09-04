@@ -14,6 +14,10 @@ const { data, pending, error } = await useDataRoute<ClaimsResponse>(
 
 const claims = computed<ClaimRow[]>(() => data.value?.claims ?? [])
 
+function citationLabel(citation: ClaimRow['citations'][number]): string {
+  return citation.resolved?.label ?? `${citation.table ?? 'Evidence'}: ${citation.key ?? '—'}`
+}
+
 useHead({ title: 'SectorTrace — Claims' })
 </script>
 
@@ -38,11 +42,32 @@ useHead({ title: 'SectorTrace — Claims' })
           <StCaveat v-for="(text, i) in claim.caveats" :key="i" :text="text" />
         </div>
 
+        <details v-if="claim.citations?.length" class="mt-4 border-t border-black/10 dark:border-white/10 pt-3">
+          <summary class="cursor-pointer text-sm font-medium">
+            Supporting evidence ({{ claim.citations.length }})
+          </summary>
+          <ul class="mt-3 space-y-2 text-sm">
+            <li v-for="(citation, i) in claim.citations" :key="`${citation.table}-${citation.key}-${i}`">
+              <template v-if="citation.resolved">
+                <StLink v-if="citation.resolved.url" :href="citation.resolved.url">
+                  {{ citationLabel(citation) }}
+                </StLink>
+                <span v-else>{{ citationLabel(citation) }}</span>
+                <span class="opacity-60"> · {{ citation.table ?? 'evidence' }}</span>
+              </template>
+              <span v-else class="opacity-70">
+                {{ citation.table ?? 'Evidence' }}: {{ citation.key ?? '—' }} — cited row no longer held
+              </span>
+            </li>
+          </ul>
+        </details>
+
         <template #footer>
           <div class="text-xs opacity-60 flex flex-wrap gap-x-4 gap-y-1">
             <span>{{ claim.citations?.length ?? 0 }} citation(s)</span>
-            <span v-if="claim.created_by">by {{ claim.created_by }}</span>
-            <span v-if="claim.created_at" class="font-mono">{{ claim.created_at }}</span>
+            <span v-if="claim.published_by ?? claim.created_by">approved by {{ claim.published_by ?? claim.created_by }}</span>
+            <span v-if="claim.published_at ?? claim.created_at" class="font-mono">{{ claim.published_at ?? claim.created_at }}</span>
+            <span v-if="claim.note">{{ claim.note }}</span>
           </div>
         </template>
       </UCard>

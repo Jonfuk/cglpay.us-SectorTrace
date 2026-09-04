@@ -36,6 +36,10 @@ const library: NavItem[] = [
   { to: '/notebook', label: 'Notebook' },
   { to: '/saved', label: 'Saved' },
   { to: '/journey', label: 'Journey' },
+  { to: '/revisions', label: 'Revisions' },
+  { to: '/pathfinder', label: 'Pathfinder' },
+  { to: '/links', label: 'Source links' },
+  { to: '/doctables', label: 'Document tables' },
 ]
 
 // The reader's per-browser collections. Save keeps the current filtered view;
