@@ -120,3 +120,60 @@ export interface CensusListingResponse {
   items: CensusItem[]
   [key: string]: unknown
 }
+
+/** A pipeline job head (`/api/admin/jobs` → `jobs[]`). */
+export interface JobHead {
+  id: number
+  kind: string | null
+  label: string | null
+  state: string | null
+  started_at: string | null
+  finished_at: string | null
+  error: string | null
+  running: boolean
+  [key: string]: unknown
+}
+
+export interface JobsResponse {
+  jobs: JobHead[]
+  running: number | null
+  [key: string]: unknown
+}
+
+/** A run-ledger row (`/api/admin/runs` → `runs[]`). */
+export interface RunRow {
+  run_id: string | null
+  origin: string | null
+  status: string | null
+  started_at: string | null
+  finished_at: string | null
+  modules_ok: number | null
+  modules_failed: number | null
+  [key: string]: unknown
+}
+
+export interface RunsResponse {
+  runs: RunRow[]
+  [key: string]: unknown
+}
+
+/** An export file (`/api/admin/exports` → `files[]`). */
+export interface ExportFile {
+  name?: string
+  path?: string
+  size?: number
+  [key: string]: unknown
+}
+
+export interface ExportsResponse {
+  files: ExportFile[]
+  staleness?: unknown
+  [key: string]: unknown
+}
+
+/** `/api/admin/search` — operator semantic/lexical search results. */
+export interface AdminSearchResponse {
+  results?: Array<Record<string, unknown>>
+  hits?: Array<Record<string, unknown>>
+  [key: string]: unknown
+}

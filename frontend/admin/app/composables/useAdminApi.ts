@@ -3,8 +3,12 @@ import type {
   AnalysisOverviewResponse,
   CandidateCountsResponse,
   CandidatesListingResponse,
+  AdminSearchResponse,
   CensusListingResponse,
+  ExportsResponse,
   HealthResponse,
+  JobsResponse,
+  RunsResponse,
   ModulesResponse,
   ReviewItemsResponse,
 } from '~/types/admin'
@@ -49,6 +53,14 @@ export interface AdminApi {
   reviewItems(options?: TransportOptions): Promise<ReviewItemsResponse>
   /** `/api/admin/census` — census metric rows awaiting verification. */
   census(options?: TransportOptions): Promise<CensusListingResponse>
+  /** `/api/admin/jobs` — in-process job heads. */
+  jobs(options?: TransportOptions): Promise<JobsResponse>
+  /** `/api/admin/runs` — the durable run ledger. */
+  runs(options?: TransportOptions): Promise<RunsResponse>
+  /** `/api/admin/exports` — export files and staleness. */
+  exports(options?: TransportOptions): Promise<ExportsResponse>
+  /** `/api/admin/search` — operator semantic/lexical search. */
+  search(options?: TransportOptions): Promise<AdminSearchResponse>
 
   // --- Writes. Each records a named human; nothing is promoted without one. ---
 
@@ -86,6 +98,10 @@ export function useAdminApi(): AdminApi {
     analysisOverview: (options) => admin<AnalysisOverviewResponse>('/analysis/overview', options),
     reviewItems: (options) => api<ReviewItemsResponse>('/review', options),
     census: (options) => admin<CensusListingResponse>('/census', options),
+    jobs: (options) => admin<JobsResponse>('/jobs', options),
+    runs: (options) => admin<RunsResponse>('/runs', options),
+    exports: (options) => admin<ExportsResponse>('/exports', options),
+    search: (options) => admin<AdminSearchResponse>('/search', options),
 
     promoteCandidate: (input) =>
       t.postJson('/api/admin/candidates/promote', {
