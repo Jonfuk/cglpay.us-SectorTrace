@@ -251,6 +251,7 @@ def run(ctx: ModuleContext) -> None:
                 "payload_sha256": file_result.payload_sha256,
             }
 
+            snapshot_rows: list[dict] = []
             for (ons_code, year), count_text in counts.items():
                 if since_year and year < since_year:
                     continue
@@ -267,7 +268,7 @@ def run(ctx: ModuleContext) -> None:
                     continue
 
                 rate_text = rates.get((ons_code, year))
-                db.upsert(conn, "rough_sleeping_snapshot", {
+                snapshot_rows.append({
                     "ons_code": ons_code,
                     "snapshot_year": year,
                     "count": _to_int(count_text),
@@ -275,9 +276,13 @@ def run(ctx: ModuleContext) -> None:
                     "rate_per_100k": _to_float(rate_text) if rate_text is not None else None,
                     "rate_text": rate_text,
                     **provenance,
-                }, natural_key=["ons_code", "snapshot_year"])
+                })
                 written += 1
 
+            db.upsert_many(
+                conn, "rough_sleeping_snapshot", snapshot_rows,
+                natural_key=["ons_code", "snapshot_year"],
+            )
             if not ctx.dry_run:
                 conn.commit()
 
