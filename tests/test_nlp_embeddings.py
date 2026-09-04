@@ -240,6 +240,54 @@ def test_embedding_compaction_dry_run_rolls_back_every_change(conn, settings):
     ).fetchone()["name"] is None
 
 
+def test_embedding_compaction_applies_after_verified_restore(conn, settings, tmp_path, monkeypatch):
+    _seed_version(conn, settings, _ELEMENTS)
+    nlp_chunk.run(conn)
+    embeddings.run(conn, model="stub")
+    source_rows = conn.execute(
+        "SELECT document_chunk_id, model_key, embedding_vec FROM document_embeddings"
+    ).fetchall()
+    for row in source_rows:
+        conn.execute(
+            "UPDATE document_embeddings SET embedding=%s WHERE document_chunk_id=%s AND model_key=%s",
+            (embeddings.pack(vector_values(row["embedding_vec"])),
+             row["document_chunk_id"], row["model_key"]),
+        )
+    conn.commit()
+
+    archive = tmp_path / "warehouse.sql.gz"
+    archive.write_bytes(b"verified backup fixture")
+    receipt = tmp_path / "restore-receipt.json"
+    import hashlib
+    import json
+    receipt.write_text(json.dumps({
+        "from": str(archive.resolve()),
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "rows": len(source_rows), "tables": 1,
+        "restored": "postgresql://redacted",
+        "restored_at": "2026-09-04T00:00:00+00:00",
+    }))
+    monkeypatch.setattr(
+        "pipeline.pgbackup.verify_archive",
+        lambda _path: {"rows": len(source_rows), "tables": 1},
+    )
+
+    result = compact_legacy_table(conn, backup_archive=archive, restore_receipt=receipt)
+
+    assert result["status"] == "complete"
+    columns = {
+        row["column_name"] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name='document_embeddings'")
+    }
+    assert "embedding" not in columns
+    assert conn.execute("SELECT COUNT(*) AS count FROM document_embeddings").fetchone()["count"] == len(source_rows)
+    assert conn.execute(
+        "SELECT status FROM embedding_migration_audits WHERE migration_id=%s",
+        (result["migration_id"],),
+    ).fetchone()["status"] == "complete"
+
+
 def test_embedding_compaction_apply_requires_restore_evidence(conn):
     try:
         compact_legacy_table(conn)

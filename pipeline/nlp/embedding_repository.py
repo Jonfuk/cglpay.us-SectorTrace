@@ -284,6 +284,11 @@ def compact_legacy_table(conn, *, backup_archive: Path | None = None,
         "embedding_vec FROM document_embeddings)) AS drift").fetchone()["drift"]
     if drift:
         raise RuntimeError("embedding rows changed during validation; writers were not paused")
+    # The old table still owns the canonical index names until it is dropped.
+    # Release those names while the table lock is held so the replacement can
+    # inherit the names that retrieval and operational checks already know.
+    conn.execute("DROP INDEX IF EXISTS idx_document_embeddings_model")
+    conn.execute("DROP INDEX IF EXISTS idx_document_embeddings_vec")
     conn.execute("ALTER TABLE document_embeddings RENAME TO document_embeddings_legacy")
     conn.execute("ALTER TABLE document_embeddings_compact RENAME TO document_embeddings")
     conn.execute("DROP TABLE document_embeddings_legacy")
