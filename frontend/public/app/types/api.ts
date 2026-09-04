@@ -481,6 +481,24 @@ export interface DocumentTablesResponse {
   [key: string]: unknown
 }
 
+/** `/api/v1/relationship_path` — the shortest verified path between two
+ *  entities. Unconfirmed name-match edges are excluded; a path is a chain of
+ *  verified edges, not an asserted relationship strength. */
+export interface PathNode {
+  node: string
+  type: string | null
+  id: string | null
+  [key: string]: unknown
+}
+
+export interface PathResponse {
+  found: boolean
+  hops: number
+  path: Array<Record<string, unknown>>
+  nodes: PathNode[]
+  [key: string]: unknown
+}
+
 /** The public API commonly wraps list payloads with provenance/meta envelopes.
  *  Concrete envelopes are typed per route as routes are ported; this is the
  *  minimal common shape the shell relies on. */

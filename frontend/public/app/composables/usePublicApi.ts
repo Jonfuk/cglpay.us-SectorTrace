@@ -16,6 +16,7 @@ import type {
   DocumentSearchResponse,
   GeographyResponse,
   MetaResponse,
+  PathResponse,
   PayResponse,
   PfdResponse,
   ProviderRow,
@@ -89,6 +90,8 @@ export interface PublicApi {
   discrepancies(options?: TransportOptions): Promise<DiscrepancyResponse>
   /** `/api/v1/compare` — parallel series for two or more entities. */
   compare(options?: TransportOptions): Promise<CompareResponse>
+  /** `/api/v1/relationship_path` — shortest verified path between two entities. */
+  relationshipPath(options?: TransportOptions): Promise<PathResponse>
   /** `/api/v1/authorities/{ons_code}` — one authority's full payload. */
   authority(code: string, options?: TransportOptions): Promise<AuthorityResponse>
   /** `/api/v1/cooccurrence` — records naming selected entities together. */
@@ -129,5 +132,6 @@ export function usePublicApi(): PublicApi {
       get<AuthorityResponse>(`/authorities/${encodeURIComponent(code)}`, options),
     cooccurrence: (options) => get<CooccurrenceResponse>('/cooccurrence', options),
     documentTables: (options) => get<DocumentTablesResponse>('/document_tables', options),
+    relationshipPath: (options) => get<PathResponse>('/relationship_path', options),
   }
 }

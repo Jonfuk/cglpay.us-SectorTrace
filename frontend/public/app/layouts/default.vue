@@ -30,6 +30,32 @@ const nav: NavItem[] = [
   { to: '/catalogue', label: 'Catalogue' },
   { to: '/api', label: 'API' },
 ]
+
+const library: NavItem[] = [
+  { to: '/notebook', label: 'Notebook' },
+  { to: '/saved', label: 'Saved' },
+  { to: '/journey', label: 'Journey' },
+]
+
+// The reader's per-browser collections. Save keeps the current filtered view;
+// Note pins the current page into the notebook. Both act on the live URL and
+// title, so a "filtered view is a link" stays true.
+const saved = useSavedSearches()
+const notebook = useNotebook()
+
+function currentTitle(): string {
+  if (typeof document === 'undefined') return 'SectorTrace'
+  return document.title.replace(/\s*·\s*SectorTrace.*/, '').replace(/^SectorTrace\s*[—-]\s*/, '') || 'SectorTrace'
+}
+function currentHref(): string {
+  return typeof location !== 'undefined' ? (location.hash || '#/') : '#/'
+}
+function saveView() {
+  saved.save(currentTitle(), currentHref())
+}
+function noteView() {
+  notebook.add({ title: currentTitle(), href: currentHref() })
+}
 </script>
 
 <template>
@@ -39,7 +65,7 @@ const nav: NavItem[] = [
         <NuxtLink to="/" class="font-semibold text-lg tracking-tight">
           SectorTrace
         </NuxtLink>
-        <nav class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <nav class="flex flex-wrap gap-x-4 gap-y-1 text-sm flex-1">
           <NuxtLink
             v-for="item in nav"
             :key="item.to"
@@ -50,6 +76,29 @@ const nav: NavItem[] = [
             {{ item.label }}
           </NuxtLink>
         </nav>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            class="text-xs opacity-70 hover:opacity-100"
+            title="Save this filtered view"
+            @click="saveView"
+          >☆ Save</button>
+          <button
+            type="button"
+            class="text-xs opacity-70 hover:opacity-100"
+            title="Pin this page to your notebook"
+            @click="noteView"
+          >✎ Note</button>
+        </div>
+      </div>
+      <div class="mx-auto max-w-6xl px-4 pb-2 flex gap-x-4 text-xs">
+        <NuxtLink
+          v-for="item in library"
+          :key="item.to"
+          :to="item.to"
+          class="opacity-60 hover:opacity-100"
+          active-class="opacity-100 font-medium"
+        >{{ item.label }}</NuxtLink>
       </div>
     </header>
 
