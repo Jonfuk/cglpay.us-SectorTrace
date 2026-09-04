@@ -4,6 +4,7 @@ import { markRaw, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue
 // this chunk — the runtime import stays dynamic below.
 import type { ExpressionSpecification, Map as MlMap } from 'maplibre-gl'
 import type { GeographyFeature } from '~/types/api'
+import { createPmtilesProtocol, type BoundaryManifest } from '~/lib/pmtiles'
 
 // A lifecycle-safe MapLibre choropleth, confined to the Places route.
 //
@@ -17,11 +18,10 @@ import type { GeographyFeature } from '~/types/api'
 //
 // There is NO base map: only the authority polygons on a blank ground, coloured
 // by value. That keeps the map origin-only and working with the network cable
-// unplugged — the boundary geometry is the same-origin `/api/v1/boundaries`
-// FeatureCollection, joined by ons_code to the values this component is given.
-// (The ~14 MB full-resolution GeoJSON is the current API; serving pre-tiled
-// PMTiles is the tracked optimisation, and this component's source is the seam
-// where that swap lands.)
+// unplugged — the boundary archive is generated from the canonical warehouse
+// geometry and served by the same origin. The external `/api/v1/boundaries`
+// FeatureCollection remains unchanged for API users and exports; this map
+// requests only visible PMTiles vector tiles.
 const props = defineProps<{
   /** Authority values to colour by, keyed by ons_code via `ons_code`/`value`. */
   features: GeographyFeature[]
@@ -35,6 +35,8 @@ const status = ref<'loading' | 'ready' | 'error'>('loading')
 let resizeObserver: ResizeObserver | null = null
 let fetchController: AbortController | null = null
 let disposed = false
+let protocolRegistered = false
+let maplibreModule: typeof import('maplibre-gl') | null = null
 
 // A five-step single-hue sequential ramp (light → dark blue). Sequential data,
 // single hue: darker = larger. Deliberately not a rainbow.
@@ -71,14 +73,21 @@ async function build() {
   try {
     // Dynamic import → separate chunk. CSS injected the same way.
     const maplibre = await import('maplibre-gl')
+    maplibreModule = maplibre
     await import('maplibre-gl/dist/maplibre-gl.css')
     if (disposed) return
 
-    const boundaries = await fetch('/api/v1/boundaries', {
+    const manifest = await fetch('/map/boundaries.json', {
       headers: { Accept: 'application/json' },
       signal: fetchController.signal,
-    }).then((r) => r.json())
+    }).then((r) => {
+      if (!r.ok) throw new Error(`Boundary manifest unavailable: ${r.status}`)
+      return r.json() as Promise<BoundaryManifest>
+    })
     if (disposed) return
+
+    maplibre.addProtocol('pmtiles', createPmtilesProtocol(manifest.archive))
+    protocolRegistered = true
 
     const instance = markRaw(
       new maplibre.Map({
@@ -96,12 +105,19 @@ async function build() {
 
     instance.on('load', () => {
       if (disposed) return
-      instance.addSource('authorities', { type: 'geojson', data: boundaries, promoteId: 'ons_code' })
+      instance.addSource('authorities', {
+        type: 'vector',
+        tiles: ['pmtiles://boundaries/{z}/{x}/{y}.pbf'],
+        minzoom: manifest.min_zoom,
+        maxzoom: manifest.max_zoom,
+        promoteId: 'ons_code',
+      })
       const values = valueByCode()
       instance.addLayer({
         id: 'authorities-fill',
         type: 'fill',
         source: 'authorities',
+        'source-layer': 'authorities',
         paint: {
           'fill-color': colorExpression([...values.values()]),
           'fill-outline-color': '#ffffff',
@@ -109,12 +125,13 @@ async function build() {
         },
       })
       // Feature-state carries the value so the paint expression can read it.
-      for (const feature of boundaries.features ?? []) {
-        const code = feature.properties?.ons_code
-        if (code && values.has(code)) {
-          instance.setFeatureState({ source: 'authorities', id: code }, { value: values.get(code) })
+      // The vector source's promoteId makes the ONS code the stable identity.
+      instance.on('sourcedata', (event) => {
+        if (!event.isSourceLoaded || event.sourceId !== 'authorities') return
+        for (const [code, value] of values) {
+          instance.setFeatureState({ source: 'authorities', id: code }, { value })
         }
-      }
+      })
       status.value = 'ready'
     })
     instance.on('error', () => { status.value = 'error' })
@@ -152,6 +169,12 @@ onBeforeUnmount(() => {
   resizeObserver = null
   map.value?.remove()
   map.value = null
+  if (protocolRegistered) {
+    // MapLibre protocols are module-global; clean this up so a later route
+    // visit registers a fresh reader instead of retaining the old archive.
+    maplibreModule?.removeProtocol('pmtiles')
+    protocolRegistered = false
+  }
 })
 </script>
 

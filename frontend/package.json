@@ -14,6 +14,8 @@
     "typecheck": "npm --prefix public run typecheck && npm --prefix admin run typecheck",
     "budgets": "node scripts/check-budgets.mjs",
     "verify": "npm run build && npm run budgets",
+    "lighthouse": "node scripts/run-lighthouse.mjs",
+    "lighthouse:assert": "node scripts/check-lighthouse.mjs",
     "clean": "rm -rf public/.nuxt public/.output public/dist admin/.nuxt admin/.output admin/dist",
     "test": "npm --prefix public run test",
     "test:e2e": "npm --prefix public run test:e2e"

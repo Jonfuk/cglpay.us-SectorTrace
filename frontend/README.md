@@ -56,6 +56,8 @@ npm run build            # generate both static outputs + SPA fallbacks
 npm run build:public     # public only  -> public/.output/public (symlinked as dist/)
 npm run build:admin      # admin only   -> admin/.output/public
 npm run typecheck        # nuxt typecheck per app
+npm run lighthouse       # pinned mobile Lighthouse reports (after build)
+npm run lighthouse:assert # enforce LCP/CLS/TBT thresholds
 ```
 
 `npm run build` runs `nuxt generate` (static) and writes explicit `200.html`
@@ -70,6 +72,11 @@ npm run test        # Vitest unit tests (public app)
 npm run test:e2e    # Playwright browser smoke tests (public app)
 ```
 
+The Lighthouse commands use the pinned mobile profile in
+`lighthouse.config.json` and write reports to `.lighthouse/`; the assertion
+gate checks LCP ≤ 2.5 s, CLS ≤ 0.1, and TBT ≤ 200 ms on the public overview,
+Places shell, and admin overview routes.
+
 The Playwright smoke gate serves the built `dist/` (no API) and drives it in a
 real Chromium to prove the shell boots with no console errors or hydration/
 interop warnings — the check that catches a broken Vapor/VDOM interop or a bad
@@ -83,12 +90,15 @@ transport (request-key canonicalisation, in-flight dedup, `AbortController`
 cancellation), `StLink` (only `http(s)` becomes a link; `javascript:`/`data:`/
 relative render as inert text), and `StStat` (null/undefined → em dash, never
 `0`). Composables that depend on Nuxt auto-imports are left to the browser/e2e
-gate. The CI `frontend` workflow runs typecheck → unit tests → build → budgets.
+gate. The CI `frontend` workflow runs typecheck → unit tests → build → budgets
+→ browser smoke → Lighthouse thresholds.
 
 ## Static output layout
 
 - Public: assets under `/_nuxt/**`, entry `index.html` (+ `200.html`/`404.html`).
 - Admin: assets under `/admin/_nuxt/**`, entry `index.html` (+ fallbacks).
+- Boundary map: `/map/boundaries.json` plus the content-addressed
+  `/map/boundaries-<source-sha256>.pmtiles` archive.
 
 Immutable content-hashed assets under `_nuxt/**` are served with one-year
 caching; HTML entry points are served `no-cache`. Delivery is origin-only (no
@@ -126,6 +136,11 @@ flag flips — so the image is cutover-ready while the legacy portals keep servi
   build` per app and the runtime stage copies the two `.output/public` trees
   into `pipeline/web/static_nuxt/{public,admin}`. Node never enters the runtime
   image — only the static files cross the stage boundary.
+- **Boundary tiles:** run `uv run --extra maps pipeline pmtiles` against the
+  migrated PostgreSQL warehouse before the static cutover. It writes the
+  manifest and immutable archive to `frontend/public/public/map/`; the
+  deployment process must copy that directory alongside the generated public
+  Nuxt output.
 - **Serve (gated):** set `SERVE_NUXT=true` and, when the built assets are
   present, the Python server serves the Nuxt apps — public at `/`, admin at
   `/admin` — via `pipeline/web/nuxt_assets.py`. Off by default: the legacy
@@ -145,10 +160,9 @@ gates pass. `tests/test_nuxt_assets.py` pins the resolver, cache policy, and CSP
 
 ## Status
 
-This is the **foundation** stage: workspace, two isolated apps, typed
-same-origin API clients (dedup + `AbortController` cancellation), URL-authoritative
-filter state, versioned browser storage, static generation with SPA fallbacks,
-hash-route compatibility, and a verified reproducible build. Route parity with
-the legacy portals is delivered stage by stage in subsequent commits; the legacy
-applications under `pipeline/web/static/**` are retained untouched as parity
-oracles until the final gated cutover.
+The Phase 6 implementation is in place: two isolated apps, typed same-origin
+API clients, route parity, static generation with SPA fallbacks, the claims
+authoring workflow, deterministic PMTiles boundary delivery, and pinned
+Lighthouse/budget/browser gates. The legacy applications under
+`pipeline/web/static/**` remain untouched as parity oracles until the final
+gated cutover and the generated archive is included in deployment.

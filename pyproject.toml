@@ -71,6 +71,14 @@ sheets = [
     "google-auth>=2.28",
 ]
 
+# Offline PMTiles generation for the authority-boundary map. These packages
+# stay out of the application image: the generated archive is the runtime
+# artefact and the standard-library server only serves its bytes.
+maps = [
+    "mapbox-vector-tile>=2.0",
+    "mercantile>=1.2",
+]
+
 # Reading PFD reports that were scanned rather than typed. An extra, not a
 # dependency, because it is large and only one module needs it: seven of every
 # twelve reports in m08's backlog are paper scans with no text layer, and the
@@ -277,6 +285,7 @@ packages = ["pipeline"]
 testpaths = ["tests"]
 markers = [
     "integration: hits live external sources, skipped by default",
+    "maps: requires the optional offline PMTiles build dependencies",
     "slow: needs a heavy optional model (e.g. a real SetFit fine-tune); skipped by default",
 ]
 addopts = "-m 'not integration and not slow'"

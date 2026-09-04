@@ -4,10 +4,9 @@ import type { Column } from '~/components/StEvidenceTable.vue'
 import type { GeographyFeature, GeographyResponse } from '~/types/api'
 
 // Places route. One value per authority for the chosen metric. The choropleth
-// itself (MapLibre + the ~14 MB boundary geometry, to be served as PMTiles
-// tiles) is a dedicated specialist stage; until then the same per-authority
-// values render as a sortable evidence table, which is the data the map would
-// colour. Parity target: legacy `public/js/pages/geography.js`.
+// loads MapLibre and a content-addressed PMTiles boundary archive only when
+// selected; the same per-authority values render as a sortable evidence table.
+// Parity target: legacy `public/js/pages/geography.js`.
 const api = usePublicApi()
 const filters = useFilterState()
 

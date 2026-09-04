@@ -5,6 +5,9 @@ import type {
   CandidatesListingResponse,
   AdminSearchResponse,
   ClaimCandidatesResponse,
+  ClaimCountsResponse,
+  ClaimEvidenceResponse,
+  ClaimsResponse,
   CensusListingResponse,
   ExportsResponse,
   HealthResponse,
@@ -64,6 +67,12 @@ export interface AdminApi {
   search(options?: TransportOptions): Promise<AdminSearchResponse>
   /** `/api/admin/claim-candidates` — the claim adjudication queue. */
   claimCandidates(options?: TransportOptions): Promise<ClaimCandidatesResponse>
+  /** `/api/admin/claims` — claims with resolved citation payloads. */
+  claims(options?: TransportOptions): Promise<ClaimsResponse>
+  /** `/api/admin/claims/counts` — claim lifecycle counts and decisions. */
+  claimCounts(options?: TransportOptions): Promise<ClaimCountsResponse>
+  /** `/api/admin/claims/evidence` — citable tables or matching rows. */
+  claimEvidence(options?: TransportOptions): Promise<ClaimEvidenceResponse>
 
   // --- Writes. Each records a named human; nothing is promoted without one. ---
 
@@ -81,6 +90,18 @@ export interface AdminApi {
   rejectCensus(input: { key: string; rejectedBy: string; note?: string }): Promise<unknown>
   /** Decide one claim candidate. */
   decideClaimCandidate(input: { claimCandidateId: string; decision: string; decidedBy: string }): Promise<unknown>
+  /** Create one attributed draft claim. */
+  createClaim(input: { claimText: string; caveats?: string; note?: string; createdBy: string }): Promise<unknown>
+  /** Edit one draft claim. */
+  updateClaim(input: { claimId: number; claimText: string; caveats?: string; note?: string }): Promise<unknown>
+  /** Cite one citable evidence row. */
+  citeClaim(input: { claimId: number; evidenceTable: string; evidenceKey: string; citedBy: string; note?: string }): Promise<unknown>
+  /** Remove one citation from a draft. */
+  unciteClaim(input: { claimId: number; evidenceTable: string; evidenceKey: string }): Promise<unknown>
+  /** Decide one claim, preserving the server-side audit trail. */
+  decideClaim(input: { claimId: number; decision: string; decidedBy: string; note?: string }): Promise<unknown>
+  /** Return a decided claim to draft without deleting its history. */
+  resetClaim(input: { claimId: number }): Promise<unknown>
 }
 
 export function useAdminApi(): AdminApi {
@@ -108,6 +129,9 @@ export function useAdminApi(): AdminApi {
     exports: (options) => admin<ExportsResponse>('/exports', options),
     search: (options) => admin<AdminSearchResponse>('/search', options),
     claimCandidates: (options) => admin<ClaimCandidatesResponse>('/claim-candidates', options),
+    claims: (options) => admin<ClaimsResponse>('/claims', options),
+    claimCounts: (options) => admin<ClaimCountsResponse>('/claims/counts', options),
+    claimEvidence: (options) => admin<ClaimEvidenceResponse>('/claims/evidence', options),
 
     promoteCandidate: (input) =>
       t.postJson('/api/admin/candidates/promote', {
@@ -148,5 +172,42 @@ export function useAdminApi(): AdminApi {
         decision: input.decision,
         decided_by: input.decidedBy,
       }),
+    createClaim: (input) =>
+      t.postJson('/api/admin/claims/create', {
+        claim_text: input.claimText,
+        caveats: input.caveats || '',
+        note: input.note || null,
+        created_by: input.createdBy,
+      }),
+    updateClaim: (input) =>
+      t.postJson('/api/admin/claims/update', {
+        claim_id: input.claimId,
+        claim_text: input.claimText,
+        caveats: input.caveats || '',
+        note: input.note || null,
+      }),
+    citeClaim: (input) =>
+      t.postJson('/api/admin/claims/cite', {
+        claim_id: input.claimId,
+        evidence_table: input.evidenceTable,
+        evidence_key: input.evidenceKey,
+        cited_by: input.citedBy,
+        note: input.note || null,
+      }),
+    unciteClaim: (input) =>
+      t.postJson('/api/admin/claims/uncite', {
+        claim_id: input.claimId,
+        evidence_table: input.evidenceTable,
+        evidence_key: input.evidenceKey,
+      }),
+    decideClaim: (input) =>
+      t.postJson('/api/admin/claims/decide', {
+        claim_id: input.claimId,
+        decision: input.decision,
+        decided_by: input.decidedBy,
+        note: input.note || null,
+      }),
+    resetClaim: (input) =>
+      t.postJson('/api/admin/claims/reset', { claim_id: input.claimId }),
   }
 }

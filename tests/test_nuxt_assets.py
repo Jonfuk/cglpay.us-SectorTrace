@@ -21,6 +21,7 @@ import pytest
 
 from pipeline.web import nuxt_assets
 from pipeline.web.server import (
+    Handler,
     nuxt_content_security_policy,
     nuxt_inline_script_hashes,
 )
@@ -69,6 +70,20 @@ def test_hashed_assets_are_immutable(tmp_path):
     # Admin assets resolve under the admin subtree.
     admin = assets.resolve("/admin/_nuxt/abc123.js")
     assert admin is not None and admin.immutable is True
+
+
+def test_content_addressed_pmtiles_are_immutable(tmp_path):
+    assets = _build(tmp_path)
+    archive_dir = tmp_path / "public" / "map"
+    archive_dir.mkdir()
+    archive = archive_dir / ("boundaries-" + "a" * 64 + ".pmtiles")
+    archive.write_bytes(b"PMTiles\x03")
+
+    served = assets.resolve("/map/" + archive.name)
+    assert served is not None
+    assert served.content_type == "application/octet-stream"
+    assert served.immutable is True
+    assert served.max_age == 31_536_000
 
 
 def test_missing_asset_is_a_404_not_the_shell(tmp_path):
@@ -146,6 +161,24 @@ def test_csp_normalises_crlf_like_the_browser():
     html = b"<html><script>a=1\r\nb=2</script></html>"
     expected = _sha256(b"a=1\nb=2")
     assert expected in nuxt_inline_script_hashes(html)
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("bytes=0-99", (0, 99)),
+        ("bytes=100-", (100, 999)),
+        ("bytes=-50", (950, 999)),
+        ("bytes=0-9999", (0, 999)),
+    ],
+)
+def test_pmtiles_range_parser_supports_single_bounded_ranges(header, expected):
+    assert Handler._parse_byte_range(header, 1000) == expected
+
+
+@pytest.mark.parametrize("header", ["bytes=1000-", "bytes=50-10", "bytes=0-1,2-3", "wat=0-1"])
+def test_pmtiles_range_parser_rejects_invalid_or_multi_ranges(header):
+    assert Handler._parse_byte_range(header, 1000) is None
 
 
 if __name__ == "__main__":  # pragma: no cover

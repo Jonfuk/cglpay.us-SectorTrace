@@ -136,8 +136,8 @@ export interface ProviderRow {
 }
 
 /** One authority value for the choropleth (`/api/v1/geography` → `features[]`).
- *  Geometry is deliberately NOT included here — boundaries are a separate 14 MB
- *  fetch (later served as PMTiles tiles). */
+ *  Geometry is deliberately NOT included here — the map loads its separate,
+ *  content-addressed PMTiles archive. */
 export interface GeographyFeature {
   ons_code: string | null
   authority_name: string | null

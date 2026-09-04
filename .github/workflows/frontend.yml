@@ -75,6 +75,28 @@ jobs:
         working-directory: frontend/public
         run: npx playwright install --with-deps chromium
 
+      - name: Expose Chromium to Lighthouse
+        shell: bash
+        run: |
+          chrome_path="$(find "$HOME/.cache/ms-playwright" -type f -name chrome -print -quit)"
+          test -n "$chrome_path"
+          echo "CHROME_PATH=$chrome_path" >> "$GITHUB_ENV"
+
       - name: Browser smoke tests
         working-directory: frontend/public
         run: npm run test:e2e
+
+      - name: Start static frontend server
+        working-directory: frontend
+        run: node scripts/serve-static.mjs > /tmp/sectortrace-static.log 2>&1 &
+
+      - name: Wait for static frontend server
+        run: for i in {1..10}; do curl --fail --silent http://127.0.0.1:4173/health && exit 0; sleep 1; done; cat /tmp/sectortrace-static.log; exit 1
+
+      - name: Lighthouse mobile profile
+        working-directory: frontend
+        run: npm run lighthouse
+
+      - name: Lighthouse thresholds
+        working-directory: frontend
+        run: npm run lighthouse:assert
