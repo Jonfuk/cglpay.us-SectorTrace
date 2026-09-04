@@ -232,12 +232,16 @@ def _file_urls_on_page(page_html: str, page_url: str, host: str) -> list[str]:
 
 def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     """A CSV spend file as line-item rows. Returns (rows, error)."""
-    text = body.decode("utf-8-sig", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    rows = [row for row in reader if any(cell.strip() for cell in row)]
-    if not rows:
+    # Decode incrementally from the archived bytes. A large spend export must
+    # not briefly exist as both its complete byte payload and a second
+    # complete decoded string before parsing starts.
+    stream = io.TextIOWrapper(io.BytesIO(body), encoding="utf-8-sig",
+                              errors="replace", newline="")
+    reader = csv.reader(stream)
+    header = next((row for row in reader if any(cell.strip() for cell in row)), None)
+    if header is None:
         return [], "the file has no rows"
-    header = [cell.strip() for cell in rows[0]]
+    header = [cell.strip() for cell in header]
     payee_idx = _match_headers(header, _PAYEE_HEADERS)
     amount_idx = _match_headers(header, _AMOUNT_HEADERS)
     if payee_idx is None or amount_idx is None:
@@ -247,7 +251,9 @@ def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     desc_idx = _match_headers(header, _DESCRIPTION_HEADERS)
 
     out: list[dict] = []
-    for raw in rows[1:]:
+    for raw in reader:
+        if not any(cell.strip() for cell in raw):
+            continue
         if len(raw) <= max(payee_idx, amount_idx):
             continue
         payee = (raw[payee_idx] or "").strip()
