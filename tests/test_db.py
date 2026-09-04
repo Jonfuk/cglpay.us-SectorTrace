@@ -78,12 +78,13 @@ def test_candidate_modules_preserve_the_decision_columns():
     tables = {"cdp_document_candidates", "committee_paper_candidates",
                "foi_request_candidates", "workforce_census_metrics"}
     found = set()
-    for path in sorted((Path(__file__).resolve().parents[1] / "pipeline" / "modules").glob("*.py")):
+    for path in sorted((Path(__file__).resolve().parents[1] / "pipeline" / "modules").rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if not (isinstance(func, ast.Attribute) and func.attr == "upsert"):
+            if not (isinstance(func, ast.Attribute)
+                    and func.attr in {"upsert", "upsert_many"}):
                 continue
             if not (node.args and isinstance(node.args[1], ast.Constant)
                      and node.args[1].value in tables):
