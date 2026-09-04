@@ -56,7 +56,7 @@ arrives that way (scrapy.md names this as a further refinement, not a
 Phase 3 requirement); no automatic decision about *which* pages need a
 browser (that is Phase 3's actual measurement work, against real m09/m10
 pages, once this session's network restriction lifts — see
-`docs/m32-scrapy-pilot-verification.md` for the analogous Phase 2 gap and
+`docs/verification/m32-scrapy-pilot-verification.md` for the analogous Phase 2 gap and
 exactly what "network restriction" means here).
 """
 from __future__ import annotations

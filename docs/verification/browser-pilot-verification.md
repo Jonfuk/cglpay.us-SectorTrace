@@ -127,7 +127,7 @@ whether a page is actually JavaScript-dependent or merely bot-blocked
 either).
 
 **It could not be run in this session**: the same outbound network
-restriction documented in `docs/m32-scrapy-pilot-verification.md` for
+restriction documented in `docs/verification/m32-scrapy-pilot-verification.md` for
 Phase 2 applies here — this session's network reaches only package
 registries and Anthropic's own API. No m09/m10 page was fetched, rendered,
 or measured against; nothing left this session's network boundary.
