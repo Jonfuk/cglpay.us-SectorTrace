@@ -16,6 +16,7 @@ interface AnalysisDashboard {
   models: AnalysisModelsResponse
   prevalence: Row[]
   operations: AnalysisOperationsResponse
+  degraded: boolean
 }
 
 // Analysis is an operator control surface. Automated signals stay inside this
@@ -43,9 +44,9 @@ const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard |
       api.analysisOperations(),
     ])
     const [overview, domains, coverage, signals, structured, themes, links, graph, models, prevalence, operations] = results
-    if (overview.status === 'rejected') throw overview.reason
     const valueOr = <T>(result: PromiseSettledResult<T>, fallback: T): T =>
       result.status === 'fulfilled' ? result.value : fallback
+    const overviewValue = valueOr(overview, { active_release: null })
     const domainsValue = valueOr(domains, { domains: [] as AnalysisDomain[] })
     const coverageValue = valueOr(coverage, { coverage: [] as Row[] })
     const signalsValue = valueOr(signals, { signals: [] as Row[] })
@@ -56,10 +57,11 @@ const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard |
     const prevalenceValue = valueOr(prevalence, { prevalence: [] as Row[] })
     const operationsValue = valueOr(operations, { runs: [], proposals: [] })
     return {
-      overview: overview.value, domains: domainsValue.domains, coverage: coverageValue.coverage,
+      overview: overviewValue, domains: domainsValue.domains, coverage: coverageValue.coverage,
       signals: signalsValue.signals, structured: structuredValue.structured,
       themes: themesValue.themes, links: linksValue.links, graph: valueOr(graph, {}), models: modelsValue,
       prevalence: prevalenceValue.prevalence, operations: operationsValue,
+      degraded: results.some((result) => result.status === 'rejected'),
     }
   },
   { default: () => null },
@@ -234,6 +236,8 @@ useHead({ title: 'SectorTrace — Analysis' })
         <div class="mt-4 flex flex-wrap gap-2"><label v-for="domain in domains" :key="domain.domain_id" class="flex items-center gap-2 text-xs border border-black/10 dark:border-white/10 rounded px-2 py-1"><input v-model="selectedDomains" type="checkbox" :value="domain.domain_id">{{ domain.domain_id }}</label></div>
         <p v-if="message" class="mt-3 text-sm" :class="messageLevel === 'bad' ? 'text-red-700 dark:text-red-300' : messageLevel === 'ok' ? 'text-green-700 dark:text-green-300' : 'opacity-70'">{{ message }}</p>
       </UCard>
+
+      <p v-if="data.degraded" class="text-sm text-amber-700 dark:text-amber-300">Some analysis projections are temporarily unavailable; the control plane is showing the data that loaded. Refresh before taking an action.</p>
 
       <UCard>
         <template #header><div class="flex items-center justify-between gap-3"><span class="text-sm font-medium">Current run</span><StatusPill :label="run?.status ?? 'none'" :level="level(run?.status)" /></div></template>
