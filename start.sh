@@ -178,12 +178,12 @@ fi
 # this check, a local run with ARCHIVE_S3_BUCKET configured uninstalls boto3
 # before the command that needs to construct the S3 archive can import it.
 storage_wanted=0
-if [[ -f .env ]] && grep -Eq '^[[:space:]]*ARCHIVE_S3_BUCKET[[:space:]]*=[[:space:]]*[^[:space:]#]' .env; then
+if [[ -f .env ]] && grep -Eq '^[[:space:]]*(ARCHIVE|BACKUP)_S3_BUCKET[[:space:]]*=[[:space:]]*[^[:space:]#]' .env; then
     storage_wanted=1
 fi
-if [[ -n "${ARCHIVE_S3_BUCKET:-}" ]]; then
+if [[ -n "${ARCHIVE_S3_BUCKET:-}" || -n "${BACKUP_S3_BUCKET:-}" ]]; then
     storage_wanted=1
-elif [[ -n "${ARCHIVE_S3_BUCKET+set}" ]]; then
+elif [[ -n "${ARCHIVE_S3_BUCKET+set}" || -n "${BACKUP_S3_BUCKET+set}" ]]; then
     storage_wanted=0
 fi
 

@@ -60,6 +60,7 @@ around.
 ```bash
 ./start.sh                        # show CLI help
 ./start.sh tui                    # interactive terminal UI for the CLI
+./start.sh sync                   # backup / sync cockpit
 ./start.sh run all                # collect from every source, in dependency order
 ./start.sh run m01_procurement    # run one module
 ./start.sh run all --jobs 4       # collect concurrently across different hosts
@@ -85,6 +86,14 @@ confirmed and recorded through the same audited review workflow as the web UI;
 it does not promote evidence or edit a canonical table. This is deliberately
 a fast backup for triage when the browser UI is inconvenient, not a replacement
 for its bulk review, pipeline controls, database browser or exports.
+
+For backup and transfer work, use `./start.sh sync`. The separate screen can
+preview and confirm additive raw-archive transfers between local disk and
+`ARCHIVE_S3_*`, additive warehouse-snapshot transfers between `data/backups`
+and `BACKUP_S3_*`, and verified PostgreSQL replacement in either direction
+between `DATABASE_URL` and `DATABASE_SOURCE_URL`. PostgreSQL replacement
+backs up the populated target first; no operation merges two writable
+warehouses or deletes remote/local files.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle

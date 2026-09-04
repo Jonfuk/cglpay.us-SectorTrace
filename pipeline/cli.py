@@ -1994,6 +1994,14 @@ def dashboard() -> None:
     tui_dashboard.run()
 
 
+@app.command("sync")
+def sync_screen() -> None:
+    """Open the backup and sync screen for archive and PostgreSQL copies."""
+    from pipeline import tui_sync
+
+    tui_sync.run()
+
+
 _audit_counts = runner.audit_counts
 
 

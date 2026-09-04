@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from pipeline import cli as cli_module
 from pipeline.tui import RunConfirmation, SafeTrogon, command_requires_confirmation
 from pipeline.tui_dashboard import InformationModal, OperatorDashboard
+from pipeline.tui_sync import BackupSyncApp
 
 
 def test_cli_exposes_tui_command() -> None:
@@ -25,7 +26,7 @@ def test_cli_exposes_tui_command() -> None:
 def test_tui_schema_contains_nested_commands_and_options() -> None:
     schema = introspect_click_app(get_group(cli_module.app))["root"]
 
-    assert {"dashboard", "graph", "documents", "nlp", "analysis", "mirror"}.issubset(
+    assert {"dashboard", "sync", "graph", "documents", "nlp", "analysis", "mirror"}.issubset(
         schema.subcommands
     )
     assert "search" in schema.subcommands["documents"].subcommands
@@ -156,5 +157,16 @@ def test_operator_dashboard_filters_queue_and_shows_reports(settings, monkeypatc
             await pilot.pause()
             assert isinstance(pilot.app.screen, InformationModal)
             assert "bad value" in str(pilot.app.screen.query_one("#information-body", Static).render())
+
+    asyncio.run(exercise())
+
+
+def test_backup_sync_screen_mounts_without_starting_a_transfer(settings) -> None:
+    """The transfer cockpit is safe to open before its endpoints are configured."""
+    async def exercise() -> None:
+        async with BackupSyncApp(settings).run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            assert "DATABASE_URL:" in str(pilot.app.query_one("#endpoints", Static).render())
+            assert not pilot.app.query_one("#replace").display
 
     asyncio.run(exercise())

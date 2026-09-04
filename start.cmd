@@ -170,9 +170,14 @@ REM before the command that needs to construct the S3 archive can import it.
 set "STORAGE_EXTRA="
 if defined ARCHIVE_S3_BUCKET (
     if not "%ARCHIVE_S3_BUCKET%"=="" set "STORAGE_EXTRA=--extra storage"
-) else (
+)
+if defined BACKUP_S3_BUCKET (
+    if not "%BACKUP_S3_BUCKET%"=="" set "STORAGE_EXTRA=--extra storage"
+)
+if not defined ARCHIVE_S3_BUCKET if not defined BACKUP_S3_BUCKET (
     if exist ".env" (
         findstr /i /r /c:"^ *ARCHIVE_S3_BUCKET *= *[^ ]" ".env" >nul 2>nul && set "STORAGE_EXTRA=--extra storage"
+        findstr /i /r /c:"^ *BACKUP_S3_BUCKET *= *[^ ]" ".env" >nul 2>nul && set "STORAGE_EXTRA=--extra storage"
     )
 )
 

@@ -436,6 +436,11 @@ class Settings(BaseSettings):
     # hostname or a password. `redacted_database_url` is what goes in a log.
     database_url: str | None = None
 
+    # Optional second PostgreSQL warehouse used only by the explicit backup /
+    # sync cockpit. It is always opened read-only when it is the source; the
+    # direction selector decides which of these two URLs is the target.
+    database_source_url: str | None = None
+
     # The same warehouse, as a role that holds SELECT and nothing else.
     #
     # This is what the portal and the operator UI read through, and it is the
@@ -486,6 +491,16 @@ class Settings(BaseSettings):
     archive_s3_url_style: str | None = None
     archive_s3_access_key: str | None = None
     archive_s3_secret: str | None = None
+    # Optional offsite destination for verified warehouse snapshots. Kept
+    # separate from ARCHIVE_S3_* because raw evidence objects and restorable
+    # database backups need different retention and credentials.
+    backup_s3_bucket: str | None = None
+    backup_s3_endpoint: str | None = None
+    backup_s3_region: str | None = None
+    backup_s3_url_style: str | None = None
+    backup_s3_access_key: str | None = None
+    backup_s3_secret: str | None = None
+    backup_s3_prefix: str = "warehouse-backups"
     # --- Mirroring an existing deployment -------------------------------------
     # A mirror is a second deployment that collects nothing: its warehouse is
     # replaced wholesale from the deployment it copies, and its raw archive is
@@ -617,7 +632,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("database_url", "database_ro_url")
+    @field_validator("database_url", "database_source_url", "database_ro_url")
     @classmethod
     def _usable_database_url(cls, v: str | None) -> str | None:
         """An unusable URL is refused here, not at the first connection.
@@ -718,6 +733,18 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _backup_configuration(self) -> Settings:
+        values = (self.backup_s3_bucket, self.backup_s3_endpoint,
+                  self.backup_s3_region, self.backup_s3_url_style,
+                  self.backup_s3_access_key, self.backup_s3_secret)
+        if any(values) and not all(values):
+            raise ValueError("BACKUP_S3_BUCKET, ENDPOINT, REGION, URL_STYLE, ACCESS_KEY, "
+                             "and SECRET must be set together")
+        if self.backup_s3_url_style and self.backup_s3_url_style not in {"virtual", "path"}:
+            raise ValueError("BACKUP_S3_URL_STYLE must be 'virtual' or 'path'")
+        return self
+
+    @model_validator(mode="after")
     def _mirror_configuration(self) -> Settings:
         """The snapshot bucket is all-or-nothing, like the archive one.
 
@@ -794,6 +821,11 @@ class Settings(BaseSettings):
         userinfo = f"{parts.username}:***@" if parts.username else "***@"
         return urlunsplit((parts.scheme, f"{userinfo}{host}", parts.path,
                             parts.query, parts.fragment))
+
+    @property
+    def redacted_database_source_url(self) -> str | None:
+        """The optional second warehouse URL with its password replaced."""
+        return self._redact(self.database_source_url)
 
     @property
     def user_agent(self) -> str:
