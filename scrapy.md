@@ -308,7 +308,9 @@ Status: the m34 adapter-only pilot is implemented in
 `pipeline/transports/pilots/m34_icb_board_papers_pilot.py`. Offline parity and
 provenance coverage are recorded in
 `docs/verification/m34-scrapy-pilot-verification.md`; the normal m34 module
-still uses HTTPX and no live source is called by CI.
+still uses HTTPX and no live source is called by CI. The watched Nottingham
+sample passed fetch/provenance checks, but its approximately 766 MB peak
+working set leaves the production cutover gate open for memory profiling.
 
 - Reuse existing URL discovery and parsers where practical.
 - Yield `FetchItem`, candidate, review and parse-failure items.
