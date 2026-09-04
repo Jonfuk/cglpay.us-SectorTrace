@@ -9,6 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VECTOR_DIMENSION = 384
+# The benchmark asks HNSW for a bounded superset, then re-ranks that superset
+# with the exact pgvector distance.  A final LIMIT directly on an approximate
+# graph cannot honestly prove the 1e-6 result contract: a near neighbour that
+# was not visited cannot be recovered by comparing the scores of the rows that
+# were visited.
+_PARITY_CANDIDATE_FACTOR = 1000
 
 
 def vector_literal(vector) -> str:
@@ -50,7 +56,8 @@ class PostgresEmbeddingRepository:
 
     def semantic_candidates(self, *, query_vector, model_key: str, filter_sql: str,
                             filter_params: list, depth: int,
-                            exact_baseline: bool = False) -> list[tuple[str, float]]:
+                            exact_baseline: bool = False,
+                            exact_rerank: bool = False) -> list[tuple[str, float]]:
         literal = vector_literal(query_vector)
         planner = None
         if exact_baseline:
@@ -60,6 +67,8 @@ class PostgresEmbeddingRepository:
             self.conn.execute("SELECT set_config('enable_indexscan','off',true),"
                               "set_config('enable_bitmapscan','off',true)")
         try:
+            query_limit = (max(depth, 1) * _PARITY_CANDIDATE_FACTOR
+                           if exact_rerank else depth)
             rows = self.conn.execute(
                 "SELECT em.document_chunk_id AS cid,"
                 "1-(em.embedding_vec OPERATOR(public.<=>) %s::public.vector) AS score "
@@ -73,13 +82,19 @@ class PostgresEmbeddingRepository:
                 "WHERE em.model_key=%s AND em.embedding_vec IS NOT NULL" + filter_sql +
                 " ORDER BY em.embedding_vec OPERATOR(public.<=>) %s::public.vector,"
                 "em.document_chunk_id LIMIT %s",
-                [literal, model_key, *filter_params, literal, depth]).fetchall()
+                [literal, model_key, *filter_params, literal, query_limit]).fetchall()
         finally:
             if planner is not None:
                 self.conn.execute(
                     "SELECT set_config('enable_indexscan',%s,true),"
                     "set_config('enable_bitmapscan',%s,true)",
                     (planner["indexscan"], planner["bitmapscan"]))
+        if exact_rerank:
+            # HNSW supplied the bounded candidate set; this sort is over the
+            # exact scores selected in the query, so approximate graph order
+            # cannot leak into the parity result.
+            rows.sort(key=lambda row: (-float(row["score"]), row["cid"]))
+            rows = rows[:depth]
         return [(row["cid"], float(row["score"])) for row in rows]
 
     def count(self, model_key: str) -> int:
