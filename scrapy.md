@@ -374,6 +374,121 @@ returned a page.
   policy, item counts, failures and completion state.
 - Raw archives remain immutable and content-addressed.
 
+## Cloud-agent implementation handoff
+
+This document is suitable as the design brief for a later cloud-agent task,
+but the agent must be given a bounded phase rather than asked to implement the
+whole plan in one pass.
+
+### First implementation task
+
+The first agent task is Phase 0 and Phase 1 only:
+
+- define the transport-neutral result contract;
+- extract or wrap the reusable archive/provenance helpers;
+- add Scrapy as an optional dependency group;
+- add a bounded Scrapy runner and transport adapter;
+- add downloader middleware for provenance, archive references, structured
+  failure classification and the existing destination guard;
+- add fixture-backed tests for the new path;
+- leave all production modules on HTTPX.
+
+The first task must not port `m09`, `m10`, `m24`, `m32` or `m34`. Porting a
+module is a later task after the transport boundary has been reviewed.
+
+### Explicit non-goals for the first task
+
+The agent must not:
+
+- make Scrapy the default transport;
+- change the existing HTTPX rate policy;
+- remove or weaken robots compliance;
+- add a general 403/429 fallback to Playwright or ZenRows;
+- fetch a real external source;
+- add a production browser dependency to the ordinary portal image;
+- add staging tables unless the transport proof of concept cannot be tested
+  without them and the schema change is separately justified;
+- rewrite existing modules, parsers, promotion logic or public routes;
+- alter `pipeline/web/static/public/**`, `public_queries.py`,
+  `public_export.py` or any `/api/v1/*` route.
+
+The agent may add new transport code, optional dependency declarations,
+fixture-server tests and focused documentation. It must not stage or modify
+unrelated worktree changes.
+
+### Repository and branch protocol
+
+The task should start from the current `beta` branch and use a dedicated
+`codex/` branch or worktree. Before editing, the agent must inspect
+`git status` and preserve every pre-existing change. It must stage explicit
+paths only and report the resulting commit hash.
+
+The agent must not merge, force-push, reset, clean untracked files or modify
+deployment configuration without an explicit follow-up task. A later review
+task decides whether the proof of concept is ready to merge into `beta`.
+
+### Required first-task deliverables
+
+The agent must return:
+
+1. the transport contract and implementation locations;
+2. the feature-flag/default-off behaviour;
+3. the exact archive and provenance path for a fixture response;
+4. the failure classifications and rate-policy decisions made;
+5. the list of files changed;
+6. the test and lint commands run, with results;
+7. any unresolved decision that needs owner approval.
+
+### First-task definition of done
+
+The phase is complete only when all of the following are true:
+
+- the existing HTTPX path remains the default and existing modules are
+  unchanged in behaviour;
+- the Scrapy dependency is optional and a normal install does not require a
+  browser binary;
+- a local fixture server can exercise a Scrapy fetch without network access;
+- a successful fixture fetch records the requested URL, final URL, status,
+  retrieval time, exact payload hash and archive reference;
+- a timeout, block or unrecognised response becomes an explicit failure and
+  cannot be interpreted as an empty evidence result;
+- missing provenance is rejected before an item can be persisted;
+- no fixture or test writes into the repository's real `data/`, `logs/` or
+  backup directories;
+- the offline pytest suite, Ruff and compilation checks pass;
+- the agent has not introduced any live-source test or production default
+  change.
+
+### Suggested prompt for the first agent
+
+```text
+Implement Phase 0 and Phase 1 of scrapy.md only. Add an optional Scrapy
+transport behind a feature flag, preserve the existing HTTPX default, and do
+not port production modules yet. Do not fetch live sources. Add
+fixture-backed tests proving provenance, exact archive hashing, final URLs,
+failure classification, disabled-by-default behaviour and repository write
+isolation. Preserve robots, destination-guard and structured-logging
+invariants. Inspect git status first, preserve unrelated changes, stage
+explicit paths only, run the offline pytest, Ruff and compilation gates, and
+stop to report any design decision that requires owner approval.
+```
+
+### Later agent tasks
+
+Later work should be split into separate reviewable tasks:
+
+1. approve the transport proof of concept;
+2. choose staging tables or the adapter-only persistence path;
+3. port one crawl-heavy module, with parity fixtures;
+4. run a watched live pilot and record coverage, timing, memory and archive
+   fidelity;
+5. add `scrapy-playwright` only for demonstrated browser-dependent routes;
+6. port additional modules only after the pilot passes its acceptance gates.
+
+Each task should produce a separate commit or pull request. No task should
+assume that a prior experimental transport is ready for public collection
+until the owner has reviewed its provenance and rate-policy evidence.
+
 ## Risks and mitigations
 
 | Risk | Mitigation |
