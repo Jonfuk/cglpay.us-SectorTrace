@@ -59,6 +59,7 @@ import structlog
 
 from pipeline.config import Settings
 from pipeline.http import PipelineHTTPClient
+from pipeline.writer import BatchWriter
 
 log = structlog.get_logger()
 
@@ -206,9 +207,14 @@ def fetch_in_parallel(
 
             # The executor has joined every worker by now, so this is the only
             # thread running. Last write wins on a repeated URL, which is the
-            # same as the serial behaviour.
-            for entry in deferred:
-                db.set_http_cache(cache_conn, **entry)
+            # same as the serial behaviour. Cache writes are deliberately
+            # bounded; losing one is safe because the next fetch revalidates.
+            def write_cache_batch(entries) -> None:
+                for entry in entries:
+                    db.set_http_cache(cache_conn, **entry)
+
+            with BatchWriter(cache_conn, write_cache_batch, max_rows=500) as writer:
+                writer.write_many(deferred)
             log.info("parallel.cache_flushed", source_system=source_system,
                       entries=len(deferred))
 
