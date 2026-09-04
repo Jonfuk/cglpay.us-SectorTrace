@@ -27,41 +27,29 @@ const toast = useToast()
 const { data, pending, error, refresh } = await useAsyncData<AnalysisDashboard | null>(
   'admin-analysis-dashboard',
   async () => {
-    // The analysis endpoints are deliberately split by workload. A slow or
-    // unavailable optional projection must not hide the operator control
-    // plane: overview, domains and operations are still useful on their own.
-    const results = await Promise.allSettled([
-      api.analysisOverview(),
-      api.analysisDomains(),
-      api.analysisCoverage(),
-      api.analysisSignals({ query: { limit: 20 } }),
-      api.analysisStructured({ query: { limit: 20 } }),
-      api.analysisThemes({ query: { limit: 20 } }),
-      api.analysisLinks({ query: { limit: 20 } }),
-      api.analysisGraph(),
-      api.analysisModels(),
-      api.analysisPrevalence({ query: { limit: 20 } }),
-      api.analysisOperations(),
-    ])
-    const [overview, domains, coverage, signals, structured, themes, links, graph, models, prevalence, operations] = results
-    const valueOr = <T>(result: PromiseSettledResult<T>, fallback: T): T =>
-      result.status === 'fulfilled' ? result.value : fallback
-    const overviewValue = valueOr(overview, { active_release: null })
-    const domainsValue = valueOr(domains, { domains: [] as AnalysisDomain[] })
-    const coverageValue = valueOr(coverage, { coverage: [] as Row[] })
-    const signalsValue = valueOr(signals, { signals: [] as Row[] })
-    const structuredValue = valueOr(structured, { structured: [] as Row[] })
-    const themesValue = valueOr(themes, { themes: [] as Row[] })
-    const linksValue = valueOr(links, { links: [] as Row[] })
-    const modelsValue = valueOr(models, { releases: [] as AnalysisRelease[] })
-    const prevalenceValue = valueOr(prevalence, { prevalence: [] as Row[] })
-    const operationsValue = valueOr(operations, { runs: [], proposals: [] })
+    // Keep the control plane useful when a projection is slow, and avoid
+    // opening eleven database-backed requests at once on the small VPS.
+    let degraded = false
+    const safe = async <T>(request: Promise<T>, fallback: T): Promise<T> => {
+      try { return await request } catch { degraded = true; return fallback }
+    }
+    const overviewValue = await safe(api.analysisOverview(), { active_release: null })
+    const domainsValue = await safe(api.analysisDomains(), { domains: [] as AnalysisDomain[] })
+    const coverageValue = await safe(api.analysisCoverage(), { coverage: [] as Row[] })
+    const signalsValue = await safe(api.analysisSignals({ query: { limit: 20 } }), { signals: [] as Row[] })
+    const structuredValue = await safe(api.analysisStructured({ query: { limit: 20 } }), { structured: [] as Row[] })
+    const themesValue = await safe(api.analysisThemes({ query: { limit: 20 } }), { themes: [] as Row[] })
+    const linksValue = await safe(api.analysisLinks({ query: { limit: 20 } }), { links: [] as Row[] })
+    const graphValue = await safe(api.analysisGraph(), {})
+    const modelsValue = await safe(api.analysisModels(), { releases: [] as AnalysisRelease[] })
+    const prevalenceValue = await safe(api.analysisPrevalence({ query: { limit: 20 } }), { prevalence: [] as Row[] })
+    const operationsValue = await safe(api.analysisOperations(), { runs: [], proposals: [] })
     return {
       overview: overviewValue, domains: domainsValue.domains, coverage: coverageValue.coverage,
       signals: signalsValue.signals, structured: structuredValue.structured,
-      themes: themesValue.themes, links: linksValue.links, graph: valueOr(graph, {}), models: modelsValue,
+      themes: themesValue.themes, links: linksValue.links, graph: graphValue, models: modelsValue,
       prevalence: prevalenceValue.prevalence, operations: operationsValue,
-      degraded: results.some((result) => result.status === 'rejected'),
+      degraded,
     }
   },
   { default: () => ({
