@@ -39,6 +39,17 @@ log = structlog.get_logger()
 
 QUERYDATA_RE = re.compile(r"(?:^|/)(?:querydata|public/query)(?:$|[/?])", re.IGNORECASE)
 VOLATILE_QUERY_KEYS = {"s", "uid", "sid", "token", "requestid", "activityid"}
+REPORT_PAGES = (
+    "Adults in treatment",
+    "Young people in treatment",
+    "Socio demographics",
+    "Mental health treatment need",
+    "Substance use",
+    "Routes into treatment",
+    "Interventions",
+    "Outcomes of treatment received",
+    "Public access data",
+)
 
 
 @dataclass(frozen=True)
@@ -361,7 +372,9 @@ def capture_powerbi_payloads(
         "powerbi.capture_starting", source_system=source_system, module=module, urls=len(requested)
     )
     process.start()
-    items, timed_out = drain_subprocess(process, queue, settings.scrapy_runner_timeout_seconds)
+    items, timed_out = drain_subprocess(
+        process, queue, settings.scrapy_playwright_runner_timeout_seconds
+    )
     if timed_out:
         log.warning("powerbi.capture_timeout", urls=len(requested))
 
@@ -532,6 +545,7 @@ def _powerbi_spider_class():
             try:
                 if page is not None:
                     await asyncio.sleep(self.wait_seconds)
+                    await self._visit_report_pages(page)
                     await _await_page_tasks(page, pending)
             finally:
                 if page is not None:
@@ -542,6 +556,30 @@ def _powerbi_spider_class():
                         pass
             for item in captures:
                 self.result_queue.put(item)
+
+        async def _visit_report_pages(self, page):
+            """Visit named report pages so their visual queries are emitted."""
+            report_frame = next(
+                (frame for frame in page.frames if "app.powerbi.com/reportEmbed" in frame.url),
+                None,
+            )
+            if report_frame is None:
+                return
+            for label in REPORT_PAGES:
+                try:
+                    buttons = await report_frame.get_by_role(
+                        "button", name=label, exact=True
+                    ).all()
+                    for button in buttons:
+                        if await button.is_visible():
+                            await button.click(timeout=3000)
+                            await asyncio.sleep(1.0)
+                            break
+                except Exception:
+                    # Pages differ between cohorts and report revisions; an
+                    # absent or temporarily stale page control is not a crawl
+                    # failure when other visual requests were captured.
+                    continue
 
         async def on_failure(self, failure):
             request = failure.request
