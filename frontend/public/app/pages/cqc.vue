@@ -32,7 +32,7 @@ const offset = computed(() => Number(filter('offset') || 0))
 
 const { data, pending, error } = await useDataRoute<CqcExplorerResponse>(
   'public-cqc-explorer',
-  (f) => api.cqc({ query: { ...f, limit: 100 } }),
+  (f) => api.get<CqcExplorerResponse>('/cqc_locations', { query: { ...f, limit: 100 } }),
 )
 
 const rows = computed(() => data.value?.results ?? [])

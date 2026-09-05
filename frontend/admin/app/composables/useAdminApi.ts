@@ -174,7 +174,7 @@ export function useAdminApi(): AdminApi {
     analysisLinks: (options) => admin<{ links: Array<Record<string, unknown>> }>('/analysis/links', options),
     analysisGraph: (options) => admin<Record<string, unknown>>('/analysis/graph', options),
     analysisModels: (options) => admin<AnalysisModelsResponse>('/analysis/models', options),
-    analysisPrevalence: (options) => admin<{ prevalence: Array<Record<string, unknown> }>('/analysis/prevalence', options),
+    analysisPrevalence: (options) => admin<{ prevalence: Array<Record<string, unknown>> }>('/analysis/prevalence', options),
     analysisOperations: (options) => admin<AnalysisOperationsResponse>('/analysis/operations', options),
     analysisRuns: (options) => admin<{ runs: AnalysisRun[] }>('/analysis/runs', options),
     reviewItems: (options) => api<ReviewItemsResponse>('/review', options),

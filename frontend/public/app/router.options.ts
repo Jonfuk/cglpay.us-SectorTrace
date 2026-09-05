@@ -1,13 +1,18 @@
 import type { RouterConfig } from '@nuxt/schema'
 import type { RouteRecordRaw } from 'vue-router'
 
-function flattenContractLifecycle(routes: RouteRecordRaw[]): RouteRecordRaw[] {
+function flattenContractLifecycle(routes: readonly RouteRecordRaw[]): RouteRecordRaw[] {
   const contracts = routes.find((route) => route.name === 'contracts')
   const lifecycle = contracts?.children?.find((route) => route.name === 'contracts-process-ocid')
-  if (!contracts || !lifecycle) return routes
+  if (!contracts || !lifecycle) return [...routes]
 
+  const withoutNestedLifecycle: RouteRecordRaw[] = routes.map((route) => {
+    if (route !== contracts) return route
+    const { children: _children, ...withoutChildren } = route
+    return withoutChildren as RouteRecordRaw
+  })
   return [
-    ...routes.map((route) => route === contracts ? { ...route, children: undefined } : route),
+    ...withoutNestedLifecycle,
     { ...lifecycle, path: '/contracts/process/:ocid' },
   ]
 }
@@ -19,10 +24,12 @@ function flattenContractLifecycle(routes: RouteRecordRaw[]): RouteRecordRaw[] {
 // needed. An explicit history-mode redirect layer is the alternative the plan
 // allows; hash history is chosen because it preserves the exact existing URLs
 // byte-for-byte.
-export default <RouterConfig>{
+const routerConfig: RouterConfig = {
   // Nuxt owns hash-history setup here. Supplying a second history factory
   // makes Nuxt's `/#` base get encoded as part of the route path on a fresh
   // deep link; hashMode preserves the legacy `#/route` bookmarks directly.
   hashMode: true,
   routes: flattenContractLifecycle,
 }
+
+export default routerConfig

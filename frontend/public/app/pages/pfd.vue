@@ -51,7 +51,7 @@ const sarColumns: Column<SarReport>[] = [
   { key: 'library_year', label: 'Library year', numeric: true }, { key: 'sab_name', label: 'Board' },
   { key: 'has_body_text', label: 'Text extracted' }, { key: 'document_url', label: 'Review', link: true },
 ]
-const hseColumns: Column<Record<string, unknown>> = [
+const hseColumns: Column<Record<string, unknown>>[] = [
   { key: 'provider_name', label: 'Provider' }, { key: 'notice_type', label: 'Type' }, { key: 'issue_date', label: 'Issued', mono: true },
   { key: 'result', label: 'Result' }, { key: 'legislation', label: 'Legislation' }, { key: 'notice_number', label: 'Number', mono: true },
 ]

@@ -48,19 +48,23 @@ function setFilter(key: string, value: string): void { void filters.setAll({ ...
 function setYear(key: string, value: string): void { void filters.set(key, value || undefined) }
 function more(): void { void filters.set('offset', String(shownTo.value)) }
 function facetLabel(row: Facet): string { return `${row.value} (${row.count.toLocaleString('en-GB')})` }
-async function openContext(result: DocumentHit): Promise<void> {
-  if (!result.document_id || !result.document_element_id) return
-  selected.value = { id: String(result.document_id), element: String(result.document_element_id) }
+function elementId(result: DocumentHit): string | number | null | undefined {
+  const value = result.document_element_id
+  return typeof value === 'string' || typeof value === 'number' ? value : undefined
+}
+async function openContext(documentId: string | number | null | undefined, elementId_: string | number | null | undefined): Promise<void> {
+  if (!documentId || !elementId_) return
+  selected.value = { id: String(documentId), element: String(elementId_) }
   contextPending.value = true
   contextError.value = null
   try {
-    context.value = await api.get<DocumentContext>(`/documents/${encodeURIComponent(String(result.document_id))}`, { query: { element_id: String(result.document_element_id), context: 8 } })
+    context.value = await api.get<DocumentContext>(`/documents/${encodeURIComponent(String(documentId))}`, { query: { element_id: String(elementId_), context: 8 } })
   } catch (err) { contextError.value = err }
   finally { contextPending.value = false }
 }
 async function moveContext(element: string | undefined): Promise<void> {
   if (!selected.value || !element) return
-  await openContext({ document_id: selected.value.id, document_element_id: element })
+  await openContext(selected.value.id, element)
 }
 function titleFor(result: DocumentHit): string { return result.title || `${result.document_type || 'Document'} page ${result.page_number ?? ''}`.trim() }
 
@@ -89,7 +93,7 @@ useHead({ title: 'SectorTrace — Document search' })
     <template v-else>
       <section v-if="selected" class="atlas-section"><div class="atlas-section-head"><h2>Reading room</h2><p>A bounded window around one matched passage. The whole source remains the citation target.</p></div><div class="atlas-panel atlas-panel-body"><div v-if="contextPending" class="text-sm opacity-60">Loading passage…</div><StEmptyState v-else-if="contextError" variant="unavailable" /><template v-else-if="context"><div class="grid gap-5 md:grid-cols-[minmax(0,0.35fr)_minmax(0,0.65fr)]"><div class="space-y-3"><h3>{{ context.title || selected.id }}</h3><dl class="text-sm opacity-70"><dt>Type</dt><dd>{{ context.document_type || '—' }}</dd><dt>Source</dt><dd>{{ context.source_system || '—' }}</dd><dt>Published</dt><dd>{{ context.published_at || '—' }}</dd><dt>Retrieved</dt><dd>{{ context.retrieved_at || '—' }}</dd><dt>Elements</dt><dd>{{ context.element_count.toLocaleString('en-GB') }}</dd></dl><a v-if="context.source_url" class="underline" :href="context.source_url" target="_blank" rel="noopener noreferrer">Open the source document ↗</a><button class="atlas-button" type="button" @click="selected = null; context = null">← Back to results</button></div><div class="space-y-3"><div class="flex gap-2"><button class="atlas-button" type="button" :disabled="!context.has_more_before" @click="moveContext(context.elements[0]?.document_element_id)">↑ Earlier</button><button class="atlas-button" type="button" :disabled="!context.has_more_after" @click="moveContext(context.elements[context.elements.length - 1]?.document_element_id)">Later ↓</button></div><article v-for="element in context.elements" :key="element.document_element_id" class="border-l-2 pl-3" :class="element.is_anchor ? 'border-[var(--st-teal)]' : 'border-[var(--st-line)]'"><p class="text-sm whitespace-pre-wrap">{{ element.text || '—' }}</p><small class="opacity-60">{{ element.page_number ? `Page ${element.page_number}` : 'Document element' }}</small></article></div></div><StCaveat v-if="context.caveat" :text="context.caveat" /></template></div></section>
 
-      <section class="atlas-section"><div class="atlas-section-head"><h2>Results for “{{ q }}”</h2><p>{{ hasMore ? `Showing ${offset.toLocaleString('en-GB')}–${shownTo.toLocaleString('en-GB')} of ${data?.total.toLocaleString('en-GB')} matching pages.` : `${results.length.toLocaleString('en-GB')} matching pages.` }}</p></div><div class="space-y-3"><article v-for="result in results" :key="`${result.document_id}-${result.document_element_id}`" class="atlas-panel atlas-panel-body space-y-3"><div class="flex flex-wrap justify-between gap-3"><div><h3>{{ titleFor(result) }}</h3><p class="text-sm opacity-70">{{ result.document_type || 'Document' }}{{ result.page_number ? ` · page ${result.page_number}` : '' }}{{ result.source_system ? ` · ${result.source_system}` : '' }}</p></div><span class="text-sm opacity-60">{{ result.published_at || result.retrieved_at || 'date not published' }}</span></div><p class="text-sm whitespace-pre-wrap">{{ result.snippet || result.text || 'No extractable passage was returned.' }}</p><div class="flex flex-wrap gap-2"><button v-if="result.document_id && result.document_element_id" class="atlas-button" type="button" @click="openContext(result)">Open in reading room</button><a v-if="result.source_url" class="atlas-button" :href="result.source_url" target="_blank" rel="noopener noreferrer">Read the source page ↗</a></div></article><StEmptyState v-if="!results.length" /></div><button v-if="hasMore" class="atlas-button primary" type="button" @click="more">Show more</button><StCaveat v-if="data?.caveat" :text="data.caveat" /></section>
+      <section class="atlas-section"><div class="atlas-section-head"><h2>Results for “{{ q }}”</h2><p>{{ hasMore ? `Showing ${offset.toLocaleString('en-GB')}–${shownTo.toLocaleString('en-GB')} of ${data?.total.toLocaleString('en-GB')} matching pages.` : `${results.length.toLocaleString('en-GB')} matching pages.` }}</p></div><div class="space-y-3"><article v-for="result in results" :key="`${result.document_id}-${result.document_element_id}`" class="atlas-panel atlas-panel-body space-y-3"><div class="flex flex-wrap justify-between gap-3"><div><h3>{{ titleFor(result) }}</h3><p class="text-sm opacity-70">{{ result.document_type || 'Document' }}{{ result.page_number ? ` · page ${result.page_number}` : '' }}{{ result.source_system ? ` · ${result.source_system}` : '' }}</p></div><span class="text-sm opacity-60">{{ result.published_at || result.retrieved_at || 'date not published' }}</span></div><p class="text-sm whitespace-pre-wrap">{{ result.snippet || result.text || 'No extractable passage was returned.' }}</p><div class="flex flex-wrap gap-2"><button v-if="result.document_id && elementId(result)" class="atlas-button" type="button" @click="openContext(result.document_id, elementId(result))">Open in reading room</button><a v-if="result.source_url" class="atlas-button" :href="result.source_url" target="_blank" rel="noopener noreferrer">Read the source page ↗</a></div></article><StEmptyState v-if="!results.length" /></div><button v-if="hasMore" class="atlas-button primary" type="button" @click="more">Show more</button><StCaveat v-if="data?.caveat" :text="data.caveat" /></section>
     </template>
   </section>
 </template>

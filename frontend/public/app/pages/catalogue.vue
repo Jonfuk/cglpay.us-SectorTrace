@@ -2,8 +2,8 @@
 import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
 import type { CatalogueDataset, CatalogueResponse } from '~/types/api'
-type Row = Record<string, any>
-interface CatalogueDetail extends CatalogueDataset { module?: string; licence_statement?: string | null; licence_caution?: string | null; tables?: Row[]; caveat?: string | null }
+interface CatalogueTableRow { name: string; rows: number; last_retrieved_at: string | null }
+interface CatalogueDetail extends CatalogueDataset { module?: string; licence_statement?: string | null; licence_caution?: string | null; licence?: { name?: string | null } | null; tables?: CatalogueTableRow[]; caveat?: string | null }
 const api = usePublicApi()
 const filters = useFilterState()
 const selectedId = computed(() => String(filters.get('dataset') ?? ''))
@@ -11,7 +11,7 @@ const { data, pending, error } = await useDataRoute<CatalogueResponse>('public-c
 const { data: detail, pending: detailPending, error: detailError } = await useAsyncData<CatalogueDetail | null>(() => `public-catalogue-${selectedId.value}`, () => selectedId.value ? api.get<CatalogueDetail>(`/catalogue/${encodeURIComponent(selectedId.value)}`) : Promise.resolve(null), { default: () => null, watch: [selectedId] })
 const datasets = computed<CatalogueDataset[]>(() => data.value?.datasets ?? [])
 const columns: Column<CatalogueDataset>[] = [{ key: 'title', label: 'Dataset', to: (row) => row.dataset_id ? `/catalogue?dataset=${encodeURIComponent(row.dataset_id)}` : null }, { key: 'publisher', label: 'Publisher' }, { key: 'evidence_layer_label', label: 'Layer' }, { key: 'geography', label: 'Geography' }, { key: 'row_count', label: 'Rows', numeric: true }, { key: 'last_retrieved_at', label: 'Last fetched', mono: true }, { key: 'official_url', label: 'Official source', link: true }]
-const tableColumns: Column<Row>[] = [{ key: 'name', label: 'Warehouse table', mono: true }, { key: 'rows', label: 'Rows', numeric: true }, { key: 'last_retrieved_at', label: 'Last retrieved', mono: true }]
+const tableColumns: Column<CatalogueTableRow>[] = [{ key: 'name', label: 'Warehouse table', mono: true }, { key: 'rows', label: 'Rows', numeric: true }, { key: 'last_retrieved_at', label: 'Last retrieved', mono: true }]
 function clear(): void { void filters.set('dataset', undefined) }
 useHead({ title: 'SectorTrace — Catalogue' })
 </script>

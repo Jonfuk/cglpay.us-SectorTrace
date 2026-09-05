@@ -56,6 +56,7 @@ const indicators = computed(() => data.value?.fingertips.indicators ?? [])
 const series = computed(() => data.value?.fingertips.series ?? [])
 const ndtmsDatasets = computed(() => data.value?.ndtms.datasets ?? [])
 const ndtmsEstimates = computed(() => data.value?.ndtms.estimates ?? [])
+const firstIndicator = computed(() => indicators.value[0])
 
 const metricColumns: Column<TreatmentMetric>[] = [
   { key: 'name', label: 'Metric' }, { key: 'substance', label: 'Substance' }, { key: 'unit', label: 'Unit' },
@@ -121,7 +122,7 @@ useHead({ title: 'SectorTrace — Treatment data' })
           </div>
           <label class="block max-w-xl text-sm"><span class="block mb-1 opacity-70">Local authority</span><select class="w-full rounded border px-3 py-2" aria-label="Local authority" :value="authorityCode ?? ''" @change="chooseAuthority"><option value="">All authorities</option><option v-for="authority in authorities" :key="authority.ons_code" :value="authority.ons_code">{{ authority.name }}{{ authority.region ? ` · ${authority.region}` : '' }}</option></select></label>
           <div class="atlas-caveat"><span>What must not be computed here</span> — prevalence and treatment numbers use different estimation methods and populations. This pipeline does not calculate unmet need by subtracting one from the other.</div>
-          <div v-if="indicators.length" class="atlas-band"><h3>{{ indicators[0].indicator_name }}</h3><p>{{ indicators[0].unit || 'Unit published with the indicator' }} · {{ authorityCode ? 'Selected authority and England are shown.' : 'Authority values are shown with their published context.' }}</p></div>
+           <div v-if="firstIndicator" class="atlas-band"><h3>{{ firstIndicator.indicator_name }}</h3><p>{{ firstIndicator.unit || 'Unit published with the indicator' }} · {{ authorityCode ? 'Selected authority and England are shown.' : 'Authority values are shown with their published context.' }}</p></div>
           <StEvidenceTable v-if="seriesRows().length" :columns="seriesColumns" :rows="seriesRows()" row-key="row_key" />
           <StEmptyState v-else />
           <StCaveat v-if="data?.metrics.caveat" :text="data.metrics.caveat" />

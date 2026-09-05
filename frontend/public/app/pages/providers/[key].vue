@@ -128,7 +128,7 @@ const disclosureRows = computed(() => {
   const disclosed = new Set((disclosure.value?.disclosed ?? []).map((row) => `${row.financial_year_end}|${row.topic}`))
   const notSearched = new Set((disclosure.value?.not_searched ?? []).map((row) => String(row.financial_year_end)))
   return indexed((disclosure.value?.topics ?? []).flatMap((topic) => {
-    const years = [...new Set([...searched.keys(), ...disclosed].filter((value) => value.endsWith(`|${topic}`)).map((value) => value.split('|')[0]))]
+    const years = [...new Set([...searched.keys(), ...disclosed].filter((value) => value.endsWith(`|${topic}`)).map((value) => value.split('|')[0]).filter((year): year is string => Boolean(year)))]
     return years.map((year) => {
       const row = searched.get(`${year}|${topic}`)
       return { financial_year_end: year, topic, status: notSearched.has(year) ? 'Report not searched' : row ? 'Terms did not match' : 'Terms matched', search_terms: row?.search_terms ?? '—' }

@@ -5,8 +5,9 @@ import type { CompareResponse, ProviderRow, ProvidersResponse } from '~/types/ap
 
 interface AuthorityOption { ons_code: string; name: string; region: string | null }
 interface AuthoritiesResponse { authorities: AuthorityOption[] }
+interface ProviderOption { provider_key: string; canonical_name: string }
 interface CompareSeries { rows?: Array<Record<string, unknown>>; england?: Array<Record<string, unknown>>; indicators?: Array<Record<string, unknown>>; caveat?: string | null; caveats?: Record<string, string | null>; provenance?: Record<string, unknown>; [key: string]: unknown }
-interface CompareEnvelope extends CompareResponse { authorities: AuthorityOption[]; providers: ProviderRow[]; series: Record<string, CompareSeries>; caveats?: { cross_layer?: string | null } }
+interface CompareEnvelope { authorities: AuthorityOption[]; providers: ProviderRow[]; series: Record<string, CompareSeries>; caveats?: { cross_layer?: string | null } }
 interface ProviderLayer { caveat?: string | null; unit?: string | null; by_provider?: Record<string, Array<Record<string, unknown>>>; [key: string]: unknown }
 interface ProviderCompare { providers: ProviderRow[]; layers: Record<string, ProviderLayer>; caveat?: string | null }
 interface CompareWorkspace { authorities: AuthoritiesResponse; providers: ProvidersResponse; compare: CompareEnvelope | null; providerPay: ProviderCompare | null }
@@ -35,9 +36,12 @@ const { data, pending, error } = await useDataRoute<CompareWorkspace>('public-co
 })
 
 const authorityOptions = computed(() => data.value?.authorities.authorities ?? [])
-const providerOptions = computed(() => data.value?.providers.providers ?? [])
+const providerOptions = computed<ProviderOption[]>(() => (data.value?.providers.providers ?? []).flatMap((item) => item.provider_key ? [{ provider_key: item.provider_key, canonical_name: item.canonical_name ?? item.provider_key }] : []))
 const selectedAuthorities = computed(() => onsCodes.value.map((code) => authorityOptions.value.find((item) => item.ons_code === code) ?? { ons_code: code, name: code, region: null }))
-const selectedProviders = computed(() => providerKeys.value.map((key) => providerOptions.value.find((item) => item.provider_key === key) ?? { provider_key: key, canonical_name: key }))
+const selectedProviders = computed(() => providerKeys.value.map((key) => {
+  const item = providerOptions.value.find((candidate) => candidate.provider_key === key)
+  return { provider_key: key, canonical_name: item?.canonical_name ?? key }
+}))
 const series = computed(() => data.value?.compare?.series ?? {})
 const seriesNames: Record<string, string> = { grant: 'Grant allocation', budget: 'Budgeted public health spend', treatment: 'Numbers in treatment', contracts: 'Contract value published' }
 

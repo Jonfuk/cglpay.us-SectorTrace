@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="Row extends Record<string, unknown>">
+<script setup lang="ts" generic="Row extends object">
 import { computed } from 'vue'
 
 // A deliberately COARSE evidence table. The plan warns against replacing one
@@ -12,7 +12,7 @@ import { computed } from 'vue'
 
 export interface Column<R> {
   /** Row key to read. */
-  key: keyof R & string
+  key: Extract<keyof R, string>
   /** Header label. */
   label: string
   /** Render as a validated http(s) link (uses StLink). */
@@ -32,7 +32,7 @@ const props = defineProps<{
   columns: Column<Row>[]
   rows: Row[] | null | undefined
   /** Stable row key for :key. Falls back to index if absent. */
-  rowKey?: keyof Row & string
+  rowKey?: Extract<keyof Row, string>
 }>()
 
 const rowsSafe = computed<Row[]>(() => (Array.isArray(props.rows) ? props.rows : []))
