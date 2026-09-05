@@ -682,7 +682,7 @@ class Settings(BaseSettings):
     # navigation response. Keep this short and bounded; a capture is never an
     # invitation to leave a page running indefinitely.
     scrapy_playwright_capture_wait_seconds: float = 20.0
-    scrapy_playwright_runner_timeout_seconds: float = 180.0
+    scrapy_playwright_runner_timeout_seconds: float = 240.0
     # Scrapy's own MEMUSAGE extension, turned on for this transport leg
     # specifically: a browser process is the one part of this pipeline whose
     # memory a single stuck page can genuinely blow up.

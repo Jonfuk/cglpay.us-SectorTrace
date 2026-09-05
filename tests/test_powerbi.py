@@ -108,6 +108,47 @@ def test_parse_querydata_resolves_value_dictionary_labels():
     assert rows[1]["value_text"] == "People in treatment"
 
 
+def test_parse_querydata_extracts_visual_series_values():
+    body = {
+        "results": [
+            {
+                "result": {
+                    "data": {
+                        "descriptor": {
+                            "Select": [
+                                {"Value": "G0", "Name": "Year"},
+                                {"Value": "M1", "Name": "Treatment count"},
+                            ]
+                        },
+                        "dsr": {
+                            "DS": [
+                                {
+                                    "SH": [{"DM1": [{"G1": "Opioids"}]}],
+                                    "PH": [
+                                        {
+                                            "DM0": [
+                                                {
+                                                    "S": [{"N": "G0"}],
+                                                    "C": [2010],
+                                                    "X": [{"M1": 170032}],
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                }
+            }
+        ]
+    }
+    rows = parse_querydata(json.dumps(body))
+    assert rows[-1]["metric_raw"] == "Treatment count"
+    assert rows[-1]["value"] == 170032
+    assert '"series_label": "Opioids"' in rows[-1]["dimensions_json"]
+
+
 def test_capture_redacts_volatile_query_parameters():
     body = b'{"C":[{"V":1}]}'
     capture = PowerBICapture(

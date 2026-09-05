@@ -134,10 +134,18 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
 
     collect_metadata(document)
 
+    def contains_key(value: Any, key: str) -> bool:
+        if isinstance(value, dict):
+            return key in value or any(contains_key(child, key) for child in value.values())
+        if isinstance(value, list):
+            return any(contains_key(child, key) for child in value)
+        return False
+
     def walk(
         value: Any,
         path: tuple[str, ...] = (),
         slots: tuple[tuple[str | None, str | None], ...] = (),
+        series_labels: tuple[str, ...] = (),
     ) -> None:
         if isinstance(value, dict):
             cells = value.get("C")
@@ -150,8 +158,95 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
                     )
                     for item in value["S"]
                 )
+            row_series = series_labels
+            for group in value.get("SH", []):
+                if not isinstance(group, dict):
+                    continue
+                for group_rows in group.values():
+                    if not isinstance(group_rows, list):
+                        continue
+                    labels = []
+                    for group_row in group_rows:
+                        if not isinstance(group_row, dict):
+                            continue
+                        label = next(
+                            (
+                                item
+                                for key, item in group_row.items()
+                                if key != "S" and not isinstance(item, (dict, list))
+                            ),
+                            None,
+                        )
+                        if isinstance(label, int) and isinstance(group_row.get("S"), list):
+                            slot = group_row["S"][0]
+                            dictionary = slot.get("DN") if isinstance(slot, dict) else None
+                            if dictionary in value_dicts and 0 <= label < len(value_dicts[dictionary]):
+                                label = value_dicts[dictionary][label]
+                        if label is not None:
+                            labels.append(str(label))
+                    if labels:
+                        row_series = tuple(labels)
+            if isinstance(value.get("X"), list):
+                base_context = {}
+                for index, cell in enumerate(cells or []):
+                    raw = cell.get("V") if isinstance(cell, dict) else cell
+                    if isinstance(cell, dict) and "D" in cell and "V" not in cell:
+                        raw = cell["D"]
+                    slot_name, dictionary_name = (
+                        row_slots[index] if index < len(row_slots) else (None, None)
+                    )
+                    decoded = raw
+                    if (
+                        isinstance(raw, int)
+                        and not isinstance(raw, bool)
+                        and dictionary_name in value_dicts
+                        and 0 <= raw < len(value_dicts[dictionary_name])
+                    ):
+                        decoded = value_dicts[dictionary_name][raw]
+                    if slot_name:
+                        base_context[descriptor_names.get(slot_name, slot_name)] = decoded
+                for series_index, series in enumerate(value["X"]):
+                    if not isinstance(series, dict):
+                        continue
+                    metric_key, raw = next(
+                        (
+                            (key, item)
+                            for key, item in series.items()
+                            if key != "S" and not isinstance(item, (dict, list))
+                        ),
+                        (None, None),
+                    )
+                    if metric_key is None:
+                        continue
+                    metric_raw = descriptor_names.get(metric_key, metric_key)
+                    dimensions = {
+                        "dimensions": base_context,
+                        "series_index": series_index,
+                        "series_label": (
+                            row_series[series_index]
+                            if series_index < len(row_series)
+                            else None
+                        ),
+                    }
+                    rows.append(
+                        {
+                            "cell_path": ".".join(path + ("X", str(series_index))),
+                            "column_index": series_index,
+                            "metric_raw": metric_raw,
+                            "value": _number(raw),
+                            "value_text": "" if raw is None else str(raw),
+                            "dimensions_json": json.dumps(
+                                dimensions, sort_keys=True, default=str
+                            ),
+                            "time_period_raw": str(base_context.get(
+                                "DIM_PendKey.pend.Variation.Date Hierarchy.Year", ""
+                            )),
+                        }
+                    )
             if isinstance(cells, list):
                 for column_index, cell in enumerate(cells):
+                    if "X" in value or contains_key(value.get("PH"), "X"):
+                        continue
                     raw = cell.get("V") if isinstance(cell, dict) else cell
                     if isinstance(cell, dict) and "D" in cell and "V" not in cell:
                         raw = cell["D"]
@@ -208,12 +303,12 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
                             slots,
                         )
                         for index, item in enumerate(child):
-                            walk(item, child_path + (str(index),), inherited_slots)
+                            walk(item, child_path + (str(index),), inherited_slots, row_series)
                     else:
-                        walk(child, child_path, row_slots)
+                        walk(child, child_path, row_slots, row_series)
         elif isinstance(value, list):
             for index, child in enumerate(value):
-                walk(child, path + (str(index),), slots)
+                walk(child, path + (str(index),), slots, series_labels)
 
     walk(document)
     if not rows:
@@ -568,7 +663,7 @@ def _powerbi_spider_class():
             for label in REPORT_PAGES:
                 try:
                     buttons = await report_frame.get_by_role(
-                        "button", name=label, exact=True
+                        "tab", name=label, exact=True
                     ).all()
                     for button in buttons:
                         if await button.is_visible():
