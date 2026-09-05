@@ -289,48 +289,61 @@ def persist_parse(conn, document_id: str, parsed: ParsedDocument, config_hash: s
         provenance={"document_id": document_id, "document_version_id": version_id,
                     "parser_name": parsed.parser_name, "parser_version": parsed.parser_version,
                     "previous_document_version_id": previous["document_version_id"] if previous else None})
+    # Batched via `observe_many` rather than one `observe()` call per element/
+    # table: a document with hundreds of elements was hundreds of round trips
+    # for what is otherwise a single-pass write.
     current_keys: set[tuple[int, str]] = set()
+    element_entries = []
     for item in parsed.elements:
         key = (item.sequence, item.element_type)
         current_keys.add(key)
         item_hash = hashlib.sha256((item.text or "").encode("utf-8")).hexdigest()
-        evidence_state.observe(
-            conn, layer="document_element", identity=f"{logical}|{item.sequence}|{item.element_type}",
+        element_entries.append(dict(
+            identity=f"{logical}|{item.sequence}|{item.element_type}",
             evidence_hash=item_hash, retrieved_at=source["retrieved_at"],
             source_valid_from=evidence_state.known_date(source["published_at"]),
             source_url=source["source_url"], payload_sha256=source["payload_sha256"],
             provenance={"document_version_id": version_id, "sequence": item.sequence,
-                        "element_type": item.element_type})
-    for sequence, element_type in sorted(set(previous_elements) - current_keys):
-        evidence_state.observe(
-            conn, layer="document_element", identity=f"{logical}|{sequence}|{element_type}",
+                        "element_type": item.element_type}))
+    evidence_state.observe_many(conn, layer="document_element", entries=element_entries)
+    removed_element_entries = [
+        dict(
+            identity=f"{logical}|{sequence}|{element_type}",
             evidence_hash=previous_elements[(sequence, element_type)] or hashlib.sha256(b"").hexdigest(),
             retrieved_at=source["retrieved_at"], source_url=source["source_url"],
             source_valid_from=evidence_state.known_date(source["published_at"]),
             payload_sha256=source["payload_sha256"], explicit_state="removed",
             provenance={"document_version_id": version_id,
                         "meaning": "passage absent from this parsed source version; not proof the fact ended"})
+        for sequence, element_type in sorted(set(previous_elements) - current_keys)
+    ]
+    evidence_state.observe_many(conn, layer="document_element", entries=removed_element_entries)
     current_table_sequences = set()
+    table_entries = []
     for table in parsed.tables:
         current_table_sequences.add(table.element_sequence)
         table_json = _json(table.rows)
-        evidence_state.observe(
-            conn, layer="document_table", identity=f"{logical}|table|{table.element_sequence}",
+        table_entries.append(dict(
+            identity=f"{logical}|table|{table.element_sequence}",
             evidence_hash=hashlib.sha256(table_json.encode()).hexdigest(),
             retrieved_at=source["retrieved_at"], source_url=source["source_url"],
             source_valid_from=evidence_state.known_date(source["published_at"]),
             payload_sha256=source["payload_sha256"],
             provenance={"document_version_id": version_id,
-                        "element_sequence": table.element_sequence})
-    for sequence in sorted(set(previous_tables) - current_table_sequences):
-        evidence_state.observe(
-            conn, layer="document_table", identity=f"{logical}|table|{sequence}",
+                        "element_sequence": table.element_sequence}))
+    evidence_state.observe_many(conn, layer="document_table", entries=table_entries)
+    removed_table_entries = [
+        dict(
+            identity=f"{logical}|table|{sequence}",
             evidence_hash=previous_tables[sequence], retrieved_at=source["retrieved_at"],
             source_valid_from=evidence_state.known_date(source["published_at"]),
             source_url=source["source_url"], payload_sha256=source["payload_sha256"],
             explicit_state="removed",
             provenance={"document_version_id": version_id,
                         "meaning": "table absent from this parsed source version; not proof the fact ended"})
+        for sequence in sorted(set(previous_tables) - current_table_sequences)
+    ]
+    evidence_state.observe_many(conn, layer="document_table", entries=removed_table_entries)
     evidence_state.assert_quality(
         conn, layer="document_version", identity=logical, assertion_type="extraction_quality",
         value=quality_status, status="asserted", method="document_quality.assess",
