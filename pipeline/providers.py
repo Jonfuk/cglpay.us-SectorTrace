@@ -643,6 +643,14 @@ def seed_providers(conn, commit: bool = True) -> None:
     make them wrong. Committing them immediately costs nothing and hands the
     write slot straight back.
 
+    PostgreSQL (performance.md Phase 1) has no single writer slot, but this
+    still isn't a boundary Phase 4's commit audit removes: several modules
+    upsert these same natural-key rows at the start of a wave, and an early
+    commit bounds how long each holds its row-level lock on `providers`/
+    `provider_identifiers` before going on to a long fetch — "releases locks
+    before network/CPU work," the same case `pipeline/modules/m00_geography.py`
+    documents at length.
+
     `commit=False` is for `--dry-run`, where the caller rolls the whole
     transaction back and a run that promised to write nothing must write
     nothing. A dry run with `--jobs` can therefore still contend — it is the
