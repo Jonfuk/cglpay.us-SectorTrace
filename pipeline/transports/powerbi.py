@@ -40,6 +40,9 @@ log = structlog.get_logger()
 QUERYDATA_RE = re.compile(r"(?:^|/)(?:querydata|public/query)(?:$|[/?])", re.IGNORECASE)
 VOLATILE_QUERY_KEYS = {"s", "uid", "sid", "token", "requestid", "activityid"}
 REPORT_PAGES = (
+    # This page contains the complete area-level export.  Visit it first so
+    # a slow interactive authority cascade cannot consume the capture window.
+    "Download data",
     "Adults in treatment",
     "Young people in treatment",
     "Socio demographics",
@@ -49,7 +52,6 @@ REPORT_PAGES = (
     "Interventions",
     "Outcomes of treatment received",
     "Public access data",
-    "Download data",
 )
 REGION_NAMES = {
     "England",
@@ -807,21 +809,7 @@ def _powerbi_spider_class():
                         if await button.is_visible():
                             await button.click(timeout=3000)
                             await asyncio.sleep(1.0)
-                            if label in {"Adults in treatment", "Young people in treatment"}:
-                                try:
-                                    await asyncio.wait_for(
-                                        self._visit_area_filters(page, report_frame, label),
-                                        # The authority combo is populated by a
-                                        # second Power BI query after the region
-                                        # click; the former short bound expired
-                                        # before that cascade became visible.
-                                        timeout=120.0,
-                                    )
-                                except asyncio.TimeoutError:
-                                    log.warning(
-                                        "powerbi.area_filter_timeout", report_page=label
-                                    )
-                            elif label == "Download data":
+                            if label == "Download data":
                                 try:
                                     await asyncio.wait_for(
                                         self._visit_download_regions(page, report_frame),
