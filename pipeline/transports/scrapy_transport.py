@@ -276,35 +276,11 @@ def _run_bounded_crawl(queue, urls, source_system, module, settings: Settings,
     try:
         from scrapy.crawler import CrawlerProcess
 
-        crawler_settings = {
-            "LOG_ENABLED": False,
-            "TELNETCONSOLE_ENABLED": False,
-            # Scrapy's own robots middleware is protego-based; this project's
-            # RobotsComplianceMiddleware below re-uses pipeline.http.RobotsRules
-            # instead, so there is exactly one robots interpretation shared
-            # with the HTTPX transport. See the module docstring.
-            "ROBOTSTXT_OBEY": False,
-            "COOKIES_ENABLED": False,
-            # Scrapy's own RetryMiddleware retries immediately with no
-            # per-attempt delay and no Retry-After support — this project's
-            # own RetryWithBackoffMiddleware below replaces it.
-            "RETRY_ENABLED": False,
-            "AUTOTHROTTLE_ENABLED": False,
-            "USER_AGENT": settings.user_agent,
-            "DOWNLOAD_TIMEOUT": settings.scrapy_download_timeout_seconds,
-            "DOWNLOAD_DELAY": settings.scrapy_download_delay_seconds,
-            "CONCURRENT_REQUESTS_PER_DOMAIN": settings.scrapy_concurrent_requests_per_domain,
-            "DOWNLOADER_MIDDLEWARES": {
-                "pipeline.transports.scrapy_transport.StructuredLoggingMiddleware": 100,
-                "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
-                "pipeline.transports.scrapy_transport.DestinationGuardMiddleware": 250,
-                "pipeline.transports.scrapy_transport.RetryWithBackoffMiddleware": 950,
-                "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 500,
-            },
-            "PIPELINE_SETTINGS": settings,
+        crawler_settings = _crawler_settings(settings)
+        crawler_settings.update({
             "PIPELINE_GUARD_DESTINATION": guard_destination,
             "PIPELINE_RESOLVER": resolver,
-        }
+        })
         process = CrawlerProcess(settings=crawler_settings, install_root_handler=False)
         process.crawl(
             _spider_class(), urls=urls, source_system=source_system,
@@ -324,6 +300,45 @@ def _run_bounded_crawl(queue, urls, source_system, module, settings: Settings,
                 failure_class=FailureClass.UNRECOGNISED,
                 failure_detail=f"{type(exc).__name__}: {exc}",
             ))
+
+
+def _crawler_settings(settings: Settings) -> dict:
+    """Shared settings for every Scrapy crawl in this package.
+
+    Keeping this in one place matters now that pilots can span many hosts:
+    AutoThrottle owns the per-slot delay, but concurrency, retry, robots,
+    archive and destination-guard policy must not drift between adapters.
+    """
+    return {
+            "LOG_ENABLED": False,
+            "TELNETCONSOLE_ENABLED": False,
+            # Scrapy's own robots middleware is protego-based; this project's
+            # RobotsComplianceMiddleware below re-uses pipeline.http.RobotsRules
+            # instead, so there is exactly one robots interpretation shared
+            # with the HTTPX transport. See the module docstring.
+            "ROBOTSTXT_OBEY": False,
+            "COOKIES_ENABLED": False,
+            # Scrapy's own RetryMiddleware retries immediately with no
+            # per-attempt delay and no Retry-After support — this project's
+            # own RetryWithBackoffMiddleware below replaces it.
+            "RETRY_ENABLED": False,
+            "AUTOTHROTTLE_ENABLED": settings.scrapy_autothrottle_enabled,
+            "AUTOTHROTTLE_START_DELAY": settings.scrapy_autothrottle_start_delay_seconds,
+            "AUTOTHROTTLE_MAX_DELAY": settings.scrapy_autothrottle_max_delay_seconds,
+            "AUTOTHROTTLE_TARGET_CONCURRENCY": settings.scrapy_autothrottle_target_concurrency,
+            "USER_AGENT": settings.user_agent,
+            "DOWNLOAD_TIMEOUT": settings.scrapy_download_timeout_seconds,
+            "DOWNLOAD_DELAY": settings.scrapy_download_delay_seconds,
+            "CONCURRENT_REQUESTS_PER_DOMAIN": settings.scrapy_concurrent_requests_per_domain,
+            "DOWNLOADER_MIDDLEWARES": {
+                "pipeline.transports.scrapy_transport.StructuredLoggingMiddleware": 100,
+                "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
+                "pipeline.transports.scrapy_transport.DestinationGuardMiddleware": 250,
+                "pipeline.transports.scrapy_transport.RetryWithBackoffMiddleware": 950,
+                "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 500,
+            },
+            "PIPELINE_SETTINGS": settings,
+        }
 
 
 class StructuredLoggingMiddleware:

@@ -13,8 +13,9 @@ integration.
 The default two-second value is a per-host rate interval, not a timeout. It is
 not a universal requirement for every future transport, but collection must
 remain polite and the selected rate policy must be explicit, source-scoped and
-auditable. Scrapy may use a source-specific download delay or AutoThrottle;
-HTTPX keeps its current policy until a measured change is approved.
+auditable. Scrapy uses AutoThrottle with no fixed delay floor by default,
+target concurrency 0.5 and a hard one-request-per-domain cap; HTTPX keeps its
+current policy until a measured change is approved.
 
 The project continues to require provenance, robots compliance, explicit
 failure states, restricted-data boundaries and human promotion. Those are
@@ -204,13 +205,16 @@ minimum_delay_seconds
 maximum_concurrency_per_host
 autothrottle_enabled
 autothrottle_target_concurrency
+autothrottle_start_delay_seconds
+autothrottle_max_delay_seconds
 retry_after_honoured
 ```
 
 Rules:
 
 - HTTPX modules retain the current default until changed deliberately.
-- A Scrapy source may opt into AutoThrottle or a different delay after a
+- A Scrapy source uses AutoThrottle by default, with a zero fixed delay floor;
+  a source may choose a more conservative floor or target after a
   source-specific decision.
 - The selected values are recorded in the crawl ledger and structured logs.
 - A faster policy is never selected automatically because a site returned
@@ -337,9 +341,18 @@ Do not include WDTK bulk collection in this phase.
 
 ### Phase 4 — migrate crawl-heavy modules
 
-Port m09, m10, m24, m32 and m34 only where the pilot shows a benefit. Keep
+Port m09, m10, m22, m24, m28, m32 and m34 only where the pilot shows a benefit. Keep
 module-specific parsers and evidence rules, but move request scheduling,
 pagination, retries and item validation into shared Scrapy components.
+
+Status: adapter-only pilots are now implemented for `m22_provider_pay_pages`,
+`m24_council_spend` and `m28_sar_reports` in
+`pipeline/transports/pilots/`. They reuse each module's existing parsers and
+bounds, return comparison results, and do not write evidence. The production
+modules remain HTTPX-backed pending offline parity tests and watched live
+measurements. AutoThrottle is enabled in the shared Scrapy runner with
+`DOWNLOAD_DELAY=0`, target concurrency `0.5`, maximum delay `60` seconds and
+`CONCURRENT_REQUESTS_PER_DOMAIN=1`.
 
 Leave API, bulk-file, derived and stable document modules on HTTPX.
 
@@ -500,7 +513,10 @@ Later work should be split into separate reviewable tasks:
    fidelity — complete for the low-memory fetch-only mode; archive-backed
    parser/finalisation is implemented on the HTTPX path;
 5. add `scrapy-playwright` only for demonstrated browser-dependent routes;
-6. port additional modules only after the pilot passes its acceptance gates.
+6. port `m22_provider_pay_pages`, `m24_council_spend` and `m28_sar_reports`
+   as adapter-only pilots — implemented;
+7. run offline parity and watched live checks for those three pilots;
+8. port additional modules only after the pilot passes its acceptance gates.
 
 Each task should produce a separate commit or pull request. No task should
 assume that a prior experimental transport is ready for public collection

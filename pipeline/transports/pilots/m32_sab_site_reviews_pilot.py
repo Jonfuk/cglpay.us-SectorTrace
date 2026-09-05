@@ -68,6 +68,7 @@ from pipeline.modules import m32_sab_site_reviews as m32
 from pipeline.transports.scrapy_transport import (
     ScrapyDisabled,
     ScrapyNotInstalled,
+    _crawler_settings,
     available,
     drain_subprocess,
     transport_result_from_failure,
@@ -272,28 +273,16 @@ def _run_pilot_crawl(queue, sab_name: str, base_url: str, settings: Settings,
     try:
         from scrapy.crawler import CrawlerProcess
 
-        crawler_settings = {
+        crawler_settings = _crawler_settings(settings)
+        crawler_settings.update({
             "LOG_ENABLED": False,
             "TELNETCONSOLE_ENABLED": False,
             "ROBOTSTXT_OBEY": False,
             "COOKIES_ENABLED": False,
             "RETRY_ENABLED": False,
-            "AUTOTHROTTLE_ENABLED": False,
-            "USER_AGENT": settings.user_agent,
-            "DOWNLOAD_TIMEOUT": settings.scrapy_download_timeout_seconds,
-            "DOWNLOAD_DELAY": settings.scrapy_download_delay_seconds,
-            "CONCURRENT_REQUESTS_PER_DOMAIN": settings.scrapy_concurrent_requests_per_domain,
-            "DOWNLOADER_MIDDLEWARES": {
-                "pipeline.transports.scrapy_transport.StructuredLoggingMiddleware": 100,
-                "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
-                "pipeline.transports.scrapy_transport.DestinationGuardMiddleware": 250,
-                "pipeline.transports.scrapy_transport.RetryWithBackoffMiddleware": 950,
-                "pipeline.transports.scrapy_transport.ProvenanceArchiveMiddleware": 900,
-            },
-            "PIPELINE_SETTINGS": settings,
             "PIPELINE_GUARD_DESTINATION": guard_destination,
             "PIPELINE_RESOLVER": resolver,
-        }
+        })
         process = CrawlerProcess(settings=crawler_settings, install_root_handler=False)
         process.crawl(_spider_class(), sab_name=sab_name, base_url=base_url, result_queue=queue)
         process.start()

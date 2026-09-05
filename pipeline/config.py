@@ -624,12 +624,15 @@ class Settings(BaseSettings):
     # module still has to be migrated (a later phase) before this flag has any
     # effect on real collection.
     scrapy_enabled: bool = False
-    # A Scrapy source's own politeness decision, kept separate from
-    # `default_rate_limit_seconds` on purpose — scrapy.md says the two-second
-    # HTTPX interval is not a universal default for every transport, and a
-    # Scrapy source opts into its own delay deliberately rather than
-    # inheriting one silently.
-    scrapy_download_delay_seconds: float = 2.0
+    # Scrapy manages the per-slot delay from observed response latency. The
+    # fixed HTTPX interval is not inherited here: a zero floor lets
+    # AutoThrottle choose the delay, while the hard per-domain concurrency
+    # cap and maximum delay remain explicit safeguards.
+    scrapy_autothrottle_enabled: bool = True
+    scrapy_autothrottle_start_delay_seconds: float = 1.0
+    scrapy_autothrottle_max_delay_seconds: float = 60.0
+    scrapy_autothrottle_target_concurrency: float = 0.5
+    scrapy_download_delay_seconds: float = 0.0
     scrapy_concurrent_requests_per_domain: int = 1
     # Scrapy's own per-request timeout (DOWNLOAD_TIMEOUT). Distinct from
     # `scrapy_runner_timeout_seconds` below, which bounds the whole bounded

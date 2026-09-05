@@ -74,6 +74,7 @@ from pipeline.config import Settings
 from pipeline.transports.scrapy_transport import (
     ScrapyDisabled,
     ScrapyNotInstalled,
+    _crawler_settings,
     available,
     drain_subprocess,
     fetch_via_scrapy,
@@ -262,16 +263,8 @@ def _run_render_crawl(queue, urls, source_system: str, settings: Settings,
         if settings.scrapy_playwright_executable_path:
             launch_options["executable_path"] = settings.scrapy_playwright_executable_path
 
-        crawler_settings = {
-            "LOG_ENABLED": False,
-            "TELNETCONSOLE_ENABLED": False,
-            "ROBOTSTXT_OBEY": False,
-            "COOKIES_ENABLED": False,
-            "RETRY_ENABLED": False,
-            "AUTOTHROTTLE_ENABLED": False,
-            "USER_AGENT": settings.user_agent,
-            "DOWNLOAD_DELAY": settings.scrapy_download_delay_seconds,
-            "CONCURRENT_REQUESTS_PER_DOMAIN": settings.scrapy_concurrent_requests_per_domain,
+        crawler_settings = _crawler_settings(settings)
+        crawler_settings.update({
             # scrapy-playwright requires the asyncio reactor explicitly —
             # unlike the rest of this package, this is not merely Scrapy's
             # own 2.13+ default.
@@ -294,6 +287,9 @@ def _run_render_crawl(queue, urls, source_system: str, settings: Settings,
                 settings.scrapy_playwright_navigation_timeout_seconds * 1000),
             "MEMUSAGE_ENABLED": True,
             "MEMUSAGE_LIMIT_MB": settings.scrapy_playwright_memory_limit_mb,
+            # Browser navigation remains retry-free and does not use the raw
+            # archive middleware because response.body is rendered DOM, not
+            # original source bytes.
             "DOWNLOADER_MIDDLEWARES": {
                 "pipeline.transports.scrapy_transport.StructuredLoggingMiddleware": 100,
                 "pipeline.transports.scrapy_transport.RobotsComplianceMiddleware": 200,
@@ -308,10 +304,9 @@ def _run_render_crawl(queue, urls, source_system: str, settings: Settings,
                 # either — retrying a browser navigation is out of scope for
                 # this scaffolding phase (see the module docstring).
             },
-            "PIPELINE_SETTINGS": settings,
             "PIPELINE_GUARD_DESTINATION": guard_destination,
             "PIPELINE_RESOLVER": resolver,
-        }
+        })
         process = CrawlerProcess(settings=crawler_settings, install_root_handler=False)
         process.crawl(_spider_class(), urls=urls, source_system=source_system, result_queue=queue)
         process.start()
