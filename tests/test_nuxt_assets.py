@@ -1,7 +1,8 @@
 """The Phase 6 Nuxt cutover seam: path resolution, cache policy, and CSP.
 
-These are DB-free unit tests over `pipeline/web/nuxt_assets` and the two Nuxt
-CSP helpers in `pipeline/web/server`. They build a tiny fake `generate` output
+Unit tests cover `pipeline/web/nuxt_assets` and the two Nuxt CSP helpers in
+`pipeline/web/server`; a fixture-backed HTTP test covers the serving guards.
+They build a tiny fake `generate` output
 in `tmp_path` so they never depend on a real build, and they assert the
 properties that keep the seam safe:
 
@@ -16,15 +17,87 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import threading
+from types import SimpleNamespace
 
+import httpx
 import pytest
+from structlog.testing import capture_logs
 
 from pipeline.web import nuxt_assets
 from pipeline.web.server import (
     Handler,
+    build_server,
     nuxt_content_security_policy,
     nuxt_inline_script_hashes,
 )
+
+
+def test_admin_override_preserves_public_bytes_and_disabled_gate(settings, tmp_path):
+    _build(tmp_path)
+    settings.nuxt_dist_dir = tmp_path
+    settings.serve_nuxt = False
+    settings.admin_ui_variant = 'legacy'
+    server = build_server(settings, host='127.0.0.1', port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{server.server_address[1]}') as client:
+            public_before = client.get('/')
+            legacy_before = client.get('/admin')
+            settings.admin_ui_variant = 'nuxt'
+            admin = client.get('/admin')
+            assert admin.status_code == 200 and b'admin spa' in admin.content
+            assert "default-src 'self'" in admin.headers['content-security-policy']
+            assert client.get('/').content == public_before.content
+            assert client.get('/admin/_nuxt/missing.js').status_code == 404
+            settings.admin_ui_variant = 'legacy'
+            assert client.get('/admin').content == legacy_before.content
+            settings.admin_ui_variant = 'nuxt'
+            settings.admin_ui_enabled = False
+            for path in ['/admin', '/admin/_nuxt/abc123.js', '/api/admin/health']:
+                assert client.get(path).status_code == 404
+            assert client.get('/').content == public_before.content
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.parametrize('serve_nuxt', [False, True])
+@pytest.mark.parametrize('variant', [None, 'legacy', 'nuxt'])
+@pytest.mark.parametrize('public_present,admin_present', [(False, False), (True, False), (False, True), (True, True)])
+def test_admin_variant_is_independent(tmp_path, serve_nuxt, variant, public_present, admin_present):
+    for app, present in [('public', public_present), ('admin', admin_present)]:
+        if present:
+            folder = tmp_path / app
+            folder.mkdir()
+            (folder / 'index.html').write_text(app)
+    settings = SimpleNamespace(serve_nuxt=serve_nuxt, admin_ui_variant=variant, nuxt_dist_dir=tmp_path)
+    assets = nuxt_assets.for_settings(settings)
+    public = assets.resolve('/') if assets else None
+    admin = assets.resolve('/admin') if assets else None
+    assert bool(public) == (serve_nuxt and public_present)
+    assert bool(admin) == (admin_present and (variant == 'nuxt' if variant else serve_nuxt))
+    if assets:
+        assert assets.resolve('/api/admin/health') is None
+        assert assets.resolve('/admin/_nuxt/missing.js') is None
+
+
+def test_missing_admin_build_warns_once_and_retains_public(tmp_path):
+    (tmp_path / 'public').mkdir()
+    (tmp_path / 'public' / 'index.html').write_text('public')
+    settings = SimpleNamespace(serve_nuxt=True, admin_ui_variant='nuxt', nuxt_dist_dir=tmp_path)
+    # Other suites configure stdlib logging. Assert the structured event rather
+    # than whichever stream the process's current logging setup happens to use.
+    with capture_logs() as events:
+        assets = nuxt_assets.for_settings(settings)
+        assert assets and assets.resolve('/') and assets.resolve('/admin') is None
+        assert nuxt_assets.for_settings(settings) is assets
+    warnings = [event for event in events if event['event'] == 'web.admin_build_unavailable']
+    assert len(warnings) == 1
+    assert warnings[0]['fallback'] == 'legacy'
+    assert warnings[0]['requested'] == 'nuxt'
 
 
 def _build(tmp_path):

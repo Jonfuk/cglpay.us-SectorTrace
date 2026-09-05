@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const dist = join(here, '..', 'dist')
+const dist = join(here, '..', '.output', 'public')
 const entry = join(dist, 'index.html')
 
 if (!existsSync(entry)) {

@@ -6,6 +6,7 @@ them at scaffold time.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,6 +39,9 @@ class Settings(BaseSettings):
     # `/api/**` is never intercepted by the Nuxt seam, so the API is unaffected
     # by this flag.
     serve_nuxt: bool = False
+    # Explicit admin choice is independent of the public cutover. None retains
+    # SERVE_NUXT behaviour; legacy assets stay available for instant rollback.
+    admin_ui_variant: Literal["legacy", "nuxt"] | None = None
     # Where the built Nuxt output lives in the image: a directory holding two
     # subdirectories, `public/` and `admin/`, each a Nuxt `generate` output.
     # Unset defaults (in pipeline/web/nuxt_assets.py) to the location the Docker
