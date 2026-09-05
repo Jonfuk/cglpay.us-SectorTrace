@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import json
 import re
 from dataclasses import dataclass
@@ -95,8 +96,14 @@ def parse_directory_csv(client: PipelineHTTPClient, conn, module_name: str,
                                json.dumps({"status": result.status_code}))
         return None
 
-    rows = list(csv.reader(io.StringIO(result.body.decode("utf-8", errors="replace"))))
-    header = _find_header(rows[:10], LOCATION_ID_COLUMN)
+    # Decode incrementally from the archived bytes, twice over -- once to peek
+    # the first few rows for the header, once to stream the data rows after
+    # it. Neither pass holds the whole ~18MB export as a decoded string or as
+    # a materialized list of rows; io.BytesIO(result.body) does not copy the
+    # underlying bytes, so the second wrap costs nothing beyond a new decoder.
+    peek_stream = io.TextIOWrapper(io.BytesIO(result.body), encoding="utf-8",
+                                   errors="replace", newline="")
+    header = _find_header(list(itertools.islice(csv.reader(peek_stream), 10)), LOCATION_ID_COLUMN)
     if header is None:
         db.record_review_item(
             conn, module_name, "cqc_bulk_export_unreadable", csv_url,
@@ -110,8 +117,10 @@ def parse_directory_csv(client: PipelineHTTPClient, conn, module_name: str,
         return None
     width = max(col[name] for name in required)
 
+    data_stream = io.TextIOWrapper(io.BytesIO(result.body), encoding="utf-8",
+                                   errors="replace", newline="")
     out: list[DirectoryRow] = []
-    for data_row in rows[header_idx + 1:]:
+    for data_row in itertools.islice(csv.reader(data_stream), header_idx + 1, None):
         if len(data_row) <= width:
             continue
         location_id = data_row[col[LOCATION_ID_COLUMN]]

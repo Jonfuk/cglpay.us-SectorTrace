@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import io
+
 from pipeline import cqc_bulk
 from pipeline.http import PipelineHTTPClient
 
@@ -112,6 +115,60 @@ def test_parse_directory_csv_records_review_item_when_header_missing(httpx_mock,
     assert conn.execute(
         "SELECT COUNT(*) c FROM review_queue WHERE item_type='cqc_bulk_export_unreadable'"
     ).fetchone()["c"] == 1
+
+
+def _old_parse_directory_csv(body: bytes) -> list[cqc_bulk.DirectoryRow] | None:
+    """The pre-refactor decode-then-StringIO-then-list approach, kept only as
+    a reference implementation for test_parse_directory_csv_matches_old_full_decode_approach
+    -- proof the streaming rewrite in pipeline.cqc_bulk did not change output,
+    not something to keep in sync with the real function otherwise.
+    """
+    rows = list(csv.reader(io.StringIO(body.decode("utf-8", errors="replace"))))
+    header = cqc_bulk._find_header(rows[:10], cqc_bulk.LOCATION_ID_COLUMN)
+    if header is None:
+        return None
+    header_idx, col = header
+    required = ("Name", "Provider name", cqc_bulk.LOCATION_ID_COLUMN, cqc_bulk.PROVIDER_ID_COLUMN)
+    if not all(name in col for name in required):
+        return None
+    width = max(col[name] for name in required)
+
+    out: list[cqc_bulk.DirectoryRow] = []
+    for data_row in rows[header_idx + 1:]:
+        if len(data_row) <= width:
+            continue
+        location_id = data_row[col[cqc_bulk.LOCATION_ID_COLUMN]]
+        provider_id = data_row[col[cqc_bulk.PROVIDER_ID_COLUMN]]
+        if not location_id or not provider_id:
+            continue
+        out.append(cqc_bulk.DirectoryRow(
+            location_id=location_id,
+            location_name=data_row[col["Name"]],
+            provider_id=provider_id,
+            provider_name=data_row[col["Provider name"]],
+        ))
+    return out
+
+
+def test_parse_directory_csv_matches_old_full_decode_approach(httpx_mock, settings, conn):
+    # _csv_body already puts the real header on row 4, after four preamble
+    # rows -- exercising the same "peek past the preamble, then stream" split
+    # the refactor introduces between the header search and the data pass.
+    body = _csv_body([
+        ["CHART Kirklees", "", "3 Wellington Street,Dewsbury", "WF13 1LY", "", "", "types",
+         "14/Apr/2022 - 00:00", "", "Change, Grow, Live", "Kirklees", "Yorkshire & Humberside",
+         "url", "1-10559211016", "1-125892604"],
+        ["Some Service", "", "addr", "AB1 2CD", "", "", "types", "", "", "Some Provider",
+         "Somewhere", "Region", "url", "", "1-88888"],  # no location id: skipped either way
+        ["Other Service", "", "addr2", "CD3 4EF", "", "", "types", "", "", "Other Provider",
+         "Elsewhere", "Region", "url2", "1-22222", "1-99999"],
+    ])
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(url=CSV_URL, content=body)
+    with _client(settings, conn) as client:
+        rows = cqc_bulk.parse_directory_csv(client, conn, "m05_cqc", CSV_URL)
+    assert rows == _old_parse_directory_csv(body)
+    assert len(rows) == 2  # sanity: the no-location-id row was actually skipped
 
 
 def test_parse_directory_csv_skips_rows_with_no_location_or_provider_id(httpx_mock, settings, conn):
