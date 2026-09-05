@@ -492,9 +492,16 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
             if isinstance(row_dimensions, dict):
                 for key, value in row_dimensions.items():
                     key_text = str(key).strip().lower().replace("_", " ")
+                    is_area_key = (
+                        key_text in {"area", "area name", "areaname", "local authority"}
+                        or key_text.endswith(".area")
+                        or key_text.endswith(".area name")
+                        or key_text.endswith(".areaname")
+                        or key_text.endswith(".local authority")
+                    )
                     if (
                         area_name is None
-                        and key_text in {"area", "area name", "areaname", "local authority"}
+                        and is_area_key
                         and isinstance(value, str)
                         and value not in REGION_NAMES
                         and value != "England"
@@ -817,6 +824,22 @@ def _powerbi_spider_class():
                                     )
                                 except asyncio.TimeoutError:
                                     log.warning("powerbi.download_filter_timeout")
+                            elif label == "Adults in treatment":
+                                # The visual query can return the authority
+                                # dictionary after a region is selected, but
+                                # traversing both cohorts and every region
+                                # starves the complete Download-data capture.
+                                try:
+                                    await asyncio.wait_for(
+                                        self._visit_area_filters(
+                                            page, report_frame, label
+                                        ),
+                                        timeout=60.0,
+                                    )
+                                except asyncio.TimeoutError:
+                                    log.warning(
+                                        "powerbi.area_filter_timeout", report_page=label
+                                    )
                             break
                 except Exception:
                     # Pages differ between cohorts and report revisions; an
@@ -885,7 +908,11 @@ def _powerbi_spider_class():
             combos = await self._area_combos(report_frame)
             for label, combo in combos:
                 options = await self._filter_options(report_frame, combo, label)
-                options = [value for value in options if value not in {"Select all", "All"}]
+                options = [
+                    value
+                    for value in options
+                    if value in REGION_SELECTIONS
+                ]
                 if not options:
                     continue
                 # Keep smoke runs useful: the same limit that bounds the
