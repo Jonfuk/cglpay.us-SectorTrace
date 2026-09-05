@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from pipeline import db
+from pipeline import db, quarantine
 from pipeline.config import Settings, get_settings
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
 
@@ -372,6 +372,15 @@ def reject(conn: sqlite3.Connection, kind: str, urls: list[str],
         f"UPDATE {spec['candidate_table']} SET rejected = 1, verified = 0 "
         f"WHERE {spec['candidate_url_column']} IN ({marks}) AND rejected = 0",
         urls)
+    # Queryable the same way parse failures and archive mismatches are —
+    # "what got rejected and why" without scraping the candidate tables'
+    # `rejected` flag, which carries no reason.
+    for url in urls:
+        quarantine.quarantine(
+            conn, kind="rejected_candidate", module=spec["source_system"],
+            item_identity=url, failure_class="human_rejection",
+            reason=note or "rejected without a stated reason",
+            payload={"rejected_by": rejected_by.strip()})
     conn.commit()
     log.info("promote.rejected", kind=kind, count=cursor.rowcount,
               by=rejected_by, note=note)

@@ -25,7 +25,7 @@ from typing import Iterator
 
 import structlog
 
-from pipeline import db
+from pipeline import collection, db
 from pipeline.registry import MODULE_REGISTRY, ModuleContext
 
 log = structlog.get_logger()
@@ -80,7 +80,8 @@ def audit_counts(conn, module: str) -> dict[str, int]:
 
 
 def execute_module(name: str, fn, settings, since, dry_run, limit,
-                    observer: RunObserver, source: str = "all") -> dict:
+                    observer: RunObserver, source: str = "all",
+                    ledger_run_id: str | None = None) -> dict:
     """Run one module on its own connection, and report what it did.
 
     A connection per module rather than one shared across the run. That is
@@ -91,6 +92,14 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
 
     Never raises. The outcome, including a failure, comes back in the summary
     so one module cannot take the run down with it.
+
+    Records one `collection_attempts` row for the module's whole run
+    (module-run granularity — a module that itself walks many
+    pages/authorities may open finer-grained attempts of its own; see
+    `pipeline/collection.py`). Committed independently of the module's own
+    writes, so the attempt is durable even when the module fails and its
+    writes roll back — the point of the record is that the attempt happened,
+    not what it found.
     """
     started = time.perf_counter()
     with observer.module_progress(name) as reporter:
@@ -119,14 +128,27 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
             log.info("module.starting", module=name, dry_run=dry_run,
                       since=str(since) if since else None, limit=limit)
             before = audit_counts(conn, name)
-            changes_before = conn.total_changes
             ctx = ModuleContext(conn=conn, settings=settings, since=since,
                                  dry_run=dry_run, limit=limit, source=source,
                                  progress=reporter)
+            attempt_id = collection.start_attempt(
+                conn, module=name, run_id=ledger_run_id, source_system=name,
+                scope="module_run")
+            conn.commit()
+            # Measured after the attempt row's own write, and after the
+            # commit that makes it durable independent of the module's
+            # outcome -- otherwise the bookkeeping insert would count itself
+            # as part of what the module wrote.
+            changes_before = conn.total_changes
             try:
                 fn(ctx)
             except Exception as exc:
                 conn.rollback()
+                collection.finish_attempt(
+                    conn, attempt_id, status="failed",
+                    failure_class=type(exc).__name__, coverage_state="failed",
+                    detail={"dry_run": dry_run})
+                conn.commit()
                 log.info("module.finished", module=name, status="failed",
                           dry_run=dry_run, error=f"{type(exc).__name__}: {exc}")
                 return {"module": name, "status": "failed", "dry_run": dry_run,
@@ -151,6 +173,12 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
             log.info("module.finished", **{k: v for k, v in row.items()
                                             if k != "elapsed"},
                       wrote=not dry_run)
+            collection.finish_attempt(
+                conn, attempt_id, status="ok" if row["rows"] else "empty",
+                result_count=row["rows"],
+                coverage_state="covered" if row["rows"] else "no_results",
+                detail={"dry_run": dry_run})
+            conn.commit()
             return row
         finally:
             conn.close()
@@ -192,7 +220,7 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
             for name in wave:
                 row = execute_module(
                     name, MODULE_REGISTRY[name], settings, since, dry_run, limit, observer,
-                    source=source)
+                    source=source, ledger_run_id=ledger_run_id)
                 summary.append(row)
                 observer.module_finished(row)
             continue
@@ -200,7 +228,8 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
         observer.wave_starting(list(wave), width)
         with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
             futures = [pool.submit(execute_module, name, MODULE_REGISTRY[name],
-                                    settings, since, dry_run, limit, observer, source=source)
+                                    settings, since, dry_run, limit, observer, source=source,
+                                    ledger_run_id=ledger_run_id)
                         for name in wave]
             # Collected in submission order, so the summary reads the same way
             # twice regardless of which API answered first.
