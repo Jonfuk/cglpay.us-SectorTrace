@@ -49,6 +49,7 @@ REPORT_PAGES = (
     "Interventions",
     "Outcomes of treatment received",
     "Public access data",
+    "Download data",
 )
 REGION_NAMES = {
     "England",
@@ -62,6 +63,17 @@ REGION_NAMES = {
     "West Midlands",
     "Yorkshire & the Humber",
 }
+REGION_SELECTIONS = (
+    "East Midlands",
+    "East of England",
+    "London",
+    "North East",
+    "North West",
+    "South East",
+    "South West",
+    "West Midlands",
+    "Yorkshire & the Humber",
+)
 
 
 @dataclass(frozen=True)
@@ -403,26 +415,49 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
             dimensions = json.loads(row["dimensions_json"])
             if filter_context:
                 dimensions["filter_context"] = filter_context
+            row_dimensions = dimensions.get("dimensions", {})
+            area_name = filter_context.get("authority")
+            ons_code = filter_context.get("ons_code")
+            if isinstance(row_dimensions, dict):
+                for key, value in row_dimensions.items():
+                    key_text = str(key).strip().lower().replace("_", " ")
+                    if (
+                        area_name is None
+                        and key_text in {"area", "area name", "areaname", "local authority"}
+                        and isinstance(value, str)
+                        and value not in REGION_NAMES
+                        and value != "England"
+                    ):
+                        area_name = value
+                    if (
+                        ons_code is None
+                        and "code" in key_text
+                        and isinstance(value, str)
+                        and re.fullmatch(r"E\d{8}", value)
+                    ):
+                        ons_code = value
             rows.append(
                 {
                     **row,
                     "dashboard_key": dashboard_key,
                     "payload_sha256": capture.payload_sha256,
-                    "area_name_raw": filter_context.get("authority"),
-                    "ons_code": filter_context.get("ons_code"),
+                    "area_name_raw": area_name,
+                    "ons_code": ons_code,
                     "dimensions_json": json.dumps(dimensions, sort_keys=True, default=str),
                     **provenance,
                 }
             )
-        db.upsert_many(
-            ctx.conn,
-            "ndtms_powerbi_observations",
-            rows,
-            natural_key=["dashboard_key", "payload_sha256", "row_index"],
-        )
-        written += len(rows)
-        if not ctx.dry_run:
-            ctx.conn.commit()
+        for offset in range(0, len(rows), 5000):
+            batch = rows[offset : offset + 5000]
+            db.upsert_many(
+                ctx.conn,
+                "ndtms_powerbi_observations",
+                batch,
+                natural_key=["dashboard_key", "payload_sha256", "row_index"],
+            )
+            written += len(batch)
+            if not ctx.dry_run:
+                ctx.conn.commit()
     return written
 
 
@@ -703,6 +738,14 @@ def _powerbi_spider_class():
                                     log.warning(
                                         "powerbi.area_filter_timeout", report_page=label
                                     )
+                            elif label == "Download data":
+                                try:
+                                    await asyncio.wait_for(
+                                        self._visit_download_regions(page, report_frame),
+                                        timeout=30.0,
+                                    )
+                                except asyncio.TimeoutError:
+                                    log.warning("powerbi.download_filter_timeout")
                             break
                 except Exception:
                     # Pages differ between cohorts and report revisions; an
@@ -818,6 +861,40 @@ def _powerbi_spider_class():
                                 "region": area,
                                 "authority": authority,
                             }
+
+        async def _visit_download_regions(self, page, report_frame):
+            """Select each region on Download data to expose its LA rows."""
+            combo = report_frame.get_by_role(
+                "combobox", name="Geographic area(s)", exact=True
+            )
+            if not await combo.count():
+                return
+            # The Download data visual finishes binding after the page tab is
+            # visible; selecting it before the table is ready leaves the
+            # virtualised popup without any option nodes.
+            await asyncio.sleep(4.0)
+            # Power BI keeps a multi-select popup open after an option click.
+            # Using the option locator directly is materially more reliable
+            # than re-discovering its virtualised listbox on every selection.
+            await combo.click(timeout=3000)
+            england = report_frame.get_by_role(
+                "option", name="England", exact=True
+            )
+            if await england.count():
+                await england.click(timeout=3000)
+            previous = None
+            for region in REGION_SELECTIONS:
+                if previous:
+                    old = report_frame.get_by_role("option", name=previous, exact=True)
+                    if await old.count():
+                        await old.click(timeout=3000)
+                option = report_frame.get_by_role("option", name=region, exact=True)
+                if not await option.count():
+                    continue
+                page._pipeline_powerbi_filter_context = {"region": region}
+                await option.click(timeout=3000)
+                await asyncio.sleep(1.0)
+                previous = region
 
         async def on_failure(self, failure):
             request = failure.request
