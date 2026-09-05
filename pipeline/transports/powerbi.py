@@ -811,7 +811,11 @@ def _powerbi_spider_class():
                                 try:
                                     await asyncio.wait_for(
                                         self._visit_area_filters(page, report_frame, label),
-                                        timeout=20.0,
+                                        # The authority combo is populated by a
+                                        # second Power BI query after the region
+                                        # click; the former short bound expired
+                                        # before that cascade became visible.
+                                        timeout=120.0,
                                     )
                                 except asyncio.TimeoutError:
                                     log.warning(
@@ -821,7 +825,7 @@ def _powerbi_spider_class():
                                 try:
                                     await asyncio.wait_for(
                                         self._visit_download_regions(page, report_frame),
-                                        timeout=30.0,
+                                        timeout=75.0,
                                     )
                                 except asyncio.TimeoutError:
                                     log.warning("powerbi.download_filter_timeout")
@@ -951,7 +955,7 @@ def _powerbi_spider_class():
             # The Download data visual finishes binding after the page tab is
             # visible; selecting it before the table is ready leaves the
             # virtualised popup without any option nodes.
-            await asyncio.sleep(4.0)
+            await asyncio.sleep(6.0)
             # Power BI keeps a multi-select popup open after an option click.
             # Using the option locator directly is materially more reliable
             # than re-discovering its virtualised listbox on every selection.
