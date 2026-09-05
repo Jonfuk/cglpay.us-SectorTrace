@@ -97,36 +97,112 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
         raise ValueError(f"invalid Power BI JSON: {exc}") from exc
 
     rows: list[dict[str, Any]] = []
+    value_dicts: dict[str, list[Any]] = {}
+    descriptor_names: dict[str, str] = {}
 
-    def walk(value: Any, path: tuple[str, ...] = ()) -> None:
+    def collect_metadata(value: Any) -> None:
+        if isinstance(value, dict):
+            dictionaries = value.get("ValueDicts")
+            if isinstance(dictionaries, dict):
+                for name, values in dictionaries.items():
+                    if isinstance(values, list):
+                        value_dicts[str(name)] = values
+            descriptor = value.get("descriptor")
+            if isinstance(descriptor, dict):
+                for select in descriptor.get("Select", []):
+                    if isinstance(select, dict):
+                        name = select.get("Name")
+                        key = select.get("Value")
+                        if isinstance(name, str) and isinstance(key, str):
+                            descriptor_names[key] = name
+            for child in value.values():
+                collect_metadata(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_metadata(child)
+
+    collect_metadata(document)
+
+    def walk(
+        value: Any,
+        path: tuple[str, ...] = (),
+        slots: tuple[tuple[str | None, str | None], ...] = (),
+    ) -> None:
         if isinstance(value, dict):
             cells = value.get("C")
+            row_slots = slots
+            if isinstance(value.get("S"), list):
+                row_slots = tuple(
+                    (
+                        item.get("N") if isinstance(item, dict) else None,
+                        item.get("DN") if isinstance(item, dict) else None,
+                    )
+                    for item in value["S"]
+                )
             if isinstance(cells, list):
                 for column_index, cell in enumerate(cells):
                     raw = cell.get("V") if isinstance(cell, dict) else cell
                     if isinstance(cell, dict) and "D" in cell and "V" not in cell:
                         raw = cell["D"]
+                    slot_name, dictionary_name = (
+                        row_slots[column_index]
+                        if column_index < len(row_slots)
+                        else (None, None)
+                    )
+                    decoded = raw
+                    if (
+                        isinstance(raw, int)
+                        and not isinstance(raw, bool)
+                        and dictionary_name in value_dicts
+                        and 0 <= raw < len(value_dicts[dictionary_name])
+                    ):
+                        decoded = value_dicts[dictionary_name][raw]
+                    metric_raw = (
+                        cell.get("N") if isinstance(cell, dict) else None
+                    ) or descriptor_names.get(slot_name or "") or f"column_{column_index}"
+                    context = {k: v for k, v in value.items() if k != "C"}
+                    if slot_name or dictionary_name:
+                        context["decoded_dimension"] = {
+                            "descriptor": metric_raw,
+                            "dictionary": dictionary_name,
+                            "raw": raw,
+                            "value": decoded,
+                        }
                     rows.append(
                         {
                             "cell_path": ".".join(path),
                             "column_index": column_index,
-                            "metric_raw": (cell.get("N") if isinstance(cell, dict) else None)
-                            or f"column_{column_index}",
-                            "value": _number(raw),
-                            "value_text": "" if raw is None else str(raw),
-                            "dimensions_json": json.dumps(
-                                {k: v for k, v in value.items() if k != "C"},
-                                sort_keys=True,
-                                default=str,
-                            ),
+                            "metric_raw": metric_raw,
+                            "value": _number(decoded),
+                            "value_text": "" if decoded is None else str(decoded),
+                            "dimensions_json": json.dumps(context, sort_keys=True, default=str),
                         }
                     )
             for key, child in value.items():
                 if key != "C":
-                    walk(child, path + (str(key),))
+                    child_path = path + (str(key),)
+                    if re.fullmatch(r"DM\d+", str(key)) and isinstance(child, list):
+                        inherited_slots = next(
+                            (
+                                tuple(
+                                    (
+                                        item.get("N") if isinstance(item, dict) else None,
+                                        item.get("DN") if isinstance(item, dict) else None,
+                                    )
+                                    for item in child[0].get("S", [])
+                                )
+                                for item in child
+                                if isinstance(item, dict) and isinstance(item.get("S"), list)
+                            ),
+                            slots,
+                        )
+                        for index, item in enumerate(child):
+                            walk(item, child_path + (str(index),), inherited_slots)
+                    else:
+                        walk(child, child_path, row_slots)
         elif isinstance(value, list):
             for index, child in enumerate(value):
-                walk(child, path + (str(index),))
+                walk(child, path + (str(index),), slots)
 
     walk(document)
     if not rows:
