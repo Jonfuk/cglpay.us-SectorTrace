@@ -678,6 +678,10 @@ class Settings(BaseSettings):
     scrapy_playwright_max_contexts: int = 1
     scrapy_playwright_max_pages_per_context: int = 1
     scrapy_playwright_navigation_timeout_seconds: float = 30.0
+    # Power BI dashboards often finish their querydata burst after the
+    # navigation response. Keep this short and bounded; a capture is never an
+    # invitation to leave a page running indefinitely.
+    scrapy_playwright_capture_wait_seconds: float = 20.0
     # Scrapy's own MEMUSAGE extension, turned on for this transport leg
     # specifically: a browser process is the one part of this pipeline whose
     # memory a single stuck page can genuinely blow up.

@@ -37,10 +37,17 @@ from odf.text import P
 from pipeline import db
 from pipeline.http import PipelineHTTPClient
 from pipeline.registry import ModuleContext, register_module
+from pipeline.transports.powerbi import persist_powerbi
 
 log = structlog.get_logger()
 
 SOURCE_SYSTEM = "ohid_ndtms"
+POWERBI_DASHBOARDS = (
+    {"key": "viewit_adult", "cohort": "adults",
+     "url": "https://www.ndtms.net/ViewIt/Adult"},
+    {"key": "viewit_young_people", "cohort": "young_people",
+     "url": "https://www.ndtms.net/ViewIt/YoungPeople"},
+)
 GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json"
 GOVUK_CONTENT_BASE = "https://www.gov.uk/api/content"
 
@@ -559,4 +566,9 @@ def run(ctx: ModuleContext) -> None:
             if not ctx.dry_run:
                 conn.commit()
 
-    log.info("ndtms.run_complete", publications=publications_done, la_rows=stats_written)
+    # ViewIt is a separate Power BI publication family. Its querydata rows
+    # remain in dedicated tables because report versions and dimensions do not
+    # share the annual ODS contract.
+    powerbi_rows = persist_powerbi(ctx, POWERBI_DASHBOARDS)
+    log.info("ndtms.run_complete", publications=publications_done,
+             la_rows=stats_written, powerbi_rows=powerbi_rows)

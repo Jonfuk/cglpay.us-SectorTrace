@@ -55,12 +55,17 @@ from pipeline.modules.m07_ndtms import (
     match_area_name,
 )
 from pipeline.registry import ModuleContext, register_module
+from pipeline.transports.powerbi import persist_powerbi
 
 log = structlog.get_logger()
 
 SOURCE_SYSTEM = "ohid_ndtms_monthly"
 BASE_URL = "https://www.ndtms.net"
 COHORT_PATHS = {"adults": "/Monthly/Adults", "young_people": "/Monthly/YoungPeople"}
+POWERBI_DASHBOARDS = (
+    {"key": "monthly_provisional", "cohort": "all",
+     "url": "https://www.ndtms.net/Monthly/MonthlyProvisionalStatistics"},
+)
 
 # The nine English NUTS1 regions as NDTMS's own "PHE Centre" filter presents
 # them -- fixed ONS region codes, not scraped, because they are a stable
@@ -390,4 +395,6 @@ def run(ctx: ModuleContext) -> None:
                 if not ctx.dry_run:
                     conn.commit()
 
-    log.info("ndtms_monthly.run_complete", stats_written=stats_written)
+    powerbi_rows = persist_powerbi(ctx, POWERBI_DASHBOARDS)
+    log.info("ndtms_monthly.run_complete", stats_written=stats_written,
+             powerbi_rows=powerbi_rows)

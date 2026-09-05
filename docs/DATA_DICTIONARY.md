@@ -948,6 +948,51 @@ Constraint 5: idempotent and resumable. Each module persists a cursor (e.g. last
 | `cursor_value` | TEXT | nullable | exportable |
 | `updated_at` | TEXT | NOT NULL | exportable |
 
+## `ndtms_powerbi_observations`
+
+Conservative long-form cells extracted from public NDTMS Power BI `querydata`
+responses. The exact response is retained in `ndtms_powerbi_payloads`; cell
+positions are not semantic measures unless the report supplies a label.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `dashboard_key` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+| `row_index` | INTEGER | NOT NULL | exportable |
+| `cell_path` | TEXT | NOT NULL | exportable |
+| `column_index` | INTEGER | NOT NULL | exportable |
+| `metric_raw` | TEXT | NOT NULL | exportable |
+| `value` | REAL | nullable | exportable |
+| `value_text` | TEXT | NOT NULL | exportable |
+| `dimensions_json` | TEXT | NOT NULL | exportable |
+| `area_name_raw` | TEXT | nullable | exportable |
+| `ons_code` | TEXT | nullable | exportable |
+| `time_period_raw` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+
+## `ndtms_powerbi_payloads`
+
+One archived exact response body per captured public Power BI querydata payload.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `dashboard_key` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+| `cohort` | TEXT | NOT NULL | exportable |
+| `dashboard_url` | TEXT | NOT NULL | exportable |
+| `response_url` | TEXT | NOT NULL | exportable |
+| `request_body_sha256` | TEXT | NOT NULL | exportable |
+| `sequence` | INTEGER | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `content_type` | TEXT | nullable | exportable |
+| `archived_path` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+
 ## `ndtms_la_statistics`
 
 *table* — 17,231 rows.

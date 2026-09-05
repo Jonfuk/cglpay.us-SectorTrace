@@ -753,6 +753,15 @@ anyone using it.
   `value` NULL. They do not mean zero.
 - **Adults and young people are different cohorts**, reported separately and
   never added together.
+- **Power BI observations are a separate publication layer.** The dashboard
+  can be revised independently of the annual ODS and legacy monthly reports;
+  its exact response payload is archived and identified by hash. Do not merge
+  or difference Power BI rows against either existing table without a named
+  review decision.
+- **Unlabelled Power BI cell positions are not semantic measures.** The raw
+  response context, metric label when supplied, and column index are retained;
+  a changed report descriptor must not be treated as though a column position
+  still means the same thing.
 - A response whose `<h1>` does not name the area that was requested is
   discarded, not stored: the form re-renders the England-wide page rather than
   erroring when its anti-forgery token is rejected, so a missing area is a

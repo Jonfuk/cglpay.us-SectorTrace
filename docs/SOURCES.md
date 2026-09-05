@@ -277,6 +277,14 @@ of PSCs is then a redaction, not a finding.
 | Key | None |
 | Rate limit | Default |
 
+Power BI pages are collected separately from the published ODS release:
+`https://www.ndtms.net/ViewIt/Adult`,
+`https://www.ndtms.net/ViewIt/YoungPeople`, and
+`https://www.ndtms.net/Monthly/MonthlyProvisionalStatistics`. The browser leg
+archives successful `querydata`/`public/query` response bytes and stores conservative
+long-form observations with their payload hashes; it does not scrape canvas
+text or replay private APIs.
+
 ## Module 8 — Prevention of Future Deaths reports
 
 | | |
@@ -504,6 +512,10 @@ invisible here.
 | Notes | Cross-checks what `m05_cqc`'s per-location API walk produced against CQC's own bulk snapshot, and flags a gap to `review_queue` (`cqc_directory_location_missing`, `cqc_directory_rating_stale`) for a person to act on. The one exception, confirmed for real (location `1-12790083928`, "Aspire Havering"): when the API returns no rating for a location at all — not older, nothing — re-running `m05_cqc` does not fix that, so this module backfills `cqc_locations.bulk_overall_rating`/`bulk_overall_rating_date` (migration 0055, kept separate from the API's own `overall_rating`/`overall_rating_date`) and, since the same silence extends to `cqc_location_reports`, scrapes the location's own page for its published report link and date (`_extract_report_info` — plain server-rendered HTML, no JavaScript execution needed, confirmed against two differently-shaped real pages). Both are cleared once the API supplies its own data, rather than left sitting beside a real value with nothing marking them stale. The ratings ODS is read by hand (stdlib `zipfile` + `xml.etree.iterparse`) rather than with odfpy (Module 13's ODS library): its `content.xml` runs past a gigabyte uncompressed, and odfpy's full-DOM load was observed still running past a gigabyte of resident memory without finishing. The streamed reader completes a pass over ~320k rows in about a minute with flat memory use — see the module docstring for the row-alignment trap ODS's repeated-cell compression sets for a naive version of this |
 
 ## Module 27 — NDTMS monthly provisional statistics
+
+The new monthly provisional Power BI page is collected separately through
+public `querydata`/`public/query` responses. The legacy HTML flow below remains the canonical
+`ndtms_monthly_statistics` table.
 
 | | |
 | --- | --- |
