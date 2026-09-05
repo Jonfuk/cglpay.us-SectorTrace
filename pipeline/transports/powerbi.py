@@ -269,6 +269,31 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
                         }
                     )
             if isinstance(cells, list):
+                decoded_cells: list[Any] = []
+                for column_index, cell in enumerate(cells):
+                    raw = cell.get("V") if isinstance(cell, dict) else cell
+                    if isinstance(cell, dict) and "D" in cell and "V" not in cell:
+                        raw = cell["D"]
+                    _, dictionary_name = (
+                        row_slots[column_index]
+                        if column_index < len(row_slots)
+                        else (None, None)
+                    )
+                    decoded = raw
+                    if (
+                        isinstance(raw, int)
+                        and not isinstance(raw, bool)
+                        and dictionary_name in value_dicts
+                        and 0 <= raw < len(value_dicts[dictionary_name])
+                    ):
+                        decoded = value_dicts[dictionary_name][raw]
+                    decoded_cells.append(decoded)
+                row_dimensions = {
+                    descriptor_names.get(slot_name, slot_name): decoded_cells[index]
+                    for index, (slot_name, _) in enumerate(row_slots)
+                    if slot_name and slot_name.startswith("G")
+                    and index < len(decoded_cells)
+                }
                 for column_index, cell in enumerate(cells):
                     if "X" in value or contains_key(value.get("PH"), "X"):
                         continue
@@ -292,6 +317,8 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
                         cell.get("N") if isinstance(cell, dict) else None
                     ) or descriptor_names.get(slot_name or "") or f"column_{column_index}"
                     context = {k: v for k, v in value.items() if k != "C"}
+                    if row_dimensions:
+                        context["dimensions"] = row_dimensions
                     if slot_name or dictionary_name:
                         context["decoded_dimension"] = {
                             "descriptor": metric_raw,
@@ -327,8 +354,50 @@ def parse_querydata(body: bytes | str) -> list[dict[str, Any]]:
                             ),
                             slots,
                         )
+                        previous_cells: list[Any] | None = None
                         for index, item in enumerate(child):
-                            walk(item, child_path + (str(index),), inherited_slots, row_series)
+                            # DSR saves bandwidth by omitting cells repeated from
+                            # the preceding row.  The R bitmask addresses the
+                            # descriptor columns, while C contains only new
+                            # values.  Expanding here is what makes an area
+                            # dimension survive into each metric observation.
+                            expanded = item
+                            if (
+                                isinstance(item, dict)
+                                and isinstance(item.get("C"), list)
+                                and isinstance(item.get("R"), int)
+                                and inherited_slots
+                            ):
+                                compressed = item["C"]
+                                repeat_mask = item["R"]
+                                full: list[Any] = []
+                                compressed_index = 0
+                                for column_index in range(len(inherited_slots)):
+                                    if repeat_mask & (1 << column_index):
+                                        full.append(
+                                            previous_cells[column_index]
+                                            if previous_cells is not None
+                                            and column_index < len(previous_cells)
+                                            else None
+                                        )
+                                    else:
+                                        full.append(
+                                            compressed[compressed_index]
+                                            if compressed_index < len(compressed)
+                                            else None
+                                        )
+                                        compressed_index += 1
+                                expanded = dict(item)
+                                expanded["C"] = full
+                                expanded.pop("R", None)
+                            if isinstance(expanded, dict) and isinstance(expanded.get("C"), list):
+                                previous_cells = expanded["C"]
+                            walk(
+                                expanded,
+                                child_path + (str(index),),
+                                inherited_slots,
+                                row_series,
+                            )
                     else:
                         walk(child, child_path, row_slots, row_series)
         elif isinstance(value, list):
@@ -576,6 +645,7 @@ def _run_capture_crawl(queue, urls: list[str], settings: Settings) -> None:
             result_queue=queue,
             source_system="ohid_ndtms_powerbi",
             wait_seconds=settings.scrapy_playwright_capture_wait_seconds,
+            download_region_limit=settings.scrapy_playwright_download_region_limit,
         )
         process.start()
     except Exception as exc:  # pragma: no cover - subprocess boundary
@@ -601,13 +671,22 @@ def _powerbi_spider_class():
     class _PowerBISpider(scrapy.Spider):
         name = "pipeline_powerbi_capture"
 
-        def __init__(self, urls, result_queue, source_system, wait_seconds=5.0, **kwargs):
+        def __init__(
+            self,
+            urls,
+            result_queue,
+            source_system,
+            wait_seconds=5.0,
+            download_region_limit=9,
+            **kwargs,
+        ):
             super().__init__(**kwargs)
             self.urls = list(urls)
             self.result_queue = result_queue
             self.source_system = source_system
             self.module = "ndtms"
             self.wait_seconds = wait_seconds
+            self.download_region_limit = max(1, int(download_region_limit))
 
         def _request(self, url):
             return scrapy.Request(
@@ -883,7 +962,7 @@ def _powerbi_spider_class():
             if await england.count():
                 await england.click(timeout=3000)
             previous = None
-            for region in REGION_SELECTIONS:
+            for region in REGION_SELECTIONS[: self.download_region_limit]:
                 if previous:
                     old = report_frame.get_by_role("option", name=previous, exact=True)
                     if await old.count():

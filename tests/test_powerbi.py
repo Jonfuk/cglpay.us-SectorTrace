@@ -108,6 +108,50 @@ def test_parse_querydata_resolves_value_dictionary_labels():
     assert rows[1]["value_text"] == "People in treatment"
 
 
+def test_parse_querydata_expands_repeated_dsr_rows():
+    body = {
+        "results": [
+            {
+                "result": {
+                    "data": {
+                        "descriptor": {
+                            "Select": [
+                                {"Value": "G0", "Name": "Reporting period"},
+                                {"Value": "G1", "Name": "Area"},
+                                {"Value": "M0", "Name": "People in treatment"},
+                            ]
+                        },
+                        "dsr": {
+                            "DS": [
+                                {
+                                    "PH": [
+                                        {
+                                            "DM0": [
+                                                {
+                                                    "S": [
+                                                        {"N": "G0", "DN": "D0"},
+                                                        {"N": "G1", "DN": "D1"},
+                                                        {"N": "M0"},
+                                                    ],
+                                                    "C": [2024, 0, 10],
+                                                },
+                                                {"R": 3, "C": [12]},
+                                            ]
+                                        }
+                                    ],
+                                    "ValueDicts": {"D0": [2024], "D1": ["Derby"]},
+                                }
+                            ]
+                        },
+                    }
+                }
+            }
+        ]
+    }
+    rows = parse_querydata(json.dumps(body))
+    assert [row["value_text"] for row in rows[3:]] == ["2024", "Derby", "12"]
+
+
 def test_parse_querydata_extracts_visual_series_values():
     body = {
         "results": [
