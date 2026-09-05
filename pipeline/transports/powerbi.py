@@ -50,6 +50,18 @@ REPORT_PAGES = (
     "Outcomes of treatment received",
     "Public access data",
 )
+REGION_NAMES = {
+    "England",
+    "East Midlands",
+    "East of England",
+    "London",
+    "North East",
+    "North West",
+    "South East",
+    "South West",
+    "West Midlands",
+    "Yorkshire & the Humber",
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +76,7 @@ class PowerBICapture:
     retrieved_at: datetime
     sequence: int
     error: str | None = None
+    filter_context: dict[str, str] | None = None
 
     @property
     def payload_sha256(self) -> str:
@@ -385,15 +398,19 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
             natural_key=["dashboard_key", "payload_sha256"],
         )
         rows = []
+        filter_context = capture.filter_context or {}
         for row in observations:
+            dimensions = json.loads(row["dimensions_json"])
+            if filter_context:
+                dimensions["filter_context"] = filter_context
             rows.append(
                 {
                     **row,
                     "dashboard_key": dashboard_key,
                     "payload_sha256": capture.payload_sha256,
-                    "area_name_raw": None,
-                    "ons_code": None,
-                    "time_period_raw": None,
+                    "area_name_raw": filter_context.get("authority"),
+                    "ons_code": filter_context.get("ons_code"),
+                    "dimensions_json": json.dumps(dimensions, sort_keys=True, default=str),
                     **provenance,
                 }
             )
@@ -606,6 +623,9 @@ def _powerbi_spider_class():
                             request_body_sha256=_request_body_hash(network_response.request),
                             retrieved_at=datetime.now(timezone.utc),
                             sequence=sequence,
+                            filter_context=dict(
+                                getattr(page, "_pipeline_powerbi_filter_context", {})
+                            ),
                         )
                     )
                 except Exception as exc:
@@ -621,6 +641,9 @@ def _powerbi_spider_class():
                             retrieved_at=datetime.now(timezone.utc),
                             sequence=sequence,
                             error=f"{type(exc).__name__}: {exc}",
+                            filter_context=dict(
+                                getattr(page, "_pipeline_powerbi_filter_context", {})
+                            ),
                         )
                     )
 
@@ -632,6 +655,7 @@ def _powerbi_spider_class():
             # the page avoids a process-global registry and its cross-tab mixups.
             page._pipeline_powerbi_captures = captures
             page._pipeline_powerbi_pending = pending
+            page._pipeline_powerbi_filter_context = {}
 
         async def parse(self, response):
             page = response.meta.get("playwright_page")
@@ -669,12 +693,131 @@ def _powerbi_spider_class():
                         if await button.is_visible():
                             await button.click(timeout=3000)
                             await asyncio.sleep(1.0)
+                            if label in {"Adults in treatment", "Young people in treatment"}:
+                                try:
+                                    await asyncio.wait_for(
+                                        self._visit_area_filters(page, report_frame, label),
+                                        timeout=20.0,
+                                    )
+                                except asyncio.TimeoutError:
+                                    log.warning(
+                                        "powerbi.area_filter_timeout", report_page=label
+                                    )
                             break
                 except Exception:
                     # Pages differ between cohorts and report revisions; an
                     # absent or temporarily stale page control is not a crawl
                     # failure when other visual requests were captured.
                     continue
+
+        async def _area_combos(self, report_frame):
+            combos = []
+            for label in (
+                "AreaName",
+                "Area Name Multi Select",
+                "Authority",
+                "AuthorityName",
+                "Local Authority",
+                "LocalAuthority",
+            ):
+                combo = report_frame.get_by_role("combobox", name=label, exact=True)
+                if await combo.count():
+                    combos.append((label, combo))
+            return combos
+
+        async def _filter_options(self, report_frame, combo, label):
+            await combo.click(timeout=3000)
+            await asyncio.sleep(0.2)
+            listboxes = await report_frame.locator('[role="listbox"]').all()
+            target = None
+            for listbox in listboxes:
+                aria_label = await listbox.get_attribute("aria-label")
+                if aria_label and aria_label.strip().lower() == label.lower():
+                    target = listbox
+                    break
+            target = target or (listboxes[-1] if listboxes else None)
+            if target is None:
+                return []
+            values = await target.get_by_role("option").all_text_contents()
+            await combo.press("Escape")
+            return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+        async def _select_filter_value(self, report_frame, label, value):
+            listboxes = await report_frame.locator('[role="listbox"]').all()
+            target = None
+            for listbox in listboxes:
+                aria_label = await listbox.get_attribute("aria-label")
+                if aria_label and aria_label.strip().lower() == label.lower():
+                    target = listbox
+                    break
+            if target is None:
+                return False
+            option = target.get_by_role("option", name=value, exact=True)
+            if not await option.count():
+                return False
+            await option.click(timeout=3000)
+            return True
+
+        async def _visit_area_filters(self, page, report_frame, report_label):
+            """Capture filter-driven queries, including nested authority lists.
+
+            The public report currently exposes regions on some pages and a
+            local-authority list on others.  We discover the list at runtime
+            instead of hard-coding council names, because Power BI can change
+            which visual owns the filter between report revisions.
+            """
+            if report_label not in {"Adults in treatment", "Young people in treatment"}:
+                return
+            combos = await self._area_combos(report_frame)
+            for label, combo in combos:
+                options = await self._filter_options(report_frame, combo, label)
+                options = [value for value in options if value not in {"Select all", "All"}]
+                if not options:
+                    continue
+                for area in options:
+                    try:
+                        await combo.click(timeout=3000)
+                    except Exception:
+                        continue
+                    context = {"area_name": area}
+                    if area in REGION_NAMES:
+                        context["region"] = area
+                    else:
+                        context["authority"] = area
+                    page._pipeline_powerbi_filter_context = context
+                    if not await self._select_filter_value(report_frame, label, area):
+                        await combo.press("Escape")
+                        continue
+                    await asyncio.sleep(0.8)
+                    # A region selection may reveal a second authority combo.
+                    for child_label, child_combo in await self._area_combos(report_frame):
+                        if child_label.lower() == label.lower():
+                            continue
+                        child_options = await self._filter_options(
+                            report_frame, child_combo, child_label
+                        )
+                        child_options = [
+                            value for value in child_options if value not in {"Select all", "All"}
+                        ]
+                        for authority in child_options:
+                            try:
+                                await child_combo.click(timeout=3000)
+                            except Exception:
+                                continue
+                            page._pipeline_powerbi_filter_context = {
+                                "region": area,
+                                "authority": authority,
+                            }
+                            if not await self._select_filter_value(
+                                report_frame, child_label, authority
+                            ):
+                                await child_combo.press("Escape")
+                                continue
+                            await asyncio.sleep(0.8)
+                            page._pipeline_powerbi_filter_context = {
+                                "region": area,
+                                "authority": authority,
+                            }
 
         async def on_failure(self, failure):
             request = failure.request
