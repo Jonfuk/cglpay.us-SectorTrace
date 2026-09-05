@@ -900,7 +900,11 @@ def _powerbi_spider_class():
                 options = [value for value in options if value not in {"Select all", "All"}]
                 if not options:
                     continue
-                for area in options:
+                # Keep smoke runs useful: the same limit that bounds the
+                # Download-data traversal also bounds the parent region loop.
+                # Otherwise a single requested region can be starved by the
+                # nine-region cascade before its authority list is visited.
+                for area in options[: self.download_region_limit]:
                     try:
                         await combo.click(timeout=3000)
                     except Exception:
