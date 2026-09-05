@@ -312,7 +312,8 @@ still uses HTTPX and no live source is called by CI. The watched Nottingham
 sample passed fetch/provenance checks. Its body-retaining comparison mode
 peaked at approximately 766 MB; the explicit low-memory fetch/archive mode
 repeated the same sample at approximately 123 MB. Production cutover still
-needs a parser/finalisation design that preserves that low-memory property.
+uses HTTPX, and m34 now applies the archive-backed compaction and pending-run
+finalisation design needed to preserve that low-memory property.
 
 - Reuse existing URL discovery and parsers where practical.
 - Yield `FetchItem`, candidate, review and parse-failure items.
@@ -496,8 +497,8 @@ Later work should be split into separate reviewable tasks:
    this pilot: adapter-only;
 3. port one crawl-heavy module, with parity fixtures — m34 pilot complete;
 4. run the watched live m34 pilot and record coverage, timing, memory and archive
-   fidelity — complete for the low-memory fetch-only mode; production parser
-   integration remains open;
+   fidelity — complete for the low-memory fetch-only mode; archive-backed
+   parser/finalisation is implemented on the HTTPX path;
 5. add `scrapy-playwright` only for demonstrated browser-dependent routes;
 6. port additional modules only after the pilot passes its acceptance gates.
 

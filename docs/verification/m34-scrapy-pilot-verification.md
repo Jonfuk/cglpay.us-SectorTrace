@@ -89,5 +89,22 @@ This repeat passes the watched fetch, ordering, provenance and memory gates
 for the fetch-only adapter. The default parity mode remains intentionally
 body-retaining for parser comparisons and measured 766 MB on the first run;
 that mode must not be used as an unbounded production crawl. A production
-cutover still requires an explicit parser/finalisation design that preserves
-the low-memory property, followed by owner review.
+cutover still requires owner review, but the production HTTPX m34 path now has
+an archive-backed parser/finalisation design that preserves the low-memory
+property: worker results retain provenance and archive references, and the
+main thread reloads and hash-checks one document immediately before parsing.
+
+## Finalisation implementation and offline coverage
+
+On 2026-09-05, m34 was updated to checkpoint every scheduled ICB as
+`pending` before fan-out. Each completed result replaces that marker with its
+final crawl status; a worker exception is recorded as `failed`, while an
+interrupted process leaves unfinished ICBs visibly `pending`. Successful
+document fetches are compacted to their content-addressed archive reference
+before they leave a worker, so a large PDF is not retained in every worker
+result. The main thread rehydrates one body at a time and verifies its
+SHA-256 before passing it to the existing PDF/DOCX parsers.
+
+Offline tests cover successful finalisation, failed ICB finalisation, and an
+interrupted run with completed and pending ICBs. Combined m34 module and pilot
+result: **14 passed**. No live source is called by CI.

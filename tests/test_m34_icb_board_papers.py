@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from pipeline.modules import m28_sar_reports as m28
 from pipeline.modules import m34_icb_board_papers as m34
+from pipeline.parallel import Outcome
 from pipeline.registry import ModuleContext
 
 DIRECTORY = m34.DIRECTORY_URL
@@ -209,3 +212,60 @@ def test_run_since_skips_an_older_meeting(httpx_mock, settings, conn, monkeypatc
     urls = [r["document_url"].rsplit("/", 1)[-1] for r in conn.execute(
         "SELECT document_url FROM icb_board_paper_candidates").fetchall()]
     assert urls == ["subject-pack-25-september-2025.pdf"]
+
+
+def test_run_finalises_a_failed_icb_as_failed_not_empty(settings, conn, monkeypatch):
+    boards = [
+        {"name": "Alpha Test Integrated Care Board", "directory_url": "https://alpha.example/"},
+        {"name": "Beta Test Integrated Care Board", "directory_url": "https://beta.example/"},
+    ]
+    monkeypatch.setattr(m34, "_collect_directory", lambda *_args: boards)
+
+    def failed(units, *_args, **_kwargs):
+        for unit in units:
+            yield Outcome(unit=unit, error=RuntimeError("fixture crawl failed"))
+
+    monkeypatch.setattr(m34, "fetch_in_parallel", failed)
+
+    m34.run(_ctx(conn, settings))
+
+    rows = conn.execute(
+        "SELECT icb_name, status FROM icb_site_crawls ORDER BY icb_name").fetchall()
+    assert [(row["icb_name"], row["status"]) for row in rows] == [
+        ("Alpha Test Integrated Care Board", "failed"),
+        ("Beta Test Integrated Care Board", "failed"),
+    ]
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM review_queue WHERE item_type = 'icb_collection_failed'"
+    ).fetchone()["n"] == 2
+
+
+def test_run_leaves_unfinished_icbs_pending_after_interruption(
+        settings, conn, monkeypatch):
+    boards = [
+        {"name": "Alpha Test Integrated Care Board", "directory_url": "https://alpha.example/"},
+        {"name": "Beta Test Integrated Care Board", "directory_url": "https://beta.example/"},
+    ]
+    monkeypatch.setattr(m34, "_collect_directory", lambda *_args: boards)
+
+    def interrupted(units, *_args, **_kwargs):
+        units = list(units)
+        yield Outcome(
+            unit=units[0],
+            value=m34.IcbCrawl(
+                icb_name=units[0][0], seed_url=units[0][1],
+                from_registry=units[0][2]),
+        )
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(m34, "fetch_in_parallel", interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        m34.run(_ctx(conn, settings))
+
+    rows = conn.execute(
+        "SELECT icb_name, status FROM icb_site_crawls ORDER BY icb_name").fetchall()
+    assert [(row["icb_name"], row["status"]) for row in rows] == [
+        ("Alpha Test Integrated Care Board", "no_documents_found"),
+        ("Beta Test Integrated Care Board", "pending"),
+    ]

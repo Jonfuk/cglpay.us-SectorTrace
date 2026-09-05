@@ -41,6 +41,7 @@ notice additions; only the fetch of an already-old document is skipped.
 """
 from __future__ import annotations
 
+import hashlib
 import html as html_lib
 import json
 import re
@@ -53,7 +54,8 @@ import httpx
 import structlog
 
 from pipeline import db, providers
-from pipeline.http import PipelineHTTPClient, RobotsDisallowed
+from pipeline.archive import ArchiveError, get_archive
+from pipeline.http import FetchResult, PipelineHTTPClient, RobotsDisallowed
 from pipeline.icb_boards import (
     GOVERNANCE_VOCAB,
     MEETING_PATHS,
@@ -286,6 +288,68 @@ class IcbCrawl:
     unreachable: bool = False
 
 
+@dataclass(frozen=True)
+class ArchivedFetchResult:
+    """A successful document fetch whose bytes already live in the archive.
+
+    Workers return this small record instead of retaining every PDF/DOCX body
+    until all ICBs have finished. The main thread rehydrates one body at a
+    time immediately before parsing it. This is the adapter-only equivalent
+    of a staging fetch item: provenance remains attached, while a large pack
+    cannot multiply across worker results in memory.
+    """
+
+    url: str
+    status_code: int
+    headers: object
+    retrieved_at: datetime
+    payload_sha256: str
+    not_modified: bool
+    archived_path: object | None
+    archived_ref: str
+    final_url: str | None = None
+    body: bytes = b""
+
+    @property
+    def ok(self) -> bool:
+        return self.status_code < 400 and bool(self.payload_sha256 and self.archived_ref)
+
+    @property
+    def content_type(self) -> str | None:
+        return self.headers.get("content-type") if hasattr(self.headers, "get") else None
+
+
+def _compact_fetch_result(fetched: FetchResult) -> FetchResult | ArchivedFetchResult:
+    """Drop a successful body only after the HTTPX client has archived it."""
+    if not fetched.ok or not fetched.archived_ref:
+        return fetched
+    return ArchivedFetchResult(
+        url=fetched.url, status_code=fetched.status_code, headers=fetched.headers,
+        retrieved_at=fetched.retrieved_at, payload_sha256=fetched.payload_sha256,
+        not_modified=fetched.not_modified, archived_path=fetched.archived_path,
+        archived_ref=fetched.archived_ref, final_url=fetched.final_url,
+    )
+
+
+def _hydrate_fetch_result(settings: object,
+                          fetched: FetchResult | ArchivedFetchResult) -> FetchResult:
+    """Read one compacted body and prove it still matches its archive key."""
+    if not isinstance(fetched, ArchivedFetchResult):
+        return fetched
+    body = get_archive(settings).read(fetched.archived_ref)
+    if hashlib.sha256(body).hexdigest() != fetched.payload_sha256:
+        raise ArchiveError(
+            f"archive hash mismatch for {fetched.archived_ref!r}: "
+            f"expected {fetched.payload_sha256}")
+    return FetchResult(
+        url=fetched.url, status_code=fetched.status_code, body=body,
+        headers=fetched.headers, retrieved_at=fetched.retrieved_at,
+        payload_sha256=fetched.payload_sha256, not_modified=fetched.not_modified,
+        archived_path=fetched.archived_path, archived_ref=fetched.archived_ref,
+        final_url=fetched.final_url,
+    )
+
+
 def crawl_icb(unit: tuple[str, str, bool, str | None], client) -> IcbCrawl:
     """One ICB's entire fetch workload. Runs on a pool thread — fetch only,
     no database."""
@@ -398,7 +462,7 @@ def crawl_icb(unit: tuple[str, str, bool, str | None], client) -> IcbCrawl:
                 ("icb_doc_unavailable", doc_url,
                  {"icb": icb_name, "status": fetched.status_code}))
             continue
-        crawl.candidates.append((fetched, link_text, from_index, method))
+        crawl.candidates.append((_compact_fetch_result(fetched), link_text, from_index, method))
     return crawl
 
 
@@ -428,6 +492,43 @@ def _provenance(result) -> dict:
         "source_system": SOURCE_SYSTEM,
         "payload_sha256": result.payload_sha256,
     }
+
+
+def _pending_crawl_row(icb_name: str, seed_url: str, now: str) -> dict:
+    """The durable marker written before a crawl worker is started.
+
+    A pending row is intentionally not a result row: it says that this ICB
+    was in scope but has not reached finalisation yet. If the process stops
+    after this checkpoint, an operator sees pending work instead of mistaking
+    the absence of a result for a clean empty crawl.
+    """
+    return {
+        "icb_name": icb_name, "board_url": seed_url,
+        "pages_fetched": 0, "docs_found": 0, "docs_with_subject": 0,
+        "ceiling_reached": 0, "status": "pending", "last_crawled": now,
+        "source_url": seed_url, "retrieved_at": now, "http_status": 0,
+        "source_system": SOURCE_SYSTEM, "payload_sha256": "",
+    }
+
+
+def _mark_crawls_pending(conn, units: list[tuple[str, str, bool, str | None]]) -> None:
+    """Checkpoint all scheduled ICBs before the parallel fetch starts."""
+    now = datetime.now(timezone.utc).isoformat()
+    for icb_name, seed_url, _from_registry, _since in units:
+        existing = conn.execute(
+            "SELECT icb_name FROM icb_site_crawls WHERE icb_name = %s",
+            (icb_name,)).fetchone()
+        if existing:
+            # Preserve the last completed counts while making the current run
+            # visibly incomplete until its own finalisation overwrites them.
+            conn.execute(
+                "UPDATE icb_site_crawls SET status = 'pending', last_crawled = %s, "
+                "source_url = %s, retrieved_at = %s WHERE icb_name = %s",
+                (now, seed_url, now, icb_name))
+        else:
+            db.upsert(conn, "icb_site_crawls",
+                      _pending_crawl_row(icb_name, seed_url, now),
+                      natural_key=["icb_name"])
 
 
 def _stored_directory(conn) -> list[dict]:
@@ -566,6 +667,11 @@ def run(ctx: ModuleContext) -> None:
     if not ctx.dry_run:
         conn.commit()
 
+    if units:
+        _mark_crawls_pending(conn, units)
+        if not ctx.dry_run:
+            conn.commit()
+
     documents = subject_documents = provider_mentions = 0
     workers = worker_count(ctx.settings, ctx.limit)
     stream = fetch_in_parallel(units, crawl_icb, source_system=SOURCE_SYSTEM,
@@ -577,7 +683,8 @@ def run(ctx: ModuleContext) -> None:
         crawl_row = {
             "icb_name": icb_name, "board_url": seed_url,
             "pages_fetched": 0, "docs_found": 0, "docs_with_subject": 0,
-            "ceiling_reached": 0, "status": "unreachable", "last_crawled": now,
+            "ceiling_reached": 0,
+            "status": "failed" if not outcome.ok else "unreachable", "last_crawled": now,
             "source_url": seed_url, "retrieved_at": now, "http_status": 0,
             "source_system": SOURCE_SYSTEM, "payload_sha256": "",
         }
@@ -610,12 +717,25 @@ def run(ctx: ModuleContext) -> None:
                 continue
 
             body_text = body_source = None
-            if ext == ".pdf":
+            try:
+                parse_fetch = _hydrate_fetch_result(ctx.settings, fetched)
+            except (ArchiveError, OSError) as exc:
+                db.record_parse_failure(
+                    conn, module_name, "body_text", document_url,
+                    f"archived document could not be reloaded: {type(exc).__name__}",
+                    source_url=document_url)
+                parse_fetch = None
+
+            if parse_fetch is None:
+                pass
+            elif ext == ".pdf":
                 ctx.phase(f"reading {link_text[:60] or document_url.rsplit('/', 1)[-1]}")
-                body_text, body_source = m28._read_pdf(ctx, module_name, document_url, fetched)
+                body_text, body_source = m28._read_pdf(
+                    ctx, module_name, document_url, parse_fetch)
             elif ext == ".docx":
                 ctx.phase(f"reading {link_text[:60] or document_url.rsplit('/', 1)[-1]}")
-                body_text, body_source = m28._read_docx(conn, module_name, document_url, fetched)
+                body_text, body_source = m28._read_docx(
+                    conn, module_name, document_url, parse_fetch)
             else:
                 db.record_parse_failure(
                     conn, module_name, "body_text", document_url,
