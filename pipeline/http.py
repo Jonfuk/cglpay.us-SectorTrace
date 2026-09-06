@@ -30,7 +30,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from pipeline import db
+from pipeline import db, telemetry
 from pipeline.archive import ArchiveError, ArchiveObject, get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
@@ -69,6 +69,28 @@ def _wait_respecting_retry_after(retry_state):
             except ValueError:
                 pass
     return _fallback_wait(retry_state)
+
+
+def _record_retry(retry_state) -> None:
+    """A retry counter (performance.md:632), not a new retry mechanism --
+    tenacity's own `@retry` below still owns backoff and the attempt limit.
+    `before_sleep` fires once per retry, never on the attempt that finally
+    succeeds or the one that exhausts `stop_after_attempt`, so this counts
+    exactly the retries this pipeline's politeness rules already accepted
+    paying for. The reason (a status code family, or a transport error) is
+    the only thing worth a label here -- never the URL, which is exactly the
+    kind of value this module's docstring on `telemetry.py` rules out."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, httpx.HTTPStatusError):
+        reason = f"http_{exc.response.status_code}"
+    elif exc is not None:
+        reason = type(exc).__name__
+    else:
+        reason = "unknown"
+    telemetry.counter(
+        "http.request.retries",
+        description="Retried HTTP requests, by the error that triggered the retry.").add(
+        1, {"reason": reason})
 
 
 @dataclass
@@ -549,6 +571,7 @@ class PipelineHTTPClient:
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
         stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
         reraise=True,
     )
     def _do_request(self, method: str, url: str, **kwargs) -> httpx.Response:
@@ -561,6 +584,7 @@ class PipelineHTTPClient:
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
         stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
         reraise=True,
     )
     def _stream_to_spool(self, method: str, url: str, **kwargs):

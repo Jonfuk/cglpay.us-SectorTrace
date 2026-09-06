@@ -21,6 +21,7 @@ from pipeline.registry import (
     resolve_run_order,
     resolve_run_waves,
 )
+from pipeline.telemetry import configure_telemetry
 from pipeline.tui import init_tui
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
@@ -76,6 +77,7 @@ def analysis_worker(
 
     configure_logging("analysis_worker", console_level=logging.INFO)
     settings = get_settings()
+    configure_telemetry(settings)
     db_conn = db.get_connection(settings)
     try:
         db.apply_migrations(db_conn, db.migrations_dir_for(settings))
@@ -114,6 +116,7 @@ def worker_run(
 
     configure_logging("worker")
     settings = get_settings()
+    configure_telemetry(settings)
     conn = db.get_connection(settings)
     try:
         db.apply_migrations(conn)
@@ -2145,6 +2148,7 @@ def web(
 
     configure_logging("web")
     settings = get_settings()
+    configure_telemetry(settings)
 
     # Migrations first, on a writable connection: the decisions table arrives
     # in 0026 and the UI would otherwise fail on a warehouse built before it.
@@ -2372,6 +2376,7 @@ def run(
 
     configure_logging(module)
     settings = get_settings()
+    configure_telemetry(settings)
     conn = db.get_connection(settings)
 
     applied = db.apply_migrations(conn)

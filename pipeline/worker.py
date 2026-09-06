@@ -46,6 +46,8 @@ from typing import Any
 
 import structlog
 
+from pipeline import telemetry
+
 log = structlog.get_logger()
 
 # The advisory lock key, hashed from a name rather than a bare integer for
@@ -67,6 +69,20 @@ PIPELINE_RUN_LOCK_NAME = "sectortrace:pipeline-run"
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _seconds_since(iso: str | None) -> float | None:
+    """Elapsed seconds since an ISO-8601 timestamp this module wrote, or None
+    for a value that is missing or does not parse -- a benchmarking read must
+    never be the reason a claimed job fails. Mirrors
+    `pipeline/graph/projector.py`'s `_lag_seconds`, the same shape for the
+    same reason (a queued row's own timestamp, compared to now)."""
+    if not iso:
+        return None
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(iso)).total_seconds()
+    except (TypeError, ValueError):
+        return None
 
 
 class WorkerQueue:
@@ -115,7 +131,7 @@ class WorkerQueue:
         # FOR UPDATE SKIP LOCKED is what lets more than one worker claim from
         # the same queue without two of them taking the same job.
         row = self.conn.execute(
-            "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count "
+            "SELECT job_id, kind, arguments_json, checkpoint_json, attempt_count, created_at "
             "FROM worker_jobs WHERE state = 'queued' OR "
             "(state = 'running' AND lease_until < %s) "
             "ORDER BY created_at, job_id LIMIT 1 FOR UPDATE SKIP LOCKED", (now,)
@@ -131,7 +147,13 @@ class WorkerQueue:
                 "arguments": json.loads(row["arguments_json"]),
                 "checkpoint": json.loads(row["checkpoint_json"] or "{}"),
                 "attempt_count": row["attempt_count"] + 1,
-                "lease_until": lease}
+                "lease_until": lease,
+                # Queue delay (performance.md:632) is this minus claim time,
+                # computed by the caller -- `created_at` is whatever
+                # `enqueue()` wrote, never touched again by a re-claim after a
+                # lease expiry, so it always answers "how long did this job
+                # wait for a worker", not "how long since the last attempt".
+                "created_at": row["created_at"]}
 
     def checkpoint(self, job_id: str, checkpoint: dict[str, Any]) -> None:
         self.conn.execute(
@@ -375,6 +397,16 @@ class _CheckpointingObserver:
         self._job_id = job_id
         self._completed = set(completed)
         self.summary: list[dict] = list(prior_summary)
+        # When this checkpoint was last durable, for the "checkpoint age"
+        # metric (performance.md:632): how long a crash right before the next
+        # module finished would have cost, in re-done work. Starts at
+        # construction time -- the checkpoint this job resumed from (or, for
+        # a fresh job, its start) -- and moves forward every time a new one is
+        # written below, never read back from the row itself: `worker_jobs`
+        # has no per-checkpoint timestamp finer than `updated_at`, which this
+        # process's own clock already stands in for while it is the one
+        # writing.
+        self._last_checkpoint_at = time.monotonic()
 
     def run_starting(self, total_modules: int) -> None:
         log.info("run.starting", modules=total_modules)
@@ -400,8 +432,13 @@ class _CheckpointingObserver:
         # Checkpointed after every module rather than batched: the point of a
         # checkpoint is that it is durable before the next thing that could
         # fail, and the next thing that could fail here is the next module.
+        age = time.monotonic() - self._last_checkpoint_at
+        telemetry.histogram(
+            "worker.checkpoint_age_seconds", unit="s",
+            description="Time since the previous durable checkpoint, at each new one.").record(age)
         self._queue.checkpoint(self._job_id, {
             "completed": sorted(self._completed), "summary": self.summary})
+        self._last_checkpoint_at = time.monotonic()
 
 
 class PipelineWorker:
@@ -463,28 +500,42 @@ class PipelineWorker:
             return None
 
         job_id = claimed["job_id"]
+        # Queue delay (performance.md:632): how long this job sat in
+        # `worker_jobs` between `enqueue()` and this claim. None rather than
+        # 0 for a row with no parseable `created_at` -- never fabricated.
+        queue_delay = _seconds_since(claimed.get("created_at"))
+        telemetry.histogram(
+            "worker.queue_delay_seconds", unit="s",
+            description="Time between a job's enqueue and its claim.").record(
+            queue_delay if queue_delay is not None else 0.0, {"kind": claimed["kind"]})
         log.info("worker.job_claimed", job_id=job_id, kind=claimed["kind"],
                  attempt=claimed["attempt_count"], worker_id=self.worker_id)
 
-        stop = threading.Event()
-        heartbeat = threading.Thread(
-            target=self._renew_lease_loop, args=(job_id, stop),
-            name=f"pipeline-worker-lease-{job_id}", daemon=True)
-        heartbeat.start()
-        try:
-            if claimed["kind"] == "pipeline_run":
-                return self._run_pipeline_job(queue, job_id, claimed)
-            # Nothing else is enqueued by this codebase today, but a row this
-            # worker does not understand must still leave the queue rather
-            # than being claimed forever and blocking every future run.
-            message = f"unknown job kind {claimed['kind']!r}"
-            queue.finish(job_id, success=False, error=message)
-            self._sync_job_runs(job_id, success=False, error=message, summary=None)
-            log.error("worker.unknown_job_kind", job_id=job_id, kind=claimed["kind"])
-            return {"job_id": job_id, "status": "failed"}
-        finally:
-            stop.set()
-            heartbeat.join(timeout=5)
+        with telemetry.span("worker.job", job_id=job_id, kind=claimed["kind"],
+                            attempt=claimed["attempt_count"],
+                            queue_delay_seconds=queue_delay) as job_span:
+            stop = threading.Event()
+            heartbeat = threading.Thread(
+                target=self._renew_lease_loop, args=(job_id, stop),
+                name=f"pipeline-worker-lease-{job_id}", daemon=True)
+            heartbeat.start()
+            try:
+                if claimed["kind"] == "pipeline_run":
+                    result = self._run_pipeline_job(queue, job_id, claimed)
+                    job_span.set_attribute("status", result["status"])
+                    return result
+                # Nothing else is enqueued by this codebase today, but a row this
+                # worker does not understand must still leave the queue rather
+                # than being claimed forever and blocking every future run.
+                message = f"unknown job kind {claimed['kind']!r}"
+                queue.finish(job_id, success=False, error=message)
+                self._sync_job_runs(job_id, success=False, error=message, summary=None)
+                log.error("worker.unknown_job_kind", job_id=job_id, kind=claimed["kind"])
+                job_span.set_attribute("status", "failed")
+                return {"job_id": job_id, "status": "failed"}
+            finally:
+                stop.set()
+                heartbeat.join(timeout=5)
 
     def _renew_lease_loop(self, job_id: str, stop: threading.Event) -> None:
         from pipeline import db

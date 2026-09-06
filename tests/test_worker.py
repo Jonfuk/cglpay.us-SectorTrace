@@ -10,7 +10,11 @@ the event log's accounting (`event_stats`/`events_since`) matches what
 """
 from __future__ import annotations
 
-from pipeline import db
+from types import SimpleNamespace
+
+import pytest
+
+from pipeline import db, telemetry
 from pipeline.registry import MODULE_REGISTRY
 from pipeline.worker import PIPELINE_RUN_LOCK_NAME, PipelineWorker, WorkerQueue
 
@@ -148,6 +152,41 @@ def test_a_resumed_job_skips_modules_the_checkpoint_already_completed(settings, 
         row = queue.job_row(job_id)
         assert row["state"] == "finished"
         assert [r["module"] for r in row["summary"]] == ["a_one", "a_two"]
+
+
+@pytest.mark.serial  # mutates pipeline.telemetry's process-global state
+def test_a_claimed_job_opens_a_worker_job_span_with_queue_delay(settings, monkeypatch):
+    """performance.md:632's "queue delay" and "jobs" span: `worker.job` wraps
+    the claimed job, correlated by `job_id`, and carries the time the row
+    waited between `enqueue()` and this claim."""
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    monkeypatch.setitem(MODULE_REGISTRY, "a_fake", lambda ctx: None)
+    with _queue(settings) as queue:
+        job_id = queue.enqueue(
+            "pipeline_run",
+            {"waves": [["a_fake"]], "since": None, "dry_run": False, "limit": None, "jobs": 1},
+            job_id="1")
+
+    exporter = InMemorySpanExporter()
+    telemetry.configure_telemetry(
+        SimpleNamespace(otel_enabled=True, otel_exporter_endpoint=None, otel_service_name="test"),
+        span_exporter=exporter)
+    try:
+        result = PipelineWorker(settings, lease_seconds=30).run_once()
+    finally:
+        telemetry.shutdown_telemetry()
+
+    assert result == {"job_id": job_id, "status": "finished"}
+    finished = {span.name: span for span in exporter.get_finished_spans()}
+    assert "worker.job" in finished
+    assert "pipeline.run" in finished  # nested inside it, via _run_pipeline_job
+    job_attrs = dict(finished["worker.job"].attributes)
+    assert job_attrs["job_id"] == job_id
+    assert job_attrs["kind"] == "pipeline_run"
+    assert job_attrs["status"] == "finished"
+    assert job_attrs["queue_delay_seconds"] >= 0
+    assert finished["pipeline.run"].parent.span_id == finished["worker.job"].context.span_id
 
 
 def test_the_advisory_lock_stops_a_second_worker_running_concurrently(settings):

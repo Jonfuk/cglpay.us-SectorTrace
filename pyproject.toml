@@ -248,6 +248,26 @@ docs = [
 assistant = [
     "openai>=1.40,<2",
 ]
+# Pipeline observability (performance.md:632, the last Phase 5 item). An
+# extra, not a dependency, for the same reason `neo4j` above is: most
+# deployments and every offline test run must keep working with no collector
+# anywhere near them, and `pipeline/telemetry.py` already degrades to a no-op
+# when this is not installed or `OTEL_ENABLED` is unset -- the import lives
+# inside `configure_telemetry()`, never at module scope, so a checkout without
+# this extra never fails to import anything that imports that module.
+#
+# The OTLP HTTP exporter is included (not left for later) because
+# `OTEL_EXPORTER_ENDPOINT` is a real, documented configuration knob from the
+# start -- shipping the API/SDK alone and telling an operator to add the
+# exporter themselves before export can ever work is a worse first release
+# than one more pinned package. Traces and metrics both go out over the same
+# `/v1/traces` and `/v1/metrics` HTTP paths a collector already exposes, so one
+# exporter package covers both signals; nothing here talks gRPC.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
 
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
