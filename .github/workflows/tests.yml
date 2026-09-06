@@ -47,7 +47,12 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --extra maps
+        # `otel` alongside `maps`: tests/test_telemetry.py's enabled-path
+        # tests exercise the real OpenTelemetry SDK (InMemorySpanExporter/
+        # InMemoryMetricReader) rather than only the no-op fallback, on
+        # purpose -- a suite that never installed the extra would never
+        # actually verify what a real span/metric looks like.
+        run: uv sync --extra maps --extra otel
 
       - name: Start PostgreSQL 18 test database
         # The application test suite is PostgreSQL-only. Build the same image
