@@ -332,6 +332,14 @@ backup_s3_secret: ""
 archive_audit_time: "02:30"
 archive_audit_full_time: "*-01,04,07,10-01 02:00:00"
 
+# Daily capture-only PostgreSQL maintenance telemetry (pipeline
+# pg-telemetry-snapshot; performance.md "PostgreSQL maintenance", migration
+# 0109). Accumulates the update-rate and index-usage evidence that section
+# requires before any autovacuum/analyze threshold, index, or planner change —
+# it changes nothing on the server itself. Offset from backup_time so the two
+# oneshots don't contend for the same connection slot at the same second.
+pg_telemetry_snapshot_time: "03:35"
+
 # --- Analyst assistant (BETA-107; OpenRouter since BETA-114) -----------------
 # The optional natural-language operator finding aid, off by default and
 # never on Railway (docs/assistant.md). Two switches, because configuring

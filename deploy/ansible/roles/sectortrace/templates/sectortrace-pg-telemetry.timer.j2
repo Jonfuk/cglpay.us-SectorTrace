@@ -1,0 +1,9 @@
+[Unit]
+Description=Run sectortrace-pg-telemetry.service daily
+
+[Timer]
+OnCalendar=*-*-* {{ pg_telemetry_snapshot_time }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

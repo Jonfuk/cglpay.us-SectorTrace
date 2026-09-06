@@ -47,3 +47,4 @@
           - "Stack:      cd {{ state_dir }} && docker compose ps"
           - "Backups:    systemctl status sectortrace-backup.timer"
           - "Archive audit: systemctl status sectortrace-archive-audit.timer / sectortrace-archive-audit-full.timer"
+          - "PG telemetry: systemctl status sectortrace-pg-telemetry.timer"
