@@ -55,7 +55,11 @@ VIEWIT_ARCHIVE_URL = (
     "ViewIt%20Export%20Data%20-%20All%20-%2011122023.csv"
 )
 VIEWIT_ARCHIVE_SOURCE = "ohid_ndtms_viewit_archive"
-VIEWIT_YOUNG_ARCHIVE_URL = "https://www.ndtms.net/ViewIt/YoungPeopleArchive"
+VIEWIT_YOUNG_ARCHIVE_URL = (
+    "https://www.ndtms.net/resources/public/"
+    "ViewIt%20Young%20People%20Export%20Data%20-%20All%20-%2004122024.csv"
+)
+VIEWIT_YOUNG_ARCHIVE_SOURCE = "ohid_ndtms_viewit_young_archive"
 GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json"
 GOVUK_CONTENT_BASE = "https://www.gov.uk/api/content"
 
@@ -415,10 +419,15 @@ def parse_viewit_archive_rows(
         headers = next(reader)
     except StopIteration as exc:
         raise ValueError("ViewIt archive export is empty") from exc
-    required = {"ReportingPeriod", "Area", "drug_group", "gender", "age_group"}
+    required = {"ReportingPeriod", "Area"}
     if not required.issubset(headers):
         missing = sorted(required - set(headers))
         raise ValueError(f"ViewIt archive export is missing columns: {missing}")
+    dimensions = {
+        "drug_group": "drug_group" if "drug_group" in headers else None,
+        "gender": "gender" if "gender" in headers else "Sex" if "Sex" in headers else None,
+        "age_group": "age_group" if "age_group" in headers else "AgeGroup" if "AgeGroup" in headers else None,
+    }
     positions = {name: headers.index(name) for name in required}
     rows: list[dict] = []
     malformed: list[str] = []
@@ -431,7 +440,7 @@ def parse_viewit_archive_rows(
         metrics = {
             name: values[index]
             for index, name in enumerate(headers)
-            if name not in required
+            if name not in required and name not in dimensions.values()
         }
         row_key = hashlib.sha256(
             (provenance["payload_sha256"] + "\x1f" + "\x1f".join(values)).encode(
@@ -444,9 +453,12 @@ def parse_viewit_archive_rows(
             "reporting_period": values[positions["ReportingPeriod"]].strip(),
             "area_name_raw": area_name,
             "ons_code": ons_code,
-            "drug_group": values[positions["drug_group"]].strip(),
-            "gender": values[positions["gender"]].strip(),
-            "age_group": values[positions["age_group"]].strip(),
+            "drug_group": values[headers.index(dimensions["drug_group"])].strip()
+            if dimensions["drug_group"] else "All",
+            "gender": values[headers.index(dimensions["gender"])].strip()
+            if dimensions["gender"] else "All",
+            "age_group": values[headers.index(dimensions["age_group"])].strip()
+            if dimensions["age_group"] else "All",
             "metrics_json": json.dumps(metrics, ensure_ascii=False),
             **provenance,
         })
@@ -479,26 +491,30 @@ def _persist_viewit_archive(
     client: PipelineHTTPClient,
     authority_lookup: dict[str, str],
     transitions: dict[str, tuple[str, str]],
+    *,
+    url: str = VIEWIT_ARCHIVE_URL,
+    cohort: str = "adults",
+    source_system: str = VIEWIT_ARCHIVE_SOURCE,
 ) -> int:
     """Capture the historical wide export as its own evidence layer."""
-    result = client.get(VIEWIT_ARCHIVE_URL)
+    result = client.get(url)
     if not result.ok:
         db.record_review_item(
             ctx.conn, "m07_ndtms", "ndtms_viewit_archive_unavailable",
-            VIEWIT_ARCHIVE_URL, json.dumps({"status": result.status_code}),
+            url, json.dumps({"status": result.status_code, "cohort": cohort}),
         )
         return 0
     provenance = {
         "source_url": result.url,
         "retrieved_at": result.retrieved_at.isoformat(),
         "http_status": result.status_code,
-        "source_system": VIEWIT_ARCHIVE_SOURCE,
+        "source_system": source_system,
         "payload_sha256": result.payload_sha256,
     }
     try:
         rows, malformed = parse_viewit_archive_rows(
             result.body,
-            cohort="adults",
+            cohort=cohort,
             provenance=provenance,
             authority_lookup=authority_lookup,
             transitions=transitions,
@@ -521,7 +537,7 @@ def _persist_viewit_archive(
     }):
         db.record_review_item(
             ctx.conn, "m07_ndtms", "unmatched_ndtms_viewit_archive_area",
-            area_name, json.dumps({"source_url": result.url}),
+            area_name, json.dumps({"source_url": result.url, "cohort": cohort}),
         )
     written = 0
     for start in range(0, len(rows), 1000):
@@ -532,33 +548,6 @@ def _persist_viewit_archive(
         if not ctx.dry_run:
             ctx.conn.commit()
     return written
-
-
-def _check_young_people_archive(ctx: ModuleContext, client: PipelineHTTPClient) -> None:
-    """Record availability without attempting to cross an account gate."""
-    result = client.get(VIEWIT_YOUNG_ARCHIVE_URL)
-    body = result.body.decode("utf-8", errors="replace")
-    gated = "<h2>Login" in body or "/Account/Login" in body
-    if gated:
-        db.record_review_item(
-            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_auth_required",
-            VIEWIT_YOUNG_ARCHIVE_URL,
-            json.dumps({"status": result.status_code,
-                        "note": "public route is login/CAPTCHA gated; no archive rows collected"}),
-        )
-        log.warning("ndtms.viewit_young_archive_auth_required", url=VIEWIT_YOUNG_ARCHIVE_URL)
-    elif not result.ok:
-        db.record_review_item(
-            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_unavailable",
-            VIEWIT_YOUNG_ARCHIVE_URL, json.dumps({"status": result.status_code}),
-        )
-    else:
-        db.record_review_item(
-            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_shape_changed",
-            VIEWIT_YOUNG_ARCHIVE_URL,
-            json.dumps({"status": result.status_code,
-                        "note": "public response requires parser review before ingestion"}),
-        )
 
 
 def _validate_viewit_history(conn) -> dict[str, int]:
@@ -620,6 +609,7 @@ def run(ctx: ModuleContext) -> None:
 
     stats_written = 0
     publications_done = 0
+    young_archive_rows = 0
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         publications = _discover_publications(client)
@@ -767,7 +757,12 @@ def run(ctx: ModuleContext) -> None:
         archive_rows = _persist_viewit_archive(
             ctx, client, authority_lookup, transitions
         )
-        _check_young_people_archive(ctx, client)
+        young_archive_rows = _persist_viewit_archive(
+            ctx, client, authority_lookup, transitions,
+            url=VIEWIT_YOUNG_ARCHIVE_URL,
+            cohort="young_people",
+            source_system=VIEWIT_YOUNG_ARCHIVE_SOURCE,
+        )
 
     # ViewIt is a separate Power BI publication family. Its querydata rows
     # remain in dedicated tables because report versions and dimensions do not
@@ -776,4 +771,5 @@ def run(ctx: ModuleContext) -> None:
     _validate_viewit_history(conn)
     log.info("ndtms.run_complete", publications=publications_done,
              la_rows=stats_written, viewit_archive_rows=archive_rows,
+             viewit_young_archive_rows=young_archive_rows,
              powerbi_rows=powerbi_rows)

@@ -51,6 +51,31 @@ def test_viewit_archive_parser_preserves_dimensions_and_suppression():
     assert '"Other": "-"' in rows[0]["metrics_json"]
 
 
+def test_viewit_young_archive_parser_accepts_yp_dimensions():
+    body = (
+        "ReportingPeriod,Area,Sex,AgeGroup,InTreatment_AllInTx,Other\n"
+        "2009/10,Derby,Female,14-15,5,NULL\n"
+    ).encode()
+    rows, malformed = ndtms.parse_viewit_archive_rows(
+        body,
+        cohort="young_people",
+        provenance={
+            "source_url": "https://example.test/yp.csv",
+            "retrieved_at": "2026-01-01T00:00:00Z",
+            "http_status": 200,
+            "source_system": "test",
+            "payload_sha256": "b" * 64,
+        },
+        authority_lookup={"derby": "E06000015"},
+        transitions={},
+    )
+    assert malformed == []
+    assert rows[0]["gender"] == "Female"
+    assert rows[0]["age_group"] == "14-15"
+    assert rows[0]["drug_group"] == "All"
+    assert '"Other": "NULL"' in rows[0]["metrics_json"]
+
+
 # --- area name normalisation ----------------------------------------------------
 
 @pytest.mark.parametrize("raw,expected", [
