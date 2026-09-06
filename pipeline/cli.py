@@ -1902,6 +1902,30 @@ def pg_capabilities(
         raise typer.Exit(code=1)
 
 
+@app.command("pg-telemetry-snapshot")
+def pg_telemetry_snapshot() -> None:
+    """Capture one PostgreSQL maintenance-telemetry snapshot (migration 0107).
+
+    Writes table/index churn and usage counters, and query-fingerprint stats
+    if `pg_stat_statements` is installed, into `pg_telemetry_*` so the
+    observation period performance.md's "PostgreSQL maintenance" section
+    requires before any autovacuum/analyze/index/planner change has evidence
+    to point at. Capture only — this never changes server configuration.
+    Schedule it the same way `pipeline backup` is scheduled (see
+    `sectortrace-backup.timer`/`sectortrace-pg-telemetry.timer` in
+    deploy/ansible).
+    """
+    from pipeline import pg_telemetry
+
+    configure_logging("pg_telemetry_snapshot")
+    conn, _settings = _document_connection()
+    try:
+        result = pg_telemetry.snapshot(conn)
+    finally:
+        conn.close()
+    typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+
+
 @app.command()
 def benchmark(
     output_dir: str = typer.Option(

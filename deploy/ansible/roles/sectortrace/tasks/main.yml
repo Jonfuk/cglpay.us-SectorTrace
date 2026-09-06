@@ -294,3 +294,19 @@
     name: sectortrace-backup.timer
     enabled: true
     state: started
+
+- name: Install the PostgreSQL maintenance-telemetry systemd unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-pg-telemetry.service
+    - sectortrace-pg-telemetry.timer
+  notify: Reload systemd
+
+- name: Enable and start the PostgreSQL maintenance-telemetry timer
+  ansible.builtin.service:
+    name: sectortrace-pg-telemetry.timer
+    enabled: true
+    state: started
