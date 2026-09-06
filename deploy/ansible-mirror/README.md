@@ -71,12 +71,20 @@ things a mirror never does:
   app image, discarding any change made directly on the box. This box always
   runs the tip of the branch you named; there is no separate `git pull` step
   to remember, unlike a `dr_mirror`'s "Redeploying" section below.
-- **Whether to serve the generated Nuxt front end.** The beta wizard writes
-  `serve_nuxt: true` by default. That renders `SERVE_NUXT=true` into the
-  app's `.env`, so `/` and `/admin` use the generated Nuxt apps while `/api`
-  remains on the Python server. Answer no in the wizard, or set
-  `serve_nuxt: false` in `group_vars/all/zz-local.yml`, to keep the legacy
-  portals as parity oracles. Disaster-recovery mirrors default to false.
+- **Whether to serve the generated Nuxt public front end.** The beta wizard
+  writes `serve_nuxt: true` by default. That renders `SERVE_NUXT=true` into
+  the app's `.env`, so `/` uses the generated Nuxt portal while `/api` remains
+  on the Python server. Answer no in the wizard, or set `serve_nuxt: false` in
+  `group_vars/all/zz-local.yml`, to keep the public portal as the legacy parity
+  oracle. Disaster-recovery mirrors default to false.
+- **The `/admin` workspace is enabled independently.** The role renders
+  `ADMIN_UI_VARIANT=nuxt` for both beta and disaster-recovery mirrors, and the
+  Docker build copies `frontend/admin/.output/public` into the app image. This
+  means every playbook run deploys the current Nuxt operator interface at
+  `/admin`, even when the public portal remains legacy. To roll back only the
+  operator interface, set `admin_ui_variant: legacy` in
+  `group_vars/all/zz-local.yml` and re-run the playbook. Set it back to `nuxt`
+  to reactivate the generated interface.
 - **Whether to reseed nightly too.** Default no. The three "how does the
   warehouse get here" sync paths below (snapshot / tunnel / URL) still apply
   — a beta box seeds from the same sources a mirror would — but by default

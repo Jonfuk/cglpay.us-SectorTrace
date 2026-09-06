@@ -40,6 +40,7 @@ same reasoning as m07_ndtms's ndtms_la_statistics.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime
 from html.parser import HTMLParser
@@ -65,6 +66,31 @@ POWERBI_DASHBOARDS = (
     {"key": "monthly_provisional", "cohort": "all",
      "url": "https://www.ndtms.net/Monthly/MonthlyProvisionalStatistics"},
 )
+
+
+def _version_bounds() -> tuple[int | None, int | None]:
+    """Return optional inclusive report-version bounds for resumable backfills.
+
+    The public monthly history is large enough to exceed a single operator
+    process window.  Keeping the bounds in the environment lets an operator
+    split a run into short, independently committed chunks without changing
+    the normal all-history behaviour or pretending that a partial run is
+    complete.
+    """
+    values: list[int | None] = []
+    for name in ("NDTMS_MONTHLY_MIN_VERSION", "NDTMS_MONTHLY_MAX_VERSION"):
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            values.append(None)
+            continue
+        try:
+            values.append(int(raw))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+    lower, upper = values
+    if lower is not None and upper is not None and lower > upper:
+        raise ValueError("NDTMS_MONTHLY_MIN_VERSION must not exceed MAX_VERSION")
+    return lower, upper
 
 # The nine English NUTS1 regions as NDTMS's own "PHE Centre" filter presents
 # them -- fixed ONS region codes, not scraped, because they are a stable
@@ -288,6 +314,7 @@ def run(ctx: ModuleContext) -> None:
                   note="run m00_geography first or every area will go to review_queue")
 
     stats_written = 0
+    min_version, max_version = _version_bounds()
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
         for cohort, path in COHORT_PATHS.items():
@@ -306,6 +333,13 @@ def run(ctx: ModuleContext) -> None:
             # normal run deliberately walks every version exposed by NDTMS.
             if ctx.limit:
                 versions = versions[:1]
+            if min_version is not None or max_version is not None:
+                versions = [
+                    (version_text, version_label)
+                    for version_text, version_label in versions
+                    if (min_version is None or int(version_text) >= min_version)
+                    and (max_version is None or int(version_text) <= max_version)
+                ]
             for version_text, version_label in versions:
                 report_month = _parse_report_month(version_label)
                 if report_month is None:

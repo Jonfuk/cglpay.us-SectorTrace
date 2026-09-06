@@ -564,6 +564,7 @@ mirror_role: $(yaml_quote "$mirror_role")
 deploy_git_branch: $(yaml_quote "$deploy_git_branch")
 mirror_recurring_sync_enabled: $recurring_sync
 serve_nuxt: $serve_nuxt
+admin_ui_variant: nuxt
 
 mirror_source_label: $(yaml_quote "$source_label")
 mirror_sync_mode: $(yaml_quote "$sync_mode")

@@ -170,6 +170,10 @@ services:
         # self-hosted Ollama (assistant_runtime_enabled). Railway builds the
         # same Dockerfile with no args, so its image never gets it.
         INSTALL_ASSISTANT: "{{ (assistant_runtime_enabled or assistant_app_enabled) | lower }}"
+        # Beta is the writable collection/test host. Install the optional
+        # Scrapy + Playwright transport there; DR mirrors remain lean and do
+        # not need browser binaries.
+        INSTALL_SCRAPY: "{{ (mirror_role == 'beta') | lower }}"
     # Named explicitly so docker-compose.sync.yml and the documents worker
     # can run this exact image instead of building a second copy of it from
     # the same context. Built here, used there.
