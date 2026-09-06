@@ -55,6 +55,7 @@ VIEWIT_ARCHIVE_URL = (
     "ViewIt%20Export%20Data%20-%20All%20-%2011122023.csv"
 )
 VIEWIT_ARCHIVE_SOURCE = "ohid_ndtms_viewit_archive"
+VIEWIT_YOUNG_ARCHIVE_URL = "https://www.ndtms.net/ViewIt/YoungPeopleArchive"
 GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json"
 GOVUK_CONTENT_BASE = "https://www.gov.uk/api/content"
 
@@ -533,6 +534,71 @@ def _persist_viewit_archive(
     return written
 
 
+def _check_young_people_archive(ctx: ModuleContext, client: PipelineHTTPClient) -> None:
+    """Record availability without attempting to cross an account gate."""
+    result = client.get(VIEWIT_YOUNG_ARCHIVE_URL)
+    body = result.body.decode("utf-8", errors="replace")
+    gated = "<h2>Login" in body or "/Account/Login" in body
+    if gated:
+        db.record_review_item(
+            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_auth_required",
+            VIEWIT_YOUNG_ARCHIVE_URL,
+            json.dumps({"status": result.status_code,
+                        "note": "public route is login/CAPTCHA gated; no archive rows collected"}),
+        )
+        log.warning("ndtms.viewit_young_archive_auth_required", url=VIEWIT_YOUNG_ARCHIVE_URL)
+    elif not result.ok:
+        db.record_review_item(
+            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_unavailable",
+            VIEWIT_YOUNG_ARCHIVE_URL, json.dumps({"status": result.status_code}),
+        )
+    else:
+        db.record_review_item(
+            ctx.conn, "m07_ndtms", "ndtms_viewit_young_archive_shape_changed",
+            VIEWIT_YOUNG_ARCHIVE_URL,
+            json.dumps({"status": result.status_code,
+                        "note": "public response requires parser review before ingestion"}),
+        )
+
+
+def _validate_viewit_history(conn) -> dict[str, int]:
+    """Report layer-local checks; never infer across the two evidence layers."""
+    checks = {
+        "archive_rows": "SELECT count(*) AS n FROM ndtms_viewit_archive_rows",
+        "archive_unmatched_geographies": (
+            "SELECT count(DISTINCT area_name_raw) AS n FROM ndtms_viewit_archive_rows "
+            "WHERE ons_code IS NULL"
+        ),
+        "archive_suppressed_cells": (
+            "SELECT count(*) AS n FROM ndtms_viewit_archive_rows r "
+            "CROSS JOIN LATERAL jsonb_each_text(r.metrics_json) m "
+            "WHERE m.value IN ('-', 'c', '*', '**', 'x', 'X')"
+        ),
+        "current_powerbi_rows": "SELECT count(*) AS n FROM ndtms_powerbi_observations",
+        "current_indicator_count": (
+            "SELECT count(DISTINCT metric_raw) AS n FROM ndtms_powerbi_observations"
+        ),
+        "archive_indicator_count": (
+            "SELECT count(DISTINCT key) AS n FROM ndtms_viewit_archive_rows r "
+            "CROSS JOIN LATERAL jsonb_object_keys(r.metrics_json) key"
+        ),
+    }
+    result = {name: int(conn.execute(sql).fetchone()["n"]) for name, sql in checks.items()}
+    current_periods = {
+        row["period"] for row in conn.execute(
+            "SELECT DISTINCT time_period_raw AS period FROM ndtms_powerbi_observations"
+        ).fetchall()
+    }
+    archive_periods = {
+        row["period"] for row in conn.execute(
+            "SELECT DISTINCT reporting_period AS period FROM ndtms_viewit_archive_rows"
+        ).fetchall()
+    }
+    result["period_overlap_candidates"] = len(current_periods & archive_periods)
+    log.info("ndtms.viewit_validation", **result)
+    return result
+
+
 @register_module(
     "m07_ndtms", supports_since=True,
     depends_on=("m00_geography",),
@@ -696,11 +762,13 @@ def run(ctx: ModuleContext) -> None:
         archive_rows = _persist_viewit_archive(
             ctx, client, authority_lookup, transitions
         )
+        _check_young_people_archive(ctx, client)
 
     # ViewIt is a separate Power BI publication family. Its querydata rows
     # remain in dedicated tables because report versions and dimensions do not
     # share the annual ODS contract.
     powerbi_rows = persist_powerbi(ctx, POWERBI_DASHBOARDS)
+    _validate_viewit_history(conn)
     log.info("ndtms.run_complete", publications=publications_done,
              la_rows=stats_written, viewit_archive_rows=archive_rows,
              powerbi_rows=powerbi_rows)

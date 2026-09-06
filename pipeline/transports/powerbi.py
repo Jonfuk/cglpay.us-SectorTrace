@@ -430,6 +430,11 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
         log.warning("powerbi.capture_disabled", reason=str(exc))
         return 0
 
+    # The subprocess capture is deliberately allowed to be slow. Revalidate
+    # the writer before the first response is recorded; otherwise an idle
+    # PostgreSQL timeout can make a non-data response look like a module crash.
+    ctx.conn.ensure_live()
+
     by_url = {spec["url"]: spec for spec in specs}
     written = 0
     for capture in captures:
@@ -437,21 +442,24 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
         try:
             observations = parse_querydata(capture.body)
         except ValueError as exc:
-            db.record_parse_failure(
-                ctx.conn,
-                "ndtms_powerbi",
-                capture.canonical_response_url,
-                "querydata",
-                capture.payload_sha256,
-                str(exc),
-            )
-            db.record_review_item(
-                ctx.conn,
-                "ndtms_powerbi",
-                "querydata_parse_failure",
-                capture.canonical_response_url,
-                json.dumps({"payload_sha256": capture.payload_sha256, "error": str(exc)}),
-            )
+            # Power BI also emits successful POST responses that are metadata,
+            # empty-state, or error envelopes. They are useful diagnostics but
+            # are not observations and must not abort the dashboard run.
+            try:
+                ctx.conn.ensure_live()
+                db.record_parse_failure(
+                    ctx.conn, "ndtms_powerbi", capture.canonical_response_url,
+                    "querydata", capture.payload_sha256, str(exc),
+                )
+                db.record_review_item(
+                    ctx.conn, "ndtms_powerbi", "querydata_parse_failure",
+                    capture.canonical_response_url,
+                    json.dumps({"payload_sha256": capture.payload_sha256,
+                                "error": str(exc)}),
+                )
+            except db.Error as record_exc:
+                log.warning("powerbi.parse_review_skipped",
+                            error=f"{type(record_exc).__name__}: {record_exc}")
             continue
         provenance = {
             "source_url": capture.canonical_response_url,

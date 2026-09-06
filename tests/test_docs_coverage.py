@@ -18,7 +18,7 @@ README = REPO_ROOT / "README.md"
 START_SH = REPO_ROOT / "start.sh"
 START_CMD = REPO_ROOT / "start.cmd"
 
-EXPORT_TARGETS = ["sheets", "geojson", "echarts", "docs", "all"]
+EXPORT_TARGETS = ["sheets", "geojson", "echarts", "docs", "ndtms", "all"]
 
 
 # Real pipeline modules follow the mNN_name convention. Filtering on it keeps
