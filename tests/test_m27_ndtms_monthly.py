@@ -84,6 +84,7 @@ def test_landing_page_parser_extracts_token_and_report_version():
     assert parser.token == "TESTTOKEN123"
     assert parser.report_version_id == "219"
     assert parser.report_label == "June 2026"
+    assert parser.report_versions == [("219", "June 2026"), ("218", "May 2026")]
 
 
 REPORT_HTML = """

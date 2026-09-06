@@ -500,6 +500,11 @@ class PipelineHTTPClient:
         self.commit_cache_writes = False
         self.pending_cache_writes: list[dict] = []
 
+    def _ensure_db_live(self) -> None:
+        """Keep a module writer usable across long remote requests."""
+        if self.conn is not None and hasattr(self.conn, "ensure_live"):
+            self.conn.ensure_live()
+
     def __enter__(self) -> "PipelineHTTPClient":
         return self
 
@@ -625,6 +630,7 @@ class PipelineHTTPClient:
         use_conditional: bool = True,
         archive: bool = True,
     ) -> FetchResult:
+        self._ensure_db_live()
         if not self._robots.can_fetch(url):
             # A configured exception does not make the fetch invisible. It is
             # logged every time and recorded once per (module, prefix) in the
@@ -667,6 +673,7 @@ class PipelineHTTPClient:
         # the counter instead.
         log.info("http.get", url=request_url, source_system=self.source_system)
         response = self._do_request("GET", url, params=params, headers=request_headers)
+        self._ensure_db_live()
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, response.status_code == 304)
         # What actually came down the wire. A 304 carries no body, so a
@@ -811,6 +818,7 @@ class PipelineHTTPClient:
 
         `get()` itself is untouched — every existing caller is unaffected.
         """
+        self._ensure_db_live()
         if not self._robots.can_fetch(url):
             override = self.settings.robots_override_for(url)
             if override is None:
@@ -833,6 +841,7 @@ class PipelineHTTPClient:
         log.info("http.get_streaming", url=request_url, source_system=self.source_system)
         response, spool, sha256, size = self._stream_to_spool(
             "GET", url, params=params, headers=dict(headers or {}))
+        self._ensure_db_live()
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, False)
         NETWORK.add(size)
@@ -891,6 +900,7 @@ class PipelineHTTPClient:
         response depends on the body sent, not just the URL, so there is
         nothing here for an ETag to validate against.
         """
+        self._ensure_db_live()
         if not self._robots.can_fetch(url):
             override = self.settings.robots_override_for(url)
             if override is None:
@@ -911,6 +921,7 @@ class PipelineHTTPClient:
 
         log.info("http.post", url=url, source_system=self.source_system)
         response = self._do_request("POST", url, data=data, headers=headers or {})
+        self._ensure_db_live()
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, False)
         NETWORK.add(len(response.content or b""))

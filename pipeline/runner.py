@@ -173,12 +173,21 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
             try:
                 fn(ctx)
             except Exception as exc:
-                conn.rollback()
-                collection.finish_attempt(
-                    conn, attempt_id, status="failed",
-                    failure_class=type(exc).__name__, coverage_state="failed",
-                    detail={"dry_run": dry_run})
-                conn.commit()
+                # A long browser capture may leave the writer session idle
+                # long enough for PostgreSQL to close it. Reconnect before
+                # bookkeeping so the original module error is not obscured
+                # by a second rollback/finish-attempt exception.
+                try:
+                    conn.ensure_live()
+                    conn.rollback()
+                    collection.finish_attempt(
+                        conn, attempt_id, status="failed",
+                        failure_class=type(exc).__name__, coverage_state="failed",
+                        detail={"dry_run": dry_run})
+                    conn.commit()
+                except db.Error as bookkeeping_exc:
+                    log.error("module.failure_bookkeeping_failed", module=name,
+                              error=f"{type(bookkeeping_exc).__name__}: {bookkeeping_exc}")
                 log.info("module.finished", module=name, status="failed",
                           dry_run=dry_run, error=f"{type(exc).__name__}: {exc}")
                 failed_row = {"module": name, "status": "failed", "dry_run": dry_run,

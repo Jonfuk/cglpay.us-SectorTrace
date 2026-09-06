@@ -79,12 +79,15 @@ class PostgresConnection:
     """
 
     def __init__(self, conn: psycopg.Connection, *, readonly: bool = False,
-                  pool: Any = None) -> None:
+                  pool: Any = None, connect_url: str | None = None,
+                  application_name: str = "sectortrace") -> None:
         self._conn = conn
         self._readonly = readonly
         # Set when this connection was borrowed rather than opened: `close()`
         # then returns it instead of dropping it. See `connect_pooled`.
         self._pool = pool
+        self._connect_url = connect_url
+        self._application_name = application_name
         self._total_changes = 0
         self._trace_callback = None
         # Set by runner.py so a stuck writer can be named. Under SQLite it
@@ -107,6 +110,30 @@ class PostgresConnection:
                 "this connection has been closed; a pooled one has been "
                 "returned to the pool and belongs to whoever borrows it next")
         return self._conn
+
+    def ensure_live(self) -> None:
+        """Re-open a dropped writer connection after a long external wait.
+
+        Browser work can take longer than a server-side idle timeout.  The
+        module must not turn a harmless lost session into a second exception
+        while it is trying to record the original parse result.
+        """
+        try:
+            self._live().execute("SELECT 1")
+            return
+        except Exception:
+            if not self._connect_url or self._readonly or self._pool is not None:
+                raise
+        old = self._conn
+        try:
+            old.close()
+        except Exception:
+            pass
+        self._conn = psycopg.connect(
+            self._connect_url,
+            row_factory=dict_row,
+            application_name=self._application_name,
+        )
 
     def execute(self, sql: str, parameters: Sequence[Any] | Mapping[str, Any] = ()):
         cursor = self._live().execute(sql, parameters or None)
@@ -275,7 +302,8 @@ def connect(url: str, *, readonly: bool = False,
     except Exception:
         conn.close()
         raise
-    return PostgresConnection(conn, readonly=readonly)
+    return PostgresConnection(conn, readonly=readonly, connect_url=url,
+                              application_name=application_name)
 
 
 @contextmanager
