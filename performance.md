@@ -151,7 +151,7 @@ follow-up rather than rushed alongside everything above.
 
 **Phase 5 implementation update — 2026-09-06.** The three archive-and-HTTP-cache
 items still outstanding at the previous baseline are landed. `http_cache`
-(migration `0106_http_cache_archive_ref`) now stores `archive_ref`,
+(migration `0110_http_cache_archive_ref`) now stores `archive_ref`,
 `content_type`, and `content_length` alongside the hash; `Archive.get_by_ref`
 (both `FilesystemArchive` and `S3Archive`) retrieves an object by that exact
 key, and `pipeline/http.py`'s 304 path uses it, falling back to the old
@@ -186,7 +186,7 @@ read, since the JMX procedure it would have used is gone from Neo4j 5.
 `tests/test_graph_parity.py` asserts exact node/edge/relationship-type/
 property/evidence-reference parity between the real `GraphStore` (behind a
 fake driver) and its PostgreSQL source after a rebuild. `pipeline/pg_telemetry.py`
-(migration `0109_pg_telemetry_snapshots`) captures `pg_stat_user_tables`/
+(migration `0113_pg_telemetry_snapshots`) captures `pg_stat_user_tables`/
 `pg_stat_user_indexes`, and `pg_stat_statements` when installed (feature-detected,
 never force-enabled — it needs `shared_preload_libraries` set at server start,
 which this code cannot do for itself), on a daily systemd timer; it changes no

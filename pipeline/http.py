@@ -686,7 +686,7 @@ class PipelineHTTPClient:
             # rows. If the archive is missing, re-fetch unconditionally: a
             # cache entry without its payload is not a usable cache hit.
             sha256 = cached["payload_sha256"] if cached else ""
-            # A cache row from before migration 0106, or a backend that
+            # A cache row from before migration 0110, or a backend that
             # never stored one, has no exact reference to retrieve by — fall
             # back to the hash-prefix lookup rather than treating a merely
             # incomplete cache row as a miss.

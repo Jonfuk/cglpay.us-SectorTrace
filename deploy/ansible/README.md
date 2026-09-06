@@ -584,7 +584,7 @@ journalctl -u sectortrace-archive-audit-full.service
 (`pg_telemetry_snapshot_time` in `vars.yml`, default 03:35) inside the `app`
 container. It captures `pg_stat_user_tables` / `pg_stat_user_indexes` (and
 `pg_stat_statements`, if installed — see below) into `pg_telemetry_*`
-(migration 0109; see `pipeline/pg_telemetry.py`). This is capture only: it
+(migration 0113; see `pipeline/pg_telemetry.py`). This is capture only: it
 accumulates the evidence performance.md's "PostgreSQL maintenance" section
 requires before any autovacuum/analyze threshold, index, or planner/memory
 change — it does not itself change any of those.

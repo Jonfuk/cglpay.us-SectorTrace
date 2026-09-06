@@ -1,4 +1,4 @@
-"""PostgreSQL maintenance telemetry (migration 0109, performance.md
+"""PostgreSQL maintenance telemetry (migration 0113, performance.md
 "PostgreSQL maintenance"). Capture and persistence only — this suite must
 never assert anything about autovacuum/index/planner *configuration*, only
 that the telemetry needed to eventually decide those is recorded correctly.

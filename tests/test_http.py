@@ -248,7 +248,7 @@ def test_304_without_archived_body_refetches(httpx_mock, settings, conn):
 
 def test_http_cache_records_the_exact_archive_reference_and_content_metadata(
         httpx_mock, settings, conn):
-    """Migration 0106: a fetch must persist `archive_ref`, `content_type` and
+    """Migration 0110: a fetch must persist `archive_ref`, `content_type` and
     `content_length` alongside the hash, so a later 304 can retrieve the
     archived body by that stored key rather than re-deriving it."""
     _allow_all_robots(httpx_mock)

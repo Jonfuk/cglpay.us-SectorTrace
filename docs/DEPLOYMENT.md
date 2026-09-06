@@ -136,7 +136,7 @@ the LAN host.
 
 ### PostgreSQL maintenance telemetry
 
-`pipeline pg-telemetry-snapshot` (`pipeline/pg_telemetry.py`, migration 0109)
+`pipeline pg-telemetry-snapshot` (`pipeline/pg_telemetry.py`, migration 0113)
 captures `pg_stat_user_tables` and `pg_stat_user_indexes` into `pg_telemetry_*`
 every run, scheduled daily by `sectortrace-pg-telemetry.timer` — see
 `deploy/ansible/README.md`, "PostgreSQL maintenance telemetry". It is capture

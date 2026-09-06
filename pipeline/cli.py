@@ -1948,7 +1948,7 @@ def pg_capabilities(
 
 @app.command("pg-telemetry-snapshot")
 def pg_telemetry_snapshot() -> None:
-    """Capture one PostgreSQL maintenance-telemetry snapshot (migration 0109).
+    """Capture one PostgreSQL maintenance-telemetry snapshot (migration 0113).
 
     Writes table/index churn and usage counters, and query-fingerprint stats
     if `pg_stat_statements` is installed, into `pg_telemetry_*` so the

@@ -12,7 +12,7 @@ because they are dropped and rebuilt from autovacuum counters, not archived.
 This module is capture only. It snapshots the three catalog views the
 performance-review paragraph names — `pg_stat_user_tables`,
 `pg_stat_user_indexes`, and, where installed, `pg_stat_statements` — into the
-`pg_telemetry_*` tables (migration 0109), one row per object per snapshot, so
+`pg_telemetry_*` tables (migration 0113), one row per object per snapshot, so
 the update-rate and index-usage history the review depends on actually exists
 when the observation period ends. It does not read its own output, does not
 compute a threshold, and does not touch autovacuum settings, indexes, or

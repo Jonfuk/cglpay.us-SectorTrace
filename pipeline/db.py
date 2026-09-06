@@ -530,7 +530,7 @@ def set_http_cache(
     content_type: str | None = None,
     content_length: int | None = None,
 ) -> None:
-    # archive_ref/content_type/content_length (migration 0106) let a 304
+    # archive_ref/content_type/content_length (migration 0110) let a 304
     # revalidation retrieve the archived body by its exact stored key
     # (`Archive.get_by_ref`) instead of `Archive.lookup`'s hash-prefix scan —
     # a listing call per cache hit on S3-compatible storage. Optional and
