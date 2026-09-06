@@ -554,3 +554,26 @@ doing once, deliberately, onto a scratch database.
 systemctl status sectortrace-backup.timer
 journalctl -u sectortrace-backup.service
 ```
+
+## Archive audits
+
+Two timers, both `pipeline archive_audit.py` (BETA-060; performance.md's
+Phase 5 archive-audit gap): `sectortrace-archive-audit.timer` runs
+`pipeline archive-audit` daily (default 02:30) — a deterministic sample, at
+least 100 objects or 1% of the archive if larger, re-hashed against the
+archive itself. `sectortrace-archive-audit-full.timer` runs
+`pipeline archive-audit-full` quarterly (default the 1st of Jan/Apr/Jul/Oct
+at 02:00, `RandomizedDelaySec=1h`) — every archived object, not a sample,
+which is why it is quarterly rather than daily.
+
+Neither ever deletes anything. A mismatch — the bytes on disk no longer
+hash to what `archive_objects` recorded — is quarantined
+(`quarantine_items`, visible in `/admin`), the same wiring `archive-verify`
+already has. Both timers' schedules are `archive_audit_time` /
+`archive_audit_full_time` in `vars.yml`.
+
+```bash
+systemctl status sectortrace-archive-audit.timer sectortrace-archive-audit-full.timer
+journalctl -u sectortrace-archive-audit.service
+journalctl -u sectortrace-archive-audit-full.service
+```

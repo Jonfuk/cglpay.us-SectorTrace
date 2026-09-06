@@ -246,6 +246,83 @@ def test_304_without_archived_body_refetches(httpx_mock, settings, conn):
     assert result.body == b"refetched body"
 
 
+def test_http_cache_records_the_exact_archive_reference_and_content_metadata(
+        httpx_mock, settings, conn):
+    """Migration 0106: a fetch must persist `archive_ref`, `content_type` and
+    `content_length` alongside the hash, so a later 304 can retrieve the
+    archived body by that stored key rather than re-deriving it."""
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.json"
+    body = b'{"a": 1}'
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "application/json"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    result = client.get(url)
+    client.close()
+
+    cached = db.get_http_cache(conn, url)
+    assert cached["archive_ref"] == result.archived_ref
+    assert cached["content_type"] == "application/json"
+    assert cached["content_length"] == len(body)
+
+
+def test_conditional_revalidation_uses_the_stored_reference_not_a_lookup_scan(
+        httpx_mock, settings, conn):
+    """Once a fetch has recorded `archive_ref`, a later 304 must retrieve the
+    archived body via `Archive.get_by_ref` (an exact key) and must never fall
+    back to `Archive.lookup`'s hash-prefix scan — the whole point of storing
+    the reference in the first place (performance.md's Phase 5 archive-audit
+    gap: "a 304 retrieves by key rather than prefix listing").
+    """
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.txt"
+    body = b"archived content"
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "text/plain", "etag": "abc123"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    first = client.get(url)
+    assert first.archived_ref is not None
+    assert db.get_http_cache(conn, url)["archive_ref"] == first.archived_ref
+
+    lookup_calls = []
+    original_lookup = client.archive.lookup
+
+    def spying_lookup(*args, **kwargs):
+        lookup_calls.append((args, kwargs))
+        return original_lookup(*args, **kwargs)
+
+    client.archive.lookup = spying_lookup
+
+    httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
+    second = client.get(url)
+    client.close()
+
+    assert second.not_modified is True
+    assert second.body == body
+    assert lookup_calls == []  # served by exact reference — never the prefix scan
+
+
+def test_conditional_revalidation_keeps_the_prior_content_type(httpx_mock, settings, conn):
+    """A 304 carries no body and typically no Content-Type of its own; the
+    cache entry must keep describing the (unchanged) archived content, not
+    overwrite it with nothing."""
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.json"
+    body = b'{"a": 1}'
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "application/json", "etag": "abc123"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    client.get(url)
+    httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
+    client.get(url)
+    client.close()
+
+    assert db.get_http_cache(conn, url)["content_type"] == "application/json"
+
+
 # --- get_streaming ---------------------------------------------------------
 
 

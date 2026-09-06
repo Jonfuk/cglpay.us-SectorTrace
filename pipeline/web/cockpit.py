@@ -122,17 +122,19 @@ def overview(conn, settings) -> dict:
     archive_reason, archive_priority, archive_metric = "No archive audit recorded", 1, 0
     try:
         audit = conn.execute(
-            "SELECT run_at, missing_refs, duplicate_hashes "
+            "SELECT run_at, missing_refs, duplicate_hashes, verified_mismatches "
             "FROM archive_audits ORDER BY run_at DESC LIMIT 1").fetchone()
         if audit:
             missing = audit["missing_refs"] or 0
             dupes = audit["duplicate_hashes"] or 0
+            mismatches = audit["verified_mismatches"] or 0
             audit_days = _age_days(audit["run_at"])
-            archive_metric = missing + dupes
-            if missing or dupes:
+            archive_metric = missing + dupes + mismatches
+            if missing or dupes or mismatches:
                 archive_priority = 3
                 archive_reason = (f"{missing} missing archive ref(s), "
-                                  f"{dupes} duplicate hash(es)")
+                                  f"{dupes} duplicate hash(es), "
+                                  f"{mismatches} verification mismatch(es)")
             elif (audit_days or 0) >= 30:
                 archive_priority = 1
                 archive_reason = f"Last audit {audit_days} days ago, clean"

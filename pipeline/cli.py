@@ -2771,12 +2771,16 @@ def archive_audit(
         False, "--show", help="Print the last few audit rows instead of "
                                "recording a new one."),
 ) -> None:
-    """Record one append-only raw-archive audit snapshot (BETA-060).
+    """Record one append-only raw-archive audit snapshot (BETA-060): the
+    daily deterministic sample (performance.md's Phase 5 archive-audit gap —
+    at least 100 objects, or 1% of the archive if larger).
 
     Counts, by-source distribution, unarchived evidence references, duplicated
-    hashes and a deterministic sample, from the `archive_objects` index. It
-    writes exactly one `archive_audits` row and touches nothing else: it never
-    deletes an object, compacts the archive, or changes retention.
+    hashes, and the sample re-hashed against the archive itself, from the
+    `archive_objects` index. Writes exactly one `archive_audits` row and
+    quarantines any verification mismatch (migration 0103) — it never deletes
+    an object, compacts the archive, or changes retention. See
+    `archive-audit-full` for the quarterly complete verification.
     """
     import json as _json
 
@@ -2795,13 +2799,38 @@ def archive_audit(
                             indent=2))
     typer.echo(f"recorded audit {row['audit_id']}: {row['object_count']} objects, "
                 f"{row['total_bytes']} bytes, {row['missing_refs']} unarchived refs, "
-                f"{row['duplicate_hashes']} duplicated hashes")
+                f"{row['duplicate_hashes']} duplicated hashes, "
+                f"{row['verified_mismatches']} of {row['sample_size']} sampled mismatched")
+
+
+@app.command("archive-audit-full")
+def archive_audit_full() -> None:
+    """Perform the quarterly complete raw-archive verification (BETA-060,
+    performance.md's Phase 5 archive-audit gap): every archived object
+    re-hashed, not the daily 1% sample, with the same quarantine-on-mismatch
+    wiring as `archive-audit` and `archive-verify`. Expensive by design — see
+    deploy/ansible for how it is scheduled quarterly rather than run ad hoc.
+    """
+    import json as _json
+
+    from pipeline import archive_audit as audit_mod
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        row = audit_mod.record(conn, settings, full=True)
+    finally:
+        conn.close()
+    typer.echo(_json.dumps({k: v for k, v in row.items() if k != "sample"},
+                            indent=2))
+    typer.echo(f"recorded full audit {row['audit_id']}: {row['object_count']} objects verified, "
+                f"{row['verified_mismatches']} mismatched")
 
 
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
-    from pipeline import db, quarantine
+    from pipeline import archive_audit, db
     from pipeline.archive import get_archive
     settings = get_settings()
     report = get_archive(settings).verify()
@@ -2810,18 +2839,13 @@ def archive_verify() -> None:
         __import__("json").dumps(report, indent=2), encoding="utf-8")
     if report["failures"]:
         # The manifest file is a point-in-time report; this makes each
-        # failure listable/retryable across runs too (migration 0103).
+        # failure listable/retryable across runs too (migration 0103) — the
+        # same helper the daily/quarterly archive-audit passes use, so a
+        # mismatch is quarantined identically regardless of which path
+        # found it.
         conn = db.get_connection(settings)
         try:
-            for failure in report["failures"]:
-                quarantine.quarantine(
-                    conn, kind="archive_mismatch", module="archive_verify",
-                    item_identity=failure["key"],
-                    failure_class="invalid_key" if "error" in failure else "sha256_mismatch",
-                    reason=failure.get("error") or (
-                        f"expected {failure.get('expected')}, got {failure.get('actual')}"),
-                    input_sha256=failure.get("expected"), output_sha256=failure.get("actual"),
-                    payload=failure)
+            archive_audit.quarantine_failures(conn, report["failures"], module="archive_verify")
             conn.commit()
         finally:
             conn.close()

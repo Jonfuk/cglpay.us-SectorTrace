@@ -1,6 +1,7 @@
 """Content-addressed raw archive backends."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import mimetypes
 import os
@@ -34,6 +35,7 @@ class ArchiveObject:
 class Archive(Protocol):
     backend: str
     def lookup(self, source_system: str, sha256: str) -> ArchiveObject | None: ...
+    def get_by_ref(self, logical_path: str) -> ArchiveObject | None: ...
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str: ...
     def put_file(self, source_system: str, sha256: str, content_type: str | None,
                  path: Path) -> ArchiveObject: ...
@@ -47,6 +49,25 @@ class Archive(Protocol):
 def logical_path(source_system: str, sha256: str, content_type: str | None) -> str:
     ext = mimetypes.guess_extension((content_type or "").split(";", 1)[0].strip()) or ".bin"
     return f"data/raw/{source_system}/{sha256}{ext}"
+
+
+def _b64_checksum(sha256_hex: str) -> str:
+    """S3's `ChecksumSHA256` wire format: base64 of the raw digest bytes,
+    not the hex string this codebase stores everywhere else."""
+    return base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
+
+
+def _is_not_found(exc: Exception) -> bool:
+    """True when an S3 client exception means "no such key" rather than a
+    real failure worth surfacing. Matches `botocore.exceptions.ClientError`'s
+    `exc.response["Error"]["Code"]` shape by duck typing rather than
+    importing botocore at module scope — it sits behind the optional
+    `storage` extra, and the offline test suite's fakes need only mimic this
+    one attribute, not the whole botocore exception hierarchy.
+    """
+    error = getattr(exc, "response", None)
+    code = error.get("Error", {}).get("Code") if isinstance(error, dict) else None
+    return code in ("404", "NoSuchKey", "NotFound")
 
 
 def _parts(path: str) -> tuple[str, str, str]:
@@ -70,6 +91,21 @@ class FilesystemArchive:
                 return ArchiveObject(f"data/raw/{source_system}/{path.name}", path.stat().st_size,
                                      path.read_bytes)
         return None
+
+    def get_by_ref(self, logical_path: str) -> ArchiveObject | None:
+        """Locate an object by the exact key a prior write already proved
+        correct — a stored `http_cache.archive_ref`, or a row this backend's
+        own inventory already named — rather than re-deriving it with
+        `lookup()`'s glob. A directory listing is cheap here, but a 304
+        revalidation used to pay for one on every single cache hit for a
+        find it had already made once; this is the single `stat`+read that
+        ought to cost instead.
+        """
+        _, _, full = _parts(logical_path)
+        path = self.root / full.removeprefix("data/raw/")
+        if not path.is_file():
+            return None
+        return ArchiveObject(full, path.stat().st_size, path.read_bytes)
 
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str:
         if hashlib.sha256(body).hexdigest() != sha256:
@@ -157,6 +193,11 @@ class FilesystemArchive:
 class S3Archive:
     backend = "s3"
 
+    # A dedicated key outside `data/raw/` — never collides with a real
+    # content-addressed object, and small enough that probing costs nothing
+    # worth measuring.
+    _CHECKSUM_PROBE_KEY = "_sectortrace_checksum_probe"
+
     def __init__(self, settings: Settings, client=None):
         if client is None:
             try:
@@ -174,6 +215,12 @@ class S3Archive:
                       "aws_secret_access_key": settings.archive_s3_secret}
             client = boto3.client("s3", **kwargs)
         self.client = client
+        # Probed once and cached for the life of this instance (performance.md
+        # Phase 5): not every S3-compatible endpoint that this project talks
+        # to implements checksum-on-write (self-hosted MinIO/Ceph deployments
+        # predate it), and there is no capability-discovery API — the only
+        # way to find out is to try one and see whether it comes back.
+        self._checksum_supported: bool | None = None
 
     def _key(self, logical: str) -> str:
         if Path(logical).is_absolute():
@@ -193,16 +240,97 @@ class S3Archive:
         logical = f"data/raw/{objects[0]['Key']}"
         return ArchiveObject(logical, int(objects[0]["Size"]), lambda: self.read(logical))
 
+    def get_by_ref(self, logical_path: str) -> ArchiveObject | None:
+        """Locate an object by the exact key a prior write already proved
+        correct, via one exact HEAD — the counterpart to `lookup()`'s
+        `list_objects_v2` call, which exists only because a bare
+        (source, sha256) pair does not know the extension `logical_path()`
+        chose. Once a caller already holds the key (a stored
+        `http_cache.archive_ref`, the archive audit's own index), paying for
+        a bucket listing to refind it is unnecessary cost and, on a bucket
+        with many objects sharing a source/hash prefix, unnecessary latency
+        per lookup.
+        """
+        key = self._key(logical_path)
+        try:
+            response = self.client.head_object(Bucket=self.bucket, Key=key)
+        except Exception as exc:
+            if _is_not_found(exc):
+                return None
+            raise
+        return ArchiveObject(logical_path, int(response["ContentLength"]),
+                             lambda: self.read(logical_path))
+
+    def _supports_checksum(self) -> bool:
+        """Whether this endpoint accepts a transport checksum on write and
+        echoes it back on an exact HEAD. A false negative here only costs
+        falling back to the slower full-byte-compare verification this
+        backend used before checksums existed; trusting a put that merely
+        did not *reject* `ChecksumAlgorithm` would be a false positive — some
+        S3-compatible servers accept and silently ignore parameters they
+        don't implement — so the probe insists on seeing the checksum
+        actually echoed back, not merely on the put succeeding.
+        """
+        if self._checksum_supported is None:
+            probe_body = b"sectortrace-checksum-capability-probe"
+            probe_sha256 = hashlib.sha256(probe_body).hexdigest()
+            try:
+                self.client.put_object(
+                    Bucket=self.bucket, Key=self._CHECKSUM_PROBE_KEY, Body=probe_body,
+                    ChecksumAlgorithm="SHA256", ChecksumSHA256=_b64_checksum(probe_sha256))
+                head = self.client.head_object(
+                    Bucket=self.bucket, Key=self._CHECKSUM_PROBE_KEY, ChecksumMode="ENABLED")
+                self._checksum_supported = head.get("ChecksumSHA256") == _b64_checksum(probe_sha256)
+            except Exception:
+                self._checksum_supported = False
+            finally:
+                try:
+                    self.client.delete_object(Bucket=self.bucket, Key=self._CHECKSUM_PROBE_KEY)
+                except Exception:
+                    pass  # Best-effort cleanup; a stray probe key breaks nothing.
+        return self._checksum_supported
+
+    def _verify_by_head(self, logical: str, key: str, sha256: str, expected_size: int) -> None:
+        """Confirm a write landed intact via one exact HEAD rather than a
+        re-download-and-compare. Only reachable once `_supports_checksum()`
+        has proven this endpoint returns `ChecksumSHA256` on request, so the
+        echoed checksum is trustworthy evidence the bytes are correct — not
+        merely evidence the key exists.
+        """
+        try:
+            head = self.client.head_object(Bucket=self.bucket, Key=key, ChecksumMode="ENABLED")
+        except Exception as exc:
+            raise ArchiveError(f"S3 archive HEAD verification failed for {logical}: {exc}") from exc
+        if (head.get("ChecksumSHA256") != _b64_checksum(sha256)
+                or int(head.get("ContentLength", -1)) != expected_size):
+            raise ArchiveError(f"S3 archive verification failed for {logical}")
+
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str:
         if hashlib.sha256(body).hexdigest() != sha256:
             raise ArchiveError("payload hash does not match archive key")
         logical = logical_path(source_system, sha256, content_type)
+        key = self._key(logical)
+        checksummed = self._supports_checksum()
         if self.lookup(source_system, sha256) is None:
-            self.client.put_object(Bucket=self.bucket, Key=self._key(logical), Body=body,
-                                   ContentType=(content_type or "application/octet-stream").split(";", 1)[0])
-        checked = self.lookup(source_system, sha256)
-        if checked is None or checked.read_bytes() != body:
-            raise ArchiveError(f"S3 archive verification failed for {logical}")
+            kwargs = {"Bucket": self.bucket, "Key": key, "Body": body,
+                      "ContentType": (content_type or "application/octet-stream").split(";", 1)[0]}
+            if checksummed:
+                # A transport checksum lets S3 itself reject a corrupted
+                # upload before it is ever stored, rather than this pipeline
+                # finding out only when it next reads the object back.
+                kwargs["ChecksumAlgorithm"] = "SHA256"
+                kwargs["ChecksumSHA256"] = _b64_checksum(sha256)
+            self.client.put_object(**kwargs)
+        if checksummed:
+            self._verify_by_head(logical, key, sha256, len(body))
+        else:
+            # No proven checksum support at this endpoint: the only way left
+            # to know the bytes are intact is to read them back and compare,
+            # the synchronous full verification this backend always did
+            # before checksums existed here.
+            checked = self.lookup(source_system, sha256)
+            if checked is None or checked.read_bytes() != body:
+                raise ArchiveError(f"S3 archive verification failed for {logical}")
         return logical
 
     def put_stream(self, source_system: str, sha256: str,
