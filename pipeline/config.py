@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
 
+    # A deployment-topology fact, not a feature flag: whether a separate
+    # `pipeline worker` process is actually running against this warehouse.
+    # The web process only ever enqueues a module run since the Phase 5
+    # worker cutover (CLAUDE.md settled decision 10) -- it cannot execute one
+    # itself any more -- so an enqueue with nobody consuming the queue would
+    # otherwise sit as "running" forever with no indication anything is
+    # wrong. Sites that run `pipeline worker` (or the `worker` compose
+    # service) alongside `pipeline web` leave this true; a checkout that only
+    # ever runs `pipeline web` sets PIPELINE_WORKER_ENABLED=false so
+    # `POST /api/admin/run` refuses with a message naming the missing worker
+    # instead of queuing into silence.
+    pipeline_worker_enabled: bool = True
+
     # Phase 6 frontend cutover seam. When true (SERVE_NUXT=true) AND the built
     # Nuxt static output is present, the server serves the two Nuxt applications
     # — public at `/`, admin at `/admin` — from `nuxt_dist_dir` instead of the

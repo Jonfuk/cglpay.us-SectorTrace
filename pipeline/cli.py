@@ -29,10 +29,12 @@ documents_app = typer.Typer(help="Inspect, parse, validate, and search archived 
 nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunks, embeddings, search).")
 analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
+worker_app = typer.Typer(help="Claim and execute queued pipeline-module runs (Phase 5 worker cutover).")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
+app.add_typer(worker_app, name="worker")
 app.add_typer(mirror_app, name="mirror")
 # Keep the TUI as another entry point over the existing command schema. The
 # project wrapper adds a confirmation boundary, while validation and side
@@ -81,6 +83,45 @@ def analysis_worker(
         db_conn.close()
     worker = AnalysisWorker(settings, poll_seconds=poll_seconds, batch_size=batch_size,
                             worker_id=worker_id, comparison_workers=comparison_workers)
+    if once:
+        result = worker.run_once()
+        typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
+    else:
+        worker.run_forever()
+
+
+@worker_app.command("run")
+def worker_run(
+    once: bool = typer.Option(False, "--once", help="Claim one queued run and exit when it finishes."),
+    poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls when idle."),
+    lease_seconds: int = typer.Option(
+        900, min=30, help="How long a claimed job may go without a lease renewal "
+                            "before another worker may reclaim it."),
+    worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
+) -> None:
+    """Execute queued pipeline-module runs enqueued by the admin UI.
+
+    A separate process from `pipeline web` (CLAUDE.md settled decision 10,
+    the Phase 5 worker cutover): the web process only ever writes a row to
+    `worker_jobs` and polls it, this process is the one that actually calls
+    `pipeline.runner.run_waves`. At most one worker process is ever inside a
+    run at a time, deployment-wide, enforced by a PostgreSQL advisory lock
+    (see pipeline/worker.py's module docstring) rather than by there being
+    only one worker process -- so it is safe, if never necessary, to run more
+    than one for availability.
+    """
+    from pipeline.worker import PipelineWorker
+
+    configure_logging("worker")
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn)
+    finally:
+        conn.close()
+
+    worker = PipelineWorker(settings, poll_seconds=poll_seconds,
+                             lease_seconds=lease_seconds, worker_id=worker_id)
     if once:
         result = worker.run_once()
         typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))

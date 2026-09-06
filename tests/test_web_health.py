@@ -568,29 +568,32 @@ def test_the_integrity_check_runs_as_a_job_and_passes_on_a_good_warehouse(client
     assert job["summary"][0]["integrity"] == ["ok"]
 
 
-def test_the_integrity_check_takes_the_same_slot_as_a_run(client, monkeypatch):
+def test_the_integrity_check_takes_the_same_slot_as_a_run(client, monkeypatch, settings):
     """Both want the whole warehouse. Checking one that is being written would
-    report on a moving target."""
+    report on a moving target.
+
+    A run is enqueued, not executed, by `POST /api/admin/run` since the
+    Phase 5 worker cutover (CLAUDE.md settled decision 10) -- so the module
+    below never actually runs, and does not need to: a merely-*queued* row is
+    already enough to hold the slot, which is exactly the case `JobRegistry`
+    has to cover that an in-process pointer alone could not (see
+    pipeline/web/jobs.py's `_refuse_if_busy`).
+    """
     from pipeline.registry import MODULE_REGISTRY
 
-    release = threading.Event()
-    monkeypatch.setitem(MODULE_REGISTRY, "a_slow", lambda ctx: release.wait(timeout=10))
+    monkeypatch.setitem(MODULE_REGISTRY, "a_slow", lambda ctx: None)
 
     started = client.post("/api/admin/run", json={"module": "a_slow"})
     try:
         refused = client.post("/api/admin/check", json={})
         assert refused.status_code == 409
     finally:
-        release.set()
         if started.status_code == 200:
-            import time
+            # Finish it off the same way a real worker process would, so the
+            # test leaves no row behind claiming to still be running.
+            from pipeline.worker import PipelineWorker
 
-            job_id = started.json()["id"]
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                if client.get(f"/api/admin/jobs/{job_id}").json()["state"] != "running":
-                    break
-                time.sleep(0.02)
+            PipelineWorker(settings, lease_seconds=5).run_once()
 
 
 def test_the_integrity_check_reads_without_writing(client, settings):
