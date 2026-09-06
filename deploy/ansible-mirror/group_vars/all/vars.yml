@@ -44,10 +44,17 @@ state_dir: /opt/sectortrace-mirror/state
 admin_ui_enabled: true
 expose_admin_publicly: false
 
+# The operator workspace is served from the generated Nuxt bundle on mirror
+# hosts. This is independent of `serve_nuxt`, which controls the public portal;
+# set `admin_ui_variant: legacy` in zz-local.yml for an emergency rollback.
+admin_ui_variant: "nuxt"
+
 # The beta deployment is the cutover proving ground for the generated Nuxt
-# front ends; a disaster-recovery mirror keeps the legacy portals as its
-# parity oracle. The wizard writes an explicit value into zz-local.yml, so an
-# operator can turn the beta cutover off without changing this shared default.
+# public front end. The operator workspace is selected independently above so
+# every mirror gets the current admin UI while the public portal can remain the
+# legacy parity oracle. The wizard writes an explicit value into zz-local.yml,
+# so an operator can turn the beta public cutover off without changing this
+# shared default.
 serve_nuxt: false
 
 # Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
