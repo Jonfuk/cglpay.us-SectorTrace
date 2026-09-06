@@ -565,6 +565,7 @@ def _validate_viewit_history(conn) -> dict[str, int]:
             "@ == \"**\" || @ == \"x\" || @ == \"X\")')"
         ),
         "current_powerbi_rows": "SELECT count(*) AS n FROM ndtms_powerbi_observations",
+        "monthly_provisional_rows": "SELECT count(*) AS n FROM ndtms_monthly_statistics",
         "current_indicator_count": (
             "SELECT count(DISTINCT metric_raw) AS n FROM ndtms_powerbi_observations"
         ),

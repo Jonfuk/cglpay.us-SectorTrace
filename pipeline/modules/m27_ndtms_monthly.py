@@ -27,12 +27,11 @@ The flow per cohort page:
      page rather than erroring, and that is not something a status code
      catches.
 
-Only the current default report month is fetched. `ReportVersionId` also
-addresses months back to April 2014 (visible in the page's own dropdown),
-but backfilling that would multiply every area by every month and nothing
-has asked for it yet -- report_version_id and report_month are both stored
-per row precisely so a future pass can add specific months without a schema
-change.
+The normal module run walks every `ReportVersionId` exposed by the page (back
+to April 2014 on the current source). A bounded `--limit` run intentionally
+uses only the selected current version and a small authority slice for smoke
+testing. `report_version_id` and `report_month` remain part of every row's
+natural key and provenance so the long historical pass is resumable.
 
 This is service-demand context, not workforce data, and is kept in its own
 table -- see the migration for why it is never merged with the census, the
@@ -95,10 +94,13 @@ class _LandingPageParser(HTMLParser):
         self.token: str | None = None
         self.report_version_id: str | None = None
         self.report_label: str | None = None
+        self.report_versions: list[tuple[str, str]] = []
         self._in_form1 = False
         self._form_depth = 0
         self._in_report_select = False
+        self._in_option = False
         self._in_selected_option = False
+        self._option_value: str | None = None
         self._option_parts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
@@ -112,9 +114,10 @@ class _LandingPageParser(HTMLParser):
             self.token = attrs.get("value")
         elif self._in_form1 and tag == "select" and attrs.get("id") == "ReportVersionId":
             self._in_report_select = True
-        elif self._in_report_select and tag == "option" and "selected" in attrs:
-            self.report_version_id = attrs.get("value")
-            self._in_selected_option = True
+        elif self._in_report_select and tag == "option":
+            self._option_value = attrs.get("value")
+            self._in_option = True
+            self._in_selected_option = "selected" in attrs
             self._option_parts = []
 
     def handle_endtag(self, tag):
@@ -124,12 +127,18 @@ class _LandingPageParser(HTMLParser):
                 self._in_form1 = False
         elif tag == "select" and self._in_report_select:
             self._in_report_select = False
-        elif tag == "option" and self._in_selected_option:
-            self.report_label = "".join(self._option_parts).strip()
+        elif tag == "option" and self._in_report_select:
+            label = "".join(self._option_parts).strip()
+            self.report_versions.append((self._option_value or "", label))
+            if self._in_selected_option:
+                self.report_version_id = self._option_value
+                self.report_label = label
+            self._in_option = False
             self._in_selected_option = False
+            self._option_value = None
 
     def handle_data(self, data):
-        if self._in_selected_option:
+        if self._in_option:
             self._option_parts.append(data)
 
 
@@ -289,111 +298,131 @@ def run(ctx: ModuleContext) -> None:
                                        url, json.dumps({}))
                 continue
 
-            report_month = _parse_report_month(filters.report_label)
-            if report_month is None:
-                db.record_review_item(conn, module_name, "ndtms_monthly_report_month_unparseable",
-                                       url, json.dumps({"label": filters.report_label}))
-                continue
-            report_version_id = int(filters.report_version_id)
-
-            areas: list[tuple[str, str, str]] = []
-            for region_code in REGIONS:
-                la_result = client.get(f"{BASE_URL}/Monthly/GetDATByPHECentre", params={
-                    "pheCentre": region_code, "vernum": filters.report_version_id})
-                if not la_result.ok:
-                    db.record_review_item(conn, module_name, "ndtms_monthly_la_list_unavailable",
-                                           region_code, json.dumps({"status": la_result.status_code}))
-                    continue
-                try:
-                    options = json.loads(la_result.body)
-                except json.JSONDecodeError:
-                    db.record_review_item(conn, module_name, "ndtms_monthly_la_list_unparseable",
-                                           region_code, json.dumps({}))
-                    continue
-                for opt in options:
-                    dat_code, area_name = opt.get("value"), opt.get("text")
-                    if dat_code and dat_code != "0" and area_name:
-                        areas.append((region_code, dat_code, area_name))
-
+            versions = filters.report_versions or [
+                (filters.report_version_id or "", filters.report_label or "")
+            ]
+            # `--limit` is the bounded smoke-test mode: it keeps the existing
+            # one-authority tests and gives operators a cheap live probe. A
+            # normal run deliberately walks every version exposed by NDTMS.
             if ctx.limit:
-                areas = areas[:ctx.limit]
+                versions = versions[:1]
+            for version_text, version_label in versions:
+                report_month = _parse_report_month(version_label)
+                if report_month is None:
+                    db.record_review_item(
+                        conn, module_name, "ndtms_monthly_report_month_unparseable",
+                        url, json.dumps({"label": version_label,
+                                         "report_version_id": version_text}),
+                    )
+                    continue
+                report_version_id = int(version_text)
 
-            # The cohort goes in the phase line rather than the bar label:
-            # each cohort is a full pass over every English local authority,
-            # and a reader watching the bar needs to know which of the two
-            # passes is running.
-            ctx.phase(f"{cohort}: {filters.report_label or report_month}")
-            for region_code, dat_code, area_name in ctx.track(areas, "local authority reports"):
-                body = {
-                    "RegionId": region_code, "DatCodeId": dat_code,
-                    "AgencyId": "0", "ReportVersionId": filters.report_version_id,
-                    "__RequestVerificationToken": filters.token,
-                }
-                result = client.post(url, data=body)
-                if not result.ok:
-                    # A stale anti-forgery token (long-idle session, cookie
-                    # rotated mid-run) fails the same way a dead link would:
-                    # one retry with a freshly issued token before giving up.
-                    filters = _fetch_filters(client, url) or filters
-                    body["ReportVersionId"] = filters.report_version_id
-                    body["__RequestVerificationToken"] = filters.token
+                areas: list[tuple[str, str, str]] = []
+                for region_code in REGIONS:
+                    la_result = client.get(f"{BASE_URL}/Monthly/GetDATByPHECentre", params={
+                        "pheCentre": region_code, "vernum": version_text})
+                    if not la_result.ok:
+                        db.record_review_item(
+                            conn, module_name, "ndtms_monthly_la_list_unavailable",
+                            region_code, json.dumps({"status": la_result.status_code,
+                                                     "report_version_id": version_text}),
+                        )
+                        continue
+                    try:
+                        options = json.loads(la_result.body)
+                    except json.JSONDecodeError:
+                        db.record_review_item(
+                            conn, module_name, "ndtms_monthly_la_list_unparseable",
+                            region_code, json.dumps({"report_version_id": version_text}),
+                        )
+                        continue
+                    for opt in options:
+                        dat_code, area_name = opt.get("value"), opt.get("text")
+                        if dat_code and dat_code != "0" and area_name:
+                            areas.append((region_code, dat_code, area_name))
+
+                if ctx.limit:
+                    areas = areas[:ctx.limit]
+
+                ctx.phase(f"{cohort}: {version_label}")
+                for region_code, dat_code, area_name in ctx.track(
+                        areas, "local authority reports"):
+                    body = {
+                        "RegionId": region_code, "DatCodeId": dat_code,
+                        "AgencyId": "0", "ReportVersionId": version_text,
+                        "__RequestVerificationToken": filters.token,
+                    }
                     result = client.post(url, data=body)
                     if not result.ok:
-                        db.record_review_item(conn, module_name, "ndtms_monthly_report_unavailable",
-                                               dat_code, json.dumps({"status": result.status_code}))
-                        continue
-
-                page = _ReportPageParser()
-                page.feed(result.body.decode("utf-8", errors="replace"))
-                if not _h1_matches_area(page.h1, area_name):
-                    db.record_review_item(conn, module_name, "ndtms_monthly_area_mismatch",
-                                           dat_code, json.dumps({"expected": area_name, "h1": page.h1}))
-                    continue
-
-                ons_code = match_area_name(area_name, authority_lookup, transitions)
-                if ons_code is None:
-                    db.record_review_item(conn, module_name, "unmatched_ndtms_monthly_area",
-                                           area_name, json.dumps({"dat_code": dat_code}))
-
-                provenance = _provenance(result)
-                stats_rows: list[dict] = []
-                for heading, rows in page.sections:
-                    if len(rows) < 2:
-                        continue
-                    section = _slugify(_section_heading(heading))
-                    header = rows[0]
-                    for row in rows[1:]:
-                        if not row or not row[0].strip():
+                        filters = _fetch_filters(client, url) or filters
+                        body["ReportVersionId"] = version_text
+                        body["__RequestVerificationToken"] = filters.token
+                        result = client.post(url, data=body)
+                        if not result.ok:
+                            db.record_review_item(
+                                conn, module_name, "ndtms_monthly_report_unavailable",
+                                dat_code, json.dumps({"status": result.status_code,
+                                                      "report_version_id": version_text}),
+                            )
                             continue
-                        row_label = row[0].strip()
-                        for i in range(1, min(len(row), len(header))):
-                            raw = row[i]
-                            if not raw.strip():
-                                continue
-                            stats_rows.append({
-                                "report_version_id": report_version_id,
-                                "report_month": report_month,
-                                "cohort": cohort,
-                                "area_name_raw": area_name,
-                                "dat_code": dat_code,
-                                "ons_code": ons_code,
-                                "region_code": region_code,
-                                "section": section,
-                                "substance_category": row_label,
-                                "time_period_raw": header[i].strip(),
-                                "value": _to_number(raw),
-                                "value_text": raw.strip(),
-                                **provenance,
-                            })
-                            stats_written += 1
 
-                db.upsert_many(
-                    conn, "ndtms_monthly_statistics", stats_rows,
-                    natural_key=["report_version_id", "cohort", "dat_code", "section",
-                                 "substance_category", "time_period_raw"],
-                )
-                if not ctx.dry_run:
-                    conn.commit()
+                    page = _ReportPageParser()
+                    page.feed(result.body.decode("utf-8", errors="replace"))
+                    if not _h1_matches_area(page.h1, area_name):
+                        db.record_review_item(
+                            conn, module_name, "ndtms_monthly_area_mismatch", dat_code,
+                            json.dumps({"expected": area_name, "h1": page.h1,
+                                        "report_version_id": version_text}),
+                        )
+                        continue
+
+                    ons_code = match_area_name(area_name, authority_lookup, transitions)
+                    if ons_code is None:
+                        db.record_review_item(
+                            conn, module_name, "unmatched_ndtms_monthly_area", area_name,
+                            json.dumps({"dat_code": dat_code,
+                                        "report_version_id": version_text}),
+                        )
+
+                    provenance = _provenance(result)
+                    stats_rows: list[dict] = []
+                    for heading, rows in page.sections:
+                        if len(rows) < 2:
+                            continue
+                        section = _slugify(_section_heading(heading))
+                        header = rows[0]
+                        for row in rows[1:]:
+                            if not row or not row[0].strip():
+                                continue
+                            row_label = row[0].strip()
+                            for i in range(1, min(len(row), len(header))):
+                                raw = row[i]
+                                if not raw.strip():
+                                    continue
+                                stats_rows.append({
+                                    "report_version_id": report_version_id,
+                                    "report_month": report_month,
+                                    "cohort": cohort,
+                                    "area_name_raw": area_name,
+                                    "dat_code": dat_code,
+                                    "ons_code": ons_code,
+                                    "region_code": region_code,
+                                    "section": section,
+                                    "substance_category": row_label,
+                                    "time_period_raw": header[i].strip(),
+                                    "value": _to_number(raw),
+                                    "value_text": raw.strip(),
+                                    **provenance,
+                                })
+                                stats_written += 1
+
+                    db.upsert_many(
+                        conn, "ndtms_monthly_statistics", stats_rows,
+                        natural_key=["report_version_id", "cohort", "dat_code", "section",
+                                     "substance_category", "time_period_raw"],
+                    )
+                    if not ctx.dry_run:
+                        conn.commit()
 
     powerbi_rows = persist_powerbi(ctx, POWERBI_DASHBOARDS)
     log.info("ndtms_monthly.run_complete", stats_written=stats_written,

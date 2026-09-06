@@ -1024,6 +1024,13 @@ ViewIt archive rows. `source_variant` remains explicit; overlapping periods
 must be compared, not deduplicated or summed, because report definitions and
 rounding rules can change between vintages.
 
+## `v_ndtms_complete_history`
+
+Read-only metric-level union of the current Power BI observations, historical
+ViewIt archive rows, and monthly provisional statistics. `source_variant` is
+always explicit; report vintages and indicator definitions must be compared,
+not summed or deduplicated.
+
 ## `ndtms_la_statistics`
 
 *table* — 17,231 rows.
