@@ -80,6 +80,45 @@ def test_archive_migrate_uses_one_inventory_and_workers(tmp_path, monkeypatch):
     assert "run archive-verify" in result.output
 
 
+def test_archive_verify_quarantines_each_failure(tmp_path, monkeypatch):
+    """A mismatch reported by `Archive.verify()` must be listable/retryable
+    afterwards (migration 0103), not only written to the point-in-time
+    manifest file."""
+    from pipeline import archive as archive_module
+
+    settings = _settings_for(tmp_path)
+
+    class FakeArchive:
+        backend = "s3"
+
+        def verify(self):
+            return {"ok": False, "files": 2, "bytes": 10,
+                     "failures": [
+                         {"key": "data/raw/source/abc.bin", "expected": "abc", "actual": "def",
+                          "expected_bytes": 5, "actual_bytes": 5},
+                         {"key": "data/raw/source/not-a-key", "error": "invalid raw archive reference"},
+                     ],
+                     "verified_at": "2026-01-01T00:00:00Z"}
+
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(archive_module, "get_archive", lambda _: FakeArchive())
+
+    result = CliRunner().invoke(cli_module.app, ["archive-verify"])
+
+    assert result.exit_code == 1  # not ok — reports the failure, does not swallow it
+    conn = db.get_connection(settings)
+    try:
+        rows = {row["item_identity"]: row for row in conn.execute(
+            "SELECT item_identity, failure_class, input_sha256, output_sha256 "
+            "FROM quarantine_items WHERE module = 'archive_verify'")}
+    finally:
+        conn.close()
+    assert rows["data/raw/source/abc.bin"]["failure_class"] == "sha256_mismatch"
+    assert rows["data/raw/source/abc.bin"]["input_sha256"] == "abc"
+    assert rows["data/raw/source/abc.bin"]["output_sha256"] == "def"
+    assert rows["data/raw/source/not-a-key"]["failure_class"] == "invalid_key"
+
+
 @register_module("fake_writer_for_tests")
 def _fake_writer(ctx: ModuleContext) -> None:
     ctx.conn.execute("CREATE TABLE IF NOT EXISTS cli_test_rows ("

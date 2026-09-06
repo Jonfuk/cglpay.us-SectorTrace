@@ -291,6 +291,25 @@ def test_rejecting_nothing_is_not_an_error(seeded):
     assert promote.reject(seeded, "cdp_document", [], rejected_by="Jon") == 0
 
 
+def test_rejection_is_quarantined_with_its_reason(seeded):
+    """A rejected candidate becomes listable/retryable the same way parse
+    failures and archive mismatches are (migration 0103), not just a flag on
+    the candidate row that carries no reason."""
+    promote.reject(
+        seeded, "committee_paper", ["https://kent.gov.uk/paper.pdf"],
+        rejected_by="Jon", note="a COVID grant report")
+
+    row = seeded.execute(
+        "SELECT kind, module, item_identity, reason, payload_json, retry_state "
+        "FROM quarantine_items WHERE item_identity = %s",
+        ("https://kent.gov.uk/paper.pdf",)).fetchone()
+    assert row["kind"] == "rejected_candidate"
+    assert row["module"] == "committee_paper_promotion"
+    assert row["reason"] == "a COVID grant report"
+    assert row["payload_json"]["rejected_by"] == "Jon"
+    assert row["retry_state"] == "pending"
+
+
 def test_reset_does_not_delete_evidence(seeded, settings, document):
     """Evidence has its own provenance and its own promotion record. Undoing a
     judgement about a candidate is not the same act as deleting a document."""

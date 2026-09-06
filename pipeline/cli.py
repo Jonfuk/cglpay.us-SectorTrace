@@ -521,6 +521,124 @@ def documents_benchmark(
         conn.close()
 
 
+@documents_app.command("benchmark-parsers")
+def documents_benchmark_parsers(
+    manifest: str = typer.Option(
+        None, help="CSV containing an evidence_id column, pointing at already-archived evidence"),
+    corpus: str = typer.Option(
+        None, help="Directory of PDF files, for a quick check without a populated database"),
+    parsers: str = typer.Option("pymupdf,pdfplumber", help="Comma-separated parser names; the first two are the primary pair for the exit code"),
+    out: str = typer.Option(None, help="Write the full JSON report here as well as stdout"),
+    limit: int = typer.Option(25, min=1),
+) -> None:
+    """Read-only PARITY comparison of two (or more) parser adapters against the
+    same document bytes — never `DocumentService.process`, never a database
+    write. This is the piece `documents benchmark` does not cover: that
+    command persists a `document_versions` row per (document, parser) via
+    `DocumentService`, which is right for populating the warehouse but wrong
+    for a repeatable equivalence check. This command calls
+    `pipeline.documents.parser_parity.compare_parsers` directly against
+    parser adapters, with nothing written anywhere.
+
+    Reports `element_count`/`table_count` deltas and a whitespace-normalized
+    text diff for every parser pair; it does NOT compare document
+    identifiers, amounts, dates, concepts, spans, assertions or relations —
+    those live downstream in `pipeline/nlp/`, not on a parser's raw
+    `ParsedDocument`, and are out of scope here (see
+    `pipeline/documents/parser_parity.py`'s docstring).
+
+    This command's exit code reports parity for THIS run only. It cannot and
+    does not decide which parser should be preferred: that requires an
+    operator running it against a real, representative corpus. This sandbox
+    has neither PyMuPDF installed (it is behind the optional `documents`
+    extra) nor a real document corpus, so no such run has been done here, and
+    nothing in this command touches `Settings.document_parser` or any other
+    configuration based on its result.
+    """
+    import json
+    from pathlib import Path
+
+    from pipeline.documents.parser_parity import compare_parsers
+    from pipeline.documents.parsers import ParserUnavailable, get_parser
+
+    if bool(manifest) == bool(corpus):
+        typer.echo("Pass exactly one of --manifest or --corpus.", err=True)
+        raise typer.Exit(code=2)
+
+    selected = [name.strip() for name in parsers.split(",") if name.strip()]
+    parser_instances = []
+    for name in selected:
+        try:
+            parser_instances.append(get_parser(name))
+        except ParserUnavailable as exc:
+            typer.echo(
+                f"Parser {name!r} is not available ({exc}). "
+                f"Install it with `uv sync --extra documents` and retry.", err=True)
+            raise typer.Exit(code=2) from exc
+
+    documents: list[tuple[str, bytes, str]] = []  # (label, body, mime_type)
+    conn = None
+    if manifest:
+        import csv
+
+        conn, _settings = _document_connection()
+        from pipeline.archive import get_archive
+
+        archive = get_archive(_settings)
+        with Path(manifest).open(newline="", encoding="utf-8") as handle:
+            evidence_ids = [row["evidence_id"] for row in csv.DictReader(handle) if row.get("evidence_id")][:limit]
+        for evidence_id in evidence_ids:
+            record = conn.execute(
+                "SELECT * FROM evidence_records WHERE evidence_id=%s", (evidence_id,)).fetchone()
+            if record is None:
+                typer.echo(f"evidence_id {evidence_id!r} not found in evidence_records; skipping.", err=True)
+                continue
+            reference = _document_reference(record)
+            try:
+                body = archive.read(reference.raw_object_path)
+            except Exception as exc:
+                typer.echo(f"evidence_id {evidence_id!r}: could not read archived bytes ({exc}); skipping.", err=True)
+                continue
+            documents.append((evidence_id, body, reference.mime_type or "application/pdf"))
+    else:
+        corpus_dir = Path(corpus)
+        pdf_paths = sorted(corpus_dir.glob("*.pdf"))[:limit]
+        for path in pdf_paths:
+            documents.append((str(path), path.read_bytes(), "application/pdf"))
+
+    try:
+        if not documents:
+            source = f"--manifest {manifest}" if manifest else f"--corpus {corpus}"
+            typer.echo(f"No documents found for {source}; nothing to benchmark.", err=True)
+            raise typer.Exit(code=2)
+
+        report = []
+        for label, body, mime_type in documents:
+            comparison = compare_parsers(body, mime_type, parser_instances)
+            report.append({"document": label, **comparison})
+
+        payload = json.dumps(report, indent=2, sort_keys=True)
+        typer.echo(payload)
+        if out:
+            Path(out).write_text(payload, encoding="utf-8")
+
+        if len(selected) >= 2:
+            primary_pair = tuple(selected[:2])
+            all_equivalent = True
+            for entry in report:
+                pair_result = next(
+                    (c for c in entry["comparisons"]
+                     if (c["left"], c["right"]) == primary_pair or (c["right"], c["left"]) == primary_pair),
+                    None)
+                if pair_result is None or not pair_result["equivalent"]:
+                    all_equivalent = False
+            if not all_equivalent:
+                raise typer.Exit(code=1)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 @nlp_app.command("chunk")
 def nlp_chunk(
     source_system: str = typer.Option(None, help="Only versions from this evidence source_system"),
@@ -2683,12 +2801,30 @@ def archive_audit(
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
+    from pipeline import db, quarantine
     from pipeline.archive import get_archive
     settings = get_settings()
     report = get_archive(settings).verify()
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     (settings.backup_dir / "archive-manifest.json").write_text(
         __import__("json").dumps(report, indent=2), encoding="utf-8")
+    if report["failures"]:
+        # The manifest file is a point-in-time report; this makes each
+        # failure listable/retryable across runs too (migration 0103).
+        conn = db.get_connection(settings)
+        try:
+            for failure in report["failures"]:
+                quarantine.quarantine(
+                    conn, kind="archive_mismatch", module="archive_verify",
+                    item_identity=failure["key"],
+                    failure_class="invalid_key" if "error" in failure else "sha256_mismatch",
+                    reason=failure.get("error") or (
+                        f"expected {failure.get('expected')}, got {failure.get('actual')}"),
+                    input_sha256=failure.get("expected"), output_sha256=failure.get("actual"),
+                    payload=failure)
+            conn.commit()
+        finally:
+            conn.close()
     typer.echo(__import__("json").dumps(report, indent=2))
     if not report["ok"]:
         raise typer.Exit(code=1)
