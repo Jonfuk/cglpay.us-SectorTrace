@@ -1,8 +1,10 @@
 import hashlib
 import io
+from types import SimpleNamespace
 
 import pytest
 
+from pipeline import telemetry
 from pipeline.archive import ArchiveError, FilesystemArchive, S3Archive
 from pipeline.config import Settings
 
@@ -214,3 +216,65 @@ def test_s3_checksum_support_is_probed_once_and_cached():
 
     assert probe_puts_after_first == 1
     assert probe_puts_after_second == 1  # not probed again on the second put
+
+
+# --- telemetry (performance.md:632: "archive operations") -----------------
+
+
+def _telemetry_settings():
+    return SimpleNamespace(otel_enabled=True, otel_exporter_endpoint=None,
+                           otel_service_name="test")
+
+
+@pytest.mark.serial  # mutates pipeline.telemetry's process-global state
+def test_filesystem_put_and_read_open_archive_spans(tmp_path):
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    telemetry.configure_telemetry(_telemetry_settings(), span_exporter=exporter)
+    try:
+        archive = FilesystemArchive(tmp_path)
+        body = b"hello"
+        sha = hashlib.sha256(body).hexdigest()
+        archive.put_stream("source", sha, "text/plain", io.BytesIO(body))
+        archive.read(f"data/raw/source/{sha}.txt")
+    finally:
+        telemetry.shutdown_telemetry()
+
+    finished = {span.name: span for span in exporter.get_finished_spans()}
+    assert "archive.put_stream" in finished
+    assert "archive.read" in finished
+    put_attrs = dict(finished["archive.put_stream"].attributes)
+    assert put_attrs["backend"] == "filesystem"
+    assert put_attrs["source_system"] == "source"
+    read_attrs = dict(finished["archive.read"].attributes)
+    assert read_attrs["source_system"] == "source"
+
+
+@pytest.mark.serial  # mutates pipeline.telemetry's process-global state
+def test_a_hash_mismatch_on_put_is_recorded_as_an_archive_failure(tmp_path):
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    reader = InMemoryMetricReader()
+    telemetry.configure_telemetry(_telemetry_settings(), span_exporter=exporter, metric_reader=reader)
+    try:
+        archive = FilesystemArchive(tmp_path)
+        with pytest.raises(ArchiveError):
+            archive.put("source", "0" * 64, "text/plain", b"does not match the hash above")
+    finally:
+        telemetry.shutdown_telemetry()
+
+    finished = [span for span in exporter.get_finished_spans() if span.name == "archive.put"]
+    assert len(finished) == 1
+    assert finished[0].status.status_code.name == "ERROR"
+
+    metric_names = {
+        metric.name
+        for resource_metrics in reader.get_metrics_data().resource_metrics
+        for scope_metrics in resource_metrics.scope_metrics
+        for metric in scope_metrics.metrics
+    }
+    assert "archive.operation.failures" in metric_names
+    assert "archive.operation.duration_seconds" in metric_names

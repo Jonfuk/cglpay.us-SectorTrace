@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from pipeline import telemetry
 from pipeline.graph.store import PROJECTOR_VERSION, GraphStore
 
 log = structlog.get_logger()
@@ -91,44 +92,62 @@ class GraphProjector:
         )
         self.conn.commit()
         counts = {"entities": 0, "relationships": 0, "claims": 0, "evidence": 0}
-        try:
-            self.store.ensure_schema()
-            if clear:
-                self.store.clear_managed_data()
-            counts["entities"] = self._project_table("entities", self.store.upsert_entities, run_id)
-            counts["evidence"] = self._project_table(
-                "evidence_records", self.store.upsert_evidence, run_id)
-            counts["claims"] = self._project_table("graph_claims", self.store.upsert_claims, run_id)
-            counts["relationships"] = self._project_table(
-                "entity_relationships", self.store.upsert_relationships, run_id)
-        except Exception as exc:
-            # Reserved for a systemic failure -- schema setup, `clear`, or a
-            # warehouse read going wrong -- none of which subdivision can
-            # isolate a row from, unlike a single bad row's write (below).
-            log.error("graph.rebuild_failed", run_id=run_id, error=str(exc))
+        # A span around the whole rebuild (performance.md:632's "graph
+        # projection"), reusing the same numbers `graph.rebuild_completed`
+        # already computes below rather than timing anything twice.
+        with telemetry.span("graph.rebuild", run_id=run_id, clear=clear) as rebuild_span:
+            try:
+                self.store.ensure_schema()
+                if clear:
+                    self.store.clear_managed_data()
+                counts["entities"] = self._project_table("entities", self.store.upsert_entities, run_id)
+                counts["evidence"] = self._project_table(
+                    "evidence_records", self.store.upsert_evidence, run_id)
+                counts["claims"] = self._project_table("graph_claims", self.store.upsert_claims, run_id)
+                counts["relationships"] = self._project_table(
+                    "entity_relationships", self.store.upsert_relationships, run_id)
+            except Exception as exc:
+                # Reserved for a systemic failure -- schema setup, `clear`, or a
+                # warehouse read going wrong -- none of which subdivision can
+                # isolate a row from, unlike a single bad row's write (below).
+                log.error("graph.rebuild_failed", run_id=run_id, error=str(exc))
+                self.conn.execute(
+                    "UPDATE graph_projection_runs SET completed_at = %s, status = 'failed', "
+                    "error_count = 1, error_detail = %s WHERE run_id = %s",
+                    (_now(), str(exc), run_id),
+                )
+                self.conn.commit()
+                raise
+            duration_seconds = time.monotonic() - clock
+            rows_total = sum(counts.values())
+            log.info(
+                "graph.rebuild_completed", run_id=run_id, duration_seconds=round(duration_seconds, 3),
+                rows_total=rows_total,
+                rows_per_second=round(rows_total / duration_seconds, 2) if duration_seconds > 0 else None,
+                row_failures=self._run_row_failures, **counts,
+            )
+            rebuild_span.set_attributes({f"rows_{key}": value for key, value in counts.items()})
+            rebuild_span.set_attribute("rows_total", rows_total)
+            rebuild_span.set_attribute("row_failures", self._run_row_failures)
+            telemetry.histogram(
+                "graph.rebuild.duration_seconds", unit="s",
+                description="Wall time of one graph rebuild.").record(duration_seconds)
+            telemetry.histogram(
+                "graph.rebuild.rows", unit="rows",
+                description="Rows projected per rebuild.").record(rows_total)
+            if self._run_row_failures:
+                telemetry.counter(
+                    "graph.rebuild.row_failures",
+                    description="Rows a rebuild could not project even after bisection, "
+                                "queued for graph sync instead.").add(self._run_row_failures)
             self.conn.execute(
-                "UPDATE graph_projection_runs SET completed_at = %s, status = 'failed', "
-                "error_count = 1, error_detail = %s WHERE run_id = %s",
-                (_now(), str(exc), run_id),
+                "UPDATE graph_projection_runs SET completed_at = %s, status = 'completed', "
+                "entity_count = %s, relationship_count = %s, claim_count = %s, error_count = %s "
+                "WHERE run_id = %s",
+                (_now(), counts["entities"], counts["relationships"], counts["claims"],
+                 self._run_row_failures, run_id),
             )
             self.conn.commit()
-            raise
-        duration_seconds = time.monotonic() - clock
-        rows_total = sum(counts.values())
-        log.info(
-            "graph.rebuild_completed", run_id=run_id, duration_seconds=round(duration_seconds, 3),
-            rows_total=rows_total,
-            rows_per_second=round(rows_total / duration_seconds, 2) if duration_seconds > 0 else None,
-            row_failures=self._run_row_failures, **counts,
-        )
-        self.conn.execute(
-            "UPDATE graph_projection_runs SET completed_at = %s, status = 'completed', "
-            "entity_count = %s, relationship_count = %s, claim_count = %s, error_count = %s "
-            "WHERE run_id = %s",
-            (_now(), counts["entities"], counts["relationships"], counts["claims"],
-             self._run_row_failures, run_id),
-        )
-        self.conn.commit()
         return {"run_id": run_id, **counts, "row_failures": self._run_row_failures}
 
     def sync_delta(self, limit: int = 500) -> dict[str, int]:
@@ -138,43 +157,62 @@ class GraphProjector:
         # is `rebuild()`'s problem because `_project_table` reads a whole page
         # at a time and calls the store once per page.
         queue_depth = self.status()["pending"]
-        rows = self.conn.execute(
-            "SELECT * FROM graph_projection_queue WHERE processed_at IS NULL ORDER BY id LIMIT %s",
-            (max(1, limit),),
-        ).fetchall()
-        processed = 0
-        failed = 0
-        lag_seconds: list[float] = []
-        now = _now()
-        for row in rows:
-            item = dict(row)
-            lag = _lag_seconds(item.get("created_at"), now)
-            if lag is not None:
-                lag_seconds.append(lag)
-            try:
-                self._sync_item(item)
-                self.conn.execute(
-                    "UPDATE graph_projection_queue SET processed_at = %s, attempt_count = attempt_count + 1, "
-                    "last_error = NULL WHERE id = %s",
-                    (_now(), item["id"]),
-                )
-                self.conn.commit()
-                processed += 1
-            except Exception as exc:
-                self.conn.execute(
-                    "UPDATE graph_projection_queue SET attempt_count = attempt_count + 1, last_error = %s "
-                    "WHERE id = %s",
-                    (str(exc), item["id"]),
-                )
-                self.conn.commit()
-                failed += 1
-        log.info(
-            "graph.sync_delta_completed", queue_depth_before=queue_depth, batch_size=len(rows),
-            processed=processed, failed=failed,
-            lag_seconds_max=round(max(lag_seconds), 3) if lag_seconds else None,
-            lag_seconds_avg=round(sum(lag_seconds) / len(lag_seconds), 3) if lag_seconds else None,
-        )
-        return {"processed": processed, "failed": failed}
+        with telemetry.span("graph.sync_delta", limit=limit,
+                            queue_depth_before=queue_depth) as sync_span:
+            rows = self.conn.execute(
+                "SELECT * FROM graph_projection_queue WHERE processed_at IS NULL ORDER BY id LIMIT %s",
+                (max(1, limit),),
+            ).fetchall()
+            processed = 0
+            failed = 0
+            lag_seconds: list[float] = []
+            now = _now()
+            for row in rows:
+                item = dict(row)
+                lag = _lag_seconds(item.get("created_at"), now)
+                if lag is not None:
+                    lag_seconds.append(lag)
+                try:
+                    self._sync_item(item)
+                    self.conn.execute(
+                        "UPDATE graph_projection_queue SET processed_at = %s, attempt_count = attempt_count + 1, "
+                        "last_error = NULL WHERE id = %s",
+                        (_now(), item["id"]),
+                    )
+                    self.conn.commit()
+                    processed += 1
+                except Exception as exc:
+                    self.conn.execute(
+                        "UPDATE graph_projection_queue SET attempt_count = attempt_count + 1, last_error = %s "
+                        "WHERE id = %s",
+                        (str(exc), item["id"]),
+                    )
+                    self.conn.commit()
+                    failed += 1
+            log.info(
+                "graph.sync_delta_completed", queue_depth_before=queue_depth, batch_size=len(rows),
+                processed=processed, failed=failed,
+                lag_seconds_max=round(max(lag_seconds), 3) if lag_seconds else None,
+                lag_seconds_avg=round(sum(lag_seconds) / len(lag_seconds), 3) if lag_seconds else None,
+            )
+            # Reusing the numbers the log line above just computed -- queue
+            # depth and per-item lag are the metrics performance.md:632 asks
+            # for ("projection lag", "queue depth").
+            sync_span.set_attributes({
+                "batch_size": len(rows), "processed": processed, "failed": failed})
+            telemetry.histogram(
+                "graph.projection_queue_depth", unit="rows",
+                description="Pending graph_projection_queue rows, sampled at the "
+                            "start of a sync.").record(queue_depth)
+            if failed:
+                telemetry.counter(
+                    "graph.sync_delta.failures",
+                    description="Queued projection items that failed this sync attempt.").add(failed)
+            for lag in lag_seconds:
+                telemetry.histogram(
+                    "graph.projection_lag_seconds", unit="s",
+                    description="Time between a queued change and its projection.").record(lag)
+            return {"processed": processed, "failed": failed}
 
     def status(self) -> dict[str, int]:
         pending = self.conn.execute(

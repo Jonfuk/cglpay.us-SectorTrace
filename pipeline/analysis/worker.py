@@ -23,7 +23,7 @@ from typing import Any
 
 import structlog
 
-from pipeline import db
+from pipeline import db, telemetry
 from pipeline.analysis import domains
 from pipeline.analysis import state as analysis_state
 from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded
@@ -320,6 +320,13 @@ class AnalysisWorker:
             requested = json.loads(run["requested_domains_json"] or "[]")
             self._budget = CallBudget(ceiling_micros=int(run["cost_ceiling_micros"] or 0))
             self._current_run_id = run_id
+            # Read once per run and stashed on the instance, not threaded
+            # through `_model_call`'s signature: this worker claims and runs
+            # one analysis run at a time (the class docstring's own
+            # contract), so `self._current_run_id`/`_current_release_id` are
+            # never ambiguous between calls the way they would be if two
+            # runs shared a worker instance concurrently.
+            self._current_release_id = run["release_id"]
         finally:
             conn.close()
 
@@ -960,9 +967,34 @@ class AnalysisWorker:
         budget = getattr(self, "_budget", CallBudget())
         with self._budget_lock:
             budget.before_call()
-        payload = client.generate_json(prompt, role=role, domain_id=domain_id, window_id=window_id)
+        # A span plus a cost metric per model call (performance.md:632).
+        # `prompt`/`window_id` never become attributes -- `window_id` is an
+        # identifier, but the risk of a caller one day passing something
+        # content-shaped into this parameter is not worth taking with a
+        # value this module does not otherwise need to record; `role` and
+        # `domain_id` are the safe, useful correlation this already has.
+        with telemetry.span("assistant.model_call", role=role, domain_id=domain_id,
+                            run_id=getattr(self, "_current_run_id", None),
+                            release_id=getattr(self, "_current_release_id", None)) as call_span:
+            payload = client.generate_json(prompt, role=role, domain_id=domain_id, window_id=window_id)
+            cost_micros = getattr(client, "last_cost_micros", 0)
+            cached = bool(getattr(client, "last_cached", False))
+            call_span.set_attribute("cached", cached)
+            call_span.set_attribute("cost_micros", cost_micros)
         with self._budget_lock:
-            budget.record(getattr(client, "last_cost_micros", 0), cached=getattr(client, "last_cached", False))
+            budget.record(cost_micros, cached=cached)
+        # Reusing `client.last_cost_micros` -- the number `budget.record`
+        # above already consumes for the run's cost ceiling -- rather than
+        # deriving a second cost figure of this module's own.
+        telemetry.counter(
+            "assistant.model_call.count",
+            description="Model calls, whether served fresh or from the response cache.").add(
+            1, {"role": role, "cached": str(cached)})
+        if cost_micros:
+            telemetry.histogram(
+                "assistant.model_call.cost_micros", unit="micros",
+                description="Cost per model call that was not a cache hit.").record(
+                cost_micros, {"role": role})
         return payload
 
     @staticmethod

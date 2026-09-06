@@ -109,6 +109,27 @@ class Settings(BaseSettings):
     # few minutes. See pipeline/web/server.py `_cache_ttl`.
     cache_static_ttl_seconds: float = 86400.0
 
+    # OpenTelemetry traces and metrics for pipeline runs, jobs, stages,
+    # database batches, model calls, archive operations and graph projection
+    # (performance.md:632). Off by default for the same reason `cache_enabled`
+    # above is (settled decision 6, "the network cable unplugged"): a checkout
+    # and the offline test suite must behave byte-identically whether or not
+    # the `otel` extra is even installed, and turning export on is a
+    # reviewable choice about what leaves the process, not an accident of
+    # what happened to be on disk. `pipeline/telemetry.py` is the seam --
+    # every span/metric call there degrades to a no-op when this is False or
+    # the SDK is absent, so nothing that calls it needs its own guard.
+    otel_enabled: bool = False
+    # An OTLP/HTTP collector endpoint, e.g. http://localhost:4318. Left unset,
+    # `configure_telemetry` still builds real spans and metrics when enabled
+    # -- it just prints them to the console instead of exporting anywhere,
+    # so `OTEL_ENABLED=true` alone never assumes a collector is listening.
+    otel_exporter_endpoint: str | None = None
+    # The `service.name` resource attribute, so traces from the web process,
+    # the pipeline worker and the analysis worker are distinguishable in a
+    # shared backend without three different endpoints.
+    otel_service_name: str = "sectortrace-pipeline"
+
     # Shared write-path controls. Individual modules may choose a smaller
     # batch for a measured reason, but should not invent process-wide defaults.
     batch_write_rows: int = 1000

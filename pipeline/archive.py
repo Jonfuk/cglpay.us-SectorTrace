@@ -2,20 +2,48 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import mimetypes
 import os
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from pipeline import telemetry
 from pipeline.config import Settings
 from pipeline.meters import DISK
 
 _KEY = re.compile(r"^data/raw/([^/]+)/([0-9a-f]{64})(\.[^/]*)$")
+
+
+@contextlib.contextmanager
+def _archive_span(operation: str, backend: str, source_system: str | None):
+    """A span plus a latency metric around one archive operation
+    (performance.md:632: "archive operations"). `source_system` is an
+    attribute, never a payload -- the archived bytes themselves never reach
+    this module's telemetry, only which content-addressed bucket they live
+    under."""
+    started = time.monotonic()
+    with telemetry.span(f"archive.{operation}", backend=backend,
+                        source_system=source_system) as archive_span:
+        try:
+            yield archive_span
+        except BaseException:
+            telemetry.counter(
+                "archive.operation.failures",
+                description="Archive put/get operations that raised.").add(
+                1, {"backend": backend, "operation": operation})
+            raise
+        finally:
+            telemetry.histogram(
+                "archive.operation.duration_seconds", unit="s",
+                description="Latency of one archive put/get operation.").record(
+                time.monotonic() - started, {"backend": backend, "operation": operation})
 
 
 class ArchiveError(RuntimeError):
@@ -101,58 +129,62 @@ class FilesystemArchive:
         find it had already made once; this is the single `stat`+read that
         ought to cost instead.
         """
-        _, _, full = _parts(logical_path)
-        path = self.root / full.removeprefix("data/raw/")
-        if not path.is_file():
-            return None
-        return ArchiveObject(full, path.stat().st_size, path.read_bytes)
+        with _archive_span("get", self.backend, None) as op_span:
+            source, _, full = _parts(logical_path)
+            op_span.set_attribute("source_system", source)
+            path = self.root / full.removeprefix("data/raw/")
+            if not path.is_file():
+                return None
+            return ArchiveObject(full, path.stat().st_size, path.read_bytes)
 
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str:
-        if hashlib.sha256(body).hexdigest() != sha256:
-            raise ArchiveError("payload hash does not match archive key")
-        logical = logical_path(source_system, sha256, content_type)
-        path = self.root / logical.removeprefix("data/raw/")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            path.write_bytes(body)
-            DISK.add(len(body))
-        if hashlib.sha256(path.read_bytes()).hexdigest() != sha256:
-            raise ArchiveError(f"filesystem archive verification failed for {logical}")
-        return logical
+        with _archive_span("put", self.backend, source_system):
+            if hashlib.sha256(body).hexdigest() != sha256:
+                raise ArchiveError("payload hash does not match archive key")
+            logical = logical_path(source_system, sha256, content_type)
+            path = self.root / logical.removeprefix("data/raw/")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_bytes(body)
+                DISK.add(len(body))
+            if hashlib.sha256(path.read_bytes()).hexdigest() != sha256:
+                raise ArchiveError(f"filesystem archive verification failed for {logical}")
+            return logical
 
     def put_stream(self, source_system: str, sha256: str,
                    content_type: str | None, stream) -> ArchiveObject:
         """Spool, hash, and atomically install a body in one pass."""
-        logical = logical_path(source_system, sha256, content_type)
-        target = self.root / logical.removeprefix("data/raw/")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temp:
-            temporary = Path(temp.name)
-            digest = hashlib.sha256()
-            size = 0
-            try:
-                while True:
-                    chunk = stream.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    digest.update(chunk)
-                    size += len(chunk)
-                    temp.write(chunk)
-                temp.flush()
-                os.fsync(temp.fileno())
-            except BaseException:
+        with _archive_span("put_stream", self.backend, source_system):
+            logical = logical_path(source_system, sha256, content_type)
+            target = self.root / logical.removeprefix("data/raw/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temp:
+                temporary = Path(temp.name)
+                digest = hashlib.sha256()
+                size = 0
+                try:
+                    while True:
+                        chunk = stream.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                        size += len(chunk)
+                        temp.write(chunk)
+                    temp.flush()
+                    os.fsync(temp.fileno())
+                except BaseException:
+                    temporary.unlink(missing_ok=True)
+                    raise
+            if digest.hexdigest() != sha256:
                 temporary.unlink(missing_ok=True)
-                raise
-        if digest.hexdigest() != sha256:
-            temporary.unlink(missing_ok=True)
-            raise ArchiveError("payload hash does not match archive key")
-        if not target.exists():
-            os.replace(temporary, target)
-            DISK.add(size)
-        else:
-            temporary.unlink(missing_ok=True)
-            size = target.stat().st_size
-        return ArchiveObject(logical, size, target.read_bytes)
+                raise ArchiveError("payload hash does not match archive key")
+            if not target.exists():
+                os.replace(temporary, target)
+                DISK.add(size)
+            else:
+                temporary.unlink(missing_ok=True)
+                size = target.stat().st_size
+            return ArchiveObject(logical, size, target.read_bytes)
 
     def put_file(self, source_system: str, sha256: str,
                  content_type: str | None, path: Path) -> ArchiveObject:
@@ -160,19 +192,21 @@ class FilesystemArchive:
             return self.put_stream(source_system, sha256, content_type, stream)
 
     def read(self, logical: str) -> bytes:
-        if Path(logical).is_absolute():
-            try:
-                logical = f"data/raw/{Path(logical).relative_to(self.root).as_posix()}"
-            except ValueError as exc:
-                raise ArchiveError(f"archive path is outside RAW_ARCHIVE_DIR: {logical}") from exc
-        source, sha, full = _parts(logical)
-        obj = self.lookup(source, sha)
-        if obj is None:
-            raise FileNotFoundError(full)
-        body = obj.read_bytes()
-        if hashlib.sha256(body).hexdigest() != sha:
-            raise ArchiveError(f"corrupt filesystem archive object: {full}")
-        return body
+        with _archive_span("read", self.backend, None) as op_span:
+            if Path(logical).is_absolute():
+                try:
+                    logical = f"data/raw/{Path(logical).relative_to(self.root).as_posix()}"
+                except ValueError as exc:
+                    raise ArchiveError(f"archive path is outside RAW_ARCHIVE_DIR: {logical}") from exc
+            source, sha, full = _parts(logical)
+            op_span.set_attribute("source_system", source)
+            obj = self.lookup(source, sha)
+            if obj is None:
+                raise FileNotFoundError(full)
+            body = obj.read_bytes()
+            if hashlib.sha256(body).hexdigest() != sha:
+                raise ArchiveError(f"corrupt filesystem archive object: {full}")
+            return body
 
     def inventory(self, verify_hashes: bool = False) -> dict:
         rows = []
@@ -251,15 +285,16 @@ class S3Archive:
         with many objects sharing a source/hash prefix, unnecessary latency
         per lookup.
         """
-        key = self._key(logical_path)
-        try:
-            response = self.client.head_object(Bucket=self.bucket, Key=key)
-        except Exception as exc:
-            if _is_not_found(exc):
-                return None
-            raise
-        return ArchiveObject(logical_path, int(response["ContentLength"]),
-                             lambda: self.read(logical_path))
+        with _archive_span("get", self.backend, None):
+            key = self._key(logical_path)
+            try:
+                response = self.client.head_object(Bucket=self.bucket, Key=key)
+            except Exception as exc:
+                if _is_not_found(exc):
+                    return None
+                raise
+            return ArchiveObject(logical_path, int(response["ContentLength"]),
+                                 lambda: self.read(logical_path))
 
     def _supports_checksum(self) -> bool:
         """Whether this endpoint accepts a transport checksum on write and
@@ -306,41 +341,51 @@ class S3Archive:
             raise ArchiveError(f"S3 archive verification failed for {logical}")
 
     def put(self, source_system: str, sha256: str, content_type: str | None, body: bytes) -> str:
-        if hashlib.sha256(body).hexdigest() != sha256:
-            raise ArchiveError("payload hash does not match archive key")
-        logical = logical_path(source_system, sha256, content_type)
-        key = self._key(logical)
-        checksummed = self._supports_checksum()
-        if self.lookup(source_system, sha256) is None:
-            kwargs = {"Bucket": self.bucket, "Key": key, "Body": body,
-                      "ContentType": (content_type or "application/octet-stream").split(";", 1)[0]}
+        with _archive_span("put", self.backend, source_system):
+            if hashlib.sha256(body).hexdigest() != sha256:
+                raise ArchiveError("payload hash does not match archive key")
+            logical = logical_path(source_system, sha256, content_type)
+            key = self._key(logical)
+            checksummed = self._supports_checksum()
+            if self.lookup(source_system, sha256) is None:
+                kwargs = {"Bucket": self.bucket, "Key": key, "Body": body,
+                          "ContentType": (content_type or "application/octet-stream").split(";", 1)[0]}
+                if checksummed:
+                    # A transport checksum lets S3 itself reject a corrupted
+                    # upload before it is ever stored, rather than this pipeline
+                    # finding out only when it next reads the object back.
+                    kwargs["ChecksumAlgorithm"] = "SHA256"
+                    kwargs["ChecksumSHA256"] = _b64_checksum(sha256)
+                self.client.put_object(**kwargs)
             if checksummed:
-                # A transport checksum lets S3 itself reject a corrupted
-                # upload before it is ever stored, rather than this pipeline
-                # finding out only when it next reads the object back.
-                kwargs["ChecksumAlgorithm"] = "SHA256"
-                kwargs["ChecksumSHA256"] = _b64_checksum(sha256)
-            self.client.put_object(**kwargs)
-        if checksummed:
-            self._verify_by_head(logical, key, sha256, len(body))
-        else:
-            # No proven checksum support at this endpoint: the only way left
-            # to know the bytes are intact is to read them back and compare,
-            # the synchronous full verification this backend always did
-            # before checksums existed here.
-            checked = self.lookup(source_system, sha256)
-            if checked is None or checked.read_bytes() != body:
-                raise ArchiveError(f"S3 archive verification failed for {logical}")
-        return logical
+                self._verify_by_head(logical, key, sha256, len(body))
+            else:
+                # No proven checksum support at this endpoint: the only way left
+                # to know the bytes are intact is to read them back and compare,
+                # the synchronous full verification this backend always did
+                # before checksums existed here. Counted (not just logged) as a
+                # fallback (performance.md:632's "retries/failures") because it
+                # is a materially slower path this backend can silently spend
+                # its whole life on, one endpoint that never gained checksum
+                # support at a time.
+                telemetry.counter(
+                    "archive.checksum_fallback",
+                    description="S3 puts verified by full byte-compare "
+                                "rather than a transport checksum.").add(1, {"backend": self.backend})
+                checked = self.lookup(source_system, sha256)
+                if checked is None or checked.read_bytes() != body:
+                    raise ArchiveError(f"S3 archive verification failed for {logical}")
+            return logical
 
     def put_stream(self, source_system: str, sha256: str,
                    content_type: str | None, stream) -> ArchiveObject:
-        # S3-compatible clients differ in whether Body accepts a seekable
-        # stream. Buffer only for this backend's upload call, while the caller
-        # still avoids a separate archive lookup and receives the exact object.
-        body = stream.read()
-        logical = self.put(source_system, sha256, content_type, body)
-        return ArchiveObject(logical, len(body), lambda: self.read(logical))
+        with _archive_span("put_stream", self.backend, source_system):
+            # S3-compatible clients differ in whether Body accepts a seekable
+            # stream. Buffer only for this backend's upload call, while the caller
+            # still avoids a separate archive lookup and receives the exact object.
+            body = stream.read()
+            logical = self.put(source_system, sha256, content_type, body)
+            return ArchiveObject(logical, len(body), lambda: self.read(logical))
 
     def put_file(self, source_system: str, sha256: str,
                  content_type: str | None, path: Path) -> ArchiveObject:
@@ -348,14 +393,16 @@ class S3Archive:
             return self.put_stream(source_system, sha256, content_type, stream)
 
     def read(self, logical: str) -> bytes:
-        key = self._key(logical)
-        logical_for_hash = f"data/raw/{key}"
-        response = self.client.get_object(Bucket=self.bucket, Key=key)
-        body = response["Body"].read()
-        _, sha, _ = _parts(logical_for_hash)
-        if hashlib.sha256(body).hexdigest() != sha:
-            raise ArchiveError(f"corrupt S3 archive object: {logical_for_hash}")
-        return body
+        with _archive_span("read", self.backend, None) as op_span:
+            key = self._key(logical)
+            logical_for_hash = f"data/raw/{key}"
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+            body = response["Body"].read()
+            source, sha, _ = _parts(logical_for_hash)
+            op_span.set_attribute("source_system", source)
+            if hashlib.sha256(body).hexdigest() != sha:
+                raise ArchiveError(f"corrupt S3 archive object: {logical_for_hash}")
+            return body
 
     def _objects(self) -> list[dict]:
         rows, token = [], None
