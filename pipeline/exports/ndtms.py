@@ -36,8 +36,6 @@ def export_all(conn, output_dir: Path) -> list[Path]:
                        value, value_text, dimensions_json, source_url,
                        retrieved_at, source_system
                 FROM v_ndtms_viewit_current_history
-                ORDER BY source_variant, cohort, reporting_period,
-                         area_name_raw, metric_raw
             ) TO STDOUT WITH (FORMAT CSV, HEADER TRUE)
         """
         with target.open("wb") as handle:
