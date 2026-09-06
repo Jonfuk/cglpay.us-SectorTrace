@@ -126,6 +126,35 @@ def test_every_response_varies_on_accept_encoding(client):
         assert client.get(path).headers["Vary"] == "Accept-Encoding"
 
 
+def test_a_cached_public_response_is_not_reencoded_on_a_hit(settings, conn):
+    """A hit must reuse the bytes `_encode_json_response` already produced --
+    for both an identity and a gzip client -- rather than re-running
+    `json.dumps`/`gzip.compress`. `/api/admin/cache` exposes the counters that
+    make "reused, not recomputed" externally observable: `computes` staying at
+    1 while `hits` climbs is the only way to see this from outside the cache.
+    """
+    tuned = settings.model_copy(update={"cache_enabled": True})
+    server = build_server(tuned, host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}",
+                           timeout=30.0) as http:
+            identity = http.get("/api/v1/contracts", headers={"Accept-Encoding": "identity"})
+            gzipped = http.get("/api/v1/contracts", headers={"Accept-Encoding": "gzip"})
+            again = http.get("/api/v1/contracts", headers={"Accept-Encoding": "identity"})
+            assert identity.status_code == gzipped.status_code == again.status_code == 200
+            assert identity.json() == gzipped.json() == again.json()
+
+            stats = http.get("/api/admin/cache").json()["cache"]
+            assert stats["computes"] == 1
+            assert stats["hits"] >= 2
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_a_compressed_response_is_still_valid_json(client, conn):
     from pipeline import db
 
