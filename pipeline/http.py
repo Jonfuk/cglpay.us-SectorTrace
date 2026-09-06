@@ -31,7 +31,7 @@ from tenacity import (
 )
 
 from pipeline import db
-from pipeline.archive import ArchiveObject, get_archive
+from pipeline.archive import ArchiveError, ArchiveObject, get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
 from pipeline.writer import BatchWriter
@@ -662,7 +662,19 @@ class PipelineHTTPClient:
             # rows. If the archive is missing, re-fetch unconditionally: a
             # cache entry without its payload is not a usable cache hit.
             sha256 = cached["payload_sha256"] if cached else ""
-            archived = self.archive.lookup(self.source_system, sha256)
+            # A cache row from before migration 0106, or a backend that
+            # never stored one, has no exact reference to retrieve by — fall
+            # back to the hash-prefix lookup rather than treating a merely
+            # incomplete cache row as a miss.
+            cached_ref = cached["archive_ref"] if cached else None
+            archived = None
+            if cached_ref:
+                try:
+                    archived = self.archive.get_by_ref(cached_ref)
+                except ArchiveError:
+                    archived = None
+            if archived is None:
+                archived = self.archive.lookup(self.source_system, sha256)
             if archived is not None:
                 body = archived.read_bytes()
                 archived_path = (Path(self.settings.raw_archive_dir) /
@@ -697,12 +709,22 @@ class PipelineHTTPClient:
                 archived_ref = archived.logical_path
 
         if self.conn is not None:
+            # A 304 carries no Content-Type of its own (RFC 9110 says the
+            # server need not repeat entity headers on one) — the body is
+            # unchanged, so the content type recorded against the prior
+            # successful fetch still describes it. Only the fresh-fetch
+            # paths (a 200, or the cache-miss refetch above, which already
+            # reassigned `response`) have a response to read one from.
             entry = dict(
                 url=request_url,
                 host=host,
                 etag=response.headers.get("etag"),
                 last_modified=response.headers.get("last-modified"),
                 payload_sha256=sha256,
+                archive_ref=archived_ref,
+                content_type=response.headers.get("content-type") or (
+                    cached["content_type"] if cached else None),
+                content_length=len(body) if body else None,
             )
             if self.defer_cache_writes:
                 # Two distinct callers set this. A pool worker thread must
@@ -805,6 +827,9 @@ class PipelineHTTPClient:
                     etag=response.headers.get("etag"),
                     last_modified=response.headers.get("last-modified"),
                     payload_sha256=sha256,
+                    archive_ref=archived_ref,
+                    content_type=response.headers.get("content-type"),
+                    content_length=size or None,
                 )
                 if self.defer_cache_writes:
                     self.pending_cache_writes.append(entry)

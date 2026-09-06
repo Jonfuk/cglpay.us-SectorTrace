@@ -323,6 +323,15 @@ backup_s3_region: ""
 backup_s3_access_key: ""
 backup_s3_secret: ""
 
+# Raw-archive integrity audits (performance.md's Phase 5 archive-audit gap;
+# pipeline/archive_audit.py): a small deterministic sample re-hashed daily,
+# a complete re-hash of every object quarterly. Both quarantine a mismatch
+# (`quarantine_items`) rather than deleting anything — see docs/CAVEATS.md's
+# "provenance or NULL" rule, which this exists to keep honest over time
+# rather than only at collection.
+archive_audit_time: "02:30"
+archive_audit_full_time: "*-01,04,07,10-01 02:00:00"
+
 # --- Analyst assistant (BETA-107; OpenRouter since BETA-114) -----------------
 # The optional natural-language operator finding aid, off by default and
 # never on Railway (docs/assistant.md). Two switches, because configuring

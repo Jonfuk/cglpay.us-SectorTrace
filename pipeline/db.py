@@ -526,14 +526,26 @@ def set_http_cache(
     etag: str | None,
     last_modified: str | None,
     payload_sha256: str | None,
+    archive_ref: str | None = None,
+    content_type: str | None = None,
+    content_length: int | None = None,
 ) -> None:
+    # archive_ref/content_type/content_length (migration 0106) let a 304
+    # revalidation retrieve the archived body by its exact stored key
+    # (`Archive.get_by_ref`) instead of `Archive.lookup`'s hash-prefix scan —
+    # a listing call per cache hit on S3-compatible storage. Optional and
+    # backward compatible: a caller that omits them (or a row written before
+    # this migration) just falls back to the old lookup path.
     conn.execute(
-        "INSERT INTO http_cache (url, host, etag, last_modified, payload_sha256, updated_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s) "
+        "INSERT INTO http_cache (url, host, etag, last_modified, payload_sha256, "
+        "archive_ref, content_type, content_length, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (url) DO UPDATE SET etag = excluded.etag, "
         "last_modified = excluded.last_modified, payload_sha256 = excluded.payload_sha256, "
-        "updated_at = excluded.updated_at",
-        (url, host, etag, last_modified, payload_sha256, _utcnow()),
+        "archive_ref = excluded.archive_ref, content_type = excluded.content_type, "
+        "content_length = excluded.content_length, updated_at = excluded.updated_at",
+        (url, host, etag, last_modified, payload_sha256, archive_ref, content_type,
+         content_length, _utcnow()),
     )
 
 

@@ -46,3 +46,4 @@
           - "Admin UI:   ssh -L 1801:127.0.0.1:1801 <user>@{{ domain }} -N, then http://127.0.0.1:1801/admin"
           - "Stack:      cd {{ state_dir }} && docker compose ps"
           - "Backups:    systemctl status sectortrace-backup.timer"
+          - "Archive audit: systemctl status sectortrace-archive-audit.timer / sectortrace-archive-audit-full.timer"
