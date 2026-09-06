@@ -25,6 +25,8 @@ tables — see the migration for why it is never merged with the census.
 """
 from __future__ import annotations
 
+import csv
+import hashlib
 import io
 import json
 import re
@@ -48,6 +50,11 @@ POWERBI_DASHBOARDS = (
     {"key": "viewit_young_people", "cohort": "young_people",
      "url": "https://www.ndtms.net/ViewIt/YoungPeople"},
 )
+VIEWIT_ARCHIVE_URL = (
+    "https://www.ndtms.net/resources/public/"
+    "ViewIt%20Export%20Data%20-%20All%20-%2011122023.csv"
+)
+VIEWIT_ARCHIVE_SOURCE = "ohid_ndtms_viewit_archive"
 GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json"
 GOVUK_CONTENT_BASE = "https://www.gov.uk/api/content"
 
@@ -385,6 +392,66 @@ def _provenance(result) -> dict:
     }
 
 
+def parse_viewit_archive_rows(
+    body: bytes,
+    *,
+    cohort: str,
+    provenance: dict,
+    authority_lookup: dict[str, str],
+    transitions: dict[str, tuple[str, str]],
+) -> tuple[list[dict], list[str]]:
+    """Parse the archived wide ViewIt export without losing suppressed cells.
+
+    The export is a versioned, wide CSV rather than querydata. Keeping the
+    indicator columns as JSON preserves the exact source vocabulary and the
+    disclosure markers (``-``, ``c``, ``*``) without expanding 127,200 rows
+    into tens of millions of mostly repetitive metric rows. The combined SQL
+    view expands them only when a caller asks for metric-level results.
+    """
+    stream = io.StringIO(body.decode("utf-8-sig", errors="replace"), newline="")
+    reader = csv.reader(stream)
+    try:
+        headers = next(reader)
+    except StopIteration as exc:
+        raise ValueError("ViewIt archive export is empty") from exc
+    required = {"ReportingPeriod", "Area", "drug_group", "gender", "age_group"}
+    if not required.issubset(headers):
+        missing = sorted(required - set(headers))
+        raise ValueError(f"ViewIt archive export is missing columns: {missing}")
+    positions = {name: headers.index(name) for name in required}
+    rows: list[dict] = []
+    malformed: list[str] = []
+    for line_number, values in enumerate(reader, start=2):
+        if len(values) != len(headers):
+            malformed.append(str(line_number))
+            continue
+        area_name = values[positions["Area"]].strip()
+        ons_code = match_area_name(area_name, authority_lookup, transitions)
+        metrics = {
+            name: values[index]
+            for index, name in enumerate(headers)
+            if name not in required
+        }
+        row_key = hashlib.sha256(
+            (provenance["payload_sha256"] + "\x1f" + "\x1f".join(values)).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        rows.append({
+            "row_key": row_key,
+            "cohort": cohort,
+            "reporting_period": values[positions["ReportingPeriod"]].strip(),
+            "area_name_raw": area_name,
+            "ons_code": ons_code,
+            "drug_group": values[positions["drug_group"]].strip(),
+            "gender": values[positions["gender"]].strip(),
+            "age_group": values[positions["age_group"]].strip(),
+            "metrics_json": json.dumps(metrics, ensure_ascii=False),
+            **provenance,
+        })
+    return rows, malformed
+
+
 def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
     found: dict[str, dict] = {}
     for query in ("substance misuse treatment for adults statistics",
@@ -404,6 +471,66 @@ def _discover_publications(client: PipelineHTTPClient) -> list[dict]:
                 "financial_year": financial_year, "title": r.get("title"),
             })
     return sorted(found.values(), key=lambda p: (p["cohort"], p["financial_year"]))
+
+
+def _persist_viewit_archive(
+    ctx: ModuleContext,
+    client: PipelineHTTPClient,
+    authority_lookup: dict[str, str],
+    transitions: dict[str, tuple[str, str]],
+) -> int:
+    """Capture the historical wide export as its own evidence layer."""
+    result = client.get(VIEWIT_ARCHIVE_URL)
+    if not result.ok:
+        db.record_review_item(
+            ctx.conn, "m07_ndtms", "ndtms_viewit_archive_unavailable",
+            VIEWIT_ARCHIVE_URL, json.dumps({"status": result.status_code}),
+        )
+        return 0
+    provenance = {
+        "source_url": result.url,
+        "retrieved_at": result.retrieved_at.isoformat(),
+        "http_status": result.status_code,
+        "source_system": VIEWIT_ARCHIVE_SOURCE,
+        "payload_sha256": result.payload_sha256,
+    }
+    try:
+        rows, malformed = parse_viewit_archive_rows(
+            result.body,
+            cohort="adults",
+            provenance=provenance,
+            authority_lookup=authority_lookup,
+            transitions=transitions,
+        )
+    except ValueError as exc:
+        db.record_parse_failure(
+            ctx.conn, "m07_ndtms", "viewit_archive_csv", result.url,
+            str(exc), result.url,
+        )
+        return 0
+    if malformed:
+        db.record_parse_failure(
+            ctx.conn, "m07_ndtms", "viewit_archive_rows",
+            ",".join(malformed[:20]),
+            f"{len(malformed)} rows had a different column count",
+            result.url,
+        )
+    for area_name in sorted({
+        row["area_name_raw"] for row in rows if row["ons_code"] is None
+    }):
+        db.record_review_item(
+            ctx.conn, "m07_ndtms", "unmatched_ndtms_viewit_archive_area",
+            area_name, json.dumps({"source_url": result.url}),
+        )
+    written = 0
+    for start in range(0, len(rows), 1000):
+        written += db.upsert_many(
+            ctx.conn, "ndtms_viewit_archive_rows", rows[start:start + 1000],
+            natural_key=["row_key"],
+        )
+        if not ctx.dry_run:
+            ctx.conn.commit()
+    return written
 
 
 @register_module(
@@ -566,9 +693,14 @@ def run(ctx: ModuleContext) -> None:
             if not ctx.dry_run:
                 conn.commit()
 
+        archive_rows = _persist_viewit_archive(
+            ctx, client, authority_lookup, transitions
+        )
+
     # ViewIt is a separate Power BI publication family. Its querydata rows
     # remain in dedicated tables because report versions and dimensions do not
     # share the annual ODS contract.
     powerbi_rows = persist_powerbi(ctx, POWERBI_DASHBOARDS)
     log.info("ndtms.run_complete", publications=publications_done,
-             la_rows=stats_written, powerbi_rows=powerbi_rows)
+             la_rows=stats_written, viewit_archive_rows=archive_rows,
+             powerbi_rows=powerbi_rows)
