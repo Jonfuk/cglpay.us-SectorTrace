@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+from pipeline import telemetry
+
 _KINDS = {"rejected_candidate", "failed_stage_input", "archive_mismatch"}
 
 
@@ -36,29 +38,43 @@ def quarantine(conn, *, kind: str, module: str, item_identity: str, failure_clas
     if kind not in _KINDS:
         raise ValueError(f"unknown quarantine kind {kind!r}; expected one of {sorted(_KINDS)}")
     now = _now()
-    row = conn.execute(
-        "INSERT INTO quarantine_items (kind, module, run_id, stage, item_identity, failure_class, "
-        "reason, input_sha256, output_sha256, payload_json, first_seen_at, last_seen_at) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s) "
-        "ON CONFLICT (kind, module, item_identity) DO UPDATE SET "
-        "run_id=excluded.run_id, stage=excluded.stage, failure_class=excluded.failure_class, "
-        "reason=excluded.reason, input_sha256=excluded.input_sha256, "
-        "output_sha256=excluded.output_sha256, payload_json=excluded.payload_json, "
-        "last_seen_at=excluded.last_seen_at "
-        "WHERE quarantine_items.retry_state <> 'resolved' "
-        "RETURNING item_id",
-        (kind, module, run_id, stage, item_identity, failure_class, reason,
-         input_sha256, output_sha256, json.dumps(payload or {}, sort_keys=True, default=str),
-         now, now),
-    ).fetchone()
-    if row is not None:
-        return row["item_id"]
-    # Already resolved: return its existing id without touching it.
-    existing = conn.execute(
-        "SELECT item_id FROM quarantine_items WHERE kind=%s AND module=%s AND item_identity=%s",
-        (kind, module, item_identity),
-    ).fetchone()
-    return existing["item_id"]
+    # A span correlated by `run_id` (performance.md:632's "quarantine
+    # identifiers") -- `item_identity`, `reason` and `payload` never become
+    # attributes here even though they are already in `conn`'s query
+    # parameters above: they carry whatever the caller is quarantining (a
+    # candidate's name, a rejected value, a URL), which is exactly the
+    # source-shaped content this pipeline's telemetry must never export.
+    with telemetry.span("quarantine.record", kind=kind, module=module,
+                        failure_class=failure_class, run_id=run_id, stage=stage) as record_span:
+        row = conn.execute(
+            "INSERT INTO quarantine_items (kind, module, run_id, stage, item_identity, failure_class, "
+            "reason, input_sha256, output_sha256, payload_json, first_seen_at, last_seen_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s) "
+            "ON CONFLICT (kind, module, item_identity) DO UPDATE SET "
+            "run_id=excluded.run_id, stage=excluded.stage, failure_class=excluded.failure_class, "
+            "reason=excluded.reason, input_sha256=excluded.input_sha256, "
+            "output_sha256=excluded.output_sha256, payload_json=excluded.payload_json, "
+            "last_seen_at=excluded.last_seen_at "
+            "WHERE quarantine_items.retry_state <> 'resolved' "
+            "RETURNING item_id",
+            (kind, module, run_id, stage, item_identity, failure_class, reason,
+             input_sha256, output_sha256, json.dumps(payload or {}, sort_keys=True, default=str),
+             now, now),
+        ).fetchone()
+        if row is not None:
+            telemetry.counter(
+                "quarantine.items",
+                description="Items newly quarantined or re-observed, by kind.").add(1, {"kind": kind})
+            record_span.set_attribute("item_id", row["item_id"])
+            return row["item_id"]
+        # Already resolved: return its existing id without touching it.
+        existing = conn.execute(
+            "SELECT item_id FROM quarantine_items WHERE kind=%s AND module=%s AND item_identity=%s",
+            (kind, module, item_identity),
+        ).fetchone()
+        record_span.set_attribute("item_id", existing["item_id"])
+        record_span.set_attribute("already_resolved", True)
+        return existing["item_id"]
 
 
 def list_items(conn, *, kind: str | None = None, module: str | None = None,

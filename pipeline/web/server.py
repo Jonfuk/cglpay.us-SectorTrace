@@ -465,6 +465,27 @@ def _cache_key(path: str, params: dict[str, list[str]]) -> str:
     return path + "?" + json.dumps(items, separators=(",", ":"))
 
 
+def _encode_json_response(payload: Any) -> tuple[bytes, bytes | None]:
+    """The identity and (maybe) gzip bytes `_send_json` would produce for
+    `payload`, computed once so a cache hit can hand them back verbatim.
+
+    Both variants are produced regardless of whether *this* request accepted
+    gzip: the cached entry is shared by every future request for the same key,
+    and some of those will not send `Accept-Encoding: gzip`. Mirrors the
+    threshold `_send` itself uses so a cached response is never gzipped when a
+    live one would not have been.
+    """
+    body = json.dumps(payload, default=str).encode("utf-8")
+    gzip_body = None
+    if len(body) >= GZIP_MIN_BYTES:
+        import gzip
+
+        compressed = gzip.compress(body, compresslevel=6)
+        if len(compressed) < len(body):
+            gzip_body = compressed
+    return body, gzip_body
+
+
 def _claim_id(body: dict) -> int:
     """The claim id a write route was sent, as an int, or a refusal.
 
@@ -625,7 +646,8 @@ class Handler(BaseHTTPRequestHandler):
                max_age: int | None = None, etag: str | None = None,
                extra_headers: dict[str, str] | None = None,
                cache_control: str | None = None,
-               csp: str | None = None) -> None:
+               csp: str | None = None,
+               pre_gzipped: bytes | None = None) -> None:
         self._responded = True
 
         # Compressed above a threshold, and only for things that compress. The
@@ -635,16 +657,25 @@ class Handler(BaseHTTPRequestHandler):
         # saves, and on loopback none of this matters at all: it is for the
         # phone on the other side of the LAN, which is a supported way to reach
         # this server.
+        #
+        # `pre_gzipped` lets a caller that already paid this cost once (a
+        # cached response, see `_encode_json_response`) hand the bytes back in
+        # rather than have gzip run again on every hit for every client that
+        # happens to accept it.
         encoding = None
-        if (len(body) >= GZIP_MIN_BYTES and self._accepts_gzip()
-                and content_type.split(";")[0].strip() in GZIP_TYPES):
-            import gzip
+        if self._accepts_gzip() and content_type.split(";")[0].strip() in GZIP_TYPES:
+            if pre_gzipped is not None:
+                if len(pre_gzipped) < len(body):
+                    body = pre_gzipped
+                    encoding = "gzip"
+            elif len(body) >= GZIP_MIN_BYTES:
+                import gzip
 
-            compressed = gzip.compress(body, compresslevel=6)
-            # Only if it actually helped. Some payloads are already entropy.
-            if len(compressed) < len(body):
-                body = compressed
-                encoding = "gzip"
+                compressed = gzip.compress(body, compresslevel=6)
+                # Only if it actually helped. Some payloads are already entropy.
+                if len(compressed) < len(body):
+                    body = compressed
+                    encoding = "gzip"
 
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -690,6 +721,17 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload, default=str).encode("utf-8")
         self._send(status, body, "application/json; charset=utf-8",
                    max_age=max_age, extra_headers=extra_headers)
+
+    def _send_json_encoded(self, encoded: tuple[bytes, bytes | None],
+                            status: int = 200, max_age: int | None = None,
+                            extra_headers: dict[str, str] | None = None) -> None:
+        """Like `_send_json`, but for bytes `_encode_json_response` already
+        produced -- a cache hit, so neither `json.dumps` nor `gzip.compress`
+        runs again here."""
+        body, gzip_body = encoded
+        self._send(status, body, "application/json; charset=utf-8",
+                   max_age=max_age, extra_headers=extra_headers,
+                   pre_gzipped=gzip_body)
 
     def _discard_body(self) -> None:
         """Read and throw away a request body that was refused unread.
@@ -1153,12 +1195,13 @@ class Handler(BaseHTTPRequestHandler):
         # only for the miss.
         if (path.startswith("/api/v1/") and
                 path not in {"/api/v1/export", "/api/v1/feed/changes.atom"}):
-            payload = self.cache.get_or_compute(
+            encoded = self.cache.get_or_compute_response(
                 _cache_key(path, params),
                 _cache_ttl(path, self.settings),
                 lambda: self._get_public_uncached(path, params),
+                _encode_json_response,
             )
-            self._send_json(payload, max_age=PUBLIC_MAX_AGE)
+            self._send_json_encoded(encoded, max_age=PUBLIC_MAX_AGE)
             return
 
         conn = queries.readonly_connection(self.settings)
@@ -1472,6 +1515,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/admin/health":
             return health.health(conn, self.settings)
+
+        if path == "/api/admin/cache":
+            # Counters only -- never the cached payloads themselves, which may
+            # include filtered warehouse content the admin cache endpoint has
+            # no business re-exposing.
+            return {"cache": self.cache.stats()}
 
         if path.startswith("/api/admin/" + "analysis"):
             degrade.preflight(conn, "analysis_platform")
@@ -2882,7 +2931,12 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     server = BoundedHTTPServer(
         (host, port),
         partial(Handler, settings=settings,
-                 jobs=JobRegistry(store=JobStore(settings),
+                 # `settings=settings` here (not just `store=`) is what turns
+                 # on `enqueue_pipeline_run` -- see JobRegistry's docstring.
+                 # Without it, this server can still run the ThreadStrategy
+                 # jobs (integrity check, export) but a module run would have
+                 # nowhere to enqueue to.
+                 jobs=JobRegistry(store=JobStore(settings), settings=settings,
                                    invalidate=cache.bump_version),
                  rate_limiter=rate_limiter,
                  cache=cache),

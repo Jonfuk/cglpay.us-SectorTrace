@@ -20,12 +20,12 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from typing import Iterator
 
 import structlog
 
-from pipeline import collection, db
+from pipeline import collection, db, telemetry
 from pipeline.registry import MODULE_REGISTRY, ModuleContext
 
 log = structlog.get_logger()
@@ -79,6 +79,22 @@ def audit_counts(conn, module: str) -> dict[str, int]:
     return {"review": count("review_queue"), "failures": count("parse_failures")}
 
 
+def _record_module_span(mod_span, row: dict, *, error: str | None = None) -> None:
+    """Finish a module's span and metric point from the row `execute_module`
+    already built -- reusing `row["elapsed"]` rather than timing the module a
+    second time, since that duration (perf_counter, module-connection scope)
+    is exactly what `module.finished`'s own log line already reports."""
+    mod_span.set_attribute("status", row["status"])
+    mod_span.set_attribute("rows", row.get("rows", 0))
+    mod_span.set_attribute("review", row.get("review", 0))
+    mod_span.set_attribute("failures", row.get("failures", 0))
+    if error is not None:
+        mod_span.set_attribute("error_class", error)
+    telemetry.histogram("pipeline.module.duration_seconds", unit="s",
+                        description="Module execution time, per execute_module call.").record(
+        row["elapsed"], {"module": row["module"], "status": row["status"]})
+
+
 def execute_module(name: str, fn, settings, since, dry_run, limit,
                     observer: RunObserver, source: str = "all",
                     ledger_run_id: str | None = None) -> dict:
@@ -102,7 +118,21 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
     not what it found.
     """
     started = time.perf_counter()
-    with observer.module_progress(name) as reporter:
+    with ExitStack() as stack:
+        reporter = stack.enter_context(observer.module_progress(name))
+        # A span per module (performance.md:632). Opened here rather than
+        # around each `execute_module` call in `run_waves` below: a
+        # concurrent wave calls this on a `ThreadPoolExecutor` worker thread,
+        # and OpenTelemetry's current-span context is thread-local, so a span
+        # opened in the submitting thread would never actually wrap the
+        # thread that does the work. Opened in the executing thread instead,
+        # this nests correctly under `run_waves`'s "pipeline.run" span for
+        # the (default, CLAUDE.md-preferred) serial case; a concurrent wave's
+        # module spans still carry `run_id` and so are still correlatable to
+        # their run, just not nested under it in a trace view -- a documented
+        # gap, not a silent one.
+        mod_span = stack.enter_context(telemetry.span(
+            "pipeline.module", module=name, dry_run=dry_run, source=source, run_id=ledger_run_id))
         # Name the thread after the module, so the write slot can say who is
         # holding it and every log line from a wave is attributable.
         #
@@ -160,8 +190,10 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
                               error=f"{type(bookkeeping_exc).__name__}: {bookkeeping_exc}")
                 log.info("module.finished", module=name, status="failed",
                           dry_run=dry_run, error=f"{type(exc).__name__}: {exc}")
-                return {"module": name, "status": "failed", "dry_run": dry_run,
-                         "elapsed": time.perf_counter() - started, "error": exc}
+                failed_row = {"module": name, "status": "failed", "dry_run": dry_run,
+                              "elapsed": time.perf_counter() - started, "error": exc}
+                _record_module_span(mod_span, failed_row, error=type(exc).__name__)
+                return failed_row
 
             if dry_run:
                 conn.rollback()
@@ -188,6 +220,7 @@ def execute_module(name: str, fn, settings, since, dry_run, limit,
                 coverage_state="covered" if row["rows"] else "no_results",
                 detail={"dry_run": dry_run})
             conn.commit()
+            _record_module_span(mod_span, row)
             return row
         finally:
             conn.close()
@@ -212,40 +245,52 @@ def run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit
     total_modules = sum(len(wave) for wave in waves)
     observer.run_starting(total_modules)
 
-    # One durable ledger row per run, whatever entry point called this
-    # (BETA-058). Best-effort — a ledger write that fails must not fail the
-    # collection — see pipeline/run_ledger.py.
-    from pipeline import run_ledger
-    selector = ", ".join(name for wave in waves for name in wave) or "none"
-    ledger_run_id = run_ledger.start(
-        settings, origin=origin,
-        module_selector="all" if total_modules >= len(MODULE_REGISTRY) else selector,
-        dry_run=dry_run, modules_total=total_modules, parent_run_id=parent_run_id)
+    # A span for the whole run (performance.md:632). `run_id` is added once
+    # `run_ledger.start` below has one -- everything else worth knowing at
+    # the top of a run is already in hand here.
+    with telemetry.span("pipeline.run", modules_total=total_modules, jobs=jobs,
+                        dry_run=dry_run, origin=origin, source=source,
+                        parent_run_id=parent_run_id) as run_span:
+        # One durable ledger row per run, whatever entry point called this
+        # (BETA-058). Best-effort — a ledger write that fails must not fail the
+        # collection — see pipeline/run_ledger.py.
+        from pipeline import run_ledger
+        selector = ", ".join(name for wave in waves for name in wave) or "none"
+        ledger_run_id = run_ledger.start(
+            settings, origin=origin,
+            module_selector="all" if total_modules >= len(MODULE_REGISTRY) else selector,
+            dry_run=dry_run, modules_total=total_modules, parent_run_id=parent_run_id)
+        run_span.set_attribute("run_id", ledger_run_id)
 
-    summary: list[dict] = []
-    for wave in waves:
-        width = max(1, min(jobs, len(wave)))
-        if width == 1:
-            for name in wave:
-                row = execute_module(
-                    name, MODULE_REGISTRY[name], settings, since, dry_run, limit, observer,
-                    source=source, ledger_run_id=ledger_run_id)
-                summary.append(row)
-                observer.module_finished(row)
-            continue
+        summary: list[dict] = []
+        for wave in waves:
+            width = max(1, min(jobs, len(wave)))
+            if width == 1:
+                for name in wave:
+                    row = execute_module(
+                        name, MODULE_REGISTRY[name], settings, since, dry_run, limit, observer,
+                        source=source, ledger_run_id=ledger_run_id)
+                    summary.append(row)
+                    observer.module_finished(row)
+                continue
 
-        observer.wave_starting(list(wave), width)
-        with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
-            futures = [pool.submit(execute_module, name, MODULE_REGISTRY[name],
-                                    settings, since, dry_run, limit, observer, source=source,
-                                    ledger_run_id=ledger_run_id)
-                        for name in wave]
-            # Collected in submission order, so the summary reads the same way
-            # twice regardless of which API answered first.
-            for future in futures:
-                row = future.result()
-                summary.append(row)
-                observer.module_finished(row)
+            observer.wave_starting(list(wave), width)
+            with ThreadPoolExecutor(max_workers=width, thread_name_prefix="module") as pool:
+                futures = [pool.submit(execute_module, name, MODULE_REGISTRY[name],
+                                        settings, since, dry_run, limit, observer, source=source,
+                                        ledger_run_id=ledger_run_id)
+                            for name in wave]
+                # Collected in submission order, so the summary reads the same way
+                # twice regardless of which API answered first.
+                for future in futures:
+                    row = future.result()
+                    summary.append(row)
+                    observer.module_finished(row)
 
-    run_ledger.finish(settings, ledger_run_id, summary)
-    return summary
+        run_ledger.finish(settings, ledger_run_id, summary)
+        failures = sum(1 for row in summary if row["status"] == "failed")
+        run_span.set_attribute("modules_completed", len(summary))
+        run_span.set_attribute("modules_failed", failures)
+        telemetry.counter("pipeline.run.modules_failed_total",
+                          description="Modules finishing failed, across every run.").add(failures)
+        return summary

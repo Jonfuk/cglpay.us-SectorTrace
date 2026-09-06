@@ -30,8 +30,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from pipeline import db
-from pipeline.archive import ArchiveObject, get_archive
+from pipeline import db, telemetry
+from pipeline.archive import ArchiveError, ArchiveObject, get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
 from pipeline.writer import BatchWriter
@@ -69,6 +69,28 @@ def _wait_respecting_retry_after(retry_state):
             except ValueError:
                 pass
     return _fallback_wait(retry_state)
+
+
+def _record_retry(retry_state) -> None:
+    """A retry counter (performance.md:632), not a new retry mechanism --
+    tenacity's own `@retry` below still owns backoff and the attempt limit.
+    `before_sleep` fires once per retry, never on the attempt that finally
+    succeeds or the one that exhausts `stop_after_attempt`, so this counts
+    exactly the retries this pipeline's politeness rules already accepted
+    paying for. The reason (a status code family, or a transport error) is
+    the only thing worth a label here -- never the URL, which is exactly the
+    kind of value this module's docstring on `telemetry.py` rules out."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, httpx.HTTPStatusError):
+        reason = f"http_{exc.response.status_code}"
+    elif exc is not None:
+        reason = type(exc).__name__
+    else:
+        reason = "unknown"
+    telemetry.counter(
+        "http.request.retries",
+        description="Retried HTTP requests, by the error that triggered the retry.").add(
+        1, {"reason": reason})
 
 
 @dataclass
@@ -554,6 +576,7 @@ class PipelineHTTPClient:
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
         stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
         reraise=True,
     )
     def _do_request(self, method: str, url: str, **kwargs) -> httpx.Response:
@@ -566,6 +589,7 @@ class PipelineHTTPClient:
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
         stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
         reraise=True,
     )
     def _stream_to_spool(self, method: str, url: str, **kwargs):
@@ -669,7 +693,19 @@ class PipelineHTTPClient:
             # rows. If the archive is missing, re-fetch unconditionally: a
             # cache entry without its payload is not a usable cache hit.
             sha256 = cached["payload_sha256"] if cached else ""
-            archived = self.archive.lookup(self.source_system, sha256)
+            # A cache row from before migration 0110, or a backend that
+            # never stored one, has no exact reference to retrieve by — fall
+            # back to the hash-prefix lookup rather than treating a merely
+            # incomplete cache row as a miss.
+            cached_ref = cached["archive_ref"] if cached else None
+            archived = None
+            if cached_ref:
+                try:
+                    archived = self.archive.get_by_ref(cached_ref)
+                except ArchiveError:
+                    archived = None
+            if archived is None:
+                archived = self.archive.lookup(self.source_system, sha256)
             if archived is not None:
                 body = archived.read_bytes()
                 archived_path = (Path(self.settings.raw_archive_dir) /
@@ -704,12 +740,22 @@ class PipelineHTTPClient:
                 archived_ref = archived.logical_path
 
         if self.conn is not None:
+            # A 304 carries no Content-Type of its own (RFC 9110 says the
+            # server need not repeat entity headers on one) — the body is
+            # unchanged, so the content type recorded against the prior
+            # successful fetch still describes it. Only the fresh-fetch
+            # paths (a 200, or the cache-miss refetch above, which already
+            # reassigned `response`) have a response to read one from.
             entry = dict(
                 url=request_url,
                 host=host,
                 etag=response.headers.get("etag"),
                 last_modified=response.headers.get("last-modified"),
                 payload_sha256=sha256,
+                archive_ref=archived_ref,
+                content_type=response.headers.get("content-type") or (
+                    cached["content_type"] if cached else None),
+                content_length=len(body) if body else None,
             )
             if self.defer_cache_writes:
                 # Two distinct callers set this. A pool worker thread must
@@ -814,6 +860,9 @@ class PipelineHTTPClient:
                     etag=response.headers.get("etag"),
                     last_modified=response.headers.get("last-modified"),
                     payload_sha256=sha256,
+                    archive_ref=archived_ref,
+                    content_type=response.headers.get("content-type"),
+                    content_length=size or None,
                 )
                 if self.defer_cache_writes:
                     self.pending_cache_writes.append(entry)

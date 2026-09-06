@@ -39,7 +39,14 @@ WORKDIR /app
 #
 # The extra list is deliberate and closed for the ordinary image: `nlp`,
 # `docs`, `ocr` and `sheets`
-# are NOT installed here. `assistant` (BETA-107) is the local-analysis-host
+# are NOT installed here. `otel` (performance.md's Phase 5 pipeline
+# observability) is always installed alongside `storage`/`graph` rather than
+# gated behind a build arg: unlike the excluded extras above it carries no
+# native build step, GPU/ML weight, or runtime process of its own -- the SDK
+# is inert until `OTEL_ENABLED=true` (pipeline/telemetry.py degrades to a
+# documented no-op otherwise), so there is no image-size or attack-surface
+# reason to make an operator rebuild the image just to turn tracing on.
+# `assistant` (BETA-107) is the local-analysis-host
 # operator layer — it pulls `openai` and expects an Ollama runtime and model
 # weights that this image neither has nor should — so it too is off by
 # default and stays off on Railway, which builds this file with no build
@@ -53,7 +60,7 @@ ARG INSTALL_ASSISTANT=false
 ARG INSTALL_SCRAPY=false
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --extra storage --extra graph \
+RUN uv sync --frozen --no-dev --no-install-project --extra storage --extra graph --extra otel \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant") \
     $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy")
 
@@ -67,7 +74,7 @@ COPY railway.toml ./railway.toml
 COPY --from=frontend /frontend/public/.output/public ./pipeline/web/static_nuxt/public
 COPY --from=frontend /frontend/admin/.output/public ./pipeline/web/static_nuxt/admin
 
-RUN uv sync --frozen --no-dev --extra storage --extra graph \
+RUN uv sync --frozen --no-dev --extra storage --extra graph --extra otel \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant") \
     $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy")
 

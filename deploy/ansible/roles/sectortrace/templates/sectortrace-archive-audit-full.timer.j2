@@ -1,0 +1,10 @@
+[Unit]
+Description=Run sectortrace-archive-audit-full.service quarterly
+
+[Timer]
+OnCalendar={{ archive_audit_full_time }}
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -35,6 +35,17 @@
 #   ./start.sh web --host 127.0.0.1    # this machine only
 #   ./start.sh web --port 8080 --no-open
 #
+#   Worker. `./start.sh web` only enqueues a module run and polls it (Phase 5
+#   worker cutover); this is the separate process that actually executes one,
+#   claiming at most one at a time deployment-wide via a PostgreSQL advisory
+#   lock. Run it alongside `web`, not instead of it -- a run enqueued from the
+#   admin UI sits queued forever with nothing consuming it otherwise, and
+#   PIPELINE_WORKER_ENABLED=false in .env is how you tell the admin UI that is
+#   expected rather than let it queue into silence:
+#   ./start.sh worker run
+#   ./start.sh worker run --once        # claim and execute at most one, then exit
+#
+
 #   PostgreSQL. DATABASE_URL is required in .env; every command reads and
 #   writes PostgreSQL 18. `backup` and `restore` use the verified PostgreSQL
 #   snapshot path. See docs/BACKUP.md and docs/DEPLOYMENT.md.
