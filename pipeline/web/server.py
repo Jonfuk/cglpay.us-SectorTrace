@@ -2931,7 +2931,12 @@ def build_server(settings: Settings | None = None, host: str = "127.0.0.1",
     server = BoundedHTTPServer(
         (host, port),
         partial(Handler, settings=settings,
-                 jobs=JobRegistry(store=JobStore(settings),
+                 # `settings=settings` here (not just `store=`) is what turns
+                 # on `enqueue_pipeline_run` -- see JobRegistry's docstring.
+                 # Without it, this server can still run the ThreadStrategy
+                 # jobs (integrity check, export) but a module run would have
+                 # nowhere to enqueue to.
+                 jobs=JobRegistry(store=JobStore(settings), settings=settings,
                                    invalidate=cache.bump_version),
                  rate_limiter=rate_limiter,
                  cache=cache),
