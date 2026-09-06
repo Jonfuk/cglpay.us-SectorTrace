@@ -571,19 +571,24 @@ def _validate_viewit_history(conn) -> dict[str, int]:
         ),
         "archive_suppressed_cells": (
             "SELECT count(*) AS n FROM ndtms_viewit_archive_rows r "
-            "CROSS JOIN LATERAL jsonb_each_text(r.metrics_json) m "
-            "WHERE m.value IN ('-', 'c', '*', '**', 'x', 'X')"
+            "WHERE jsonb_path_exists(r.metrics_json, "
+            "'$.** ? (@ == \"-\" || @ == \"c\" || @ == \"*\" || "
+            "@ == \"**\" || @ == \"x\" || @ == \"X\")')"
         ),
         "current_powerbi_rows": "SELECT count(*) AS n FROM ndtms_powerbi_observations",
         "current_indicator_count": (
             "SELECT count(DISTINCT metric_raw) AS n FROM ndtms_powerbi_observations"
         ),
-        "archive_indicator_count": (
-            "SELECT count(DISTINCT key) AS n FROM ndtms_viewit_archive_rows r "
-            "CROSS JOIN LATERAL jsonb_object_keys(r.metrics_json) key"
-        ),
     }
     result = {name: int(conn.execute(sql).fetchone()["n"]) for name, sql in checks.items()}
+    sampled_metrics = conn.execute(
+        "SELECT metrics_json FROM ndtms_viewit_archive_rows "
+        "ORDER BY row_key LIMIT 100"
+    ).fetchall()
+    archive_keys = {
+        key for row in sampled_metrics for key in (row["metrics_json"] or {})
+    }
+    result["archive_indicator_count_sampled"] = len(archive_keys)
     current_periods = {
         row["period"] for row in conn.execute(
             "SELECT DISTINCT time_period_raw AS period FROM ndtms_powerbi_observations"

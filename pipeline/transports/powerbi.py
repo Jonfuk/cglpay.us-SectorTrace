@@ -15,6 +15,7 @@ import hashlib
 import json
 import multiprocessing
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -535,15 +536,28 @@ def persist_powerbi(ctx, specs: Sequence[dict[str, str]]) -> int:
             )
         for offset in range(0, len(rows), 5000):
             batch = rows[offset : offset + 5000]
-            db.upsert_many(
-                ctx.conn,
-                "ndtms_powerbi_observations",
-                batch,
-                natural_key=["dashboard_key", "payload_sha256", "row_index"],
-            )
+            for attempt in range(3):
+                try:
+                    ctx.conn.ensure_live()
+                    db.upsert_many(
+                        ctx.conn,
+                        "ndtms_powerbi_observations",
+                        batch,
+                        natural_key=["dashboard_key", "payload_sha256", "row_index"],
+                    )
+                    if not ctx.dry_run:
+                        ctx.conn.commit()
+                    break
+                except db.OperationalError:
+                    if attempt == 2:
+                        raise
+                    # PostgreSQL may need a few seconds to restart after the
+                    # provider closes a backend under a large upsert. The
+                    # batch is idempotent, so reconnecting and retrying it is
+                    # safe and bounds the recovery to the failed chunk.
+                    time.sleep(5 * (attempt + 1))
+                    ctx.conn.ensure_live()
             written += len(batch)
-            if not ctx.dry_run:
-                ctx.conn.commit()
     return written
 
 
