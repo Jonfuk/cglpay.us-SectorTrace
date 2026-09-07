@@ -22,7 +22,12 @@ export const navigationGroups = [
   ] },
 ] as const
 
+export function navigationSectionPath(path: string): string {
+  return ['/pathfinder', '/cooccurrence'].includes(path) ? '/relationships' : path
+}
+
 export function navigationLabel(path: string): string {
+  path = navigationSectionPath(path)
   const items = navigationGroups.flatMap(g => [...g.items])
   return items.find(item => item[0] === path)?.[1]
     ?? items.find(item => item[0] !== '/' && path.startsWith(`${item[0]}/`))?.[1]
