@@ -187,7 +187,7 @@ input::placeholder { color: var(--st-dim); }
 .st-nav-group summary { padding: 8px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .st-nav-group a { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px; color: var(--text-secondary); border-radius: 4px; border-left: 2px solid transparent; }
 .st-nav-group a:hover { background: var(--surface-hover); color: var(--text-primary); }
-.st-nav-group a.router-link-exact-active { background: var(--surface-elevated); color: var(--text-primary); border-left-color: var(--interactive-secondary); }
+.st-nav-group a.router-link-active { background: var(--surface-elevated); color: var(--text-primary); border-left-color: var(--interactive-secondary); }
 .st-nav-symbol { flex: 0 0 22px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
 .st-nav-label { line-height: 1.4; }
 .st-collapse { width: 100%; text-align: right; min-height: 44px; padding: 8px; color: var(--text-muted); font-size: 12px; }
