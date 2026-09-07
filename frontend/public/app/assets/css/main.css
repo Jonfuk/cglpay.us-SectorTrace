@@ -284,6 +284,10 @@ input::placeholder { color: var(--st-dim); }
 .st-inspector { padding: 20px; border: 1px solid var(--border-subtle); background: var(--surface-panel); align-self: start; position: sticky; top: 80px; }
 .st-inspector > header { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 16px; }
 .st-inspector h2 { font-size: 20px; }
+.st-inspector-host.has-inspector { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.st-inspector-host.has-inspector.st-inspector-docked { grid-template-columns: minmax(480px, 1fr) var(--inspector-width, 360px); }
+.st-inspector-host > * { min-width: 0; }
+.st-inspector-resize { position: absolute; inset-block: 0; left: -13px; width: 12px; cursor: col-resize; touch-action: none; border-inline: 5px solid var(--surface-base); background: var(--border-control); }
 .st-inspector-actions { display: grid; gap: 8px; margin-block: 20px; }
 .st-holdings { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-block: 20px; font-size: 13px; }
 .st-holdings dd { text-align: right; font-variant-numeric: tabular-nums; }
