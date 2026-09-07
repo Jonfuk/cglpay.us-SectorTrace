@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 const providers = Array.from({ length: 5 }, (_, index) => ({ provider_key: `p${index + 1}`, canonical_name: `Provider ${index + 1}` }))
 const authorities = [{ ons_code: 'E00000001', name: 'Authority 1', region: null }]
 test.beforeEach(async ({ page }) => {
@@ -38,9 +39,53 @@ test('comparison never truncates oversized selections and preserves all provider
   await expect(page.getByText('Choose no more than four peers.', { exact: false })).toBeVisible()
   expect(requests).toBe(0)
   await page.getByRole('button', { name: 'Remove Provider 5', exact: true }).click()
-  await expect(page.getByText('Role 10: £15 per hour', { exact: true })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Role 10', exact: true })).toBeVisible()
   expect(requests).toBe(1)
   await expect(page.getByText('No matching entry was recorded', { exact: false })).toHaveCount(0)
+})
+
+test('comparison pages and record inspection retain source context without refetching', async ({ page }) => {
+  let requests = 0
+  const rows = Array.from({ length: 26 }, (_, index) => ({ provider_key: 'p1', financial_year_end: `source-period-${index}`, total_income: index, total_expenditure: null, source_url: 'https://example.invalid/filing', retrieved_at: null }))
+  const source = { rows, caveat: 'Synthetic source caveat.', provenance: { sources: ['https://example.invalid/collection'], retrieved_at: '2026-09-01' } }
+  await page.route('**/api/v1/compare?*', route => { requests++; return route.fulfill({ json: { providers, authorities: [], series: { charity: source, provider_contracts: { rows: [] } }, caveats: { cross_layer: 'No cross-source totals.' } } }) })
+  await page.goto('/#/compare?provider_key=p1&provider_key=p2')
+  const table = page.getByRole('region', { name: 'Charity income and expenditure records', exact: true })
+  await expect(table.getByRole('button', { name: /^Inspect record / })).toHaveCount(25)
+  await table.getByRole('button', { name: 'Next page', exact: true }).click()
+  await table.getByRole('button', { name: 'Inspect record 26', exact: true }).click()
+  const inspector = page.getByRole('complementary', { name: 'Comparison record', exact: true })
+  await expect(inspector).toContainText('source-period-25')
+  const download = page.waitForEvent('download')
+  await table.getByRole('button', { name: 'Download source reference JSON', exact: true }).click()
+  const saved = JSON.parse(readFileSync((await (await download).path())!, 'utf8'))
+  expect(saved.rows).toEqual(rows)
+  expect(saved._provenance.source_context.provenance).toEqual(source.provenance)
+  expect(saved.rows[0].retrieved_at).toBeNull()
+  expect(requests).toBe(1)
+  await inspector.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Evidence source', exact: true }).selectOption('provider_contracts')
+  await expect(page.getByText('p1: no observations were returned in this source.', { exact: true })).toBeVisible()
+  expect(requests).toBe(1)
+  await page.getByRole('combobox', { name: 'Evidence source', exact: true }).selectOption('charity')
+  await table.getByRole('button', { name: 'Inspect record 26', exact: true }).click()
+  await expect(page).toHaveURL(/record_scope=charity/)
+  await expect(inspector).toContainText('source-period-25')
+  await page.route('**/api/v1/compare?*', route => route.fulfill({ json: { providers, authorities: [], series: { charity: { ...source, rows: rows.slice(0, 25) } } } }))
+  await page.reload()
+  await expect(inspector.getByText('The saved record is missing or changed.', { exact: false })).toBeVisible()
+})
+test('comparison record inspection works on mobile and retains missing row provenance', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/v1/compare?*', route => route.fulfill({ json: { providers, authorities: [], series: { charity: { rows: [{ provider_key: 'p1', financial_year_end: '2024-03-31', total_income: 0, total_expenditure: null }], provenance: { retrieved_at: '2026-09-01', sources: ['https://example.invalid/collection'] } } } } }))
+  await page.goto('/#/compare?provider_key=p1&provider_key=p2')
+  await page.getByRole('button', { name: 'Inspect record 1', exact: true }).click()
+  const inspector = page.getByRole('dialog', { name: 'Comparison record', exact: true })
+  await expect(inspector).toContainText('Record provenance is shown only where supplied.')
+  await expect(inspector.getByText('2026-09-01', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: info.outputPath('comparison-mobile-record.png'), animations: 'disabled' })
+  await inspector.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '0', exact: true })).toBeVisible()
 })
 test('one-peer comparison can request a source without unrelated filters', async ({ page }) => {
   let request: URL | undefined
