@@ -1,61 +1,155 @@
-# SectorTrace
+<a id="readme-top"></a>
 
-An England-wide **evidence pipeline** for the drug and alcohol treatment
-sector. It collects public-domain evidence — procurement, pay, provider
-finances, treatment activity, regulation, safeguarding — from ~30 official
-sources across every commissioning area in England, stores it in a SQLite (or
-PostgreSQL) warehouse with full provenance, and serves it as a public
-evidence portal and an operator review UI from one stdlib HTTP server. It
-exists to be a trade union pay campaign's evidence base.
+<!--
+*** This README uses the structure and conventions of the Best-README-Template
+*** (https://github.com/othneildrew/Best-README-Template), adapted for a
+*** single-maintainer evidence pipeline rather than an open-contribution
+*** project. Sections that template assumes (open PR contributions, a demo
+*** GIF) are trimmed or reworded where they don't apply — nothing below is
+*** invented to fill a section shape.
+-->
+
+[![Tests][tests-shield]][tests-url]
+[![Docs][docs-shield]][docs-url]
+[![License: MIT][license-shield]][license-url]
+[![Live portal][portal-shield]][portal-url]
+
+<br />
+<div align="center">
+  <h3 align="center">SectorTrace</h3>
+
+  <p align="center">
+    An England-wide, provenance-first evidence pipeline for the drug and
+    alcohol treatment sector — built as the evidence base for a trade union
+    pay campaign.
+    <br />
+    <a href="https://jonfuk.github.io/cglpay.us-SectorTrace/"><strong>Explore the docs »</strong></a>
+    <br />
+    <br />
+    <a href="https://trace.cglpay.us">View the live portal</a>
+    &middot;
+    <a href="https://cglpay.us">The campaign this evidence supports</a>
+    &middot;
+    <a href="docs/CAVEATS.md">Caveats — read before using any figure</a>
+  </p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li>
+      <a href="#about-the-project">About The Project</a>
+      <ul>
+        <li><a href="#built-with">Built With</a></li>
+        <li><a href="#design-principles">Design principles</a></li>
+      </ul>
+    </li>
+    <li>
+      <a href="#getting-started">Getting Started</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#installation">Installation</a></li>
+      </ul>
+    </li>
+    <li><a href="#usage">Usage</a></li>
+    <li><a href="#modules">Modules</a></li>
+    <li><a href="#how-it-works">How It Works</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#development">Development</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#acknowledgments">Acknowledgments</a></li>
+  </ol>
+</details>
+
+<!-- ABOUT THE PROJECT -->
+## About The Project
+
+SectorTrace collects public-domain evidence — procurement, pay, provider
+finances, treatment activity, regulation, safeguarding — from around 30
+official sources across every commissioning area in England. It stores what
+it collects in a PostgreSQL warehouse with full provenance, and serves that
+warehouse as a public evidence portal (`/`) and an operator review UI
+(`/admin`) from one stdlib HTTP server. It exists to be a trade union pay
+campaign's evidence base: a figure that can still be defended a year later in
+a room where someone disputes it.
+
+**[trace.cglpay.us](https://trace.cglpay.us)** is the public portal — pay
+evidence, contracts, treatment demand, a page per authority and per provider,
+the claims index and the map. Every figure links to its source, retrieval
+date, licence and caveats; every section exports CSV or JSON with that
+provenance written into the file.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### Design principles
 
 The guiding principle is that a smaller dataset which can be defended line by
-line is worth more than a large one that cannot:
+line is worth more than a large one that cannot. This is enforced, not just
+stated:
 
-- **Provenance or `NULL`.** Every row carries the URL it came from, when it
+* **Provenance or `NULL`.** Every row carries the URL it came from, when it
   was fetched, and the SHA-256 of the exact bytes, archived under
   `data/raw/`. Nothing is inferred, interpolated or defaulted — an
   unparseable field is `NULL` with a `parse_failures` row, and anything
   needing judgement goes to `review_queue`.
-- **Evidence layers stay separate.** Census figures, charity accounts,
+* **Evidence layers stay separate.** Census figures, charity accounts,
   tribunal counts and contract values are never combined into composite
   scores or cross-source ratios.
-- **Nothing becomes evidence without a person.** Database triggers enforce
+* **Nothing becomes evidence without a person.** Database triggers enforce
   it; candidate documents and machine-extracted claims stay findings until a
   named reviewer promotes them.
-- **Personal data lives only in `restricted_` tables**, excluded from every
+* **Personal data lives only in `restricted_` tables**, excluded from every
   export and every portal response by a column guard, not by intention.
+* **No authentication, by design.** The security model is a JSON
+  content-type plus same-origin write guard, an SSRF destination guard, and
+  `--host 127.0.0.1` when the network is not trusted — see
+  [How It Works](#how-it-works).
 
-## See it live
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-**[trace.cglpay.us](https://trace.cglpay.us)** — the public evidence portal.
-Browse pay evidence, contracts, treatment demand, a page per authority and
-per provider, the claims index and the map. Every figure links to its source,
-retrieval date, licence and caveats; every section exports CSV or JSON with
-that provenance written into the file.
+### Built With
 
-**[cglpay.us](https://cglpay.us)** — the trade union pay campaign this
-evidence base supports.
+* [![Python][python-shield]][python-url] — stdlib only for the web server: no framework, no ASGI, no build step, no CDN
+* [![PostgreSQL][postgres-shield]][postgres-url] with `pgvector`, `pg_trgm` and PostGIS
+* [![uv][uv-shield]][uv-url] for dependency and environment management
+* Vanilla JavaScript front ends (`pipeline/web/static/`, `frontend/`) — both render with the network cable unplugged
 
-## Documentation
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-**[jonfuk.github.io/cglpay.us-SectorTrace](https://jonfuk.github.io/cglpay.us-SectorTrace/)**
-— the full documentation, rebuilt from `master` on every push. Start here:
+<!-- GETTING STARTED -->
+## Getting Started
 
-| Page | What it covers |
-| --- | --- |
-| [Caveats](docs/CAVEATS.md) | Known limitations, and what must **not** be computed — read before using any figure |
-| [Sources](docs/SOURCES.md) | Every source's URL, licence, API-key requirement and applied rate limit |
-| [Data dictionary](docs/DATA_DICTIONARY.md) | Every table and column, generated from the live schema |
-| [Deployment](docs/DEPLOYMENT.md) | The PostgreSQL backend, the cutover checklist, and dual maintenance |
-| [Backups](docs/BACKUP.md) | Snapshotting and restoring the warehouse on either backend |
-| [AI promotion policy](docs/AI_PROMOTION_POLICY.md) | Where machine assistance is and is not allowed near evidence |
-| [Analyst assistant](docs/assistant.md) | The optional, off-by-default natural-language finding aid (inference on OpenRouter) — how it is bounded and how to enable it |
+### Prerequisites
 
-The site also carries generated API reference for every module in `pipeline/`.
-[`CLAUDE.md`](CLAUDE.md) records the settled decisions the codebase is built
-around.
+* [uv](https://docs.astral.sh/uv/getting-started/installation/)
+* PostgreSQL 18, with the `pgvector`, `pg_trgm` and PostGIS extensions
+  available — `deploy/docker-compose.postgres.yml` provides a local one
+* `CONTACT_EMAIL` set before any run that fetches: it is sent in the
+  `User-Agent` of every request and the pipeline refuses to start without it
+* A few modules need a free API key (Charity Commission, Companies House,
+  CQC); each fails immediately naming the variable it is missing
 
-## Quick start
+### Installation
+
+```bash
+git clone https://github.com/Jonfuk/cglpay.us-SectorTrace.git
+cd cglpay.us-SectorTrace
+./start.sh            # Linux / macOS / WSL / Git Bash — start.cmd on Windows
+```
+
+`./start.sh` creates the writable directories, copies `.env.example` to
+`.env` if it is missing, checks `uv` is installed, and syncs dependencies.
+Credentials stay out of the repository (`.env`, `secrets/`,
+`*-service-account.json` are all gitignored). `DATABASE_URL` is mandatory —
+point it at the Compose PostgreSQL instance or your own.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- USAGE -->
+## Usage
 
 ```bash
 ./start.sh                        # show CLI help
@@ -73,10 +167,10 @@ around.
 `./start.sh tui` presents the same complete command tree in an interactive
 terminal form, including nested commands and their options. Use `Ctrl+S` to
 search, `Ctrl+T` to return to the command tree, `Ctrl+O` for command help, and
-`Ctrl+R` to close the form and run the selected command. Commands that are not
-on the small read-only inspection allowlist first show the exact command and
-ask for confirmation; this includes warehouse, archive, export and service
-operations.
+`Ctrl+R` to close the form and run the selected command. Commands that are
+not on the small read-only inspection allowlist first show the exact command
+and ask for confirmation; this includes warehouse, archive, export and
+service operations.
 
 For the operator landing view, use `./start.sh dashboard`. It shows warehouse
 health, parse-failure pressure, and an oldest-first pending review worklist;
@@ -84,10 +178,11 @@ select a row to inspect its stored provenance. Press `f` to focus the queue
 filter, press Enter to apply it, and use Ctrl+X to clear it. `d` opens recent
 review decisions and `p` opens grouped parse failures. Enter a reviewer name
 and optional note to approve, reject or reset an item. Every decision is
-confirmed and recorded through the same audited review workflow as the web UI;
-it does not promote evidence or edit a canonical table. This is deliberately
-a fast backup for triage when the browser UI is inconvenient, not a replacement
-for its bulk review, pipeline controls, database browser or exports.
+confirmed and recorded through the same audited review workflow as the web
+UI; it does not promote evidence or edit a canonical table. This is
+deliberately a fast backup for triage when the browser UI is inconvenient,
+not a replacement for its bulk review, pipeline controls, database browser or
+exports.
 
 For backup and transfer work, use `./start.sh sync`. The separate screen can
 preview and confirm additive raw-archive transfers between local disk and
@@ -104,8 +199,8 @@ deletion, or arbitrary container removal.
 
 For the full collection, use `./start.sh run-all`. It shows the dependency
 waves before starting and defaults to `--jobs 14`; the form also exposes
-`--since`, `--limit`, the m01 source channel, and `--dry-run`. It uses the same
-runner and durable run ledger as the CLI and web operator UI.
+`--since`, `--limit`, the m01 source channel, and `--dry-run`. It uses the
+same runner and durable run ledger as the CLI and web operator UI.
 
 ```bash
 ./start.sh export all        # sheets, geojson, echarts, docs, then a zipped bundle
@@ -116,27 +211,22 @@ runner and durable run ledger as the CLI and web operator UI.
 ./start.sh export ndtms      # stream Power BI, ViewIt archive, and monthly evidence
 ```
 
-`./start.sh` (Linux / macOS / WSL / Git Bash) and `start.cmd` (Windows) take
-the same arguments and pass them straight to the CLI. They create the
-writable directories, copy `.env.example` to `.env` if it is missing, check
-[`uv`](https://docs.astral.sh/uv/getting-started/installation/) is installed,
-and sync dependencies. `CONTACT_EMAIL` is **required** — it is sent in the
-`User-Agent` of every request and the pipeline refuses to start without it.
-A few modules need a free API key (Charity Commission, Companies House, CQC);
-each fails immediately naming the variable it is missing. Credentials stay out
-of the repository (`.env`, `secrets/`, `*-service-account.json` are all
-gitignored).
-
 Without the wrapper scripts: `uv run python -m pipeline run m00_geography`.
 
+_For the full command reference and generated API docs, see the
+[Documentation][docs-url]._
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- MODULES -->
 ## Modules
 
 Each module owns its tables, upserts on a natural key so re-runs are
 idempotent, and declares what it reads so `run all` resolves a dependency
 order (everything joins to **authorities**, from `m00`; provider evidence
 joins to **providers**). Collection is polite: `robots.txt` respected, one
-request per two seconds per host enforced process-wide, conditional requests,
-`Retry-After` honoured.
+request per two seconds per host enforced process-wide, conditional
+requests, `Retry-After` honoured.
 
 | Module | Source | Evidence |
 | --- | --- | --- |
@@ -182,25 +272,42 @@ without any host seeing a faster request rate. `m06`, `m09`, `m10` and `m20`
 produce worklists reviewed in the operator UI — see
 [Caveats](docs/CAVEATS.md) and the per-module docstrings.
 
-## How it works
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-- **A stdlib web server** (`pipeline/web/`) — no framework, no build step, no
+<!-- HOW IT WORKS -->
+## How It Works
+
+* **A stdlib web server** (`pipeline/web/`) — no framework, no build step, no
   CDN — serves a read-only `/api/v1/` portal at `/` and the review UI at
   `/admin`. Every figure's caveat travels with it in the payload; every
   section exports CSV/JSON and a `.provenance.json` companion; a download is
   the whole dataset, not the page's window. The API is self-documented at
   `/api`.
-- **No authentication, by design.** The security model is a JSON
+* **No authentication, by design.** The security model is a JSON
   content-type plus same-origin write guard, an SSRF destination guard
   (`pipeline/netguard.py`), and `--host 127.0.0.1` when the network is not
   trusted. Anyone who can reach the port can read the whole warehouse and
   start a run — do not expose it.
-- **SQLite by default; PostgreSQL** behind `DATABASE_URL`, same SQL under a
-  parallel migration tree. Production runs on Railway. Back up before
+* **PostgreSQL** behind `DATABASE_URL`, with `pgvector`, `pg_trgm` and
+  PostGIS as required extensions. Production runs on Railway. Back up before
   anything that rewrites the warehouse: `./start.sh backup`.
-- **The review UI** writes decisions back through a separate writable
+* **The review UI** writes decisions back through a separate writable
   connection; the table browser and SQL box are read-only. Every decision is
   recorded with who made it, when, and the context it was taken against.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ROADMAP -->
+## Roadmap
+
+Findings and phase status live in
+[`docs/upgrade-roadmap.md`](docs/upgrade-roadmap.md), not here, so there is
+one place tracking it rather than two that can drift apart.
+
+See the [open issues](https://github.com/Jonfuk/cglpay.us-SectorTrace/issues)
+for individually tracked items.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Development
 
@@ -222,8 +329,70 @@ fixture cannot notice a source quietly changing shape. Fixtures containing
 personal data are anonymised — the underlying records are public, but this
 repository is public and the pipeline treats claimant names as restricted.
 
-## Licence
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-MIT for the code. The evidence is public-domain; each source's own licence is
-in [Sources](docs/SOURCES.md) — most is OGL v3, some is not, and the portal
+<!-- CONTRIBUTING -->
+## Contributing
+
+This is a single-maintainer evidence base built for a specific campaign, not
+an open-contribution project — there is no CONTRIBUTING guide or issue
+template set up here. If you've spotted a factual problem with a published
+figure, a source SectorTrace should be tracking, or a bug, please
+[open an issue](https://github.com/Jonfuk/cglpay.us-SectorTrace/issues)
+describing it; that is the right channel before any pull request.
+
+Read [`CLAUDE.md`](CLAUDE.md) before touching anything that produces a
+figure — it records the settled decisions the codebase is built around, and
+they are not defaults to re-litigate in a PR. **This README is one of
+them**: it is maintained by hand and is not to be rewritten, restructured or
+"improved" by an AI coding assistant on its own initiative — see the note at
+the top of `CLAUDE.md`.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- LICENSE -->
+## License
+
+Distributed under the MIT License for the code — see [`LICENSE`](LICENSE).
+
+The evidence itself is public-domain; each source's own licence is listed in
+[Sources](docs/SOURCES.md) — most is OGL v3, some is not, and the portal
 labels each figure accordingly.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTACT -->
+## Contact
+
+Jon Fuk — [jon@jonf.uk](mailto:jon@jonf.uk)
+
+Project link: [https://github.com/Jonfuk/cglpay.us-SectorTrace](https://github.com/Jonfuk/cglpay.us-SectorTrace)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ACKNOWLEDGMENTS -->
+## Acknowledgments
+
+* Every source SectorTrace collects from is credited, licensed and dated in
+  [`docs/SOURCES.md`](docs/SOURCES.md) — the pipeline exists only because
+  these bodies publish the underlying data.
+* [Best-README-Template](https://github.com/othneildrew/Best-README-Template),
+  whose structure this document follows.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- MARKDOWN LINKS & IMAGES -->
+[tests-shield]: https://img.shields.io/github/actions/workflow/status/Jonfuk/cglpay.us-SectorTrace/tests.yml?label=tests&style=for-the-badge
+[tests-url]: https://github.com/Jonfuk/cglpay.us-SectorTrace/actions/workflows/tests.yml
+[docs-shield]: https://img.shields.io/github/actions/workflow/status/Jonfuk/cglpay.us-SectorTrace/docs.yml?label=docs&style=for-the-badge
+[docs-url]: https://jonfuk.github.io/cglpay.us-SectorTrace/
+[license-shield]: https://img.shields.io/github/license/Jonfuk/cglpay.us-SectorTrace.svg?style=for-the-badge
+[license-url]: https://github.com/Jonfuk/cglpay.us-SectorTrace/blob/master/LICENSE
+[portal-shield]: https://img.shields.io/badge/live_portal-trace.cglpay.us-blue?style=for-the-badge
+[portal-url]: https://trace.cglpay.us
+[python-shield]: https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white
+[python-url]: https://www.python.org/
+[postgres-shield]: https://img.shields.io/badge/postgresql-18-4169E1?style=for-the-badge&logo=postgresql&logoColor=white
+[postgres-url]: https://www.postgresql.org/
+[uv-shield]: https://img.shields.io/badge/uv-package_manager-DE5FE9?style=for-the-badge
+[uv-url]: https://docs.astral.sh/uv/
