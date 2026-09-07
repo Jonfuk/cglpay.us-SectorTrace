@@ -52,5 +52,5 @@ useHead({ title: 'Safety and legal evidence · SectorTrace' })
   </section>
 </template>
 <style scoped>
-.st-safety-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; } label { display: grid; gap: 6px; font-size: 13px; } input, select { border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-base); color: var(--text-primary); padding: 9px; max-width: 100%; }
+.st-safety-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; } label { display: grid; gap: 6px; font-size: 13px; max-width: 100%; } input, select { border: 1px solid var(--border-control); border-radius: 4px; background: var(--surface-base); color: var(--text-primary); padding: 9px; max-width: 100%; min-height: 44px; }
 </style>

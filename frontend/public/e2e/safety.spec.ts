@@ -18,6 +18,7 @@ test('safety keeps source lanes, relationships, uncertain dates and reference sc
   const rows = [event('pfd', 'March 2026', 'named_in', 'Partial-date report'), event('pfd', null, 'named_in', 'Undated report'), event('pfd', '2025-12-31', 'addressed_to', 'Older report'), event('pfd', '12 March 2026', 'addressed_to', 'Newer report'), event('pfd', '12 March 2026', 'named_in', 'Newer report'), event('sar', null, 'named_in', 'SAR library item'), { ...event('hse', '2026-01-01', 'matched_to', 'HSE notice'), result: 'Withdrawn following appeal' }, event('tribunal', '2026-01-02', 'named_in', 'Tribunal case')]
   await page.route('**/api/v1/safety_legal*', route => { requests.push(new URL(route.request().url())); return route.fulfill({ json: { events: rows, truncated: true, caveats: { pfd: 'Synthetic report relationships are separate.' } } }) })
   await page.goto('/#/pfd?provider_key=example-recovery&ons_code=E00000001')
+  await expect(page.getByRole('textbox', { name: 'First source year', exact: true })).toHaveCSS('border-top-style', 'solid')
   const pfd = page.getByRole('region', { name: 'Coroners’ reports', exact: true })
   await expect(pfd.getByRole('heading', { name: 'Dated entries, newest first' })).toBeVisible()
   const entries = pfd.getByRole('list', { name: 'Coroners’ reports chronology' }).getByRole('listitem')
