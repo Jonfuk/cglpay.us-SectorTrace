@@ -185,7 +185,7 @@ Exports carry provenance into the file rather than leaving it behind:
 
 ```bash
 ./start.sh export all        # everything below, then a zipped bundle
-./start.sh export sheets     # ten CSV tabs, caveats written in above each header
+./start.sh export sheets     # 11 CSV tabs, caveats written in above each header
 ./start.sh export geojson    # contracts, CQC locations, treatment and PFD as separate layers
 ./start.sh export echarts    # pre-shaped dashboard series, each carrying source and caveats
 ./start.sh export docs       # regenerate the data dictionary from the live schema
