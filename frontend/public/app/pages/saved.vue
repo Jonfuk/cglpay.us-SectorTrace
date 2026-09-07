@@ -1,28 +1,24 @@
 <script setup lang="ts">
-// Saved searches — filtered views the reader chose to keep, each a shareable
-// link back to that exact URL (a filtered view is a link). Per-browser only.
+import { collectionHref, validCollectionEntry, type CollectionEntry } from '~/lib/collections'
+import type { SavedSearch } from '~/composables/useLibrary'
 const saved = useSavedSearches()
-useHead({ title: 'SectorTrace — Saved searches' })
+const status = ref('')
+function imported(entries: CollectionEntry[]) {
+  const result = saved.importEntries(entries as SavedSearch[])
+  status.value = `${result.added} ${result.added === 1 ? 'entry' : 'entries'} added. ${result.skipped} exact ${result.skipped === 1 ? 'duplicate' : 'duplicates'} skipped. ${result.persisted ? 'Collection saved in this browser.' : 'Browser storage is unavailable. Export this collection before leaving this view.'}`
+}
+function remove(id: string) { status.value = saved.remove(id) ? 'View removed from this browser.' : 'View removed from memory. Browser storage could not be updated. Export the current collection before leaving.' }
+useHead({ title: 'Saved views · SectorTrace' })
 </script>
-
 <template>
   <section class="space-y-6">
-    <h1 class="text-2xl font-semibold">Saved searches</h1>
-    <p class="opacity-70 text-sm">
-      Views you saved with the ☆ button, kept in this browser. Each is a link
-      back to that exact filtered view.
-    </p>
-
-    <StEmptyState
-      v-if="!saved.searches.value.length"
-      title="No saved searches"
-      message="Use the ☆ Save button in the header to keep a filtered view here."
-    />
-    <ul v-else class="divide-y divide-black/5 dark:divide-white/5">
-      <li v-for="s in saved.searches.value" :key="s.id" class="py-2 flex items-center gap-4">
-        <a :href="s.href" class="flex-1 text-[var(--st-accent)] hover:underline break-words">{{ s.label }}</a>
-        <UButton size="xs" color="neutral" variant="ghost" @click="saved.remove(s.id)">Remove</UButton>
-      </li>
-    </ul>
+    <header class="st-page-header"><h1>Saved views</h1><p>Named links to your selected evidence, kept in this browser. They are not synchronised to an account.</p></header>
+    <StCollectionTransfer kind="saved" :entries="saved.searches.value" @imported="imported" />
+    <p v-if="status" role="status">{{ status }}</p>
+    <StEmptyState v-if="!saved.searches.value.length" title="No saved views" message="Use Save view in the header to keep the current selection here." />
+    <ul v-else class="space-y-4"><li v-for="(entry, index) in saved.searches.value" :key="index" class="atlas-panel atlas-panel-body space-y-3">
+      <template v-if="validCollectionEntry(entry, 'saved')"><a :href="collectionHref(entry.href)!" class="break-words">{{ entry.label }}</a><div><button type="button" class="atlas-button" :aria-label="`Remove ${entry.label}`" @click="remove(entry.id)">Remove</button></div></template>
+      <template v-else><p>Unrecognised stored entry. It remains in exports, but its link is unavailable.</p><pre class="whitespace-pre-wrap break-words">{{ JSON.stringify(entry, null, 2) }}</pre></template>
+    </li></ul>
   </section>
 </template>

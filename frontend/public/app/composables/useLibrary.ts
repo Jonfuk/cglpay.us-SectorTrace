@@ -4,6 +4,8 @@
 // sent anywhere. They are conveniences: a failure to read or write degrades to
 // an empty collection, never a broken page.
 
+import { mergeCollection } from '~/lib/collections'
+
 export interface NotebookEntry {
   id: string
   title: string
@@ -48,14 +50,19 @@ export function useNotebook() {
     return store.write(entries.value)
   }
   const remove = (id: string) => {
-    entries.value = entries.value.filter((e) => e.id !== id)
-    store.write(entries.value)
+    entries.value = entries.value.filter((e) => e?.id !== id)
+    return store.write(entries.value)
   }
   const clear = () => {
     entries.value = []
-    store.clear()
+    return store.clear()
   }
-  return { entries, add, remove, clear }
+  const importEntries = (incoming: NotebookEntry[]) => {
+    const result = mergeCollection(entries.value, incoming, makeId)
+    entries.value = result.entries
+    return { ...result, persisted: store.write(entries.value) }
+  }
+  return { entries, add, remove, clear, importEntries }
 }
 
 export function useSavedSearches() {
@@ -68,15 +75,20 @@ export function useSavedSearches() {
   const save = (label: string, href: string) => {
     // De-dupe by href: saving the same view twice updates its label rather
     // than stacking duplicates.
-    const rest = searches.value.filter((s) => s.href !== href)
+    const rest = searches.value.filter((s) => s?.href !== href)
     searches.value = [{ id: makeId(), label, href, at: Date.now() }, ...rest]
     return store.write(searches.value)
   }
   const remove = (id: string) => {
-    searches.value = searches.value.filter((s) => s.id !== id)
-    store.write(searches.value)
+    searches.value = searches.value.filter((s) => s?.id !== id)
+    return store.write(searches.value)
   }
-  return { searches, save, remove }
+  const importEntries = (incoming: SavedSearch[]) => {
+    const result = mergeCollection(searches.value, incoming, makeId)
+    searches.value = result.entries
+    return { ...result, persisted: store.write(searches.value) }
+  }
+  return { searches, save, remove, importEntries }
 }
 
 export function useJourney() {
