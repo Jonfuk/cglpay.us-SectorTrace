@@ -134,6 +134,27 @@ superuser to add. The panel says so rather than reporting a clean bill for a
 check that did not run; if you want the physical check, run `pg_amcheck` on
 the LAN host.
 
+### PostgreSQL maintenance telemetry
+
+`pipeline pg-telemetry-snapshot` (`pipeline/pg_telemetry.py`, migration 0113)
+captures `pg_stat_user_tables` and `pg_stat_user_indexes` into `pg_telemetry_*`
+every run, scheduled daily by `sectortrace-pg-telemetry.timer` — see
+`deploy/ansible/README.md`, "PostgreSQL maintenance telemetry". It is capture
+only: performance.md's "PostgreSQL maintenance" section wants table-specific
+autovacuum/analyze thresholds and index changes made only after this
+telemetry has accumulated over an observation period, not from this run
+itself, so nothing here writes to autovacuum, index, or planner/memory
+configuration.
+
+The query-fingerprint half (`pg_stat_statements`) needs
+`shared_preload_libraries` set at server start — like `amcheck` above, not
+something `CREATE EXTENSION` alone can do, and not something this repository
+can do to a running server. It is "available here, not installed" (the table
+above), so the snapshot logs `pg_telemetry.pg_stat_statements_unavailable`
+and still records table/index telemetry rather than failing. To populate it:
+add `pg_stat_statements` to `shared_preload_libraries`, restart PostgreSQL,
+then `CREATE EXTENSION pg_stat_statements`.
+
 **TLS is off, and that is the one gap in this setup.** The warehouse holds
 personal data in `restricted_` tables, and connections cross a private network
 rather than the public internet. If that network is not itself encrypted, the

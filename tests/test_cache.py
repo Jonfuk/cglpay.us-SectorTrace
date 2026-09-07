@@ -96,6 +96,91 @@ def test_nullcache_always_computes_and_never_stores():
     cache.bump_version()  # a no-op that must not raise
 
 
+# --- get_or_compute_response: caching an already-encoded response ------------
+
+
+def test_a_response_hit_reuses_the_encoded_bytes_without_reencoding():
+    cache = InProcessCache()
+    computes, encodes = [], []
+
+    def compute():
+        computes.append(1)
+        return {"n": 1}
+
+    def encode(payload):
+        encodes.append(1)
+        return (b"body", None)
+
+    assert cache.get_or_compute_response("k", 10, compute, encode) == (b"body", None)
+    assert cache.get_or_compute_response("k", 10, compute, encode) == (b"body", None)
+    assert computes == [1]
+    assert encodes == [1]  # not re-run on the hit
+
+
+def test_response_cache_tracks_compute_and_serialize_time_separately():
+    clock = [0.0]
+
+    def tick(step: float):
+        clock[0] += step
+        return clock[0]
+
+    cache = InProcessCache(clock=lambda: clock[0])
+
+    def compute():
+        tick(0.02)
+        return "v"
+
+    def encode(payload):
+        tick(0.005)
+        return (payload.encode(), None)
+
+    cache.get_or_compute_response("k", 10, compute, encode)
+    stats = cache.stats()
+    assert stats["compute_seconds"] >= 0.02 - 1e-9
+    assert stats["serialize_seconds"] >= 0.005 - 1e-9
+
+
+def test_response_cache_hit_after_version_bump_recomputes_and_reencodes():
+    cache = InProcessCache()
+    calls = []
+
+    def compute():
+        calls.append("compute")
+        return "v"
+
+    def encode(payload):
+        calls.append("encode")
+        return (payload.encode(), None)
+
+    cache.get_or_compute_response("k", 1000, compute, encode)
+    cache.bump_version()
+    cache.get_or_compute_response("k", 1000, compute, encode)
+    assert calls == ["compute", "encode", "compute", "encode"]
+
+
+def test_nullcache_get_or_compute_response_always_computes_and_encodes():
+    cache = NullCache()
+    calls = []
+    for _ in range(2):
+        cache.get_or_compute_response(
+            "k", 1000,
+            lambda: calls.append("compute") or "v",
+            lambda payload: (calls.append("encode") or payload.encode(), None),
+        )
+    assert calls == ["compute", "encode", "compute", "encode"]
+
+
+def test_stats_exposes_the_full_metric_set():
+    cache = InProcessCache()
+    cache.get_or_compute_response("k", 10, lambda: "v", lambda p: (p.encode(), None))
+    stats = cache.stats()
+    for key in ("hits", "misses", "waiters", "computes", "failures", "evictions",
+                "queue_delay_seconds", "compute_seconds", "serialize_seconds"):
+        assert key in stats
+
+    assert NullCache().stats() == {"enabled": 0}
+
+
 def test_get_cache_is_null_unless_enabled():
     off = SimpleNamespace(cache_enabled=False)
     assert isinstance(get_cache(off), NullCache)

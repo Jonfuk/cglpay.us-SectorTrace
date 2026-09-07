@@ -68,12 +68,15 @@ import json
 import math
 import re
 import zipfile
+from dataclasses import dataclass
+from dataclasses import field as _field
 from datetime import date, timedelta
 
 import structlog
 
-from pipeline import db
+from pipeline import collection, db
 from pipeline.buyer_name_overrides import BUYER_NAME_OVERRIDES
+from pipeline.config import Settings
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
 from pipeline.keywords import (
     RELEVANT_CPV_PREFIXES,
@@ -82,6 +85,7 @@ from pipeline.keywords import (
 )
 from pipeline.notice_urls import published_notice_url
 from pipeline.registry import ModuleContext, register_module
+from pipeline.writer import BatchWriter
 
 log = structlog.get_logger()
 
@@ -108,11 +112,11 @@ KAGGLE_DOWNLOAD_URL = (
     f"https://www.kaggle.com/api/v1/datasets/download/{KAGGLE_OWNER}/"
     f"{KAGGLE_DATASET_SLUG}/{KAGGLE_CSV_FILENAME}"
 )
-# How often the kaggle walk checkpoints its row offset and commits. The file
-# is one ~700MB download processed as a single long loop rather than many
-# small requests, so there is no natural per-request checkpoint the way the
-# other three channels have one per page/file.
-KAGGLE_COMMIT_EVERY_ROWS = 1000
+# The kaggle walk checkpoints its row offset and commits every
+# `settings.batch_write_rows` rows -- the file is one ~700MB download
+# processed as a single long loop rather than many small requests, so there
+# is no natural per-request checkpoint the way the other three channels have
+# one per page/file.
 
 # Crown Commercial Service's own CKAN catalogue of daily Contracts Finder
 # OCDS-flattened-CSV dumps. robots.txt on this host disallows /api/ wholesale
@@ -315,13 +319,17 @@ def _provenance(result, source_system: str) -> dict:
     }
 
 
-def _record_channel_sighting(conn, notice_id: str, source_system: str, fields: dict, result) -> None:
-    """What *this* channel itself observed for `notice_id`, kept alongside
-    (never instead of) `contracts` — see migration 0058. Every channel calls
-    this, not just --kag, so "do the supply routes agree" is answerable from
-    one table rather than only from whatever --kag's own check flags.
+def _channel_sighting_row(notice_id: str, source_system: str, fields: dict, result) -> dict:
+    """The row `procurement_channel_sightings` would hold for what *this*
+    channel itself observed for `notice_id`, kept alongside (never instead
+    of) `contracts` — see migration 0058. Every channel builds one, not just
+    --kag, so "do the supply routes agree" is answerable from one table
+    rather than only from whatever --kag's own check flags. Pure -- writing
+    it is the caller's job (batched for the three channels that populate
+    `contracts`; immediate for --kag, which must read its own row straight
+    back — see `_check_kaggle_against_other_channels`).
     """
-    db.upsert(conn, "procurement_channel_sightings", {
+    return {
         "notice_id": notice_id,
         "source_system": source_system,
         **fields,
@@ -329,15 +337,45 @@ def _record_channel_sighting(conn, notice_id: str, source_system: str, fields: d
         "retrieved_at": result.retrieved_at.isoformat(),
         "http_status": result.status_code,
         "payload_sha256": result.payload_sha256,
-    }, natural_key=["notice_id", "source_system"])
+    }
 
 
-def _process_release(conn, module_name: str, source_system: str, release: dict, result, authority_lookup: dict[str, str]) -> int:
+def _record_channel_sighting(conn, notice_id: str, source_system: str, fields: dict, result) -> None:
+    """Immediate single-row write built on `_channel_sighting_row` — kept for
+    --kag, whose cross-channel check reads its own row straight back in the
+    same call (see its docstring); the three channels that populate
+    `contracts` batch this shape through a `BatchWriter` instead.
+    """
+    db.upsert(conn, "procurement_channel_sightings", _channel_sighting_row(notice_id, source_system, fields, result),
+              natural_key=["notice_id", "source_system"])
+
+
+@dataclass
+class ReleaseWrite:
+    """What `_process_release` (and `_process_csv_release_row`) would write
+    for one release, as data rather than as an immediate write.
+
+    Pure by design: a channel walk feeds these into its own `BatchWriter`s
+    (see `_walk_and_process`/`_walk_and_process_csv_archive`) so many
+    releases' worth of rows become one `db.upsert_many`/
+    `record_parse_failures`/`record_review_items` call instead of one round
+    trip per release — the buyer-matching, supplier/award-extraction and
+    provenance logic itself is unchanged, only where the write happens.
+    """
+    contract_rows: list[dict] = _field(default_factory=list)
+    sighting: dict | None = None
+    # (source_url, field_name, raw_fragment, reason) — db.record_parse_failures' row shape.
+    parse_failures: list[tuple[str | None, str, str, str]] = _field(default_factory=list)
+    # (item_type, raw_value, context_json) — db.record_review_items' row shape.
+    review_items: list[tuple[str, str, str | None]] = _field(default_factory=list)
+
+
+def _process_release(module_name: str, source_system: str, release: dict, result, authority_lookup: dict[str, str]) -> ReleaseWrite:
     notice_id = release.get("id")
     if not notice_id:
-        db.record_parse_failure(conn, module_name, "id", json.dumps(release)[:500],
-                                 "release missing notice id", source_url=result.url)
-        return 0
+        return ReleaseWrite(parse_failures=[
+            (result.url, "id", json.dumps(release)[:500], "release missing notice id"),
+        ])
 
     ocid = release.get("ocid")
     notice_type = ",".join(release.get("tag") or [])
@@ -345,12 +383,13 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
     buyer_party = next((p for p in (release.get("parties") or []) if "buyer" in (p.get("roles") or [])), None)
     buyer_name = (release.get("buyer") or {}).get("name") or (buyer_party or {}).get("name")
 
+    review_items: list[tuple[str, str, str | None]] = []
     buyer_ons_code = None
     if buyer_name:
         buyer_ons_code = _match_buyer(buyer_name, authority_lookup)
         if buyer_ons_code is None:
-            db.record_review_item(conn, module_name, "unmatched_buyer_name", buyer_name,
-                                   json.dumps({"ocid": ocid, "notice_id": notice_id}))
+            review_items.append(("unmatched_buyer_name", buyer_name,
+                                  json.dumps({"ocid": ocid, "notice_id": notice_id})))
 
     cpv_codes = ",".join(sorted(_extract_cpv_codes(release))) or None
     procedure_type, psr_basis = _classify_procedure(tender)
@@ -403,18 +442,18 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
             "notice_web_url": notice_web_url,
             **provenance,
         })
-    # A release can carry several award/supplier rows. Keep one statement
-    # shape for the whole release so procurement's high-volume path does not
-    # turn each supplier into its own parse/round-trip/commit unit.
-    rows_written = db.upsert_many(
-        conn, "contracts", contract_rows, natural_key=["notice_id", "supplier_id"])
+    # A release can carry several award/supplier rows. Keep one row shape for
+    # the whole release so procurement's high-volume path does not turn each
+    # supplier into its own parse/round-trip/commit unit -- the caller's
+    # BatchWriter is what actually turns this into one statement, now across
+    # many releases rather than just this one.
 
     # Own-award values only (pre tender-estimate fallback) -- summing the
     # fallback would double-count the tender estimate as if it were an award
     # every time a notice has no award yet, which is most rows.
     award_values = [sr["value_core"] for sr in supplier_rows if sr.get("value_core") is not None]
     supplier_names = "|".join(sr["supplier_name_raw"] for sr in supplier_rows if sr.get("supplier_name_raw")) or None
-    _record_channel_sighting(conn, notice_id, source_system, {
+    sighting = _channel_sighting_row(notice_id, source_system, {
         "ocid": ocid,
         "buyer_name": buyer_name,
         "title": tender.get("title"),
@@ -426,7 +465,7 @@ def _process_release(conn, module_name: str, source_system: str, release: dict, 
         "date_published": release.get("date"),
     }, result)
 
-    return rows_written
+    return ReleaseWrite(contract_rows=contract_rows, sighting=sighting, review_items=review_items)
 
 
 def _resolve_start(conn, cursor_key: str, explicit_since: str | None, default_start: date) -> tuple[str | None, date]:
@@ -442,10 +481,26 @@ def _resolve_start(conn, cursor_key: str, explicit_since: str | None, default_st
     return None, default_start
 
 
+def _existing_ocids(conn, ocids: set[str]) -> set[str]:
+    """Which of `ocids` already have a `contracts` row.
+
+    Purely a reporting signal for `collection_attempts.detail_json`'s
+    new-vs-seen counts — idempotency itself still comes from
+    `db.upsert_many`'s ON CONFLICT, this changes nothing about what gets
+    written. One query per page/month/Kaggle-batch; skipped entirely when
+    there is nothing to check.
+    """
+    if not ocids:
+        return set()
+    rows = conn.execute("SELECT ocid FROM contracts WHERE ocid = ANY(%s)", (sorted(ocids),)).fetchall()
+    return {row["ocid"] for row in rows}
+
+
 def _walk_and_process(
     client: PipelineHTTPClient, conn, module_name: str, source_system: str, base_url: str,
     date_params: tuple[str, str], resume_url: str | None, window_from: date, window_to: date,
     cursor_key: str, authority_lookup: dict[str, str], limit: int | None, dry_run: bool,
+    settings: Settings,
 ) -> int:
     if resume_url:
         url, params = resume_url, None
@@ -458,30 +513,131 @@ def _walk_and_process(
             "limit": 100,
         }
 
+    # Read by the contracts writer's checkpoint only -- every page sets it to
+    # that page's own resume point right before the writers are closed, so a
+    # threshold-triggered flush mid-page (rare at 100 releases/page, real for
+    # a release with many suppliers) always checkpoints to a page this loop
+    # has actually finished, never to one still being built.
+    cursor_value: list[str | None] = [None]
+
+    def _checkpoint() -> None:
+        if cursor_value[0] is not None:
+            db.set_cursor(conn, cursor_key, cursor_value[0])
+
+    def _on_contract_row_error(row: dict, exc: BaseException) -> None:
+        # One malformed release must not cost the batch its siblings --
+        # BatchWriter has already isolated it down to this single row via
+        # SAVEPOINTs (writer.py) by the time this fires. Recorded like any
+        # other unparseable-at-write-time value (settled decision 1), not
+        # silently dropped.
+        parse_failures_writer.write((
+            row.get("source_url"), "contract_row",
+            json.dumps({"notice_id": row.get("notice_id"), "supplier_id": row.get("supplier_id")})[:500],
+            f"batch write failed: {exc}",
+        ))
+
+    contracts_writer = BatchWriter(
+        conn, lambda batch: db.upsert_many(conn, "contracts", list(batch), natural_key=["notice_id", "supplier_id"]),
+        checkpoint=_checkpoint, on_row_error=_on_contract_row_error,
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds,
+        commit=not dry_run)
+    sightings_writer = BatchWriter(
+        conn, lambda batch: db.upsert_many(conn, "procurement_channel_sightings", list(batch),
+                                            natural_key=["notice_id", "source_system"]),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+    parse_failures_writer = BatchWriter(
+        conn, lambda batch: db.record_parse_failures(conn, module_name, list(batch)),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+    review_items_writer = BatchWriter(
+        conn, lambda batch: db.record_review_items(conn, module_name, list(batch)),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+
+    def _flush_and_checkpoint(*, advance_cursor: bool, had_contract_writes: bool) -> None:
+        contracts_writer.close()
+        sightings_writer.close()
+        parse_failures_writer.close()
+        review_items_writer.close()
+        if advance_cursor and not had_contract_writes:
+            # Nothing landed in the contracts writer this page, so its own
+            # checkpoint never fired -- BatchWriter.close() is a no-op with
+            # nothing pending (see its docstring). A page with nothing to
+            # write -- empty, fully out-of-scope, or cut short by --limit
+            # before any match -- still has to move the cursor for itself,
+            # or a long such stretch would leave a stale resume point.
+            _checkpoint()
+            if not dry_run:
+                conn.commit()
+
     total_matched = 0
     processed = 0
+    page_number = 0
     while url:
+        page_number += 1
         result = client.get(url, params=params)
         params = None
-        if not result.ok:
-            db.record_parse_failure(conn, module_name, "page", url, f"status {result.status_code}", source_url=result.url)
-            return total_matched
 
-        data = json.loads(result.body)
-        for release in data.get("releases", []):
-            if _release_matches_scope(release):
-                total_matched += _process_release(conn, module_name, source_system, release, result, authority_lookup)
-            processed += 1
-            if limit and processed >= limit:
-                db.set_cursor(conn, cursor_key, f"URL:{url}")
-                if not dry_run:
-                    conn.commit()
+        with collection.collection_attempt(
+            conn, module=module_name, source_system=source_system,
+            scope=f"page {page_number}: {url}", run_id=None,
+        ) as attempt:
+            if not result.ok:
+                parse_failures_writer.write((result.url, "page", url, f"status {result.status_code}"))
+                attempt.result_count = 0
+                attempt.coverage_state = "unavailable"
+                attempt.failure_class = f"http_{result.status_code}"
+                # Cursor untouched -- next run retries this same page, the
+                # same behaviour a failed fetch always had here.
+                _flush_and_checkpoint(advance_cursor=False, had_contract_writes=False)
                 return total_matched
 
-        next_url = (data.get("links") or {}).get("next")
-        db.set_cursor(conn, cursor_key, f"URL:{next_url}" if next_url else f"DONE:{window_to.isoformat()}")
-        if not dry_run:
-            conn.commit()
+            data = json.loads(result.body)
+            releases = data.get("releases", [])
+            if not releases:
+                attempt.coverage_state = "no_results"
+
+            page_matched = 0
+            page_contract_rows = 0
+            page_ocids: set[str] = set()
+            hit_limit = False
+            for release in releases:
+                if _release_matches_scope(release):
+                    bundle = _process_release(module_name, source_system, release, result, authority_lookup)
+                    if bundle.contract_rows:
+                        contracts_writer.write_many(bundle.contract_rows)
+                        page_contract_rows += len(bundle.contract_rows)
+                    if bundle.sighting is not None:
+                        sightings_writer.write(bundle.sighting)
+                    if bundle.parse_failures:
+                        parse_failures_writer.write_many(bundle.parse_failures)
+                    if bundle.review_items:
+                        review_items_writer.write_many(bundle.review_items)
+                    page_matched += len(bundle.contract_rows)
+                    if release.get("ocid"):
+                        page_ocids.add(release["ocid"])
+                processed += 1
+                if limit and processed >= limit:
+                    hit_limit = True
+                    break
+
+            existing = _existing_ocids(conn, page_ocids)
+            attempt.result_count = page_matched
+            attempt.detail = {"new_ocids": len(page_ocids - existing), "seen_ocids": len(page_ocids & existing)}
+            total_matched += page_matched
+
+            next_url = (data.get("links") or {}).get("next")
+            if hit_limit:
+                # Resume this same page next run -- releases in it beyond the
+                # limit have not been processed yet, so the page as a whole
+                # is not done. `params=None` on resume (see the top of this
+                # function) re-fetches the identical URL rather than the
+                # dated search again.
+                cursor_value[0] = f"URL:{url}"
+                _flush_and_checkpoint(advance_cursor=True, had_contract_writes=page_contract_rows > 0)
+                return total_matched
+
+            cursor_value[0] = f"URL:{next_url}" if next_url else f"DONE:{window_to.isoformat()}"
+
+        _flush_and_checkpoint(advance_cursor=True, had_contract_writes=page_contract_rows > 0)
         url = next_url
 
     return total_matched
@@ -724,31 +880,37 @@ def _discover_cf_csv_months(client: PipelineHTTPClient, conn, module_name: str,
     return months
 
 
-def _process_csv_release_row(conn, module_name: str, source_system: str, row: dict,
-                              result, authority_lookup: dict[str, str]) -> int:
+def _process_csv_release_row(module_name: str, source_system: str, row: dict,
+                              result, authority_lookup: dict[str, str]) -> ReleaseWrite | None:
+    """`None` for a row this module has nothing to say about (no id, or out
+    of scope) -- distinct from a `ReleaseWrite` with empty lists, which would
+    still be worth a caller's attention (e.g. a bundle carrying only a parse
+    failure). Kept pure like `_process_release`; the caller batches whatever
+    comes back.
+    """
     amount_failures: list[tuple[str, str]] = []
     release = _unflatten_release_row(row, amount_failures)
     if not release.get("id"):
-        return 0
+        return None
     if not _release_matches_scope(release):
-        return 0
-    # Recorded only for a release this module is actually keeping. A
-    # malformed amount on a row that fails the scope check is a fact about
-    # someone else's playground-equipment notice, and parse_failures is a
-    # bug list about this pipeline's own parsers rather than a log of every
-    # oddity in the archive.
-    for field_path, raw_value in amount_failures:
-        db.record_parse_failure(
-            conn, module_name, field_path, raw_value,
-            "amount is not a finite number; stored as NULL",
-            source_url=result.url)
-    return _process_release(conn, module_name, source_system, release, result, authority_lookup)
+        return None
+    bundle = _process_release(module_name, source_system, release, result, authority_lookup)
+    if amount_failures:
+        # Recorded only for a release this module is actually keeping. A
+        # malformed amount on a row that fails the scope check is a fact
+        # about someone else's playground-equipment notice, and
+        # parse_failures is a bug list about this pipeline's own parsers
+        # rather than a log of every oddity in the archive.
+        extra = [(result.url, field_path, raw_value, "amount is not a finite number; stored as NULL")
+                 for field_path, raw_value in amount_failures]
+        bundle.parse_failures = [*extra, *bundle.parse_failures]
+    return bundle
 
 
 def _walk_and_process_csv_archive(
     client: PipelineHTTPClient, conn, module_name: str, source_system: str,
     cursor_key: str, window_end: date, authority_lookup: dict[str, str],
-    limit: int | None, dry_run: bool,
+    limit: int | None, dry_run: bool, settings: Settings,
 ) -> int:
     """Historical Contracts Finder backfill from CCS's own CSV dumps — see
     the module docstring and the block comment above for why this channel
@@ -757,11 +919,69 @@ def _walk_and_process_csv_archive(
     Checkpointed per completed month (`DONE:YYYY-MM`), not per file: a month
     is ~30 small, individually cached/conditional fetches, so an interrupted
     month simply re-walks its own files next run — cheap, and idempotent via
-    the same (notice_id, supplier_id) upsert the live channels use.
+    the same (notice_id, supplier_id) upsert the live channels use. Every
+    row across a month's files is batched into the contracts/sightings/
+    parse_failures/review_items writers below and flushed once the month is
+    done, so a busy month's several thousand rows become a handful of
+    statements rather than one round trip each.
     """
     months = _discover_cf_csv_months(client, conn, module_name, window_end)
     cursor = db.get_cursor(conn, cursor_key)
     done_through = date.fromisoformat(cursor[5:]) if cursor and cursor.startswith("DONE:") else None
+
+    # Read by the contracts writer's checkpoint only -- set to the month just
+    # finished right before the writers are closed, so a threshold-triggered
+    # flush mid-month (real: a busy month is thousands of rows) always
+    # checkpoints to the last month actually completed, never to one still
+    # in progress -- an in-progress month must never read as DONE.
+    cursor_value: list[str | None] = [None]
+
+    def _checkpoint() -> None:
+        if cursor_value[0] is not None:
+            db.set_cursor(conn, cursor_key, cursor_value[0])
+
+    def _on_contract_row_error(row: dict, exc: BaseException) -> None:
+        # One malformed release must not cost the batch its siblings --
+        # BatchWriter has already isolated it down to this single row via
+        # SAVEPOINTs (writer.py) by the time this fires. Recorded like any
+        # other unparseable-at-write-time value (settled decision 1), not
+        # silently dropped.
+        parse_failures_writer.write((
+            row.get("source_url"), "contract_row",
+            json.dumps({"notice_id": row.get("notice_id"), "supplier_id": row.get("supplier_id")})[:500],
+            f"batch write failed: {exc}",
+        ))
+
+    contracts_writer = BatchWriter(
+        conn, lambda batch: db.upsert_many(conn, "contracts", list(batch), natural_key=["notice_id", "supplier_id"]),
+        checkpoint=_checkpoint, on_row_error=_on_contract_row_error,
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds,
+        commit=not dry_run)
+    sightings_writer = BatchWriter(
+        conn, lambda batch: db.upsert_many(conn, "procurement_channel_sightings", list(batch),
+                                            natural_key=["notice_id", "source_system"]),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+    parse_failures_writer = BatchWriter(
+        conn, lambda batch: db.record_parse_failures(conn, module_name, list(batch)),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+    review_items_writer = BatchWriter(
+        conn, lambda batch: db.record_review_items(conn, module_name, list(batch)),
+        max_rows=settings.batch_write_rows, max_seconds=settings.batch_write_seconds, commit=not dry_run)
+
+    def _flush_and_checkpoint(*, advance_cursor: bool, had_contract_writes: bool) -> None:
+        contracts_writer.close()
+        sightings_writer.close()
+        parse_failures_writer.close()
+        review_items_writer.close()
+        if advance_cursor and not had_contract_writes:
+            # Nothing landed in the contracts writer this month, so its own
+            # checkpoint never fired -- BatchWriter.close() is a no-op with
+            # nothing pending. A month with nothing to write still has to
+            # move the cursor for itself, or the next run re-discovers and
+            # re-walks it for nothing.
+            _checkpoint()
+            if not dry_run:
+                conn.commit()
 
     total_matched = 0
     processed = 0
@@ -769,49 +989,85 @@ def _walk_and_process_csv_archive(
         if done_through and month_start <= done_through:
             continue
 
-        csv_resources = sorted(
-            (r for r in (package.get("resources") or [])
-             if (r.get("format") or "").strip().upper() == "CSV" and r.get("url")),
-            key=lambda r: r.get("url"),
-        )
-        for resource in csv_resources:
-            try:
-                result = client.get(resource["url"])
-            except RobotsDisallowed:
-                # A handful of the earliest (Dec 2014) files are hosted on
-                # www.dropbox.com rather than CCS's own domain, whose
-                # robots.txt disallows /s/ (shared-link paths) for every
-                # crawler but Twitterbot/facebookexternalhit link-preview
-                # bots — a blanket anti-scraping stance on Dropbox's part,
-                # not the "aimed at a search UI" situation the
-                # robots_exceptions entries above are for. Recorded and
-                # skipped rather than added there or left to take the whole
-                # month down.
-                db.record_review_item(conn, module_name, "cf_csv_file_robots_disallowed",
-                                       resource["url"], json.dumps({"month": month_start.isoformat()}))
-                continue
-            if not result.ok:
-                db.record_parse_failure(conn, module_name, "csv_file", resource["url"],
-                                         f"status {result.status_code}", source_url=result.url)
-                continue
-            try:
-                text = result.body.decode("utf-8-sig")
-            except UnicodeDecodeError as exc:
-                db.record_parse_failure(conn, module_name, "csv_file", resource["url"], str(exc),
-                                         source_url=result.url)
-                continue
-            for row in csv.DictReader(io.StringIO(text)):
-                total_matched += _process_csv_release_row(
-                    conn, module_name, source_system, row, result, authority_lookup)
-                processed += 1
-                if limit and processed >= limit:
-                    if not dry_run:
-                        conn.commit()
-                    return total_matched
+        with collection.collection_attempt(
+            conn, module=module_name, source_system=source_system,
+            scope=month_start.strftime("%Y-%m"), run_id=None,
+        ) as attempt:
+            csv_resources = sorted(
+                (r for r in (package.get("resources") or [])
+                 if (r.get("format") or "").strip().upper() == "CSV" and r.get("url")),
+                key=lambda r: r.get("url"),
+            )
+            month_matched = 0
+            month_contract_rows = 0
+            month_row_count = 0
+            month_ocids: set[str] = set()
+            hit_limit = False
+            for resource in csv_resources:
+                try:
+                    result = client.get(resource["url"])
+                except RobotsDisallowed:
+                    # A handful of the earliest (Dec 2014) files are hosted on
+                    # www.dropbox.com rather than CCS's own domain, whose
+                    # robots.txt disallows /s/ (shared-link paths) for every
+                    # crawler but Twitterbot/facebookexternalhit link-preview
+                    # bots — a blanket anti-scraping stance on Dropbox's part,
+                    # not the "aimed at a search UI" situation the
+                    # robots_exceptions entries above are for. Recorded and
+                    # skipped rather than added there or left to take the whole
+                    # month down.
+                    review_items_writer.write(("cf_csv_file_robots_disallowed", resource["url"],
+                                                json.dumps({"month": month_start.isoformat()})))
+                    continue
+                if not result.ok:
+                    parse_failures_writer.write((result.url, "csv_file", resource["url"],
+                                                  f"status {result.status_code}"))
+                    continue
+                try:
+                    text = result.body.decode("utf-8-sig")
+                except UnicodeDecodeError as exc:
+                    parse_failures_writer.write((result.url, "csv_file", resource["url"], str(exc)))
+                    continue
+                for row in csv.DictReader(io.StringIO(text)):
+                    month_row_count += 1
+                    bundle = _process_csv_release_row(module_name, source_system, row, result, authority_lookup)
+                    if bundle is not None:
+                        if bundle.contract_rows:
+                            contracts_writer.write_many(bundle.contract_rows)
+                            month_contract_rows += len(bundle.contract_rows)
+                        if bundle.sighting is not None:
+                            sightings_writer.write(bundle.sighting)
+                            ocid = bundle.sighting.get("ocid")
+                            if ocid:
+                                month_ocids.add(ocid)
+                        if bundle.parse_failures:
+                            parse_failures_writer.write_many(bundle.parse_failures)
+                        if bundle.review_items:
+                            review_items_writer.write_many(bundle.review_items)
+                        month_matched += len(bundle.contract_rows)
+                    processed += 1
+                    if limit and processed >= limit:
+                        hit_limit = True
+                        break
+                if hit_limit:
+                    break
 
-        db.set_cursor(conn, cursor_key, f"DONE:{month_start.isoformat()}")
-        if not dry_run:
-            conn.commit()
+            if month_row_count == 0:
+                attempt.coverage_state = "no_results"
+            existing = _existing_ocids(conn, month_ocids)
+            attempt.result_count = month_matched
+            attempt.detail = {"new_ocids": len(month_ocids - existing), "seen_ocids": len(month_ocids & existing)}
+            total_matched += month_matched
+
+            if hit_limit:
+                # Cursor untouched -- an interrupted month simply re-walks
+                # its own files next run (see the docstring above).
+                _flush_and_checkpoint(advance_cursor=False, had_contract_writes=False)
+                return total_matched
+
+            cursor_value[0] = f"DONE:{month_start.isoformat()}"
+
+        _flush_and_checkpoint(advance_cursor=True, had_contract_writes=month_contract_rows > 0)
 
     return total_matched
 
@@ -1085,7 +1341,7 @@ def _kaggle_csv_text(body: bytes, module_name: str, conn, source_url: str) -> st
 
 def _walk_and_process_kaggle(
     client: PipelineHTTPClient, conn, module_name: str, cursor_key: str,
-    limit: int | None, dry_run: bool,
+    limit: int | None, dry_run: bool, settings: Settings,
 ) -> int:
     """Downloads the Kaggle archive's one CSV file and walks it row by row.
 
@@ -1096,50 +1352,96 @@ def _walk_and_process_kaggle(
     since one file has no natural per-request boundary to checkpoint on the
     way the other three channels' pages/months do; `DONE` once every row has
     been read means later runs are a no-op until the archive changes.
+
+    Unlike the other two channels that write `contracts`, each row's actual
+    writes here stay direct (`_process_kaggle_release_row` calls
+    `db.upsert`/`db.record_review_item` on `conn` itself, not through a
+    `BatchWriter`): `_check_kaggle_against_other_channels` reads the sighting
+    a row *just* wrote straight back, in the same call, to compare it
+    against the other channels' sightings for the same ocid -- deferring
+    that write into a batch would leave it invisible to that read until the
+    batch happened to flush, misreporting a coverage gap for every row in
+    between. Only the periodic-commit cadence changed here, from the
+    module's own constant to `settings.batch_write_rows`, and the whole walk
+    is wrapped in one `collection_attempt` — there is no natural per-request
+    page/month boundary to attempt more finely against, per the note above.
     """
     cursor = db.get_cursor(conn, cursor_key)
     if cursor == "DONE":
         return 0
     resume_from = int(cursor[4:]) if cursor and cursor.startswith("ROW:") else 0
 
-    result = client.get(KAGGLE_DOWNLOAD_URL)
-    if not result.ok:
-        db.record_parse_failure(conn, module_name, "kaggle_download", KAGGLE_DOWNLOAD_URL,
-                                 f"status {result.status_code}", source_url=result.url)
-        return 0
-
-    text = _kaggle_csv_text(result.body, module_name, conn, result.url)
-    if text is None:
-        return 0
-
-    reader = csv.DictReader(io.StringIO(text))
-    if not reader.fieldnames:
-        db.record_parse_failure(conn, module_name, "kaggle_csv", result.url, "CSV has no header row")
-        return 0
-    index = _kaggle_column_index(reader.fieldnames)
-
-    total_matched = 0
-    processed = 0
-    for row_index, row in enumerate(reader):
-        if row_index < resume_from:
-            continue
-        total_matched += _process_kaggle_release_row(conn, module_name, row, index, result)
-        processed += 1
-
-        if processed % KAGGLE_COMMIT_EVERY_ROWS == 0:
-            db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+    with collection.collection_attempt(
+        conn, module=module_name, source_system=SOURCE_CF_KAGGLE,
+        scope=f"rows from {resume_from}", run_id=None,
+    ) as attempt:
+        result = client.get(KAGGLE_DOWNLOAD_URL)
+        if not result.ok:
+            db.record_parse_failure(conn, module_name, "kaggle_download", KAGGLE_DOWNLOAD_URL,
+                                     f"status {result.status_code}", source_url=result.url)
+            attempt.result_count = 0
+            attempt.coverage_state = "unavailable"
+            attempt.failure_class = f"http_{result.status_code}"
             if not dry_run:
                 conn.commit()
-        if limit and processed >= limit:
-            db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+            return 0
+
+        text = _kaggle_csv_text(result.body, module_name, conn, result.url)
+        if text is None:
+            attempt.result_count = 0
+            attempt.coverage_state = "unavailable"
             if not dry_run:
                 conn.commit()
-            return total_matched
+            return 0
 
-    db.set_cursor(conn, cursor_key, "DONE")
-    if not dry_run:
-        conn.commit()
-    return total_matched
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames:
+            db.record_parse_failure(conn, module_name, "kaggle_csv", result.url, "CSV has no header row")
+            attempt.result_count = 0
+            attempt.coverage_state = "unavailable"
+            if not dry_run:
+                conn.commit()
+            return 0
+        index = _kaggle_column_index(reader.fieldnames)
+
+        total_matched = 0
+        processed = 0
+        matched_ocids: set[str] = set()
+
+        def _finish(result_count: int) -> None:
+            attempt.result_count = result_count
+            existing = _existing_ocids(conn, matched_ocids)
+            attempt.detail = {"new_ocids": len(matched_ocids - existing), "seen_ocids": len(matched_ocids & existing)}
+
+        for row_index, row in enumerate(reader):
+            if row_index < resume_from:
+                continue
+            written = _process_kaggle_release_row(conn, module_name, row, index, result)
+            total_matched += written
+            if written:
+                ocid = _kaggle_field(row, index, "ocid")
+                if ocid:
+                    matched_ocids.add(ocid)
+            processed += 1
+
+            if processed % settings.batch_write_rows == 0:
+                db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+                if not dry_run:
+                    conn.commit()
+            if limit and processed >= limit:
+                db.set_cursor(conn, cursor_key, f"ROW:{row_index + 1}")
+                _finish(total_matched)
+                if not dry_run:
+                    conn.commit()
+                return total_matched
+
+        db.set_cursor(conn, cursor_key, "DONE")
+        if processed == 0:
+            attempt.coverage_state = "no_results"
+        _finish(total_matched)
+        if not dry_run:
+            conn.commit()
+        return total_matched
 
 
 def backfill_channel_sightings(conn) -> int:
@@ -1228,7 +1530,7 @@ def run(ctx: ModuleContext) -> None:
                 matched = _walk_and_process(
                     client, conn, module_name, source_system, base_url, date_params,
                     resume_url, window_from, window_to, cursor_key, authority_lookup,
-                    ctx.limit, ctx.dry_run,
+                    ctx.limit, ctx.dry_run, ctx.settings,
                 )
             log.info("procurement.source_complete", source=source_key, matched_rows=matched)
 
@@ -1244,7 +1546,7 @@ def run(ctx: ModuleContext) -> None:
         with PipelineHTTPClient(SOURCE_CF_CSV, settings=ctx.settings, conn=conn) as client:
             matched = _walk_and_process_csv_archive(
                 client, conn, module_name, SOURCE_CF_CSV, csv_cursor_key, WINDOW_START,
-                authority_lookup, ctx.limit, ctx.dry_run,
+                authority_lookup, ctx.limit, ctx.dry_run, ctx.settings,
             )
         log.info("procurement.source_complete", source="cf_csv", matched_rows=matched)
 
@@ -1260,5 +1562,5 @@ def run(ctx: ModuleContext) -> None:
         with PipelineHTTPClient(SOURCE_CF_KAGGLE, settings=ctx.settings, conn=conn) as client:
             client.set_basic_auth(username, key)
             matched = _walk_and_process_kaggle(client, conn, module_name, kaggle_cursor_key,
-                                                ctx.limit, ctx.dry_run)
+                                                ctx.limit, ctx.dry_run, ctx.settings)
         log.info("procurement.source_complete", source="kaggle", matched_rows=matched)

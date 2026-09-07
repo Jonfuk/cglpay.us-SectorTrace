@@ -75,8 +75,8 @@ and outstanding.
 | Phase 1 — PostgreSQL-only transition | **Complete** | PostgreSQL 18 is now the sole application/test warehouse: startup requires `DATABASE_URL`, the PostgreSQL migration tree is authoritative, psycopg/psycopg_pool/pgvector are core dependencies, required pgvector/pg_trgm/PostGIS extensions are enforced, SQL uses psycopg-native parameters, psycopg named rows replace the SQLite row wrapper, and SQLite backend/mirror/backup selection has been removed from the application path. The clean PostgreSQL suite, lint, and compilation gates pass. |
 | Phase 2 — Analysis and model-call reduction | **Complete — shadow-only acceptance; suppression deferred** | Stable keyset traversal now feeds PostgreSQL-backed incremental theme counts with bounded ordered evidence, compact resumable input manifests, and an active-only candidate queue; completed detail is digest-validated and removed, while failed detail has a seven-day purge. Model reuse is content-addressed across releases and model workers reuse clients while one database writer batches cache/audit/verifier/signal/cost writes. Exact links use a keyset-batched indexed SQL candidate join, health counts reuse deduplicated operational snapshots, and append-only lineage/final release manifests are exposed to admin diagnostics. Shadow-only parity and production benchmark acceptance do not require a human corpus. Suppression remains disabled until a real adjudicated corpus is recorded and passes the 99%/100% release-safety gate. The complete PostgreSQL suite, lint, and compilation gates pass on `beta`. |
 | Phase 3 — Incremental NLP and semantic search | **Complete** | Stage-state/checkpoint/failure schema and bounded keyset stage wiring, explicit invalidation/`--force`, three-path PostgreSQL retrieval with deterministic RRF, the central pgvector repository, streamed 2,000-row prediction writes, bitemporal/source-change and orthogonal quality schema, the versioned token trie, reproducible parity/latency harness, and the packed Mojo ontology/context ABI with Python fallback are landed. PostgreSQL fixture execution, isolated populated PostgreSQL 18 backup/restore and compaction proof, legacy-column removal, measured semantic parity, and exact ontology/context parity gates are complete. |
-| Phase 4 — Shared writes and ingestion memory | **Partial** | `BatchWriter`, batch upserts with unchanged-write suppression, streamed archive interfaces, one-pass HTTP archiving, and a streaming XLSX iterator are implemented. Full adoption across every ingestion/document path and the PDF/CSV/prediction batch flows remain outstanding. |
-| Phase 5 — Archive, graph, PostgreSQL, and backend | **Partial** | Graph projection uses keyset pagination and projected columns; relationship writes use grouped `UNWIND`; the web server has bounded workers/queue rejection; public cache misses use single-flight coordination; operational snapshot and durable worker-queue primitives exist. Full archive audits, PostgreSQL maintenance, cross-process invalidation, worker cutover, and all listed operational gates remain outstanding. |
+| Phase 4 — Shared writes and ingestion memory | **Partial — see the 2026-09-05 update below** | `BatchWriter`, batch upserts with unchanged-write suppression, streamed archive interfaces, one-pass HTTP archiving, and a streaming XLSX iterator are implemented. Full adoption across every ingestion/document path and the PDF/CSV/prediction batch flows remain outstanding. |
+| Phase 5 — Archive, graph, PostgreSQL, and backend | **Complete — see the 2026-09-06 update below** | Every listed item is landed: the archive-audit trio (304-by-key, S3 checksum/HEAD validation, daily-sample/quarterly-full audits with quarantine and scheduling); graph projector failed-batch retry subdivision, projection benchmarking instrumentation, and an exact parity test; a PostgreSQL maintenance-telemetry capture foundation (observation-only, as the phase requires); public-response caching of serialized+gzip bytes with full single-flight timing metrics; the worker-service cutover (a separate `pipeline worker run` process executing pipeline modules under a PostgreSQL advisory lock, replacing in-process thread execution); and OpenTelemetry traces/metrics across runs, jobs, batches, archive operations, and graph projection. See the update below for detail and the one documented gap (index/autovacuum/planner tuning itself remains gated on the telemetry observation period the phase specifies). |
 | Phase 6 — Nuxt frontend delivery | **Partial** | The `frontend/` workspace exists with two independent Nuxt 4 apps (public `/`, admin `/admin/`) on Nuxt UI v4/Tailwind v4 and Vue 3.6-rc.6 with `vue.vapor: true` enabled and one Vapor component proving interop. Each app has isolated config/pages/layouts/composables/CSS, a pinned lockfile with reproducible `npm ci`, static `nuxt generate` output with `200.html`/`404.html` SPA fallbacks, hash-history bookmark compatibility, a typed same-origin API client (canonical keys, in-flight dedup, `AbortController` cancellation), URL-authoritative filter state, and versioned browser storage. The public app covers every standalone list route plus the provider/authority entity-detail flows; the admin app has its read-only views and the promote/reject/decide/verify write flows behind the same-origin write guard with a required reviewer identity. A gated deployment cutover seam is in place: a Docker `node:22` build stage compiles both apps and the runtime image copies the static output into `pipeline/web/static_nuxt/` (Node never enters the runtime image), and `SERVE_NUXT` makes the Python server serve the Nuxt apps (public at `/`, admin at `/admin`, `/api` never intercepted) with immutable-asset caching, `200.html` SPA fallback, and a per-page hashed-inline-script CSP — off by default so the legacy portals keep serving as oracles. The public surface now covers every route including the niche ones (pathfinder, timeline, and the notebook/saved/journey reader library over versioned storage), plus a lazy, lifecycle-safe MapLibre choropleth confined to the Places route (markRaw, explicit dispose, origin-only blank-ground rendering). The admin app adds the read consoles (pipeline/exports/search) and the claim-review adjudication write flow. Bundle-budget compliance is now enforced by `frontend/scripts/check-budgets.mjs` (public shared JS ~118 KiB/120, CSS/overview/admin all within budget, MapLibre confined to a lazy chunk and within the 400 KiB map budget, public bundle proven to contain no admin code); Vitest unit tests (transport dedup/cancellation, StLink validation, StStat null-safety) and a Playwright browser smoke gate (shell boot, routing, lazy-MapLibre — fails on any console/hydration/interop error) run in a path-filtered `frontend` CI workflow (typecheck → unit → build → budgets → browser). Remaining: PMTiles vector-tile generation to replace the full-resolution boundary GeoJSON (needs the offline tiling pipeline; the map's GeoJSON source is the seam), the full claims authoring editor (create/update/cite), and pinned Lighthouse LCP/CLS/TBT runs. |
 | Phase 7 — CI and regression protection | **Partial** | The beta workflow now provisions PostgreSQL 18, runs lint/compile checks, partitions the suite into `pytest-xdist` parallel-safe and process-global serial lanes, and publishes JUnit/timing artifacts. Frontend typecheck, build budgets, browser smoke, Lighthouse thresholds, CodeQL, and Chromium/Firefox/WebKit smoke configurations for both public and admin apps are present. The public API contract now classifies route and required-parameter changes, and the optional NLP job verifies the patched Transformers/SetFit import boundary. The remaining acceptance gate is ten consecutive clean parallel/serial CI runs; response-field schema evolution remains a future extension. |
 
@@ -91,6 +91,130 @@ preview server, Lighthouse runner, and budget assertion are also wired into
 the frontend CI workflow for pinned LCP/CLS/TBT checks. Acceptance still needs the normal frontend build/browser/Lighthouse run. The operational deployment has since been exercised on the rebuilt beta VPS: the archive was generated from the deployed PostgreSQL data, served with PMTiles range responses and immutable caching, and the Nuxt cutover health checks passed.
 
 **Phase 7 implementation update — 2026-09-04.** The PostgreSQL CI workflow now uses `pytest-xdist` with `--dist loadscope -n auto` for database-isolated tests and a separate non-xdist `serial` lane for process-global tests. Both lanes record slow-test timings and JUnit XML, with artifacts uploaded even when a lane fails. Local collection confirms 3,233 parallel-safe tests and 64 serial tests. A full local execution was not used as acceptance because the checkout's configured test URL points at the live VPS; the disposable PostgreSQL service in GitHub Actions remains the authoritative run. Ten consecutive clean runs are still required before Phase 7 can be marked complete. Public and admin browser smoke configurations now cover Chromium, Firefox, and WebKit; local Chromium smoke passes for both applications, while the CI workflow installs and runs the complete browser matrix. The public OpenAPI baseline now has an explicit 42-route compatibility classification covering removals, deprecations, additions, and required-parameter changes. The optional NLP job pins Transformers at the patched 5.x floor, upgrades SetFit to its Transformers 5-compatible line, and exercises the import boundary directly.
+
+**Phase 4 implementation update — 2026-09-05.** The quarantine/replay contract
+and collection-attempt tracking that the section below asked for are landed:
+migration `0103_collection_attempts_and_quarantine` adds `collection_attempts`
+(one row per module-run, later extended to one per page/month within
+procurement's three live channels) and `quarantine_items` — the unified,
+listable, bounded-retry home for rejected candidates, failed stage inputs,
+and archive mismatches that had no durable table before it (`review_queue`
+and `parse_failures` keep their existing shape and ~75 call sites
+unchanged). `pipeline/collection.py` and `pipeline/quarantine.py` provide the
+API; `pipeline/runner.py:execute_module` records one attempt per module-run
+independent of the module's own commit/rollback, and archive verification
+(`archive-verify`, `pipeline/archive_process.py`) and candidate rejection
+(`pipeline/promote.py:reject`) now quarantine their failures instead of only
+reporting or discarding them. `pipeline/modules/m01_procurement.py` adopts
+`BatchWriter` across all three of its live channels (contracts, sightings,
+parse failures, review items), with a bulk existing-OCID check feeding
+new-vs-seen counts into each attempt's detail and per-page/month collection
+attempts replacing the old commit-every-N-releases loops; the Kaggle channel
+deliberately keeps its direct, unbatched writes; its own-ocid cross-channel
+check reads a row it just wrote back in the same call, which a batched
+write would leave invisible until the batch flushed. The `evidence_state`
+N+1 in `pipeline/documents/repository.py:persist_parse` (four per-element/
+table loops, each previously one `observe()` round trip apiece) is closed by
+`evidence_state.observe_many`, bulk-fetching every identity's current row
+once and batching the writes, proven identical to calling `observe()` once
+per entry by a dedicated equivalence test. `pipeline/http.py` gains
+`PipelineHTTPClient.get_streaming()` — a context manager that spools a large
+body to a temp file while hashing it in one pass, archived via the existing
+`put_stream`, additive alongside the unchanged `get()`/`FetchResult` — plus
+opt-in deferred, batched HTTP-cache writes (`flush_cache_writes()`) for a
+serial single-connection caller; the already-correct pool-worker path in
+`pipeline/parallel.py` (each worker commits its own cache row now that
+PostgreSQL has no writer slot to avoid) is untouched. `pipeline/cqc_bulk.py`'s
+CSV parse no longer holds a full decoded string and a full row-list copy
+alongside its output, matching the streaming pattern `m24_council_spend.py`
+already used. A read-only parser-parity harness
+(`pipeline/documents/parser_parity.py`, `pipeline documents
+benchmark-parsers`) compares two parser adapters' raw output for the same
+bytes without touching the database, alongside the pre-existing
+`documents benchmark` command that persists real parses.
+
+Three items are deliberately not done, each because doing them "fully" here
+would produce exactly the kind of undefensible figure this project exists to
+avoid: the PyMuPDF-vs-pdfplumber benchmark has a harness but no real
+corpus — none is available offline and PyMuPDF is not installed in this
+environment (it is the optional `documents` extra) — so no parser-default
+decision follows from it; the bounded producer/consumer CSV parser is not
+built because performance.md gates it on a live benchmark this environment
+cannot run; and collection-attempt tracking sits at (module, run) granularity
+plus procurement's own finer per-page/month attempts, not rewritten into
+every one of the other source modules' internal loops. `get_streaming` is
+also not yet wired into `m01_procurement.py`'s CSV-archive month-file
+download or `m24_council_spend.py`/`m25_skills_for_care.py`'s workbook
+downloads — the primitive is built and tested, but adopting it there means
+restructuring currently-working evidence-collection loops, left as scoped
+follow-up rather than rushed alongside everything above.
+
+**Phase 5 implementation update — 2026-09-06.** The three archive-and-HTTP-cache
+items still outstanding at the previous baseline are landed. `http_cache`
+(migration `0110_http_cache_archive_ref`) now stores `archive_ref`,
+`content_type`, and `content_length` alongside the hash; `Archive.get_by_ref`
+(both `FilesystemArchive` and `S3Archive`) retrieves an object by that exact
+key, and `pipeline/http.py`'s 304 path uses it, falling back to the old
+`Archive.lookup` hash-prefix scan only for a cache row written before this
+migration or a backend that never recorded a reference. `S3Archive` now
+capability-probes checksum support once per instance (a real
+`ChecksumAlgorithm`/`ChecksumSHA256` put, confirmed by an exact `head_object`
+echoing it back, never merely by the put not erroring — some S3-compatible
+endpoints accept and silently ignore parameters they do not implement); when
+supported, `put()` sends the SHA-256 transport checksum and verifies via one
+exact HEAD instead of a re-download-and-compare, and falls back to the
+original full-byte-compare verification when the endpoint cannot prove it.
+`pipeline/archive_audit.py`'s daily sample is now `max(100, ceil(1% ×
+object_count))` (was a fixed 20) and is a genuine read-and-rehash of what it
+samples via `get_by_ref`, not only a report of `archive_objects` metadata; a
+new `full=True` path (`pipeline archive-audit-full`) verifies every archived
+object for the quarterly pass. Both, and `archive-verify`, quarantine a
+mismatch through one shared helper (`archive_audit.quarantine_failures`) —
+never deleting evidence. `deploy/ansible`'s `sectortrace` role installs
+`sectortrace-archive-audit.timer` (daily) and
+`sectortrace-archive-audit-full.timer` (quarterly), the same systemd-timer
+convention the existing backup timer uses.
+
+The remaining Phase 5 items landed the same day. `GraphProjector.rebuild()`
+now bisects a failing batch down to single-row granularity rather than
+aborting the whole run, queuing an isolated row's failure back onto
+`graph_projection_queue` for `graph sync` to retry; `sync_delta()` needed no
+change, being already per-row. `store.py` and `projector.py` now log
+projection lag, queue depth, rows/bytes per `UNWIND`, transaction time, and
+rebuild throughput; `GraphStore.jvm_metrics()` is a documented best-effort
+read, since the JMX procedure it would have used is gone from Neo4j 5.
+`tests/test_graph_parity.py` asserts exact node/edge/relationship-type/
+property/evidence-reference parity between the real `GraphStore` (behind a
+fake driver) and its PostgreSQL source after a rebuild. `pipeline/pg_telemetry.py`
+(migration `0113_pg_telemetry_snapshots`) captures `pg_stat_user_tables`/
+`pg_stat_user_indexes`, and `pg_stat_statements` when installed (feature-detected,
+never force-enabled — it needs `shared_preload_libraries` set at server start,
+which this code cannot do for itself), on a daily systemd timer; it changes no
+autovacuum, index, or planner/memory setting, deliberately, since the phase
+requires an observation period before any such change is evidence-led rather
+than heuristic. The public response cache (`pipeline/web/cache.py`) now caches
+the serialized identity and gzip bytes a request would produce, keyed by data
+version, so a cache hit never re-runs `json.dumps`/`gzip.compress`; single-flight
+metrics gained queue-delay, compute-time, and serialization-time alongside the
+existing hit/miss/waiter/eviction/failure counts, exposed at
+`/api/admin/cache`. The worker cutover (settled decision 10) wires the
+previously-unused `WorkerQueue` into a real separate process: `POST
+/api/admin/run` now enqueues a `worker_jobs` row and returns; a `pipeline
+worker run` process claims it under a PostgreSQL advisory lock
+(`pg_try_advisory_lock(hashtext('sectortrace:pipeline-run'))`, the same
+convention `pipeline/nlp/embedding_repository.py` already uses), executes it
+through the same `runner.run_waves` the CLI calls, checkpoints per module (the
+only granularity available), and finishes it; the admin poll contract
+(`GET /api/admin/jobs/{id}`) is unchanged, now reading live from
+`worker_jobs`/`worker_job_events` for a worker-backed job. Finally,
+`pipeline/telemetry.py` adds OpenTelemetry traces and metrics — off by default,
+a documented no-op when the optional `otel` extra is not installed — around
+pipeline runs/modules, worker jobs (queue delay, checkpoint age), database
+batches, archive puts/gets, model calls (reusing the existing cost figures),
+and graph projection, correlated by run/job/release/quarantine identifiers and
+never carrying source content, PII, or `restricted_`-table data; `lineage_id`
+is a documented gap, not attached to any span because no instrumented seam has
+one on hand without an extra lookup a benchmarking read should not force.
 
 This table is descriptive only: it does not remove, reorder, or weaken any
 unimplemented requirement in the roadmap or rollout sequence.

@@ -6,6 +6,7 @@ them at scaffold time.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,19 @@ class Settings(BaseSettings):
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
 
+    # A deployment-topology fact, not a feature flag: whether a separate
+    # `pipeline worker` process is actually running against this warehouse.
+    # The web process only ever enqueues a module run since the Phase 5
+    # worker cutover (CLAUDE.md settled decision 10) -- it cannot execute one
+    # itself any more -- so an enqueue with nobody consuming the queue would
+    # otherwise sit as "running" forever with no indication anything is
+    # wrong. Sites that run `pipeline worker` (or the `worker` compose
+    # service) alongside `pipeline web` leave this true; a checkout that only
+    # ever runs `pipeline web` sets PIPELINE_WORKER_ENABLED=false so
+    # `POST /api/admin/run` refuses with a message naming the missing worker
+    # instead of queuing into silence.
+    pipeline_worker_enabled: bool = True
+
     # Phase 6 frontend cutover seam. When true (SERVE_NUXT=true) AND the built
     # Nuxt static output is present, the server serves the two Nuxt applications
     # — public at `/`, admin at `/admin` — from `nuxt_dist_dir` instead of the
@@ -38,6 +52,9 @@ class Settings(BaseSettings):
     # `/api/**` is never intercepted by the Nuxt seam, so the API is unaffected
     # by this flag.
     serve_nuxt: bool = False
+    # Explicit admin choice is independent of the public cutover. None retains
+    # SERVE_NUXT behaviour; legacy assets stay available for instant rollback.
+    admin_ui_variant: Literal["legacy", "nuxt"] | None = None
     # Where the built Nuxt output lives in the image: a directory holding two
     # subdirectories, `public/` and `admin/`, each a Nuxt `generate` output.
     # Unset defaults (in pipeline/web/nuxt_assets.py) to the location the Docker
@@ -91,6 +108,27 @@ class Settings(BaseSettings):
     # long enough that the large GeoJSON is parsed once daily rather than every
     # few minutes. See pipeline/web/server.py `_cache_ttl`.
     cache_static_ttl_seconds: float = 86400.0
+
+    # OpenTelemetry traces and metrics for pipeline runs, jobs, stages,
+    # database batches, model calls, archive operations and graph projection
+    # (performance.md:632). Off by default for the same reason `cache_enabled`
+    # above is (settled decision 6, "the network cable unplugged"): a checkout
+    # and the offline test suite must behave byte-identically whether or not
+    # the `otel` extra is even installed, and turning export on is a
+    # reviewable choice about what leaves the process, not an accident of
+    # what happened to be on disk. `pipeline/telemetry.py` is the seam --
+    # every span/metric call there degrades to a no-op when this is False or
+    # the SDK is absent, so nothing that calls it needs its own guard.
+    otel_enabled: bool = False
+    # An OTLP/HTTP collector endpoint, e.g. http://localhost:4318. Left unset,
+    # `configure_telemetry` still builds real spans and metrics when enabled
+    # -- it just prints them to the console instead of exporting anywhere,
+    # so `OTEL_ENABLED=true` alone never assumes a collector is listening.
+    otel_exporter_endpoint: str | None = None
+    # The `service.name` resource attribute, so traces from the web process,
+    # the pipeline worker and the analysis worker are distinguishable in a
+    # shared backend without three different endpoints.
+    otel_service_name: str = "sectortrace-pipeline"
 
     # Shared write-path controls. Individual modules may choose a smaller
     # batch for a measured reason, but should not invent process-wide defaults.
@@ -674,6 +712,12 @@ class Settings(BaseSettings):
     scrapy_playwright_max_contexts: int = 1
     scrapy_playwright_max_pages_per_context: int = 1
     scrapy_playwright_navigation_timeout_seconds: float = 30.0
+    # Power BI dashboards often finish their querydata burst after the
+    # navigation response. Keep this short and bounded; a capture is never an
+    # invitation to leave a page running indefinitely.
+    scrapy_playwright_capture_wait_seconds: float = 20.0
+    scrapy_playwright_runner_timeout_seconds: float = 240.0
+    scrapy_playwright_download_region_limit: int = 9
     # Scrapy's own MEMUSAGE extension, turned on for this transport leg
     # specifically: a browser process is the one part of this pipeline whose
     # memory a single stuck page can genuinely blow up.

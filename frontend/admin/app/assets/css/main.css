@@ -1,10 +1,4 @@
-/* Nuxt UI v4 / Tailwind v4 entry for the admin surface. Admin keeps its own
- * CSS graph so no operator styling can leak into the public bundle. */
-@import "tailwindcss";
-@import "@nuxt/ui";
-
-:root {
-  --st-ink: #14181f;
-  --st-paper: #f7f7f4;
-  --st-accent: #b91c1c; /* operator surfaces read distinctly from the public atlas */
-}
+/* Admin-only colour graph: public assets never import these tokens. */
+@import 'tailwindcss';
+@import '@nuxt/ui';
+@import './operator.css';

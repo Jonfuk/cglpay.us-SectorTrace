@@ -22,15 +22,15 @@ class EntryAssets(HTMLParser):
             self.references.append(fields.get("href") or "")
 
 
-def verify_assets(dist: Path) -> None:
+def verify_assets(dist: Path, apps: tuple[str, ...] = ("public", "admin")) -> None:
     # Import only when called. The helper can be tested with disposable static
     # fixtures and does not open a warehouse connection or contact a source.
     from pipeline.web.nuxt_assets import NuxtAssets
 
     assets = NuxtAssets(dist)
-    if not assets.available():
-        raise RuntimeError("Generated public and admin entry points are required")
     for app, prefix in (("public", "/"), ("admin", "/admin/")):
+        if app not in apps:
+            continue
         for filename in ("index.html", "200.html", "404.html"):
             entry = dist / app / filename
             if not entry.is_file():
@@ -58,14 +58,21 @@ def main() -> None:
     from pipeline.config import Settings
     from pipeline.web.nuxt_assets import DEFAULT_DIST_DIR
 
-    if len(sys.argv) != 2 or sys.argv[1] not in {"true", "false"}:
-        raise RuntimeError("Expected the selected frontend flag: true or false")
+    if (len(sys.argv) != 3 or sys.argv[1] not in {"true", "false"}
+            or sys.argv[2] not in {"nuxt", "legacy"}):
+        raise RuntimeError("Expected public true/false and admin nuxt/legacy choices")
     expected = sys.argv[1] == "true"
+    expected_admin = sys.argv[2] == "nuxt"
     settings = Settings()
     if settings.serve_nuxt != expected:
         raise RuntimeError("Effective SERVE_NUXT disagrees with the deployment choice. Check .env.merge overrides.")
-    if expected:
-        verify_assets(Path(settings.nuxt_dist_dir or DEFAULT_DIST_DIR))
+    admin_variant = settings.admin_ui_variant
+    actual_admin = admin_variant == "nuxt" if admin_variant is not None else settings.serve_nuxt
+    if actual_admin != expected_admin:
+        raise RuntimeError("Effective ADMIN_UI_VARIANT disagrees with the deployment choice. Check .env.merge overrides.")
+    apps = tuple(app for app, enabled in (("public", expected), ("admin", expected_admin)) if enabled)
+    if apps:
+        verify_assets(Path(settings.nuxt_dist_dir or DEFAULT_DIST_DIR), apps)
 
 
 if __name__ == "__main__":

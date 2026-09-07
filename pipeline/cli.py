@@ -21,6 +21,7 @@ from pipeline.registry import (
     resolve_run_order,
     resolve_run_waves,
 )
+from pipeline.telemetry import configure_telemetry
 from pipeline.tui import init_tui
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
@@ -29,10 +30,12 @@ documents_app = typer.Typer(help="Inspect, parse, validate, and search archived 
 nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunks, embeddings, search).")
 analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
+worker_app = typer.Typer(help="Claim and execute queued pipeline-module runs (Phase 5 worker cutover).")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
+app.add_typer(worker_app, name="worker")
 app.add_typer(mirror_app, name="mirror")
 # Keep the TUI as another entry point over the existing command schema. The
 # project wrapper adds a confirmation boundary, while validation and side
@@ -74,6 +77,7 @@ def analysis_worker(
 
     configure_logging("analysis_worker", console_level=logging.INFO)
     settings = get_settings()
+    configure_telemetry(settings)
     db_conn = db.get_connection(settings)
     try:
         db.apply_migrations(db_conn, db.migrations_dir_for(settings))
@@ -81,6 +85,46 @@ def analysis_worker(
         db_conn.close()
     worker = AnalysisWorker(settings, poll_seconds=poll_seconds, batch_size=batch_size,
                             worker_id=worker_id, comparison_workers=comparison_workers)
+    if once:
+        result = worker.run_once()
+        typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
+    else:
+        worker.run_forever()
+
+
+@worker_app.command("run")
+def worker_run(
+    once: bool = typer.Option(False, "--once", help="Claim one queued run and exit when it finishes."),
+    poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls when idle."),
+    lease_seconds: int = typer.Option(
+        900, min=30, help="How long a claimed job may go without a lease renewal "
+                            "before another worker may reclaim it."),
+    worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
+) -> None:
+    """Execute queued pipeline-module runs enqueued by the admin UI.
+
+    A separate process from `pipeline web` (CLAUDE.md settled decision 10,
+    the Phase 5 worker cutover): the web process only ever writes a row to
+    `worker_jobs` and polls it, this process is the one that actually calls
+    `pipeline.runner.run_waves`. At most one worker process is ever inside a
+    run at a time, deployment-wide, enforced by a PostgreSQL advisory lock
+    (see pipeline/worker.py's module docstring) rather than by there being
+    only one worker process -- so it is safe, if never necessary, to run more
+    than one for availability.
+    """
+    from pipeline.worker import PipelineWorker
+
+    configure_logging("worker")
+    settings = get_settings()
+    configure_telemetry(settings)
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn)
+    finally:
+        conn.close()
+
+    worker = PipelineWorker(settings, poll_seconds=poll_seconds,
+                             lease_seconds=lease_seconds, worker_id=worker_id)
     if once:
         result = worker.run_once()
         typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
@@ -519,6 +563,124 @@ def documents_benchmark(
             raise typer.Exit(code=1)
     finally:
         conn.close()
+
+
+@documents_app.command("benchmark-parsers")
+def documents_benchmark_parsers(
+    manifest: str = typer.Option(
+        None, help="CSV containing an evidence_id column, pointing at already-archived evidence"),
+    corpus: str = typer.Option(
+        None, help="Directory of PDF files, for a quick check without a populated database"),
+    parsers: str = typer.Option("pymupdf,pdfplumber", help="Comma-separated parser names; the first two are the primary pair for the exit code"),
+    out: str = typer.Option(None, help="Write the full JSON report here as well as stdout"),
+    limit: int = typer.Option(25, min=1),
+) -> None:
+    """Read-only PARITY comparison of two (or more) parser adapters against the
+    same document bytes — never `DocumentService.process`, never a database
+    write. This is the piece `documents benchmark` does not cover: that
+    command persists a `document_versions` row per (document, parser) via
+    `DocumentService`, which is right for populating the warehouse but wrong
+    for a repeatable equivalence check. This command calls
+    `pipeline.documents.parser_parity.compare_parsers` directly against
+    parser adapters, with nothing written anywhere.
+
+    Reports `element_count`/`table_count` deltas and a whitespace-normalized
+    text diff for every parser pair; it does NOT compare document
+    identifiers, amounts, dates, concepts, spans, assertions or relations —
+    those live downstream in `pipeline/nlp/`, not on a parser's raw
+    `ParsedDocument`, and are out of scope here (see
+    `pipeline/documents/parser_parity.py`'s docstring).
+
+    This command's exit code reports parity for THIS run only. It cannot and
+    does not decide which parser should be preferred: that requires an
+    operator running it against a real, representative corpus. This sandbox
+    has neither PyMuPDF installed (it is behind the optional `documents`
+    extra) nor a real document corpus, so no such run has been done here, and
+    nothing in this command touches `Settings.document_parser` or any other
+    configuration based on its result.
+    """
+    import json
+    from pathlib import Path
+
+    from pipeline.documents.parser_parity import compare_parsers
+    from pipeline.documents.parsers import ParserUnavailable, get_parser
+
+    if bool(manifest) == bool(corpus):
+        typer.echo("Pass exactly one of --manifest or --corpus.", err=True)
+        raise typer.Exit(code=2)
+
+    selected = [name.strip() for name in parsers.split(",") if name.strip()]
+    parser_instances = []
+    for name in selected:
+        try:
+            parser_instances.append(get_parser(name))
+        except ParserUnavailable as exc:
+            typer.echo(
+                f"Parser {name!r} is not available ({exc}). "
+                f"Install it with `uv sync --extra documents` and retry.", err=True)
+            raise typer.Exit(code=2) from exc
+
+    documents: list[tuple[str, bytes, str]] = []  # (label, body, mime_type)
+    conn = None
+    if manifest:
+        import csv
+
+        conn, _settings = _document_connection()
+        from pipeline.archive import get_archive
+
+        archive = get_archive(_settings)
+        with Path(manifest).open(newline="", encoding="utf-8") as handle:
+            evidence_ids = [row["evidence_id"] for row in csv.DictReader(handle) if row.get("evidence_id")][:limit]
+        for evidence_id in evidence_ids:
+            record = conn.execute(
+                "SELECT * FROM evidence_records WHERE evidence_id=%s", (evidence_id,)).fetchone()
+            if record is None:
+                typer.echo(f"evidence_id {evidence_id!r} not found in evidence_records; skipping.", err=True)
+                continue
+            reference = _document_reference(record)
+            try:
+                body = archive.read(reference.raw_object_path)
+            except Exception as exc:
+                typer.echo(f"evidence_id {evidence_id!r}: could not read archived bytes ({exc}); skipping.", err=True)
+                continue
+            documents.append((evidence_id, body, reference.mime_type or "application/pdf"))
+    else:
+        corpus_dir = Path(corpus)
+        pdf_paths = sorted(corpus_dir.glob("*.pdf"))[:limit]
+        for path in pdf_paths:
+            documents.append((str(path), path.read_bytes(), "application/pdf"))
+
+    try:
+        if not documents:
+            source = f"--manifest {manifest}" if manifest else f"--corpus {corpus}"
+            typer.echo(f"No documents found for {source}; nothing to benchmark.", err=True)
+            raise typer.Exit(code=2)
+
+        report = []
+        for label, body, mime_type in documents:
+            comparison = compare_parsers(body, mime_type, parser_instances)
+            report.append({"document": label, **comparison})
+
+        payload = json.dumps(report, indent=2, sort_keys=True)
+        typer.echo(payload)
+        if out:
+            Path(out).write_text(payload, encoding="utf-8")
+
+        if len(selected) >= 2:
+            primary_pair = tuple(selected[:2])
+            all_equivalent = True
+            for entry in report:
+                pair_result = next(
+                    (c for c in entry["comparisons"]
+                     if (c["left"], c["right"]) == primary_pair or (c["right"], c["left"]) == primary_pair),
+                    None)
+                if pair_result is None or not pair_result["equivalent"]:
+                    all_equivalent = False
+            if not all_equivalent:
+                raise typer.Exit(code=1)
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @nlp_app.command("chunk")
@@ -1784,6 +1946,30 @@ def pg_capabilities(
         raise typer.Exit(code=1)
 
 
+@app.command("pg-telemetry-snapshot")
+def pg_telemetry_snapshot() -> None:
+    """Capture one PostgreSQL maintenance-telemetry snapshot (migration 0113).
+
+    Writes table/index churn and usage counters, and query-fingerprint stats
+    if `pg_stat_statements` is installed, into `pg_telemetry_*` so the
+    observation period performance.md's "PostgreSQL maintenance" section
+    requires before any autovacuum/analyze/index/planner change has evidence
+    to point at. Capture only — this never changes server configuration.
+    Schedule it the same way `pipeline backup` is scheduled (see
+    `sectortrace-backup.timer`/`sectortrace-pg-telemetry.timer` in
+    deploy/ansible).
+    """
+    from pipeline import pg_telemetry
+
+    configure_logging("pg_telemetry_snapshot")
+    conn, _settings = _document_connection()
+    try:
+        result = pg_telemetry.snapshot(conn)
+    finally:
+        conn.close()
+    typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+
+
 @app.command()
 def benchmark(
     output_dir: str = typer.Option(
@@ -1962,6 +2148,7 @@ def web(
 
     configure_logging("web")
     settings = get_settings()
+    configure_telemetry(settings)
 
     # Migrations first, on a writable connection: the decisions table arrives
     # in 0026 and the UI would otherwise fail on a warehouse built before it.
@@ -2189,6 +2376,7 @@ def run(
 
     configure_logging(module)
     settings = get_settings()
+    configure_telemetry(settings)
     conn = db.get_connection(settings)
 
     applied = db.apply_migrations(conn)
@@ -2653,12 +2841,16 @@ def archive_audit(
         False, "--show", help="Print the last few audit rows instead of "
                                "recording a new one."),
 ) -> None:
-    """Record one append-only raw-archive audit snapshot (BETA-060).
+    """Record one append-only raw-archive audit snapshot (BETA-060): the
+    daily deterministic sample (performance.md's Phase 5 archive-audit gap —
+    at least 100 objects, or 1% of the archive if larger).
 
     Counts, by-source distribution, unarchived evidence references, duplicated
-    hashes and a deterministic sample, from the `archive_objects` index. It
-    writes exactly one `archive_audits` row and touches nothing else: it never
-    deletes an object, compacts the archive, or changes retention.
+    hashes, and the sample re-hashed against the archive itself, from the
+    `archive_objects` index. Writes exactly one `archive_audits` row and
+    quarantines any verification mismatch (migration 0103) — it never deletes
+    an object, compacts the archive, or changes retention. See
+    `archive-audit-full` for the quarterly complete verification.
     """
     import json as _json
 
@@ -2677,18 +2869,56 @@ def archive_audit(
                             indent=2))
     typer.echo(f"recorded audit {row['audit_id']}: {row['object_count']} objects, "
                 f"{row['total_bytes']} bytes, {row['missing_refs']} unarchived refs, "
-                f"{row['duplicate_hashes']} duplicated hashes")
+                f"{row['duplicate_hashes']} duplicated hashes, "
+                f"{row['verified_mismatches']} of {row['sample_size']} sampled mismatched")
+
+
+@app.command("archive-audit-full")
+def archive_audit_full() -> None:
+    """Perform the quarterly complete raw-archive verification (BETA-060,
+    performance.md's Phase 5 archive-audit gap): every archived object
+    re-hashed, not the daily 1% sample, with the same quarantine-on-mismatch
+    wiring as `archive-audit` and `archive-verify`. Expensive by design — see
+    deploy/ansible for how it is scheduled quarterly rather than run ad hoc.
+    """
+    import json as _json
+
+    from pipeline import archive_audit as audit_mod
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        row = audit_mod.record(conn, settings, full=True)
+    finally:
+        conn.close()
+    typer.echo(_json.dumps({k: v for k, v in row.items() if k != "sample"},
+                            indent=2))
+    typer.echo(f"recorded full audit {row['audit_id']}: {row['object_count']} objects verified, "
+                f"{row['verified_mismatches']} mismatched")
 
 
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
+    from pipeline import archive_audit, db
     from pipeline.archive import get_archive
     settings = get_settings()
     report = get_archive(settings).verify()
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     (settings.backup_dir / "archive-manifest.json").write_text(
         __import__("json").dumps(report, indent=2), encoding="utf-8")
+    if report["failures"]:
+        # The manifest file is a point-in-time report; this makes each
+        # failure listable/retryable across runs too (migration 0103) — the
+        # same helper the daily/quarterly archive-audit passes use, so a
+        # mismatch is quarantined identically regardless of which path
+        # found it.
+        conn = db.get_connection(settings)
+        try:
+            archive_audit.quarantine_failures(conn, report["failures"], module="archive_verify")
+            conn.commit()
+        finally:
+            conn.close()
     typer.echo(__import__("json").dumps(report, indent=2))
     if not report["ok"]:
         raise typer.Exit(code=1)

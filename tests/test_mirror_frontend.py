@@ -54,7 +54,7 @@ def test_an_environment_override_cannot_silently_keep_the_legacy_frontend(monkey
     from pipeline import config
 
     monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=False, nuxt_dist_dir=None))
-    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "true"])
+    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "true", "nuxt"])
     with pytest.raises(RuntimeError, match="Effective SERVE_NUXT disagrees"):
         CHECK.main()
 
@@ -62,6 +62,38 @@ def test_an_environment_override_cannot_silently_keep_the_legacy_frontend(monkey
 def test_explicit_rollback_does_not_require_generated_assets(monkeypatch):
     from pipeline import config
 
-    monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=False, nuxt_dist_dir=None))
-    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "false"])
+    monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=False, admin_ui_variant="legacy", nuxt_dist_dir=None))
+    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "false", "legacy"])
+    CHECK.main()
+
+
+def test_public_rollback_still_checks_independently_enabled_admin(tmp_path, monkeypatch):
+    from pipeline import config
+
+    dist = _assets(tmp_path)
+    (dist / "public/index.html").unlink()
+    monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=False, admin_ui_variant="nuxt", nuxt_dist_dir=dist))
+    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "false", "nuxt"])
+    CHECK.main()
+    (dist / "admin/_nuxt/entry.js").unlink()
+    with pytest.raises(RuntimeError, match="Missing generated admin entry asset"):
+        CHECK.main()
+
+
+def test_admin_override_cannot_silently_serve_another_variant(monkeypatch):
+    from pipeline import config
+
+    monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=True, admin_ui_variant="legacy", nuxt_dist_dir=None))
+    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "true", "nuxt"])
+    with pytest.raises(RuntimeError, match="Effective ADMIN_UI_VARIANT disagrees"):
+        CHECK.main()
+
+
+def test_public_selection_does_not_require_an_explicitly_legacy_admin_build(tmp_path, monkeypatch):
+    from pipeline import config
+
+    dist = _assets(tmp_path)
+    (dist / "admin/index.html").unlink()
+    monkeypatch.setattr(config, "Settings", lambda: SimpleNamespace(serve_nuxt=True, admin_ui_variant="legacy", nuxt_dist_dir=dist))
+    monkeypatch.setattr(CHECK.sys, "argv", [str(SCRIPT), "true", "legacy"])
     CHECK.main()

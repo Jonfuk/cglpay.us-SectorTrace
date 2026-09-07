@@ -554,3 +554,56 @@ doing once, deliberately, onto a scratch database.
 systemctl status sectortrace-backup.timer
 journalctl -u sectortrace-backup.service
 ```
+
+## Archive audits
+
+Two timers, both `pipeline archive_audit.py` (BETA-060; performance.md's
+Phase 5 archive-audit gap): `sectortrace-archive-audit.timer` runs
+`pipeline archive-audit` daily (default 02:30) — a deterministic sample, at
+least 100 objects or 1% of the archive if larger, re-hashed against the
+archive itself. `sectortrace-archive-audit-full.timer` runs
+`pipeline archive-audit-full` quarterly (default the 1st of Jan/Apr/Jul/Oct
+at 02:00, `RandomizedDelaySec=1h`) — every archived object, not a sample,
+which is why it is quarterly rather than daily.
+
+Neither ever deletes anything. A mismatch — the bytes on disk no longer
+hash to what `archive_objects` recorded — is quarantined
+(`quarantine_items`, visible in `/admin`), the same wiring `archive-verify`
+already has. Both timers' schedules are `archive_audit_time` /
+`archive_audit_full_time` in `vars.yml`.
+
+```bash
+systemctl status sectortrace-archive-audit.timer sectortrace-archive-audit-full.timer
+journalctl -u sectortrace-archive-audit.service
+journalctl -u sectortrace-archive-audit-full.service
+```
+
+## PostgreSQL maintenance telemetry
+
+`sectortrace-pg-telemetry.timer` runs `pipeline pg-telemetry-snapshot` daily
+(`pg_telemetry_snapshot_time` in `vars.yml`, default 03:35) inside the `app`
+container. It captures `pg_stat_user_tables` / `pg_stat_user_indexes` (and
+`pg_stat_statements`, if installed — see below) into `pg_telemetry_*`
+(migration 0113; see `pipeline/pg_telemetry.py`). This is capture only: it
+accumulates the evidence performance.md's "PostgreSQL maintenance" section
+requires before any autovacuum/analyze threshold, index, or planner/memory
+change — it does not itself change any of those.
+
+`pg_stat_statements` needs `shared_preload_libraries` set at server *start*,
+which this playbook does not set and the running application cannot arrange
+for itself. Until an operator does the following on the PostgreSQL box, the
+snapshot still captures table/index telemetry and logs
+`pg_telemetry.pg_stat_statements_unavailable` rather than failing:
+
+```bash
+# postgresql.conf (or ALTER SYSTEM), then restart the server:
+shared_preload_libraries = 'pg_stat_statements'
+```
+```sql
+CREATE EXTENSION pg_stat_statements;
+```
+
+```bash
+systemctl status sectortrace-pg-telemetry.timer
+journalctl -u sectortrace-pg-telemetry.service
+```

@@ -277,6 +277,14 @@ of PSCs is then a redaction, not a finding.
 | Key | None |
 | Rate limit | Default |
 
+Power BI pages are collected separately from the published ODS release:
+`https://www.ndtms.net/ViewIt/Adult`,
+`https://www.ndtms.net/ViewIt/YoungPeople`, and
+`https://www.ndtms.net/Monthly/MonthlyProvisionalStatistics`. The browser leg
+archives successful `querydata`/`public/query` response bytes and stores conservative
+long-form observations with their payload hashes; it does not scrape canvas
+text or replay private APIs.
+
 ## Module 8 — Prevention of Future Deaths reports
 
 | | |
@@ -505,6 +513,10 @@ invisible here.
 
 ## Module 27 — NDTMS monthly provisional statistics
 
+The new monthly provisional Power BI page is collected separately through
+public `querydata`/`public/query` responses. The legacy HTML flow below remains the canonical
+`ndtms_monthly_statistics` table.
+
 | | |
 | --- | --- |
 | Source | NDTMS monthly provisional treatment reports — the server-rendered "old version" of the report, not the Power BI dashboard those pages link to |
@@ -512,7 +524,7 @@ invisible here.
 | Licence | OGL v3.0 |
 | Key | None |
 | Rate limit | Default (2s/host). POSTs are not conditional — a POST's response depends on the body sent, not the URL, so there is nothing for an ETag to validate |
-| Notes | A plain self-posting ASP.NET Core form: Region / Local Authority / Treatment provider / Report Date selects, and one `<table>` per indicator in the response. Tables are paired with the collapsible-panel heading that precedes them in document order rather than by index, because Adults carries six sections and YoungPeople four, and hardcoding either shape silently mislabels the other. The area check is the part that matters: when the anti-forgery token is rejected the form re-renders the England-wide page with HTTP 200 rather than erroring, so every response's `<h1>` is matched against the area that was requested before any row from it is trusted — a status code does not catch this. `DatCodeId` is NDTMS's own area code (`B18B` for Manchester), and NDTMS-style and ONS-style codes coexist in the same list, so `ons_code` is resolved by name against `authorities` the same way Module 7 does. Only the site's current default report month is fetched; `ReportVersionId` addresses months back to April 2014, and `report_version_id`/`report_month` are stored per row so a later pass can add specific months without a schema change |
+| Notes | A plain self-posting ASP.NET Core form: Region / Local Authority / Treatment provider / Report Date selects, and one `<table>` per indicator in the response. Tables are paired with the collapsible-panel heading that precedes them in document order rather than by index, because Adults carries six sections and YoungPeople four, and hardcoding either shape silently mislabels the other. The area check is the part that matters: when the anti-forgery token is rejected the form re-renders the England-wide page with HTTP 200 rather than erroring, so every response's `<h1>` is matched against the area that was requested before any row from it is trusted — a status code does not catch this. `DatCodeId` is NDTMS's own area code (`B18B` for Manchester), and NDTMS-style and ONS-style codes coexist in the same list, so `ons_code` is resolved by name against `authorities` the same way Module 7 does. A normal run walks every report version exposed by the site's dropdown (Adults currently back to April 2014); `report_version_id`/`report_month` are stored per row. For a process-sized historical backfill, set inclusive `NDTMS_MONTHLY_MIN_VERSION`/`NDTMS_MONTHLY_MAX_VERSION` bounds and run the next chunk after the previous one has committed | 
 
 ## Module 28 — Safeguarding Adult Reviews (SARs)
 

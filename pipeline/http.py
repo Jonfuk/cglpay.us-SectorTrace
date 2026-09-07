@@ -11,8 +11,11 @@ import json
 import mimetypes
 import re
 import sqlite3
+import tempfile
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,10 +30,11 @@ from tenacity import (
     wait_exponential,
 )
 
-from pipeline import db
-from pipeline.archive import ArchiveObject, get_archive
+from pipeline import db, telemetry
+from pipeline.archive import ArchiveError, ArchiveObject, get_archive
 from pipeline.config import Settings, get_settings
 from pipeline.meters import DISK, NETWORK
+from pipeline.writer import BatchWriter
 
 log = structlog.get_logger()
 
@@ -67,6 +71,28 @@ def _wait_respecting_retry_after(retry_state):
     return _fallback_wait(retry_state)
 
 
+def _record_retry(retry_state) -> None:
+    """A retry counter (performance.md:632), not a new retry mechanism --
+    tenacity's own `@retry` below still owns backoff and the attempt limit.
+    `before_sleep` fires once per retry, never on the attempt that finally
+    succeeds or the one that exhausts `stop_after_attempt`, so this counts
+    exactly the retries this pipeline's politeness rules already accepted
+    paying for. The reason (a status code family, or a transport error) is
+    the only thing worth a label here -- never the URL, which is exactly the
+    kind of value this module's docstring on `telemetry.py` rules out."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, httpx.HTTPStatusError):
+        reason = f"http_{exc.response.status_code}"
+    elif exc is not None:
+        reason = type(exc).__name__
+    else:
+        reason = "unknown"
+    telemetry.counter(
+        "http.request.retries",
+        description="Retried HTTP requests, by the error that triggered the retry.").add(
+        1, {"reason": reason})
+
+
 @dataclass
 class FetchResult:
     url: str
@@ -99,6 +125,50 @@ class FetchResult:
         on the second and subsequent runs.
         """
         return bool(self.body) and self.status_code < 400
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{self.status_code} for {self.url}", request=None, response=None  # type: ignore[arg-type]
+            )
+
+
+# Below this, a body is spooled to a temp file while hashing rather than
+# held whole in memory; below it, the OS page cache and a `bytes` object cost
+# the same and a temp file is pure overhead. Not tuned against a benchmark —
+# a round number comfortably above ordinary HTML/JSON responses and
+# comfortably below the multi-hundred-MB CSV archives `get_streaming` exists
+# for.
+_SPOOL_MAX_MEMORY_BYTES = 10 * 1024 * 1024
+
+
+@dataclass
+class StreamedFetchResult:
+    """`FetchResult`'s sibling for a body too large to hold twice in memory.
+
+    `spool` is a file-like object (`tempfile.SpooledTemporaryFile`), seeked
+    to 0 and ready to read, open only for the life of the `get_streaming`
+    context manager that yielded it — read it inside the `with` block, or
+    copy what you need out of it. There is no `.body: bytes` here on
+    purpose: materialising one would defeat the entire point.
+    """
+    url: str
+    status_code: int
+    spool: object
+    byte_count: int
+    headers: httpx.Headers
+    retrieved_at: datetime
+    payload_sha256: str
+    archived_ref: str | None = None
+    final_url: str | None = None
+
+    @property
+    def content_type(self) -> str | None:
+        return self.headers.get("content-type")
+
+    @property
+    def ok(self) -> bool:
+        return self.byte_count > 0 and self.status_code < 400
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -430,6 +500,11 @@ class PipelineHTTPClient:
         self.commit_cache_writes = False
         self.pending_cache_writes: list[dict] = []
 
+    def _ensure_db_live(self) -> None:
+        """Keep a module writer usable across long remote requests."""
+        if self.conn is not None and hasattr(self.conn, "ensure_live"):
+            self.conn.ensure_live()
+
     def __enter__(self) -> "PipelineHTTPClient":
         return self
 
@@ -452,7 +527,37 @@ class PipelineHTTPClient:
         self._client.headers.update(headers)
 
     def close(self) -> None:
+        if self.defer_cache_writes:
+            self.flush_cache_writes()
         self._client.close()
+
+    def flush_cache_writes(self) -> int:
+        """Flush conditional-request cache entries buffered by
+        `defer_cache_writes` for a serial, single-connection caller — a
+        module walking many pages on its own connection, where a commit per
+        request is real overhead but the thread-pool worker's argument for
+        writing and committing eagerly (`pipeline/parallel.py`) does not
+        apply, because there is only one connection here in the first place.
+
+        Safe to call repeatedly; called automatically from `close()`, so a
+        caller that never calls it directly still gets a final flush.
+        """
+        if self.conn is None or not self.pending_cache_writes:
+            return 0
+        pending, self.pending_cache_writes = self.pending_cache_writes, []
+
+        def write_batch(entries) -> None:
+            for entry in entries:
+                db.set_http_cache(self.conn, **entry)
+
+        writer = BatchWriter(
+            self.conn, write_batch,
+            max_rows=self.settings.http_cache_write_batch_size,
+            max_seconds=self.settings.batch_write_seconds,
+            commit=self.commit_cache_writes)
+        writer.write_many(pending)
+        writer.close()
+        return writer.rows_written
 
     def _archive_body(self, body: bytes, sha256: str,
                       content_type: str | None) -> ArchiveObject:
@@ -471,6 +576,7 @@ class PipelineHTTPClient:
         retry=retry_if_exception(_is_retryable),
         wait=_wait_respecting_retry_after,
         stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
         reraise=True,
     )
     def _do_request(self, method: str, url: str, **kwargs) -> httpx.Response:
@@ -478,6 +584,42 @@ class PipelineHTTPClient:
         if response.status_code >= 500 or response.status_code == 429:
             response.raise_for_status()
         return response
+
+    @retry(
+        retry=retry_if_exception(_is_retryable),
+        wait=_wait_respecting_retry_after,
+        stop=stop_after_attempt(6),
+        before_sleep=_record_retry,
+        reraise=True,
+    )
+    def _stream_to_spool(self, method: str, url: str, **kwargs):
+        """One attempt: stream the body into a fresh spool while hashing it
+        in one pass, never holding the whole body as a second `bytes` copy.
+
+        A fresh `SpooledTemporaryFile` per call, because this is retried —
+        the same shape `_do_request` uses for a small body, so a transport
+        error partway through a multi-hundred-MB download restarts into a
+        clean spool rather than resuming into (or leaving beside) a
+        truncated one. Returns `(response, spool, sha256, byte_count)`, the
+        spool positioned at 0.
+        """
+        spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
+        try:
+            with self._client.stream(method, url, **kwargs) as response:
+                if response.status_code >= 500 or response.status_code == 429:
+                    response.read()  # small error bodies; safe to buffer for the message
+                    response.raise_for_status()
+                digest = hashlib.sha256()
+                size = 0
+                for chunk in response.iter_bytes():
+                    digest.update(chunk)
+                    size += len(chunk)
+                    spool.write(chunk)
+            spool.seek(0)
+        except BaseException:
+            spool.close()
+            raise
+        return response, spool, digest.hexdigest(), size
 
     def get(
         self,
@@ -488,6 +630,7 @@ class PipelineHTTPClient:
         use_conditional: bool = True,
         archive: bool = True,
     ) -> FetchResult:
+        self._ensure_db_live()
         if not self._robots.can_fetch(url):
             # A configured exception does not make the fetch invisible. It is
             # logged every time and recorded once per (module, prefix) in the
@@ -530,6 +673,7 @@ class PipelineHTTPClient:
         # the counter instead.
         log.info("http.get", url=request_url, source_system=self.source_system)
         response = self._do_request("GET", url, params=params, headers=request_headers)
+        self._ensure_db_live()
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, response.status_code == 304)
         # What actually came down the wire. A 304 carries no body, so a
@@ -549,7 +693,19 @@ class PipelineHTTPClient:
             # rows. If the archive is missing, re-fetch unconditionally: a
             # cache entry without its payload is not a usable cache hit.
             sha256 = cached["payload_sha256"] if cached else ""
-            archived = self.archive.lookup(self.source_system, sha256)
+            # A cache row from before migration 0110, or a backend that
+            # never stored one, has no exact reference to retrieve by — fall
+            # back to the hash-prefix lookup rather than treating a merely
+            # incomplete cache row as a miss.
+            cached_ref = cached["archive_ref"] if cached else None
+            archived = None
+            if cached_ref:
+                try:
+                    archived = self.archive.get_by_ref(cached_ref)
+                except ArchiveError:
+                    archived = None
+            if archived is None:
+                archived = self.archive.lookup(self.source_system, sha256)
             if archived is not None:
                 body = archived.read_bytes()
                 archived_path = (Path(self.settings.raw_archive_dir) /
@@ -584,22 +740,40 @@ class PipelineHTTPClient:
                 archived_ref = archived.logical_path
 
         if self.conn is not None:
+            # A 304 carries no Content-Type of its own (RFC 9110 says the
+            # server need not repeat entity headers on one) — the body is
+            # unchanged, so the content type recorded against the prior
+            # successful fetch still describes it. Only the fresh-fetch
+            # paths (a 200, or the cache-miss refetch above, which already
+            # reassigned `response`) have a response to read one from.
             entry = dict(
                 url=request_url,
                 host=host,
                 etag=response.headers.get("etag"),
                 last_modified=response.headers.get("last-modified"),
                 payload_sha256=sha256,
+                archive_ref=archived_ref,
+                content_type=response.headers.get("content-type") or (
+                    cached["content_type"] if cached else None),
+                content_length=len(body) if body else None,
             )
             if self.defer_cache_writes:
-                # A worker thread must not write here. SQLite allows one
-                # writer, and the module's main thread holds that slot while
-                # it commits an authority's evidence — so a cache write from
-                # a pool thread would block for the whole busy_timeout, over
-                # and over. These are flushed by the main thread once the
-                # pool has finished; the cache is a fetch optimisation, so
-                # losing it to a crash costs a re-validation, not evidence.
+                # Two distinct callers set this. A pool worker thread must
+                # not write here: SQLite allows one writer, and the module's
+                # main thread holds that slot while it commits an
+                # authority's evidence — so a cache write from a pool thread
+                # would block for the whole busy_timeout, over and over.
+                # Those are flushed by the main thread once the pool has
+                # finished (`pipeline/parallel.py`). A serial, single-
+                # connection caller opts in for a cheaper reason — a commit
+                # per request is real overhead across a long walk — and
+                # flushes itself via `flush_cache_writes()`/`close()`.
+                # Either way, losing a buffered entry to a crash costs a
+                # re-validation next run, not evidence, so this is bounded
+                # rather than held forever.
                 self.pending_cache_writes.append(entry)
+                if len(self.pending_cache_writes) >= self.settings.http_cache_write_batch_size:
+                    self.flush_cache_writes()
             else:
                 db.set_http_cache(self.conn, **entry)
                 if self.commit_cache_writes:
@@ -618,6 +792,101 @@ class PipelineHTTPClient:
             final_url=str(response.url),
         )
 
+    @contextmanager
+    def get_streaming(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        headers: dict | None = None,
+        archive: bool = True,
+    ) -> Iterator[StreamedFetchResult]:
+        """`get()`'s sibling for a body too large to buffer twice — a
+        multi-hundred-MB procurement CSV archive or council-spend workbook,
+        the callers this exists for. Same robots/rate-limit/retry/provenance
+        discipline; no conditional-request support yet (no caller needing
+        one has needed this path too), so every call is a full fetch.
+
+        A context manager because the spooled body is only guaranteed to
+        exist for the life of the call — read `result.spool` (or pass it
+        straight to something that streams, like `xlsx.iter_sheet_stream`)
+        inside the `with` block:
+
+            with client.get_streaming(url) as result:
+                for row in xlsx.iter_sheet_stream(result.spool, "Sheet1"):
+                    ...
+
+        `get()` itself is untouched — every existing caller is unaffected.
+        """
+        self._ensure_db_live()
+        if not self._robots.can_fetch(url):
+            override = self.settings.robots_override_for(url)
+            if override is None:
+                raise RobotsDisallowed(
+                    f"robots.txt disallows fetching {url} as {self.settings.user_agent!r}")
+            log.warning("http.robots_override", url=url, allowed_by=override,
+                        source_system=self.source_system)
+            if self.conn is not None and override not in self._overrides_recorded:
+                self._overrides_recorded.add(override)
+                db.record_review_item(
+                    self.conn, self.source_system, "robots_override_in_use", override,
+                    json.dumps({"note": "robots.txt disallows this prefix; fetched under an "
+                                        "explicit exception in Settings.robots_exceptions",
+                                "user_agent": self.settings.user_agent}))
+
+        host = urlparse(url).netloc
+        self._rate_limiter.wait(host)
+
+        request_url = str(httpx.URL(url, params=params)) if params else url
+        log.info("http.get_streaming", url=request_url, source_system=self.source_system)
+        response, spool, sha256, size = self._stream_to_spool(
+            "GET", url, params=params, headers=dict(headers or {}))
+        self._ensure_db_live()
+        retrieved_at = datetime.now(timezone.utc)
+        REQUESTS.record(host, False)
+        NETWORK.add(size)
+
+        archived_ref = None
+        try:
+            if archive and size:
+                obj = self.archive.put_stream(
+                    self.source_system, sha256, response.headers.get("content-type"), spool)
+                archived_ref = obj.logical_path
+            spool.seek(0)
+
+            if self.conn is not None:
+                entry = dict(
+                    url=request_url, host=host,
+                    etag=response.headers.get("etag"),
+                    last_modified=response.headers.get("last-modified"),
+                    payload_sha256=sha256,
+                    archive_ref=archived_ref,
+                    content_type=response.headers.get("content-type"),
+                    content_length=size or None,
+                )
+                if self.defer_cache_writes:
+                    self.pending_cache_writes.append(entry)
+                    if len(self.pending_cache_writes) >= self.settings.http_cache_write_batch_size:
+                        self.flush_cache_writes()
+                else:
+                    db.set_http_cache(self.conn, **entry)
+                    if self.commit_cache_writes:
+                        self.conn.commit()
+
+            yield StreamedFetchResult(
+                url=request_url,
+                status_code=response.status_code,
+                spool=spool,
+                byte_count=size,
+                headers=response.headers,
+                retrieved_at=retrieved_at,
+                payload_sha256=sha256,
+                archived_ref=archived_ref,
+                final_url=str(response.url),
+            )
+        finally:
+            spool.close()
+
     def post(
         self,
         url: str,
@@ -631,6 +900,7 @@ class PipelineHTTPClient:
         response depends on the body sent, not just the URL, so there is
         nothing here for an ETag to validate against.
         """
+        self._ensure_db_live()
         if not self._robots.can_fetch(url):
             override = self.settings.robots_override_for(url)
             if override is None:
@@ -651,6 +921,7 @@ class PipelineHTTPClient:
 
         log.info("http.post", url=url, source_system=self.source_system)
         response = self._do_request("POST", url, data=data, headers=headers or {})
+        self._ensure_db_live()
         retrieved_at = datetime.now(timezone.utc)
         REQUESTS.record(host, False)
         NETWORK.add(len(response.content or b""))

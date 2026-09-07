@@ -44,10 +44,15 @@ state_dir: /opt/sectortrace-mirror/state
 admin_ui_enabled: true
 expose_admin_publicly: false
 
-# Generated frontends are the normal mirror entry points. Existing local
+# Generated public frontends are the normal mirror entry points. Existing local
 # overrides remain explicit. --enable-frontend upgrades an older saved false
 # setting, and --legacy-frontend persists the rollback without reseeding data.
 serve_nuxt: true
+# The operator workspace is served from the generated Nuxt bundle on mirror
+# hosts. This is independent of `serve_nuxt`, which controls the public portal.
+# set `admin_ui_variant: legacy` in zz-local.yml for an emergency rollback.
+admin_ui_variant: "nuxt"
+
 
 # Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
 # are accepted too (198.51.100.0/24). The allowlist IS the authentication —

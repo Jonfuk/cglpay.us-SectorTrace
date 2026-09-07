@@ -57,7 +57,8 @@ test('treatment chooses one measure and retains local uncertainty and England pr
   const manifest = JSON.parse(readFileSync((await (await download).path())!, 'utf8'))
   expect(manifest.rows[0]).toMatchObject({ source_url: null, retrieved_at: null, payload_sha256: null, value: 100 })
   expect(manifest._provenance.filters_applied_to_this_array).toEqual({ indicator_id: '123' })
-  await page.screenshot({ path: info.outputPath('treatment-local-england-dark.png'), fullPage: true })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({ path: info.outputPath('treatment-local-england-dark.png'), fullPage: true, animations: 'disabled' })
 })
 
 test('NDTMS keeps table catalogue, publication editions, numeric cohorts and suppressed rows distinct', async ({ page }, info) => {

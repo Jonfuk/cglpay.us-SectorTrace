@@ -246,6 +246,187 @@ def test_304_without_archived_body_refetches(httpx_mock, settings, conn):
     assert result.body == b"refetched body"
 
 
+def test_http_cache_records_the_exact_archive_reference_and_content_metadata(
+        httpx_mock, settings, conn):
+    """Migration 0110: a fetch must persist `archive_ref`, `content_type` and
+    `content_length` alongside the hash, so a later 304 can retrieve the
+    archived body by that stored key rather than re-deriving it."""
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.json"
+    body = b'{"a": 1}'
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "application/json"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    result = client.get(url)
+    client.close()
+
+    cached = db.get_http_cache(conn, url)
+    assert cached["archive_ref"] == result.archived_ref
+    assert cached["content_type"] == "application/json"
+    assert cached["content_length"] == len(body)
+
+
+def test_conditional_revalidation_uses_the_stored_reference_not_a_lookup_scan(
+        httpx_mock, settings, conn):
+    """Once a fetch has recorded `archive_ref`, a later 304 must retrieve the
+    archived body via `Archive.get_by_ref` (an exact key) and must never fall
+    back to `Archive.lookup`'s hash-prefix scan — the whole point of storing
+    the reference in the first place (performance.md's Phase 5 archive-audit
+    gap: "a 304 retrieves by key rather than prefix listing").
+    """
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.txt"
+    body = b"archived content"
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "text/plain", "etag": "abc123"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    first = client.get(url)
+    assert first.archived_ref is not None
+    assert db.get_http_cache(conn, url)["archive_ref"] == first.archived_ref
+
+    lookup_calls = []
+    original_lookup = client.archive.lookup
+
+    def spying_lookup(*args, **kwargs):
+        lookup_calls.append((args, kwargs))
+        return original_lookup(*args, **kwargs)
+
+    client.archive.lookup = spying_lookup
+
+    httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
+    second = client.get(url)
+    client.close()
+
+    assert second.not_modified is True
+    assert second.body == body
+    assert lookup_calls == []  # served by exact reference — never the prefix scan
+
+
+def test_conditional_revalidation_keeps_the_prior_content_type(httpx_mock, settings, conn):
+    """A 304 carries no body and typically no Content-Type of its own; the
+    cache entry must keep describing the (unchanged) archived content, not
+    overwrite it with nothing."""
+    _allow_all_robots(httpx_mock)
+    url = "https://example.com/doc.json"
+    body = b'{"a": 1}'
+    httpx_mock.add_response(url=url, status_code=200, content=body,
+                             headers={"content-type": "application/json", "etag": "abc123"})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    client.get(url)
+    httpx_mock.add_response(url=url, status_code=304, match_headers={"If-None-Match": "abc123"})
+    client.get(url)
+    client.close()
+
+    assert db.get_http_cache(conn, url)["content_type"] == "application/json"
+
+
+# --- get_streaming ---------------------------------------------------------
+
+
+def test_get_streaming_produces_the_same_hash_and_archive_as_the_buffered_path(
+        httpx_mock, settings):
+    """The point of the streaming path: identical bytes must land in the
+    same archive object with the same hash as `get()` would produce — the
+    difference is only how the body travels, never what ends up stored."""
+    _allow_all_robots(httpx_mock)
+    body = b"a large council-spend workbook, in spirit" * 10_000
+    httpx_mock.add_response(
+        url="https://example.com/big.xlsx", status_code=200, content=body,
+        headers={"content-type": "application/octet-stream"})
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with client.get_streaming("https://example.com/big.xlsx") as streamed:
+        read_back = streamed.spool.read()
+        assert streamed.status_code == 200
+        assert streamed.byte_count == len(body)
+        assert streamed.payload_sha256 == hashlib.sha256(body).hexdigest()
+        assert streamed.archived_ref is not None
+    client.close()
+
+    assert read_back == body
+    archived = settings.raw_archive_dir / streamed.archived_ref.removeprefix("data/raw/")
+    assert archived.read_bytes() == body
+
+
+def test_get_streaming_never_holds_the_whole_body_in_one_bytes_object(httpx_mock, settings):
+    """A body larger than the spool's in-memory threshold must roll to
+    disk — the regression this exists to prevent is a 'streaming' path that
+    quietly reassembles the whole thing in RAM first."""
+    from pipeline.http import _SPOOL_MAX_MEMORY_BYTES
+
+    _allow_all_robots(httpx_mock)
+    body = b"x" * (_SPOOL_MAX_MEMORY_BYTES + 1024)
+    httpx_mock.add_response(url="https://example.com/huge.bin", status_code=200, content=body)
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with client.get_streaming("https://example.com/huge.bin", archive=False) as streamed:
+        assert streamed.byte_count == len(body)
+        # SpooledTemporaryFile rolls to a real file once past max_size; the
+        # underlying object exposes this as `_rolled` on CPython.
+        assert getattr(streamed.spool, "_rolled", None) is True
+    client.close()
+
+
+def test_get_streaming_respects_robots(httpx_mock, settings):
+    httpx_mock.add_response(url="https://example.com/robots.txt", status_code=200,
+                             text="User-agent: *\nDisallow: /private/")
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(RobotsDisallowed):
+        with client.get_streaming("https://example.com/private/big.csv"):
+            pass
+    client.close()
+
+
+def test_get_streaming_writes_the_conditional_cache_entry(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    body = b"streamed body"
+    httpx_mock.add_response(url="https://example.com/archive.csv", status_code=200, content=body,
+                             headers={"content-type": "text/csv", "etag": "\"v1\""})
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    with client.get_streaming("https://example.com/archive.csv"):
+        pass
+    client.close()
+
+    cached = db.get_http_cache(conn, "https://example.com/archive.csv")
+    assert cached["etag"] == '"v1"'
+    assert cached["payload_sha256"] == hashlib.sha256(body).hexdigest()
+
+
+# --- flush_cache_writes ------------------------------------------------------
+
+
+def test_flush_cache_writes_batches_a_serial_walk(httpx_mock, settings, conn):
+    """A serial caller that opts into `defer_cache_writes` gets its cache
+    entries committed in bounded batches rather than one commit per fetch —
+    `close()` flushes whatever is left."""
+    _allow_all_robots(httpx_mock)
+    for i in range(3):
+        httpx_mock.add_response(url=f"https://example.com/page{i}.html", status_code=200,
+                                 content=f"page {i}".encode())
+
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    client.defer_cache_writes = True
+    for i in range(3):
+        client.get(f"https://example.com/page{i}.html")
+    # Nothing committed yet — still buffered.
+    assert len(client.pending_cache_writes) == 3
+    client.close()
+
+    assert client.pending_cache_writes == []
+    rows = [db.get_http_cache(conn, f"https://example.com/page{i}.html") for i in range(3)]
+    assert all(row is not None for row in rows)
+
+
+def test_flush_cache_writes_is_a_no_op_with_nothing_pending(settings, conn):
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    assert client.flush_cache_writes() == 0
+    client.close()
+
+
 def test_rate_limiter_enforces_minimum_interval(settings):
     settings.rate_limit_overrides = {"slow.example.com": 0.2}
     limiter = _RateLimiter(settings)

@@ -3,8 +3,9 @@
 This module owns exactly one thing: given a request path, decide whether the
 built Nuxt static output should answer it and, if so, which file with which
 cache policy. It never touches the API, the database, or evidence. It is inert
-unless ``SERVE_NUXT`` is set and the built output is actually present, so the
-default deployment behaves byte-identically to before this module existed.
+unless ``SERVE_NUXT`` or the admin-only ``ADMIN_UI_VARIANT=nuxt`` requests
+a present build. Public serving depends only on ``SERVE_NUXT``; an explicit
+admin variant never changes public dispatch.
 
 Two applications are served from one directory:
 
@@ -38,6 +39,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+import structlog
 
 # Default location the Docker build stage copies the two generated outputs to.
 # Kept beside the legacy static tree but distinct from it, so both can coexist
@@ -91,7 +94,9 @@ def _content_type(path: Path) -> str:
 class NuxtAssets:
     """Resolver over the two built application directories."""
 
-    def __init__(self, dist_dir: Path) -> None:
+    def __init__(self, dist_dir: Path, *, public_enabled: bool = True, admin_enabled: bool = True) -> None:
+        self.public_enabled = public_enabled
+        self.admin_enabled = admin_enabled
         self.root = dist_dir.resolve()
         self.public = (self.root / "public").resolve()
         self.admin = (self.root / "admin").resolve()
@@ -109,9 +114,13 @@ class NuxtAssets:
             return None
 
         if path == "/admin" or path.startswith("/admin/"):
+            if not self.admin_enabled:
+                return None
             base = self.admin
             rel = path[len("/admin"):]
         else:
+            if not self.public_enabled:
+                return None
             base = self.public
             rel = path
         rel = rel.lstrip("/")
@@ -170,17 +179,26 @@ def _has_extension(rel: str) -> bool:
 
 # Module-level cache so the directory is stat-checked once per process, not per
 # request. Keyed on the resolved directory so a test can point it elsewhere.
-_CACHE: dict[Path, NuxtAssets | None] = {}
+_CACHE: dict[tuple[Path, bool, str | None], NuxtAssets | None] = {}
 
 
 def for_settings(settings) -> NuxtAssets | None:
-    """Return a ready ``NuxtAssets`` when the cutover seam is active and the
-    build is present, else ``None``. Cheap to call per request."""
-    if not getattr(settings, "serve_nuxt", False):
+    """Resolve each application's availability independently, once per policy."""
+    public_requested = bool(getattr(settings, "serve_nuxt", False))
+    variant = getattr(settings, "admin_ui_variant", None)
+    admin_requested = variant == "nuxt" if variant is not None else public_requested
+    if not public_requested and not admin_requested:
         return None
-    dist = settings.nuxt_dist_dir or DEFAULT_DIST_DIR
-    dist = Path(dist).resolve()
-    if dist not in _CACHE:
-        assets = NuxtAssets(dist)
-        _CACHE[dist] = assets if assets.available() else None
-    return _CACHE[dist]
+    dist = Path(settings.nuxt_dist_dir or DEFAULT_DIST_DIR).resolve()
+    key = (dist, public_requested, variant)
+    if key not in _CACHE:
+        public_ready = public_requested and (dist / "public" / "index.html").is_file()
+        admin_ready = admin_requested and (dist / "admin" / "index.html").is_file()
+        if admin_requested and not admin_ready:
+            structlog.get_logger().warning(
+                "web.admin_build_unavailable", requested="nuxt", fallback="legacy", dist=str(dist),
+            )
+        _CACHE[key] = NuxtAssets(
+            dist, public_enabled=public_ready, admin_enabled=admin_ready,
+        ) if public_ready or admin_ready else None
+    return _CACHE[key]

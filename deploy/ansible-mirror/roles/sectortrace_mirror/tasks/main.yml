@@ -293,6 +293,7 @@
       - app
       - deploy/ansible-mirror/check_frontend.py
       - "{{ serve_nuxt | bool | lower }}"
+      - "{{ admin_ui_variant }}"
     chdir: "{{ state_dir }}"
   changed_when: false
 

@@ -11,6 +11,32 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-01-01',
 
   modules: ['@nuxt/ui'],
+  router: { options: { hashMode: true } },
+
+  colorMode: {
+    preference: 'system',
+    fallback: 'light',
+    storageKey: 'st.admin.theme',
+  },
+  // Bundle the built-in control icons; offline admin must never fall back to
+  // an icon API request (there is no Nitro server in the deployed image).
+  icon: {
+    provider: 'none',
+    customCollections: [{ prefix: 'operator', dir: './app/assets/icons' }],
+    clientBundle: {
+      scan: true,
+      icons: [
+        'operator:close',
+        'operator:loading',
+        'operator:check',
+        'operator:chevron-down',
+        'operator:chevron-left',
+        'operator:chevron-right',
+        'operator:arrow-right',
+        'operator:menu',
+      ],
+    },
+  },
 
   app: {
     // Served from /admin/. Build assets resolve to /admin/_nuxt/ by default.
@@ -54,6 +80,15 @@ export default defineNuxtConfig({
 
   experimental: {
     payloadExtraction: false,
+    defaults: { nuxtLink: { prefetch: false } },
+  },
+
+  hooks: {
+    'build:manifest'(manifest) {
+      // Overlays and workspaces are intentionally fetched on demand. Nuxt's
+      // generated prefetch hints otherwise download them on a bare /admin load.
+      for (const entry of Object.values(manifest)) entry.prefetch = false
+    },
   },
 
   typescript: {

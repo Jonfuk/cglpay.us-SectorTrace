@@ -741,9 +741,13 @@ anyone using it.
   they are rolling windows: consecutive columns share eleven months, so the
   difference between two of them is not a month's change and successive
   columns are not independent observations.
-- **Only the current report month is collected.** The site's own dropdown
-  addresses months back to April 2014; nothing here has walked them. An
-  absent month means it was never fetched, not that it does not exist.
+- **The normal run walks every exposed report version, but history is still
+  provisional.** The site's own dropdown currently addresses Adults back to
+  April 2014 (and Young People to a later start). `report_version_id` and
+  `report_month` identify each publication. Long backfills may be split into
+  inclusive `NDTMS_MONTHLY_MIN_VERSION`/`NDTMS_MONTHLY_MAX_VERSION` chunks;
+  an absent month means that chunk has not been fetched, not that it does not
+  exist.
 - **`dat_code` is NDTMS's own area code, not an ONS code.** NDTMS-style codes
   (`B18B`) and ONS-style ones (`00EQ`) sit in the same list, so `ons_code` is
   resolved from the area *name* against `authorities`; an unmatched name is
@@ -753,6 +757,15 @@ anyone using it.
   `value` NULL. They do not mean zero.
 - **Adults and young people are different cohorts**, reported separately and
   never added together.
+- **Power BI observations are a separate publication layer.** The dashboard
+  can be revised independently of the annual ODS and legacy monthly reports;
+  its exact response payload is archived and identified by hash. Do not merge
+  or difference Power BI rows against either existing table without a named
+  review decision.
+- **Unlabelled Power BI cell positions are not semantic measures.** The raw
+  response context, metric label when supplied, and column index are retained;
+  a changed report descriptor must not be treated as though a column position
+  still means the same thing.
 - A response whose `<h1>` does not name the area that was requested is
   discarded, not stored: the form re-renders the England-wide page rather than
   erroring when its anti-forgery token is rejected, so a missing area is a

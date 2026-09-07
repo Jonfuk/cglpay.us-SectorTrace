@@ -53,7 +53,16 @@ export function useLocalStore<T>(
       const raw = s.getItem(key)
       if (!raw) return fallback()
       const env = JSON.parse(raw) as Envelope<T>
-      if (env && typeof env === 'object' && env.v === version) return env.data
+      if (env && typeof env === 'object' && env.v === version) {
+        const expected = fallback()
+        if (
+          env.data == null ||
+          typeof env.data !== typeof expected ||
+          Array.isArray(env.data) !== Array.isArray(expected)
+        )
+          return expected
+        return env.data
+      }
       if (env && migrate) {
         const upgraded = migrate(env.v, env.data)
         if (upgraded !== undefined) {

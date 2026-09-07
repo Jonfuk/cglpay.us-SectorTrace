@@ -39,6 +39,7 @@ import structlog
 log = structlog.get_logger()
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 
 class Cache(Protocol):
@@ -48,7 +49,20 @@ class Cache(Protocol):
     def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
         ...
 
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        """Like `get_or_compute`, but for a caller that must serialize its
+        result before it is reusable (JSON + gzip bytes). `compute` and
+        `encode` are timed separately so the cache's metrics can tell a slow
+        query apart from slow serialization, and the *encoded* value is what
+        gets cached -- a hit never reruns either step."""
+        ...
+
     def bump_version(self) -> None:
+        ...
+
+    def stats(self) -> dict[str, int]:
         ...
 
 
@@ -61,8 +75,16 @@ class NullCache:
     def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
         return compute()
 
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        return encode(compute())
+
     def bump_version(self) -> None:
         pass
+
+    def stats(self) -> dict[str, int]:
+        return {"enabled": 0}
 
 
 class InProcessCache:
@@ -87,6 +109,14 @@ class InProcessCache:
         self._metrics = {
             "hits": 0, "misses": 0, "waiters": 0, "computes": 0,
             "failures": 0, "evictions": 0,
+            # Seconds, summed across every call in this process's lifetime --
+            # not an average, since the number of hits/computes to divide by is
+            # already in the dict above. queue_delay is what a *waiter* spent
+            # blocked on someone else's compute; compute/serialize are the
+            # owner's own time, split so a slow query and slow JSON+gzip show
+            # up as different problems rather than one blended number.
+            "queue_delay_seconds": 0.0, "compute_seconds": 0.0,
+            "serialize_seconds": 0.0,
         }
         # versioned key -> (value, expiry). OrderedDict gives the LRU ordering:
         # move_to_end on use, popitem(last=False) drops the coldest.
@@ -139,6 +169,76 @@ class InProcessCache:
                 self._inflight.pop(vkey, None)
                 future.set_result(value)
             return value
+        except BaseException as exc:
+            with self._lock:
+                self._metrics["failures"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_exception(exc)
+            raise
+
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        """`get_or_compute`, but the thing cached is `encode(compute())`.
+
+        A public API response is JSON-serialized and (sometimes) gzipped on
+        every request today, hit or miss -- pure waste on a hit, since the
+        bytes are identical every time the underlying payload is. Caching the
+        encoded bytes instead of the raw payload removes that: `encode` never
+        runs again until the version bumps or the TTL lapses, same as
+        `compute`. Kept as a second method rather than folding into
+        `get_or_compute` because the two steps are timed separately (see the
+        metrics comment on `_metrics`), which only makes sense when the caller
+        hands over both a compute and an encode step explicitly.
+        """
+        now = self._clock()
+        owner = False
+        wait_start = now
+        with self._lock:
+            version = self._version
+            vkey = f"{version}:{key}"
+            hit = self._store.get(vkey)
+            if hit is not None and hit[1] > now:
+                self._store.move_to_end(vkey)
+                self._metrics["hits"] += 1
+                return hit[0]  # type: ignore[return-value]
+            self._store.pop(vkey, None)
+
+            future = self._inflight.get(vkey)
+            if future is None:
+                future = Future()
+                self._inflight[vkey] = future
+                owner = True
+                self._metrics["misses"] += 1
+                self._metrics["computes"] += 1
+            else:
+                self._metrics["waiters"] += 1
+
+        if not owner:
+            result = future.result()  # type: ignore[assignment]
+            with self._lock:
+                self._metrics["queue_delay_seconds"] += max(0.0, self._clock() - wait_start)
+            return result  # type: ignore[return-value]
+
+        try:
+            compute_start = self._clock()
+            payload = compute()
+            compute_elapsed = self._clock() - compute_start
+            serialize_start = self._clock()
+            encoded = encode(payload)
+            serialize_elapsed = self._clock() - serialize_start
+            with self._lock:
+                self._metrics["compute_seconds"] += compute_elapsed
+                self._metrics["serialize_seconds"] += serialize_elapsed
+                if version == self._version:
+                    self._store[vkey] = (encoded, self._clock() + max(0.0, ttl))
+                    self._store.move_to_end(vkey)
+                    while len(self._store) > self._max:
+                        self._store.popitem(last=False)
+                        self._metrics["evictions"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_result(encoded)
+            return encoded
         except BaseException as exc:
             with self._lock:
                 self._metrics["failures"] += 1

@@ -294,3 +294,40 @@
     name: sectortrace-backup.timer
     enabled: true
     state: started
+
+- name: Install the archive-audit systemd units and timers
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-archive-audit.service
+    - sectortrace-archive-audit.timer
+    - sectortrace-archive-audit-full.service
+    - sectortrace-archive-audit-full.timer
+  notify: Reload systemd
+
+- name: Enable and start the archive-audit timers
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sectortrace-archive-audit.timer
+    - sectortrace-archive-audit-full.timer
+
+- name: Install the PostgreSQL maintenance-telemetry systemd unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-pg-telemetry.service
+    - sectortrace-pg-telemetry.timer
+  notify: Reload systemd
+
+- name: Enable and start the PostgreSQL maintenance-telemetry timer
+  ansible.builtin.service:
+    name: sectortrace-pg-telemetry.timer
+    enabled: true
+    state: started

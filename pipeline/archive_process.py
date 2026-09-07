@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pipeline import quarantine
 from pipeline.archive import Archive, ArchiveError
 from pipeline.pdftext import page_texts
 
@@ -164,10 +165,23 @@ def process_archive(conn, settings, archive: Archive, *, source_system: str | No
         mime_type = mimetypes.guess_type(logical)[0] or "application/octet-stream"
         now = _now()
         try:
-            body = archive.read(logical)
-            actual = hashlib.sha256(body).hexdigest()
-            if actual != sha:
-                raise ArchiveError(f"archive hash mismatch for {logical}: {actual}")
+            try:
+                body = archive.read(logical)
+            except ArchiveError as exc:
+                # Both backends' `read()` re-hash and refuse to return a
+                # mismatched body before this line ever sees it, so this is
+                # the only place a mismatch is actually observable. Recorded
+                # here so it is listable/retryable (migration 0103), not just
+                # a line in this run's failed count. `run_id` below is
+                # archive_extraction_runs' own uuid4, unrelated to
+                # run_ledger's id space, so it goes in the payload rather
+                # than quarantine's run_id column.
+                quarantine.quarantine(
+                    conn, kind="archive_mismatch", module="archive_process",
+                    item_identity=logical, failure_class="sha256_mismatch",
+                    reason=str(exc), input_sha256=sha,
+                    payload={"source_system": source, "extraction_run_id": run_id})
+                raise
             _upsert_object(conn, object_id, source, sha, logical, mime_type, len(body), now)
             existing = conn.execute(
                 "SELECT extraction_id FROM archive_extractions "

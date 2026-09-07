@@ -216,13 +216,13 @@ BANNER
     fi
 
     echo
-    echo "--- Serve the generated frontend -------------------------------"
-    echo "The generated public and admin apps use the existing Python"
-    echo "server and APIs. Node is needed only while building the image."
+    echo "--- Serve the generated public frontend ------------------------"
+    echo "The public portal uses the existing Python server and APIs."
+    echo "Admin has its own setting. Node is needed only for the build."
     if [ -n "$FRONTEND_OVERRIDE" ]; then
         serve_nuxt="$FRONTEND_OVERRIDE"
         echo "Using the frontend choice supplied on the command line."
-    elif ! ask_yes_no "Serve the generated frontend on this box?" "y"; then
+    elif ! ask_yes_no "Serve the generated public frontend on this box?" "y"; then
         serve_nuxt="false"
     fi
 
@@ -577,6 +577,7 @@ mirror_role: $(yaml_quote "$mirror_role")
 deploy_git_branch: $(yaml_quote "$deploy_git_branch")
 mirror_recurring_sync_enabled: $recurring_sync
 serve_nuxt: $serve_nuxt
+admin_ui_variant: nuxt
 
 mirror_source_label: $(yaml_quote "$source_label")
 mirror_sync_mode: $(yaml_quote "$sync_mode")

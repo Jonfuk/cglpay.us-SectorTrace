@@ -113,6 +113,7 @@ runner and durable run ledger as the CLI and web operator UI.
 ./start.sh export geojson    # contracts / CQC locations / treatment / PFD as separate layers
 ./start.sh export echarts    # pre-shaped dashboard series, each carrying source and caveats
 ./start.sh export docs       # regenerate docs/DATA_DICTIONARY.md from the live schema
+./start.sh export ndtms      # stream Power BI, ViewIt archive, and monthly evidence
 ```
 
 `./start.sh` (Linux / macOS / WSL / Git Bash) and `start.cmd` (Windows) take

@@ -71,9 +71,9 @@ things a mirror never does:
   app image, discarding any change made directly on the box. This box always
   runs the tip of the branch you named; there is no separate `git pull` step
   to remember, unlike a `dr_mirror`'s "Redeploying" section below.
-- **Whether to serve the generated frontend.** Both mirror modes now default
+- **Whether to serve the generated public frontend.** Both mirror modes now default
   to `serve_nuxt: true`. That renders `SERVE_NUXT=true` into the app's `.env`,
-  so `/` and `/admin` use the generated Nuxt apps while `/api` remains on the
+  so `/` uses the generated Nuxt portal while `/api` remains on the
   Python server. Node is used only in the Docker build stage. Existing local
   settings still take precedence over the tracked default.
 
@@ -84,17 +84,26 @@ things a mirror never does:
   the warehouse. The ordinary playbook still performs its configured build
   and deployment tasks.
 
-  `./ansible-mirror.sh --legacy-frontend` persists the serving rollback through
+  `./ansible-mirror.sh --legacy-frontend` persists the public serving rollback through
   the same path. On an already configured box, `--check` can accompany either
   option and does not persist the choice. Initial setup and `--reconfigure`
   still write the wizard's configuration. Conflicting enable and rollback
   flags are refused.
 
-  Before restarting the app, the playbook checks its effective flag and the
-  generated public/admin entry points, SPA fallbacks and referenced scripts
-  and stylesheets inside the built image. A conflicting `SERVE_NUXT` in
+  Before restarting the app, the playbook checks its effective public and
+  admin choices. For each enabled generated app, it checks entry points,
+  SPA fallbacks and referenced scripts and stylesheets inside the built image.
+  A conflicting `SERVE_NUXT` or `ADMIN_UI_VARIANT` in
   `.env.merge` causes a visible failure instead of silently serving the old
   portal. This preflight does not replace browser and accessibility testing.
+- **The `/admin` workspace is enabled independently.** The role renders
+  `ADMIN_UI_VARIANT=nuxt` for both beta and disaster-recovery mirrors, and the
+  Docker build copies `frontend/admin/.output/public` into the app image. This
+  means every playbook run deploys the current Nuxt operator interface at
+  `/admin`, even when the public portal remains legacy. To roll back only the
+  operator interface, set `admin_ui_variant: legacy` in
+  `group_vars/all/zz-local.yml` and re-run the playbook. Set it back to `nuxt`
+  to reactivate the generated interface.
 - **Whether to reseed nightly too.** Default no. The three "how does the
   warehouse get here" sync paths below (snapshot / tunnel / URL) still apply
   — a beta box seeds from the same sources a mirror would — but by default
