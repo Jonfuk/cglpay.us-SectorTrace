@@ -28,6 +28,7 @@ const nodes = computed<PathNode[]>(() => data.value?.nodes ?? [])
 <template>
   <section class="space-y-6">
     <h1 class="text-2xl font-semibold">Pathfinder</h1>
+    <StConnectionsNav />
     <p class="opacity-70 max-w-2xl text-sm">
       The shortest verified path between two entities. Only confirmed edges are
       followed — a path is a chain of verified relationships, not a measure of

@@ -31,6 +31,7 @@ const results = computed<CooccurrenceRecord[]>(() => data.value?.results ?? [])
   <section class="space-y-6">
     <div class="space-y-2">
       <h1 class="text-2xl font-semibold">Co-occurrence</h1>
+      <StConnectionsNav />
       <p class="opacity-70 max-w-2xl">
         Records that name two or more selected entities together, with the exact
         passage. Appearing together in a record is location, not an asserted

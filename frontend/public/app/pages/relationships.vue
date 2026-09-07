@@ -1,128 +1,72 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { Column } from '~/components/StEvidenceTable.vue'
-import type { RelationshipEdge, RelationshipsResponse } from '~/types/api'
-
-// Relationships route. The entity relationship neighbourhood for a chosen
-// centre (an authority or provider). Relationships carry dated evidence; the
-// exact edge semantics are preserved (no aggregation into a single tie).
-// Parity target: legacy `public/js/pages/relationships.js`.
+import type { ConnectionPayload } from '~/types/connections'
+import { connectionName, connectionNode, connectionReferences, connectionText } from '~/lib/connections'
+import { downloadEvidenceCsv, downloadEvidenceJson } from '~/lib/evidence-export'
 const api = usePublicApi()
+const route = useRoute()
 const filters = useFilterState()
-
-interface EntityChoice { ons_code?: string | null; provider_key?: string | null; name?: string | null; canonical_name?: string | null }
-interface RelationshipDetail { timeline?: Array<Record<string, unknown>>; caveat?: string | null; truncated?: boolean }
-
-const { data: choices } = await useAsyncData('relationship-choices', async () => {
-  const [authorityData, providerData] = await Promise.all([
-    api.get<{ authorities?: EntityChoice[] }>('/authorities'),
-    api.providers(),
-  ])
-  return { authorities: authorityData.authorities ?? [], providers: providerData.providers ?? [] }
-}, { default: () => ({ authorities: [], providers: [] }) })
-
-const { data, pending, error } = await useDataRoute<RelationshipsResponse>(
-  'public-relationships',
-  (f) => api.relationships({ query: f }),
-)
-
-const edges = computed<RelationshipEdge[]>(() => data.value?.edges ?? [])
-const neighbours = computed(() => data.value?.neighbours ?? [])
-const center = computed(() => data.value?.center ?? {})
-const nodeNames = computed(() => new Map([
-  [String(center.value.entity_id ?? ''), String(center.value.canonical_name ?? '—')],
-  ...neighbours.value.map((node) => [String(node.entity_id ?? ''), String(node.canonical_name ?? '—')] as const),
-]))
-const displayEdges = computed(() => edges.value.map((edge) => ({
-  ...edge,
-  subject_name: nodeNames.value.get(String(edge.subject_entity_id)) ?? edge.subject_entity_id,
-  object_name: nodeNames.value.get(String(edge.object_entity_id)) ?? edge.object_entity_id,
-})))
-const details = ref<Record<string, RelationshipDetail>>({})
-const detailLoading = ref<string | null>(null)
-
-function detailFor(id: string | null): RelationshipDetail | null {
-  return id ? details.value[id] ?? null : null
+const notebook = useNotebook()
+const get = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
+const query = computed(() => ({ ons_code: get('ons_code') || undefined, provider_key: get('provider_key') || undefined }))
+const chosen = computed(() => Boolean(query.value.ons_code || query.value.provider_key))
+const invalid = computed(() => query.value.ons_code && query.value.provider_key ? 'This view needs one centre. Choose an authority or a provider to resolve the mixed saved selection.' : query.value.ons_code && !/^[A-Z]\d{8}$/.test(query.value.ons_code) ? 'The authority identifier is not a supported ONS code.' : '')
+const signature = computed(() => JSON.stringify(query.value))
+const { data, pending, error, refresh } = await useAsyncData('public-commissioning-neighbourhood', async (_app, { signal }) => {
+  if (!chosen.value || invalid.value) return null
+  const key = signature.value
+  return { key, response: await api.get<ConnectionPayload>('/relationships', { query: query.value, signal }) }
+}, { watch: [signature] })
+const current = computed(() => !pending.value && !error.value && data.value?.key === signature.value ? data.value.response : null)
+const edges = computed(() => Array.isArray(current.value?.edges) ? current.value.edges : null)
+const nodes = computed(() => [...(current.value?.center ? [current.value.center] : []), ...(Array.isArray(current.value?.neighbours) ? current.value.neighbours : [])])
+const candidates = computed(() => get('relationship_id') ? (edges.value ?? []).filter(edge => edge.relationship_id === get('relationship_id')) : [])
+const selected = computed(() => candidates.value.length === 1 ? candidates.value[0] : undefined)
+const selectedNode = computed(() => connectionNode(nodes.value, get('node')))
+const selectionConflict = computed(() => Boolean(get('relationship_id') && get('node')))
+const hasInspector = computed(() => Boolean(get('relationship_id') || get('node')))
+const name = (id: string | null | undefined) => connectionName(nodes.value, id)
+const offsetFor = (key: string) => { const value = Number(get(key)); return Number.isSafeInteger(value) && value >= 0 ? value : 0 }
+const offset = computed(() => offsetFor('offset'))
+const diagramOffset = computed(() => offsetFor('diagram_offset'))
+const displayed = computed(() => (edges.value ?? []).slice(offset.value, offset.value + 25))
+const diagramRows = computed(() => (edges.value ?? []).slice(diagramOffset.value, diagramOffset.value + 12))
+const wide = ref(false)
+let media: MediaQueryList | undefined
+function responsive() { wide.value = media?.matches ?? false }
+onMounted(() => { media = matchMedia('(min-width: 900px)'); responsive(); media.addEventListener('change', responsive) })
+onBeforeUnmount(() => media?.removeEventListener('change', responsive))
+const view = computed(() => get('view') || (wide.value ? 'diagram' : 'data'))
+const status = ref('')
+let trigger: HTMLElement | SVGElement | null = null
+let update = Promise.resolve()
+function centre(value: { ons_code?: string; provider_key?: string }) {
+  const next = update.then(() => filters.setAll({ ...filters.all(), ons_code: value.ons_code, provider_key: value.provider_key, relationship_id: undefined, node: undefined, offset: undefined, diagram_offset: undefined, timeline_offset: undefined }))
+  update = next.catch(() => {})
+  return next
 }
-function detailCaveat(id: string | null): string | null | undefined { return detailFor(id)?.caveat }
-function detailTruncated(id: string | null): boolean { return Boolean(detailFor(id)?.truncated) }
-function detailTimeline(id: string | null): Array<Record<string, unknown>> { return detailFor(id)?.timeline ?? [] }
-
-const selectedAuthority = computed(() => String(filters.get('ons_code') ?? ''))
-const selectedProvider = computed(() => String(filters.get('provider_key') ?? ''))
-
-async function selectAuthority(value: string): Promise<void> {
-  await filters.setAll(value ? { ons_code: value } : {})
+async function inspect(id: string, event: Event, node = false) { trigger = event.currentTarget as HTMLElement | SVGElement; await filters.setAll({ ...filters.all(), relationship_id: node ? undefined : id, node: node ? id : undefined, timeline_offset: undefined }); await nextTick(); document.querySelector<HTMLElement>('.st-inspector-heading')?.focus() }
+async function close() { await filters.setAll({ ...filters.all(), relationship_id: undefined, node: undefined, timeline_offset: undefined }); await nextTick(); if (trigger?.isConnected) trigger.focus() }
+function scope(kind: string) { return { scope: kind, endpoint: '/api/v1/relationships', request_filters: query.value, predicate: 'AWARDED_TO', predicate_basis: 'This endpoint selects AWARDED_TO relationships only.', local_offset: offset.value, diagram_offset: diagramOffset.value, returned_edges: edges.value?.length ?? null, retained_view: `#${route.fullPath}`, caveat: current.value?.caveat ?? null, limitations: 'Per-edge derivation type and payload hash are not returned. Graph identifiers are not public provider keys or ONS codes. Validity dates do not establish current service delivery.' } }
+const annotation = computed(() => `Source: /api/v1/relationships. AWARDED_TO edges only. Diagram group ${diagramRows.value.length} of ${edges.value?.length ?? 'unknown'} returned edges, offset ${diagramOffset.value}. Filters ${JSON.stringify(query.value)}. ${current.value?.caveat ?? ''} ${scope('diagram').limitations}\n${connectionReferences(diagramRows.value, nodes.value)}\nView ${import.meta.client ? window.location.origin + window.location.pathname : ''}#${route.fullPath}.`)
+function download(kind: 'json' | 'csv' | 'references') {
+  if (kind === 'csv') downloadEvidenceCsv('commissioning-displayed-edges', displayed.value)
+  else if (kind === 'json') downloadEvidenceJson('commissioning-displayed-edges', displayed.value, scope('displayed-data-page'))
+  else downloadEvidenceJson('commissioning-returned-references', [{ center: current.value?.center ?? null, neighbours: current.value?.neighbours ?? null, edges: edges.value }], scope('returned-neighbourhood-reference-manifest'))
 }
-async function selectProvider(value: string): Promise<void> {
-  await filters.setAll(value ? { provider_key: value } : {})
-}
-async function loadDetail(id: string | null): Promise<void> {
-  if (!id || details.value[id]) return
-  detailLoading.value = id
-  try { details.value[id] = await api.get<RelationshipDetail>(`/relationships/${id}`) }
-  finally { detailLoading.value = null }
-}
-
-const columns: Column<RelationshipEdge>[] = [
-  { key: 'subject_name', label: 'Subject' },
-  { key: 'object_name', label: 'Object' },
-  { key: 'valid_from', label: 'From', mono: true },
-  { key: 'valid_to', label: 'To', mono: true },
-  { key: 'confidence', label: 'Confidence' },
-  { key: 'source_url', label: 'Source', link: true },
-]
-
-useHead({ title: 'SectorTrace — Relationships' })
+function save() { const record = get('node') ? selectedNode.value : selected.value; if (record) status.value = notebook.add({ title: get('node') ? `Graph entity: ${name(get('node'))}` : `Commissioning relationship ${get('relationship_id')}`, href: `#${route.fullPath}`, note: JSON.stringify({ ...scope('selected-returned-record'), record }, null, 2) }) ? 'Connection reference saved to this browser’s notebook.' : 'This browser could not save the reference.' }
+watch(() => [get('relationship_id'), get('node')], () => { status.value = '' })
+useHead({ title: 'Commissioning connections · SectorTrace' })
 </script>
-
 <template>
-  <section class="space-y-6">
-    <div class="space-y-2">
-      <h1 class="text-2xl font-semibold">Relationships</h1>
-      <p class="opacity-70 max-w-2xl">
-        The dated relationships around an entity. Each edge keeps its own
-        evidence and validity window; nothing is collapsed into a single tie.
-      </p>
-    </div>
-
-    <div v-if="pending" class="text-sm opacity-60">Loading relationships…</div>
-    <StEmptyState v-else-if="error" variant="unavailable" />
-    <template v-else>
-      <UCard>
-        <template #header><span class="text-sm font-medium">Choose an authority or provider</span></template>
-        <div class="flex flex-wrap gap-4 items-end">
-          <label class="text-sm grid gap-1"><span class="opacity-70">Authority</span><select :value="selectedAuthority" class="rounded border border-black/15 dark:border-white/15 bg-transparent px-2 py-1" @change="selectAuthority(($event.target as HTMLSelectElement).value)"><option value="">Choose an authority…</option><option v-for="item in choices.authorities" :key="String(item.ons_code ?? '')" :value="item.ons_code ?? ''">{{ item.name }} · {{ item.ons_code }}</option></select></label>
-          <label class="text-sm grid gap-1"><span class="opacity-70">Provider</span><select :value="selectedProvider" class="rounded border border-black/15 dark:border-white/15 bg-transparent px-2 py-1" @change="selectProvider(($event.target as HTMLSelectElement).value)"><option value="">Choose a provider…</option><option v-for="item in choices.providers" :key="String(item.provider_key ?? '')" :value="item.provider_key ?? ''">{{ item.canonical_name }} · {{ item.provider_key }}</option></select></label>
-          <button v-if="selectedAuthority || selectedProvider" type="button" class="text-sm underline" @click="filters.setAll({})">Clear</button>
-        </div>
-      </UCard>
-      <StEmptyState
-        v-if="!edges.length"
-        title="No relationships to show"
-        message="Choose an entity (via a provider or authority link) to see its relationship neighbourhood."
-      />
-      <UCard v-else>
-        <template #header>
-          <span class="text-sm font-medium">
-            {{ edges.length }} edge(s), {{ neighbours.length }} neighbour(s)
-          </span>
-        </template>
-        <StEvidenceTable :columns="columns" :rows="displayEdges" row-key="relationship_id" />
-        <div class="mt-4 space-y-2 border-t border-black/10 dark:border-white/10 pt-3">
-          <details v-for="edge in edges" :key="`detail-${edge.relationship_id}`" @toggle="loadDetail(edge.relationship_id)">
-            <summary class="cursor-pointer text-sm">Show dated contract events for {{ nodeNames.get(String(edge.subject_entity_id)) }} → {{ nodeNames.get(String(edge.object_entity_id)) }}</summary>
-            <div class="mt-2 text-sm">
-              <span v-if="detailLoading === edge.relationship_id" class="opacity-60">Loading events…</span>
-              <template v-else-if="detailFor(edge.relationship_id)">
-                <StCaveat :text="detailCaveat(edge.relationship_id)" />
-                <p v-if="detailTruncated(edge.relationship_id)" class="opacity-70">Showing a bounded timeline; use Contracts for the complete notice set.</p>
-                <ul class="list-disc pl-5"><li v-for="(event, index) in detailTimeline(edge.relationship_id)" :key="index">{{ event.date ?? event.valid_from ?? 'Undated' }} · {{ event.title ?? event.notice_id ?? 'Contract event' }}<StLink v-if="event.source_url" :href="String(event.source_url)" /></li></ul>
-              </template>
-            </div>
-          </details>
-        </div>
-      </UCard>
-    </template>
+  <section class="space-y-6"><header class="st-page-header"><p class="atlas-eyebrow">Connections</p><h1>Commissioning connections</h1><p>Authority-to-provider relationships supported by procurement evidence. Their dates do not establish current service delivery.</p></header><StConnectionsNav />
+    <div class="flex flex-wrap gap-4"><StEntityPicker kind="authority" :model-value="get('ons_code')" @update:model-value="centre({ ons_code: $event || undefined })" /><StEntityPicker kind="provider" :model-value="get('provider_key')" @update:model-value="centre({ provider_key: $event || undefined })" /><button v-if="chosen" type="button" class="atlas-button" @click="centre({})">Clear centre</button></div><p v-if="get('year_from') || get('year_to')" class="atlas-footnote">Retained year bounds do not filter this endpoint. Each relationship retains its supplied validity dates.</p><p v-if="invalid" role="status">{{ invalid }}</p><p v-else-if="!chosen" role="status">Choose an authority or provider to inspect its commissioning neighbourhood.</p>
+    <StEvidenceState v-else :pending="pending" :error="error" @retry="refresh"><template v-if="current"><h2>{{ current.center?.canonical_name ?? 'Centre name not supplied' }}</h2><p v-if="current.center?.entity_id === null" class="atlas-caveat">No graph entity is held for the selected organisation. This does not establish an absence of commissioning activity.</p><p class="atlas-caveat">{{ current.caveat ?? 'No source-specific caveat was supplied.' }}</p><p class="atlas-footnote">Only AWARDED_TO records are returned here. The response includes source facts and derived relationships but does not identify each row’s derivation type. Ownership, co-mentions and extracted claims are outside this view.</p><p v-if="!Array.isArray(current.neighbours)" role="status">The neighbour array was not supplied. Missing node identities cannot be reconstructed from edge identifiers.</p>
+      <p v-if="!edges" role="status">The relationship array was not supplied. This is not an empty neighbourhood.</p><template v-else><p>{{ edges.length }} returned relationship records. Repeated dated edges remain separate.</p><div class="flex flex-wrap gap-2" role="group" aria-label="Commissioning presentation"><button type="button" class="atlas-button" :aria-pressed="view === 'diagram'" @click="filters.set('view', 'diagram')">Diagram</button><button type="button" class="atlas-button" :aria-pressed="view === 'data'" @click="filters.set('view', 'data')">Data</button></div><p v-if="!['diagram', 'data'].includes(view)" role="status">The saved presentation is not supported. Choose Diagram or Data.</p><div class="flex flex-wrap gap-2"><button type="button" class="atlas-button" @click="download('json')">Download displayed edges JSON</button><button type="button" class="atlas-button" @click="download('csv')">Download displayed edges CSV</button><button type="button" class="atlas-button" @click="download('references')">Download neighbourhood reference manifest</button></div><p class="atlas-footnote">Displayed-edge downloads cover the data page below. The manifest retains the complete returned neighbourhood, source caveat and missing metadata. Diagram exports identify their own displayed group.</p>
+      <div class="st-directory-workspace" :class="{ 'has-inspector': hasInspector }"><div class="min-w-0 space-y-4"><template v-if="view === 'diagram'"><NuxtErrorBoundary><LazyStCommissioningDiagram :edges="diagramRows" :nodes="nodes" :selected="get('relationship_id')" :annotation="annotation" @inspect="(id, event) => inspect(id, event)" @node="(id, event) => inspect(id, event, true)" /><template #error="{ clearError }"><p role="status">The diagram could not load. The edge data and inspectors remain available below.</p><button type="button" class="atlas-button" @click="clearError()">Retry diagram</button></template></NuxtErrorBoundary><nav class="flex flex-wrap gap-2" aria-label="Diagram groups"><span class="atlas-footnote">{{ diagramRows.length }} edges in this group, starting at returned offset {{ diagramOffset }}.</span><button type="button" class="atlas-button" :disabled="!diagramOffset" @click="filters.set('diagram_offset', String(Math.max(0, diagramOffset - 12)))">Previous diagram group</button><button type="button" class="atlas-button" :disabled="diagramOffset + 12 >= edges.length" @click="filters.set('diagram_offset', String(diagramOffset + 12))">Next diagram group</button></nav></template>
+      <div v-if="displayed.length" class="overflow-x-auto" role="region" aria-label="Commissioning edge data" tabindex="0"><table class="w-full text-sm"><caption class="text-left atlas-footnote">{{ displayed.length }} edges on this data page of {{ edges.length }} returned. Source-defined validity dates remain unchanged.</caption><thead><tr><th scope="col">Authority / subject</th><th scope="col">Provider / object</th><th scope="col">Validity</th><th scope="col">Evidence</th></tr></thead><tbody><tr v-for="(edge, index) in displayed" :key="`${edge.relationship_id}:${index}`"><td><button v-if="edge.subject_entity_id" type="button" class="atlas-button" @click="inspect(edge.subject_entity_id, $event, true)">{{ name(edge.subject_entity_id) }}</button><span v-else>Identifier not supplied</span></td><td><button v-if="edge.object_entity_id" type="button" class="atlas-button" @click="inspect(edge.object_entity_id, $event, true)">{{ name(edge.object_entity_id) }}</button><span v-else>Identifier not supplied</span></td><td>From: {{ edge.valid_from ?? 'not supplied' }}<br>To: {{ edge.valid_to ?? 'not supplied' }}</td><td><p>{{ edge.relationship_id ?? 'Relationship identifier not supplied' }}</p><p>Confidence: {{ edge.confidence ?? 'not supplied' }}</p><button v-if="edge.relationship_id" type="button" class="atlas-button" :aria-label="`Inspect relationship ${edge.relationship_id}, displayed row ${index + 1}`" @click="inspect(edge.relationship_id, $event)">Inspect relationship</button></td></tr></tbody></table></div><StEvidenceState v-else empty :empty-title="offset ? 'No edges on this display page' : 'No commissioning edges returned'" message="This does not establish that no commissioning activity occurred. Choose another centre or return to the first data page." /><nav class="flex flex-wrap gap-2" aria-label="Edge data pages"><button type="button" class="atlas-button" :disabled="!offset" @click="filters.set('offset', String(Math.max(0, offset - 25)))">Previous data page</button><button type="button" class="atlas-button" :disabled="offset + 25 >= edges.length" @click="filters.set('offset', String(offset + 25))">Next data page</button><button v-if="offset" type="button" class="atlas-button" @click="filters.set('offset', undefined)">First data page</button></nav></div>
+      <StInspector v-if="hasInspector" :title="get('node') ? 'Graph entity' : `Relationship ${get('relationship_id')}`" @close="close"><p v-if="selectionConflict" role="status">The link requests both a graph entity and a relationship. Close this inspection and select one record.</p><template v-else-if="get('node')"><template v-if="selectedNode"><h3>{{ selectedNode.canonical_name ?? 'Name not supplied' }}</h3><dl><template v-for="(value, key) in selectedNode" :key="key"><dt>{{ String(key).replaceAll('_', ' ') }}</dt><dd>{{ connectionText(value) }}</dd></template></dl><p class="atlas-footnote">This node response supplies no public provider key, ONS code or source provenance. Inspect a relationship for its evidence and any supplied public identifiers.</p><button type="button" class="atlas-button" @click="save">Save connection reference</button></template><p v-else role="status">The graph identifier does not identify one returned node. Missing or conflicting identities remain unresolved.</p></template><template v-else-if="selected"><h3>{{ name(selected.subject_entity_id) }} awarded to {{ name(selected.object_entity_id) }}</h3><dl><template v-for="(value, key) in selected" :key="key"><dt>{{ String(key).replaceAll('_', ' ') }}</dt><dd>{{ connectionText(value) }}</dd></template></dl><StProvenance :provenance="selected" /><p class="atlas-footnote">The edge response does not supply a payload hash or a per-edge derivation type.</p><button type="button" class="atlas-button" @click="save">Save connection reference</button><LazyStCommissioningDetail :key="get('relationship_id')" :id="get('relationship_id')" @centre="centre" /></template><p v-else role="status">The saved relationship identifier does not identify one edge in this returned neighbourhood. No replacement has been selected.</p><p role="status">{{ status }}</p></StInspector></div>
+      </template></template><p v-else role="status">The commissioning response was not supplied.</p>
+    </StEvidenceState>
   </section>
 </template>
+<style scoped>th, td { text-align: left; padding: 10px; vertical-align: top; min-width: 145px; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; } th, dt { color: var(--text-muted); } dt { margin-top: 10px; font-size: 12px; } dd { overflow-wrap: anywhere; } </style>
