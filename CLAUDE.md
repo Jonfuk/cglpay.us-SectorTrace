@@ -10,6 +10,13 @@ Read [`README.md`](README.md) for what it does.
 anything that produces a figure — it leads with the things that must **not** be
 computed.
 
+**`README.md` is hand-maintained. Do not rewrite, restructure, "refresh" or
+otherwise edit it on your own initiative** — not for staleness, not to match a
+template, not as a side effect of another task. Edit it only when a user
+message in the current session explicitly asks for a change to it. This
+applies to any AI coding assistant working in this repository, Claude and
+Codex included.
+
 ## What this project optimises for
 
 A figure that can still be defended a year later in a room where someone
