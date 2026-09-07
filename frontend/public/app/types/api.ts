@@ -309,12 +309,24 @@ export interface ClaimsResponse {
 /** A CQC location row (`/api/v1/cqc_locations` → `results[]`). */
 export interface CqcLocation {
   location_id: string | null
+  provider_id?: string | null
+  provider_key?: string | null
   location_name: string | null
   provider_name: string | null
   postal_code: string | null
   region: string | null
   registration_status: string | null
+  latitude?: number | null
+  longitude?: number | null
+  local_authority_raw?: string | null
+  local_authority_ons_code?: string | null
+  registration_date?: string | null
+  last_inspection_date?: string | null
   overall_rating: string | null
+  overall_rating_date?: string | null
+  rating_source?: string | null
+  regulated_activities?: string | null
+  service_types?: string | null
   source_url: string | null
   retrieved_at: string | null
   [key: string]: unknown
@@ -404,7 +416,7 @@ export interface ProviderTimelineResponse {
   [key: string]: unknown
 }
 
-/** A coverage-timeline dataset probe (`/api/v1/coverage_timeline` → `datasets[]`). */
+/** A coverage-timeline dataset probe (`/api/v1/coverage_timeline` → `sources[]`). */
 export interface CoverageDataset {
   dataset_id: string
   title: string | null
@@ -417,7 +429,10 @@ export interface CoverageDataset {
 
 export interface CoverageResponse {
   entity: { kind?: string; id?: string | null; name?: string | null } | null
-  datasets: CoverageDataset[]
+  sources: CoverageDataset[]
+  years?: number[]
+  note?: string | null
+  caveat?: string | null
   span?: { min: number; max: number } | null
   [key: string]: unknown
 }
@@ -549,4 +564,6 @@ export interface Provenance {
   source_url?: string | null
   retrieved_at?: string | null
   content_sha256?: string | null
+  payload_sha256?: string | null
+  published_at?: string | null
 }

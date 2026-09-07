@@ -1,4 +1,5 @@
 import { Transport, type TransportOptions } from '~/lib/transport'
+import { publicQuery } from '~/lib/public-query'
 import type {
   AuthorityResponse,
   CalendarResponse,
@@ -19,7 +20,6 @@ import type {
   PathResponse,
   PayResponse,
   PfdResponse,
-  ProviderRow,
   ProvidersResponse,
   ProviderTimelineResponse,
   RelationshipsResponse,
@@ -104,7 +104,7 @@ export interface PublicApi {
 export function usePublicApi(): PublicApi {
   const t = transport()
   const get = <T>(path: string, options?: TransportOptions): Promise<T> =>
-    t.getJson<T>(`/api/v1${path}`, options)
+    t.getJson<T>(`/api/v1${path}`, { ...options, query: publicQuery(path, options?.query) })
 
   return {
     get,

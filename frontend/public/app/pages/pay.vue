@@ -1,75 +1,56 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
-import type { PayResponse, StatutoryPayRate } from '~/types/api'
-
-type PayRow = Record<string, unknown>
-type PayPayload = PayResponse & {
-  charity_wage_series?: PayRow[]
-  nhs_job_adverts?: PayRow[]
-  provider_published_pay?: PayRow[]
-  living_wage_accreditations?: PayRow[]
-  gender_pay_gap_reports?: PayRow[]
-  workforce_census?: PayRow[]
-  ons_ashe_observations?: PayRow[]
-  skills_for_care_estimates?: PayRow[]
-  source_groups?: Array<{ key: string; label: string; count: number }>
-  filters_available?: { roles?: string[]; pay_units?: string[] }
-}
-
-// Pay is a set of published signals, not a payroll dataset. The original page
-// exposed eight evidence arrays; the first Nuxt pass rendered only statutory
-// rates. Keep each source in its own panel so no unlike values are averaged or
-// converted into a misleading pay score.
-const api = usePublicApi()
+import { payLenses, payQuery, payRows, type PayPayload, type PayRow } from '~/lib/pay-lenses'
 const filters = useFilterState()
-const source = computed({ get: () => String(filters.get('source') ?? ''), set: (v: string) => { void filters.set('source', v || undefined) } })
-const role = computed({ get: () => String(filters.get('role') ?? ''), set: (v: string) => { void filters.set('role', v || undefined) } })
-const payUnit = computed({ get: () => String(filters.get('pay_unit') ?? ''), set: (v: string) => { void filters.set('pay_unit', v || undefined) } })
-
-const { data, pending, error } = await useDataRoute<PayResponse>('public-pay', (f) => api.pay({ query: f }))
-const payload = computed(() => (data.value ?? null) as PayPayload | null)
+const api = usePublicApi()
+const get = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
+const active = computed(() => payLenses.find(lens => lens.key === get('lens')))
+const sourceKeys = new Set(payLenses.map(lens => lens.group))
+const invalid = computed(() => Boolean((get('lens') && !active.value) || (get('source') && !sourceKeys.has(get('source')))))
+const retained = computed(() => Object.fromEntries(['source', 'provider_key', 'year_from', 'year_to', 'role', 'pay_unit'].map(key => [key, get(key) || undefined])))
+const query = computed(() => payQuery(active.value, retained.value))
+const invalidYear = computed(() => active.value?.years && (['year_from', 'year_to'].some(key => get(key) && !/^\d{4}$/.test(get(key))) || Boolean(get('year_from') && get('year_to') && get('year_from') > get('year_to'))))
+const invalidUnit = computed(() => active.value?.unit && get('pay_unit') && !['hourly', 'annual', 'other'].includes(get('pay_unit')))
+const signature = computed(() => `${JSON.stringify(query.value)}:${invalid.value}:${Boolean(invalidYear.value)}:${Boolean(invalidUnit.value)}`)
+const { data, pending, error, refresh } = await useAsyncData('public-pay-questions', async (_app, { signal }) => {
+  if (invalid.value || invalidYear.value || invalidUnit.value) return null
+  const key = signature.value
+  return { key, payload: await api.get<PayPayload>('/pay', { query: query.value, signal }) }
+}, { watch: [signature] })
+const payload = computed(() => !pending.value && !error.value && data.value?.key === signature.value ? data.value.payload : null)
 const groups = computed(() => payload.value?.source_groups ?? [])
-const availableRoles = computed(() => payload.value?.filters_available?.roles ?? [])
-
-const rates = computed<StatutoryPayRate[]>(() => payload.value?.statutory_pay_rates ?? [])
-const currentPeriod = computed(() => rates.value[0]?.period_label)
-const currentRates = computed(() => rates.value.filter((row) => row.period_label === currentPeriod.value && row.band_label !== 'Under 18'))
-const currentRateRows = computed<PayRow[]>(() => currentRates.value as unknown as PayRow[])
-const genericRows = (key: keyof PayPayload): PayRow[] => (payload.value?.[key] as PayRow[] | undefined) ?? []
-const cols = (keys: Array<[string, string, boolean?]>): Column<PayRow>[] => keys.map(([key, label, numeric]) => ({ key, label, numeric }))
-const caveats = computed(() => Object.entries(payload.value?.caveats ?? {}).filter(([, text]) => Boolean(text)))
-
-function value(row: PayRow, key: string): string {
-  const item = row[key]
-  return item === null || item === undefined || item === '' ? '—' : String(item)
+const available = (group: string, array: string) => groups.value.some(item => item.key === group && (!item.arrays || item.arrays.includes(array)))
+const questions = computed(() => get('source') && !active.value ? payLenses.filter(lens => lens.group === get('source')) : payLenses)
+const observations = computed(() => active.value ? payRows(payload.value, active.value.array) : null)
+const caveats = computed(() => Object.fromEntries((active.value?.caveats ?? []).map(key => [key, payload.value?.caveats?.[key] ?? null])))
+let update = Promise.resolve()
+function setFilter(key: string, value: string) {
+  const next = update.then(async () => { await filters.setAll({ ...filters.all(), [key]: value || undefined, pay_offset: undefined, record: undefined }); await nextTick() })
+  update = next.catch(() => {})
+  return next
 }
-function money(row: PayRow, key: string): string {
-  const item = row[key]
-  return typeof item === 'number' ? item.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }) : value(row, key)
-}
-function clearFilters() { source.value = ''; role.value = ''; payUnit.value = '' }
-
-useHead({ title: 'SectorTrace — Pay & benchmarks' })
+function choose(key: string) { const lens = payLenses.find(item => item.key === key); return filters.setAll({ ...filters.all(), lens: lens?.key, source: lens?.group, record: undefined, pay_offset: undefined }) }
+const repeatRows = computed(() => payRows(payload.value, 'repeat_advertised_roles'))
+const repeatColumns: Column<PayRow>[] = [{ key: 'job_title_normalised', label: 'Normalised role name' }, { key: 'employer_name_raw', label: 'Employer as published' }, { key: 'advert_count', label: 'Grouped adverts', numeric: true }, { key: 'first_posted_date', label: 'First posted' }, { key: 'last_posted_date', label: 'Last posted' }, { key: 'distinct_salary_periods', label: 'Distinct salary periods', numeric: true }, { key: 'job_references', label: 'Source job references' }]
+useHead({ title: 'Pay and workforce · SectorTrace' })
 </script>
-
 <template>
-  <section class="atlas-hero"><div><div class="atlas-kicker">Workforce · separate evidence layers</div><h1>Pay</h1><p class="atlas-lede">Explore published pay, advertised roles, statutory floors, and labour-market context. Each source answers a different question, so these figures are not combined into one pay score.</p><details class="atlas-read-first"><summary>How to read pay evidence</summary><p>Charity accounts provide an indicative wage measure; NHS Jobs records advertised vacancies; provider pages record what an organisation published; statutory rates are legal hourly floors.</p><p>None is payroll data. Labour-market benchmarks provide context only, and the portal does not calculate gaps, ratios, or a combined trend from unlike sources.</p></details></div></section>
-  <section v-if="pending" class="atlas-panel p-6">Loading pay evidence…</section>
-  <section v-else-if="error || !payload" class="atlas-panel p-6">Pay evidence is unavailable.</section>
-  <template v-else>
-    <section class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-eyebrow">Pay evidence explorer</div><div class="flex flex-wrap items-end gap-3 mt-3"><label class="text-sm">Source<select v-model="source" class="block mt-1 px-2 py-1"><option value="">All sources</option><option v-for="group in groups" :key="group.key" :value="group.key">{{ group.label }} · {{ group.count }}</option></select></label><label class="text-sm">Role<input v-model="role" list="pay-role-options" class="block mt-1 px-2 py-1" placeholder="Any role"><datalist id="pay-role-options"><option v-for="item in availableRoles" :key="item" :value="item" /></datalist></label><label class="text-sm">Unit<select v-model="payUnit" class="block mt-1 px-2 py-1"><option value="">Any pay unit</option><option v-for="item in (payload.filters_available?.pay_units ?? [])" :key="item" :value="item">{{ item }}</option></select></label><button v-if="source || role || payUnit" type="button" class="atlas-button" @click="clearFilters">Clear filters</button></div><p class="atlas-footnote mt-3">Sources are never combined. Filter state is in the URL and can be shared.</p></section>
-
-    <section v-if="genericRows('charity_wage_series').length" class="atlas-section atlas-panel atlas-panel-body"><h2>Indicative wage from charity accounts</h2><p class="atlas-footnote">Wages and salaries divided by an average employee count. This is not a pay scale, a median salary, or an individual employee’s earnings.</p><StEvidenceTable :columns="cols([['canonical_name', 'Provider'], ['financial_year_end', 'Year'], ['indicative_wage_per_head', 'Per head', true], ['indicative_wage_per_fte', 'Per FTE', true], ['employees_basis', 'Denominator']])" :rows="genericRows('charity_wage_series')" row-key="charity_number" /></section>
-
-    <section v-if="genericRows('nhs_job_adverts').length" class="atlas-section atlas-panel atlas-panel-body"><h2>Advertised roles</h2><p class="atlas-footnote">NHS Jobs figures cover adverts whose employer field matched a known provider name. Providers advertising solely on their own sites are invisible here; every count is a floor.</p><StEvidenceTable :columns="cols([['canonical_name', 'Provider'], ['job_title', 'Role'], ['salary_raw', 'Published salary'], ['contract_type', 'Contract'], ['working_pattern', 'Pattern'], ['posted_date', 'Posted']])" :rows="genericRows('nhs_job_adverts').slice(0, 100)" row-key="job_reference" /></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><h2>Published and statutory pay</h2><p class="atlas-footnote">Statutory rates are published hourly floors. Provider-owned pages and Living Wage checks remain separate records.</p><div v-if="currentRates.length" class="atlas-band"><h3>Current statutory rates</h3><StEvidenceTable :columns="cols([['period_label', 'Period'], ['band_label', 'Band'], ['band_role', 'Role'], ['value_text', 'Published value']])" :rows="currentRateRows" row-key="effective_from" /></div><div v-if="genericRows('provider_published_pay').length" class="atlas-band"><h3>Provider-published pay</h3><StEvidenceTable :columns="cols([['canonical_name', 'Provider'], ['role_title', 'Role'], ['value_text', 'Published value'], ['pay_unit', 'Unit'], ['source_url', 'Source']])" :rows="genericRows('provider_published_pay').slice(0, 100)" row-key="source_url" /></div><div v-if="genericRows('living_wage_accreditations').length" class="atlas-band"><h3>Living Wage Foundation checks</h3><StEvidenceTable :columns="cols([['canonical_name', 'Provider'], ['searched_variant', 'Checked name'], ['accredited', 'Result'], ['retrieved_at', 'Retrieved']])" :rows="genericRows('living_wage_accreditations')" row-key="canonical_name" /></div><div v-if="genericRows('gender_pay_gap_reports').length" class="atlas-band"><h3>Gender pay gap filings</h3><StEvidenceTable :columns="cols([['canonical_name', 'Employer'], ['reporting_year', 'Year'], ['mean_hourly_gap_percent', 'Mean gap %', true], ['median_hourly_gap_percent', 'Median gap %', true]])" :rows="genericRows('gender_pay_gap_reports')" row-key="canonical_name" /></div></section>
-
-    <section v-if="genericRows('workforce_census').length" class="atlas-section atlas-panel atlas-panel-body"><h2>Workforce census</h2><p class="atlas-footnote">Segments and years are shown as published and are not differenced or combined.</p><StEvidenceTable :columns="cols([['census_year', 'Year'], ['metric', 'Metric'], ['workforce_segment', 'Segment'], ['value', 'Value'], ['unit', 'Unit'], ['verified', 'Verified']])" :rows="genericRows('workforce_census')" row-key="metric" /></section>
-
-    <section v-if="genericRows('ons_ashe_observations').length || genericRows('skills_for_care_estimates').length" class="atlas-section atlas-panel atlas-panel-body"><h2>External comparators</h2><p class="atlas-footnote">ASHE and Skills for Care provide labour-market context only. They are not measures of what tracked providers pay.</p><div v-if="genericRows('ons_ashe_observations').length" class="atlas-band"><h3>ONS ASHE observations</h3><StEvidenceTable :columns="cols([['area_name', 'Area'], ['occupation_label', 'Occupation'], ['year', 'Year'], ['hourly_pay', 'Hourly pay', true]])" :rows="genericRows('ons_ashe_observations').slice(0, 100)" row-key="area_code" /></div><div v-if="genericRows('skills_for_care_estimates').length" class="atlas-band"><h3>Skills for Care estimates</h3><StEvidenceTable :columns="cols([['area', 'Area'], ['job_role', 'Role'], ['year', 'Year'], ['hourly_pay', 'Hourly pay', true], ['vacancy_rate', 'Vacancy', true]])" :rows="genericRows('skills_for_care_estimates').slice(0, 100)" row-key="area_code" /></div></section>
-
-    <section v-if="caveats.length" class="atlas-section atlas-panel atlas-panel-body"><h2>How to read these figures</h2><div class="space-y-2"><p v-for="[key, text] in caveats" :key="key" class="atlas-caveat"><span aria-hidden="true">⚠</span> {{ text }}</p></div></section>
-  </template>
+  <section class="space-y-6"><header class="st-page-header"><p class="atlas-eyebrow">Evidence</p><h1>Pay and workforce</h1><p>Choose a question, then read the source’s figures, periods and limitations.</p></header><p class="atlas-caveat">Accounts, advertised offers, statutory rates and workforce estimates describe different populations and periods. They are not combined into a pay score, converted between pay periods or attributed across sources.</p>
+    <div v-if="invalid" role="status" class="atlas-panel atlas-panel-body"><h2>This pay view is not recognised</h2><button type="button" class="atlas-button" @click="filters.setAll({ provider_key: get('provider_key') || undefined })">Choose a supported question</button></div>
+    <template v-else><div v-if="active" class="space-y-3"><button type="button" class="atlas-button" @click="filters.setAll({ ...filters.all(), lens: undefined, source: undefined, record: undefined, pay_offset: undefined })">All pay and workforce questions</button><h2>{{ active.title }}</h2><p>{{ active.description }}</p></div>
+      <section v-if="active" class="atlas-panel atlas-panel-body space-y-3" aria-label="Pay source filters"><div class="st-pay-filters"><StEntityPicker v-if="active.provider" kind="provider" label="Provider" empty-label="All returned providers" :model-value="get('provider_key')" @update:model-value="setFilter('provider_key', $event)" /><template v-if="active.years"><label>Account year from<input type="text" inputmode="numeric" maxlength="4" :value="get('year_from')" @change="setFilter('year_from', ($event.target as HTMLInputElement).value)"></label><label>Account year to<input type="text" inputmode="numeric" maxlength="4" :value="get('year_to')" @change="setFilter('year_to', ($event.target as HTMLInputElement).value)"></label></template><label v-if="active.role">Role or source label contains<input type="search" :value="get('role')" list="pay-source-roles" @change="setFilter('role', ($event.target as HTMLInputElement).value)"><datalist id="pay-source-roles"><option v-for="role in payload?.filters_available?.roles ?? []" :key="role" :value="role" /></datalist></label><label v-if="active.unit">Pay unit<select :value="get('pay_unit')" @change="setFilter('pay_unit', ($event.target as HTMLSelectElement).value)"><option value="">All source units</option><option v-if="get('pay_unit') && !(payload?.filters_available?.pay_units ?? []).includes(get('pay_unit'))" :value="get('pay_unit')">{{ get('pay_unit') }}</option><option v-for="unit in payload?.filters_available?.pay_units ?? []" :key="unit" :value="unit">{{ unit }}</option></select></label></div>
+      <p v-if="!active.provider && get('provider_key')" class="atlas-footnote">The provider selection {{ get('provider_key') }} is retained in this link but does not filter or identify these observations.</p><p v-if="!active.years && (get('year_from') || get('year_to'))" class="atlas-footnote">Account-year bounds are retained for the charity view and do not filter this source.</p><p v-if="(!active.role && get('role')) || (!active.unit && get('pay_unit'))" class="atlas-footnote">Role or pay-unit selections unsupported by this question are retained in the link and are not applied.</p><p v-if="active.role" class="atlas-footnote">Role suggestions come from the current API provider/year scope before role and unit filtering. Suggestions can belong to another source in that response.</p><button type="button" class="atlas-button" @click="filters.setAll({ lens: active.key, source: active.group })">Clear source filters</button></section>
+      <p v-if="invalidYear" role="status">Use four-digit account years, with the first year no later than the last.</p><p v-else-if="invalidUnit" role="status">The pay unit is not recognised. Choose a unit supplied by the source filter.</p>
+      <StEvidenceState v-else :pending="pending" :error="error" @retry="refresh"><template v-if="!active"><p v-if="get('source')" class="atlas-footnote">Questions within the selected source group. <button class="atlas-button" type="button" @click="filters.set('source', undefined)">Show every question</button></p><ul class="st-pay-questions"><li v-for="lens in questions" :key="lens.key"><h2>{{ lens.question }}</h2><p>{{ lens.description }}</p><button class="atlas-button" type="button" :disabled="!available(lens.group, lens.array)" @click="choose(lens.key)">Read {{ lens.title.toLowerCase() }}</button><p v-if="!available(lens.group, lens.array)" class="atlas-footnote">This source group is not supplied by the response.</p></li></ul></template><template v-else-if="payload"><p v-if="!available(active.group, active.array)" role="status">The selected evidence array is not declared in this response’s source groups.</p><p v-else-if="observations === null" role="status">The selected source array was not supplied. This is not an empty dataset.</p><template v-else><StPayRecords :key="active.key" :lens="active" :rows="observations" :query="query" :caveats="caveats" /><section v-if="active.key === 'adverts'" class="space-y-3"><h2>Repeat-advertised-role candidates</h2><p>These groups are candidates for reading the named adverts. They are not a vacancy count or a finding about recruitment. Mixed salary periods are not compared.</p><p v-if="get('pay_unit')" class="atlas-footnote">A pay-unit filter removes these mixed-source-period groups. Clear the unit to read the returned candidates.</p><StEvidenceTable v-else :columns="repeatColumns" :rows="repeatRows" caption="Returned repeat-advertised-role candidates" /><p v-if="!get('pay_unit') && !repeatRows?.length">No candidate groups were returned.</p><p class="atlas-footnote">The grouped response does not supply per-advert URLs, retrieval dates or hashes. Inspect individual adverts for the metadata actually returned.</p></section><StCaveat v-for="(text, key) in caveats" :key="key" :text="text" /></template></template></StEvidenceState>
+    </template>
+  </section>
 </template>
+<style scoped>
+.st-pay-questions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px; }
+.st-pay-questions li { padding: 20px; border: 1px solid var(--border-subtle); background: var(--surface-panel); }
+.st-pay-questions h2 { font-size: 18px; margin-bottom: 12px; }
+.st-pay-questions p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.st-pay-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+.st-pay-filters label { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
+.st-pay-filters input, .st-pay-filters select { min-width: 0; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border-control); border-radius: 4px; }
+</style>

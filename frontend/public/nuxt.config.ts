@@ -16,13 +16,13 @@ export default defineNuxtConfig({
   ssr: false,
   compatibilityDate: '2025-01-01',
 
-  modules: ['@nuxt/ui'],
+  modules: ['@nuxt/ui', '@nuxt/eslint'],
 
   // Public surface is served from the site root. Admin is a separate app.
   app: {
     baseURL: '/',
     head: {
-      htmlAttrs: { lang: 'en' },
+      htmlAttrs: { lang: 'en-GB' },
       title: 'SectorTrace',
     },
   },
@@ -41,6 +41,13 @@ export default defineNuxtConfig({
   },
 
   css: ['~/assets/css/main.css'],
+
+  // Preserve the legacy preference. Nuxt's early theme script is included in
+  // the existing serving CSP hash set, before the client paints its content.
+  colorMode: {
+    preference: 'dark', fallback: 'dark', storageKey: 'sectortrace-theme',
+    dataValue: 'theme', classSuffix: '',
+  },
 
   // Hermetic, origin-only builds. Nuxt UI pulls in @nuxt/fonts, whose default
   // provider chain fetches faces from Google/Bunny/Fontshare/Fontsource CDNs at

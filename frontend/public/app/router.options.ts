@@ -1,20 +1,24 @@
 import type { RouterConfig } from '@nuxt/schema'
 import type { RouteRecordRaw } from 'vue-router'
 
-function flattenContractLifecycle(routes: readonly RouteRecordRaw[]): RouteRecordRaw[] {
-  const contracts = routes.find((route) => route.name === 'contracts')
-  const lifecycle = contracts?.children?.find((route) => route.name === 'contracts-process-ocid')
-  if (!contracts || !lifecycle) return [...routes]
-
-  const withoutNestedLifecycle: RouteRecordRaw[] = routes.map((route) => {
-    if (route !== contracts) return route
-    const { children: _children, ...withoutChildren } = route
-    return withoutChildren as RouteRecordRaw
-  })
-  return [
-    ...withoutNestedLifecycle,
-    { ...lifecycle, path: '/contracts/process/:ocid' },
-  ]
+function flattenStandaloneReaders(routes: readonly RouteRecordRaw[]): RouteRecordRaw[] {
+  let result = [...routes]
+  for (const [parentName, childName, path] of [
+    ['contracts', 'contracts-process-ocid', '/contracts/process/:ocid'],
+    ['documents', 'documents-id', '/documents/:id'],
+  ]) {
+    const parent = result.find(route => route.name === parentName)
+    const child = parent?.children?.find(route => route.name === childName)
+    if (!parent || !child) continue
+    result = result.map(route => {
+      if (route !== parent) return route
+      const { children, ...base } = route
+      const remaining = children?.filter(item => item !== child)
+      return { ...base, ...(remaining?.length ? { children: remaining } : {}) } as RouteRecordRaw
+    })
+    result.push({ ...child, path: path! })
+  }
+  return result
 }
 
 // The legacy portal addressed every route as `#/route?filters`, and those are
@@ -29,7 +33,7 @@ const routerConfig: RouterConfig = {
   // makes Nuxt's `/#` base get encoded as part of the route path on a fresh
   // deep link; hashMode preserves the legacy `#/route` bookmarks directly.
   hashMode: true,
-  routes: flattenContractLifecycle,
+  routes: flattenStandaloneReaders,
 }
 
 export default routerConfig

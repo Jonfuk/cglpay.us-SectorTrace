@@ -6,9 +6,9 @@ import type { Ref } from 'vue'
 // filter change is a data change. The fetcher receives the current filters as a
 // plain object read from the URL.
 //
-// Cancellation of superseded requests is handled one layer down by the shared
-// Transport (dedup by canonical key); this composable does not need its own
-// AbortController for the common case.
+// Nuxt supplies the cancellation signal for a superseded load. Fetchers pass
+// it into PublicApi so the shared transport releases that request's waiter.
+// Deduplication alone cannot cancel requests with different query keys.
 
 export interface DataRoute<T> {
   data: Ref<T | null>
@@ -19,14 +19,14 @@ export interface DataRoute<T> {
 
 export async function useDataRoute<T>(
   key: string,
-  fetcher: (filters: Record<string, string | string[] | undefined>) => Promise<T>,
+  fetcher: (filters: Record<string, string | string[] | undefined>, signal: AbortSignal) => Promise<T>,
 ): Promise<DataRoute<T>> {
   const route = useRoute()
   const filters = useFilterState()
 
   const { data, pending, error, refresh } = await useAsyncData<T | null>(
     key,
-    () => fetcher(filters.all()),
+    (_app, { signal }) => fetcher(filters.all(), signal),
     {
       default: () => null,
       // A filter change is a data change: refetch when the query object shifts.

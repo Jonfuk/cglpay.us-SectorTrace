@@ -1,102 +1,57 @@
 <script setup lang="ts">
-import type { Column } from '~/components/StEvidenceTable.vue'
-import type { ContractNotice, ContractsResponse } from '~/types/api'
-
-type RollupRow = Record<string, unknown>
-type ContractPayload = ContractsResponse & {
-  total?: number
-  total_value_gbp?: number
-  direct_award_count?: number
-  matched_to_provider?: number
-  value_concentration?: Record<string, unknown>
-  date_range?: { earliest?: string; latest?: string }
-  ending_soon?: { rows?: RollupRow[]; caveat?: string }
-  by_year?: RollupRow[]
-  by_provider?: RollupRow[]
-  by_procedure_type?: RollupRow[]
-  value_bands?: RollupRow[]
-  top_buyers?: RollupRow[]
-}
-type CouncilSpendPayload = {
-  total?: number
-  payments?: RollupRow[]
-  files?: RollupRow[]
-  caveats?: Record<string, string | null>
-}
-
+import type { ContractPayload, PaymentPayload } from '~/types/contracts'
 const api = usePublicApi()
 const filters = useFilterState()
-const query = computed({
-  get: () => String(filters.get('q') ?? ''),
-  set: (v: string) => { void filters.set('q', v || undefined) },
-})
-const psrOnly = computed({
-  get: () => filters.get('psr_only') === 'true',
-  set: (v: boolean) => { void filters.set('psr_only', v ? 'true' : undefined) },
-})
-
-const { data, pending, error } = await useDataRoute<ContractPayload>(
-  'public-contracts',
-  (f) => api.contracts({ query: f }),
-)
-const { data: spending } = await useAsyncData<CouncilSpendPayload>(
-  'public-council-spend',
-  () => api.get<CouncilSpendPayload>('/council_spend', { query: { limit: 500 } }),
-  { default: () => ({}) },
-)
-
-const payload = computed(() => data.value)
-const notices = computed<ContractNotice[]>(() => payload.value?.notices ?? [])
-const concentration = computed(() => payload.value?.value_concentration ?? {})
-const rows = (key: keyof ContractPayload): RollupRow[] => (payload.value?.[key] as RollupRow[] | undefined) ?? []
-const number = (key: string): string => {
-  const value = concentration.value[key]
-  return typeof value === 'number' ? value.toLocaleString('en-GB', { maximumFractionDigits: 1 }) : '—'
+const get = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
+const lens = computed(() => get('lens') || 'notices')
+const validLens = computed(() => ['notices', 'patterns', 'payments'].includes(lens.value))
+const payments = computed(() => lens.value === 'payments')
+const authority = computed(() => payments.value ? get('authority_ons_code') || get('buyer_ons_code') : get('buyer_ons_code'))
+const filterKeys = ['provider_key', 'buyer_ons_code', 'year_from', 'year_to', 'q', 'since_retrieved_at'] as const
+const limit = computed(() => { const value = Number(get('limit') || (payments.value ? 500 : 100)); return Number.isSafeInteger(value) ? Math.min(5000, Math.max(1, value)) : 100 })
+const offset = computed(() => { const value = Number(get('offset') || 0); return Number.isSafeInteger(value) ? Math.max(0, value) : 0 })
+const query = computed<Record<string, string | number | boolean | undefined>>(() => payments.value
+  ? { provider_key: get('provider_key') || undefined, authority_ons_code: authority.value || undefined, limit: limit.value }
+  : { ...Object.fromEntries(filterKeys.map(key => [key, get(key) || undefined])), psr_only: ['true', '1'].includes(get('psr_only')), limit: limit.value, offset: offset.value })
+const invalidYear = computed(() => !payments.value && (['year_from', 'year_to'].some(key => get(key) && !/^\d{4}$/.test(get(key))) || (get('year_from') && get('year_to') && get('year_from') > get('year_to'))))
+const signature = computed(() => `${payments.value ? 'payments' : 'notices'}:${JSON.stringify(query.value)}:${validLens.value}:${Boolean(invalidYear.value)}`)
+const { data, pending, error, refresh } = await useAsyncData('public-procurement-workspace', async (_app, { signal }) => {
+  const key = signature.value
+  if (!validLens.value || invalidYear.value) return null
+  if (payments.value) return { key, kind: 'payments' as const, response: await api.get<PaymentPayload>('/council_spend', { query: query.value, signal }) }
+  return { key, kind: 'notices' as const, response: await api.get<ContractPayload>('/contracts', { query: query.value, signal }) }
+}, { watch: [signature] })
+const current = computed(() => !pending.value && !error.value && data.value?.key === signature.value ? data.value : null)
+const notices = computed(() => current.value?.kind === 'notices' ? current.value.response : null)
+const spending = computed(() => current.value?.kind === 'payments' ? current.value.response : null)
+let write = Promise.resolve()
+function setFilter(key: string, value: string) {
+  const next = write.then(async () => { await filters.setAll({ ...filters.all(), [key]: value || undefined, ...(key === 'authority_ons_code' ? { buyer_ons_code: undefined } : {}), offset: undefined, notice_id: undefined, file_url: undefined, row_index: undefined, payment_authority: undefined, aggregate: undefined }); await nextTick() })
+  write = next.catch(() => {})
+  return next
 }
-const money = (value: unknown): string => typeof value === 'number'
-  ? value.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 })
-  : value === null || value === undefined ? '—' : String(value)
-const rollupColumns = (keys: Array<[string, string, boolean?]>): Column<RollupRow>[] =>
-  keys.map(([key, label, numeric]) => ({ key, label, numeric }))
-
-const noticeColumns: Column<ContractNotice>[] = [
-  { key: 'date_published', label: 'Published', mono: true },
-  { key: 'buyer_name', label: 'Buyer' },
-  { key: 'supplier_name_raw', label: 'Supplier' },
-  { key: 'title', label: 'Title' },
-  { key: 'ocid', label: 'Lifecycle', mono: true, to: (row) => row.ocid ? `/contracts/process/${encodeURIComponent(String(row.ocid))}` : null },
-  { key: 'value_core', label: 'Published value', numeric: true },
-  { key: 'procedure_type', label: 'Procedure' },
-  { key: 'notice_link', label: 'Notice', link: true },
-  { key: 'source_url', label: 'Data source', link: true },
-]
-
-useHead({ title: 'SectorTrace — Contracts' })
+function setLens(value: string) { return filters.set('lens', value) }
+const ignoredPaymentFilters = computed(() => ['q', 'year_from', 'year_to', 'since_retrieved_at', 'psr_only', 'offset'].filter(key => get(key)).length > 0)
+useHead({ title: 'Contracts and payments · SectorTrace' })
 </script>
-
 <template>
-  <section class="atlas-hero"><div><div class="atlas-kicker">Funding · procurement notices and payments</div><h1>Where public money is going</h1><p class="atlas-lede">Published notices are not payments or a clean sector-spend total. Values can be ceilings, framework values, or missing; buyer, provider, and date context matters.</p><details class="atlas-read-first"><summary>How to read a notice</summary><p>A notice records what was published at procurement stage. It may cover several years or lots, and a framework may never be called off.</p><p>Council payment files are shown separately because they record a different kind of published evidence.</p></details></div></section>
-
-  <section v-if="pending" class="atlas-panel p-6">Loading contract evidence…</section>
-  <section v-else-if="error || !payload" class="atlas-panel p-6">Contract evidence is unavailable.</section>
-  <template v-else>
-    <section class="atlas-section atlas-panel atlas-panel-body"><div class="atlas-eyebrow">Contracts workbench</div><p class="atlas-footnote">{{ payload.total?.toLocaleString('en-GB') ?? '0' }} published notices matched by the current filters. The middle notice is {{ money(concentration.median_value_gbp) }}; the mean is {{ money(concentration.mean_value_gbp) }}.</p><div class="flex flex-wrap items-end gap-3 mt-3"><label class="text-sm">Search buyer or supplier<input v-model.lazy="query" type="search" class="block mt-1 px-2 py-1 min-w-64" placeholder="Search notices…"></label><label class="text-sm flex items-center gap-2 pb-1"><input v-model="psrOnly" type="checkbox"> PSR notices only</label></div><p v-if="query" class="atlas-footnote mt-3">Search is applied server-side and remains in the shareable URL.</p></section>
-
-    <section class="atlas-section"><div class="atlas-eyebrow">Money-flow snapshot</div><div class="atlas-grid atlas-grid-4 mt-3"><div class="atlas-stat"><strong>{{ payload.total?.toLocaleString('en-GB') ?? '—' }}</strong><span>published notices</span></div><div class="atlas-stat"><strong>{{ number('priced_notices') }}</strong><span>with a published value</span></div><div class="atlas-stat"><strong>{{ number('matched_to_provider') }}</strong><span>matched to a tracked provider</span></div><div class="atlas-stat"><strong>{{ money(payload.total_value_gbp) }}</strong><span>published values, not spend</span></div></div><p class="atlas-caveat mt-4"><span aria-hidden="true">⚠</span> {{ payload.caveats?.value_sum }}</p></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><h2>Concentration and coverage</h2><div class="atlas-grid atlas-grid-4"><div><strong>{{ money(concentration.median_value_gbp) }}</strong><p class="atlas-footnote">median published value</p></div><div><strong>{{ money(concentration.mean_value_gbp) }}</strong><p class="atlas-footnote">mean published value</p></div><div><strong>{{ number('top_10_share') }}%</strong><p class="atlas-footnote">share held by top 10</p></div><div><strong>{{ number('share_over_1bn') }}%</strong><p class="atlas-footnote">share in notices over £1bn</p></div></div><p class="atlas-footnote mt-4">Dates span {{ payload.date_range?.earliest?.slice(0, 10) ?? '—' }} to {{ payload.date_range?.latest?.slice(0, 10) ?? '—' }}. This is the collection window, not the period contracts were awarded over.</p></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><h2>Published patterns</h2><div class="atlas-band"><h3>By year</h3><StEvidenceTable :columns="rollupColumns([['year', 'Year'], ['count', 'Notices', true], ['value_gbp', 'Published value', true]])" :rows="rows('by_year')" row-key="year" /></div><div class="atlas-band"><h3>Value bands</h3><StEvidenceTable :columns="rollupColumns([['band_label', 'Band'], ['count', 'Notices', true]])" :rows="rows('value_bands')" row-key="band_label" /></div><div class="atlas-band"><h3>Procedure types</h3><StEvidenceTable :columns="rollupColumns([['procedure_type', 'Procedure'], ['count', 'Notices', true]])" :rows="rows('by_procedure_type').slice(0, 12)" row-key="procedure_type" /></div></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><h2>Providers and buyers</h2><div class="atlas-band"><h3>Matched providers</h3><p class="atlas-footnote">Exact-name matching only. These totals are a floor; an unmatched notice is not evidence that no known provider was involved.</p><StEvidenceTable :columns="rollupColumns([['canonical_name', 'Provider'], ['count', 'Notices', true], ['value_gbp', 'Published value', true]])" :rows="rows('by_provider')" row-key="provider_key" /></div><div class="atlas-band"><h3>Largest buyers</h3><StEvidenceTable :columns="rollupColumns([['buyer_name', 'Buyer'], ['count', 'Notices', true], ['value_gbp', 'Published value', true]])" :rows="rows('top_buyers').slice(0, 15)" row-key="buyer_name" /></div></section>
-
-    <section v-if="payload.ending_soon?.rows?.length" class="atlas-section atlas-panel atlas-panel-body"><h2>Published end dates ahead</h2><p class="atlas-footnote">{{ payload.ending_soon.caveat }}</p><StEvidenceTable :columns="rollupColumns([['quarter', 'Quarter'], ['count', 'Notices', true], ['matched', 'Matched providers', true]])" :rows="payload.ending_soon.rows" row-key="quarter" /></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><div class="flex flex-wrap items-baseline justify-between gap-3"><div><h2>Notices</h2><p class="atlas-footnote">The current page behind the rollups, newest first. The full filtered set remains available through the public API.</p></div><span class="atlas-footnote">Showing {{ notices.length }} (offset {{ data?.page?.offset ?? 0 }})</span></div><StEvidenceTable v-if="notices.length" :columns="noticeColumns" :rows="notices" row-key="notice_id" /><StEmptyState v-else /></section>
-
-    <section v-if="spending?.payments?.length" class="atlas-section atlas-panel atlas-panel-body"><h2>Published council payments</h2><p class="atlas-footnote">{{ spending.total?.toLocaleString('en-GB') }} payment lines in council spend-transparency files. These are actual published payments, separate from notice-stage contract values and authority budgets.</p><p class="atlas-caveat"><span aria-hidden="true">⚠</span> {{ spending.caveats?.payments }}</p><StEvidenceTable :columns="rollupColumns([['authority_name', 'Authority'], ['period', 'Period'], ['payee', 'Payee'], ['amount_text', 'Published amount', true], ['description', 'Description'], ['canonical_name', 'Matched provider'], ['source_url', 'Source']])" :rows="spending.payments.slice(0, 100)" row-key="row_index" /></section>
-    <section v-if="spending?.files?.length" class="atlas-section atlas-panel atlas-panel-body"><h2>Transparency files</h2><p class="atlas-footnote">Unreadable files remain visible as gaps; they are never treated as zero.</p><StEvidenceTable :columns="rollupColumns([['authority_name', 'Authority'], ['file_format', 'Format'], ['parse_status', 'Status'], ['row_count', 'Rows', true], ['retrieved_at', 'Retrieved'], ['source_url', 'Source']])" :rows="spending.files.slice(0, 100)" row-key="source_url" /></section>
-
-    <section class="atlas-section atlas-panel atlas-panel-body"><h2>How to read these figures</h2><div class="space-y-2"><p v-for="(text, key) in payload.caveats" :key="key" class="atlas-caveat"><span aria-hidden="true">⚠</span> {{ text }}</p></div></section>
-  </template>
+  <section class="space-y-6">
+    <header class="st-page-header"><p class="atlas-eyebrow">Evidence</p><h1>Contracts and payments</h1><p>Read published procurement notices and council payment records with their source context.</p></header>
+    <p class="atlas-caveat">Notice values may be estimates, ceilings or framework values. They do not establish spending, provider income or the value of distinct awards. Council payment lines describe a separate source.</p>
+    <nav class="st-lens-nav" aria-label="Procurement evidence views"><button v-for="[key, label] in [['notices', 'Notices'], ['patterns', 'Patterns'], ['payments', 'Payments']]" :key="key" class="atlas-button" type="button" :aria-pressed="lens === key" @click="setLens(key!)">{{ label }}</button></nav>
+    <p v-if="!validLens" role="status">This evidence view is not recognised. Choose Notices, Patterns or Payments.</p>
+    <template v-else>
+      <section class="atlas-panel atlas-panel-body space-y-4" aria-label="Procurement filters"><div class="st-contract-filters"><StEntityPicker kind="provider" label="Provider" empty-label="All tracked and unmatched suppliers" :model-value="get('provider_key')" @update:model-value="setFilter('provider_key', $event)" /><StEntityPicker kind="authority" :label="payments ? 'Paying authority' : 'Buyer authority'" empty-label="All authorities and unmatched names" :model-value="authority" @update:model-value="setFilter(payments ? 'authority_ons_code' : 'buyer_ons_code', $event)" />
+      <template v-if="!payments"><label>Search buyer or supplier name<input type="search" :value="get('q')" @change="setFilter('q', ($event.target as HTMLInputElement).value)"></label><label>Publication year from<input type="text" inputmode="numeric" maxlength="4" :value="get('year_from')" @change="setFilter('year_from', ($event.target as HTMLInputElement).value)"></label><label>Publication year to<input type="text" inputmode="numeric" maxlength="4" :value="get('year_to')" @change="setFilter('year_to', ($event.target as HTMLInputElement).value)"></label><label>Retrieved since (ISO date or timestamp)<input type="text" :value="get('since_retrieved_at')" @change="setFilter('since_retrieved_at', ($event.target as HTMLInputElement).value)"></label><label class="st-check"><input type="checkbox" :checked="['true', '1'].includes(get('psr_only'))" @change="setFilter('psr_only', ($event.target as HTMLInputElement).checked ? 'true' : '')">PSR notices only</label></template></div>
+      <p v-if="payments" class="atlas-footnote">Authority and provider apply to payment lines. Files use authority only. No date filter applies.<span v-if="ignoredPaymentFilters"> Notice search, date and pagination selections are retained in the link for the notice views and are not applied to payments.</span></p><p v-else class="atlas-footnote">Name search checks buyer and supplier names, not notice titles. Year bounds use publication dates. Retrieved since uses the collection timestamp. PSR means a published Provider Selection Regime basis.</p><button class="atlas-button" type="button" @click="filters.setAll({ lens })">Clear filters</button></section>
+      <p v-if="invalidYear" role="status">Use four-digit publication years, with the first year no later than the last.</p>
+      <StEvidenceState v-else :pending="pending" :error="error" @retry="refresh"><template v-if="notices"><StContractNotices v-if="lens === 'notices'" :payload="notices" :query="query" /><LazyStContractPatterns v-else :payload="notices" :query="query" /><details><summary>Source limitations</summary><StCaveat v-for="(text, key) in notices.caveats ?? {}" :key="key" :text="text" /></details></template><LazyStCouncilPayments v-else-if="spending" :payload="spending" :query="query" /></StEvidenceState>
+    </template>
+  </section>
 </template>
+<style scoped>
+.st-contract-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+.st-contract-filters label { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
+.st-contract-filters input:not([type='checkbox']) { width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border-control); border-radius: 4px; }
+.st-contract-filters .st-check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+</style>

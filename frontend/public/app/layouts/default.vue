@@ -1,129 +1,64 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-// The public shell: masthead + primary navigation + routed content. The nav
-// mirrors the legacy portal's route set so deep links and section labels are
-// preserved through the migration. Routes are declared as data; pages are
-// added under app/pages as each is ported to parity.
-interface NavItem {
-  to: string
-  label: string
-}
-
-// Ordering and labels track the legacy portal's primary navigation. Entries
-// are enabled as their pages land; this foundation ships the shell and the
-// overview route, with the rest scaffolded in subsequent stages.
-const nav: NavItem[] = [
-  { to: '/', label: 'Overview' },
-  { to: '/pay', label: 'Pay' },
-  { to: '/contracts', label: 'Contracts' },
-  { to: '/providers', label: 'Providers' },
-  { to: '/geography', label: 'Places' },
-  { to: '/treatment', label: 'Treatment' },
-  { to: '/cqc', label: 'CQC' },
-  { to: '/pfd', label: 'PFD' },
-  { to: '/relationships', label: 'Relationships' },
-  { to: '/claims', label: 'Claims' },
-  { to: '/documents', label: 'Documents' },
-  { to: '/compare', label: 'Compare' },
-  { to: '/cooccurrence', label: 'Co-occurrence' },
-  { to: '/changes', label: 'Changes' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/catalogue', label: 'Catalogue' },
-  { to: '/api', label: 'API' },
-]
-
-const library: NavItem[] = [
-  { to: '/notebook', label: 'Notebook' },
-  { to: '/saved', label: 'Saved' },
-  { to: '/journey', label: 'Journey' },
-  { to: '/revisions', label: 'Revisions' },
-  { to: '/pathfinder', label: 'Pathfinder' },
-  { to: '/links', label: 'Source links' },
-  { to: '/doctables', label: 'Document tables' },
-]
-
-// The reader's per-browser collections. Save keeps the current filtered view;
-// Note pins the current page into the notebook. Both act on the live URL and
-// title, so a "filtered view is a link" stays true.
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { navigationLabel } from '~/lib/navigation'
+const route = useRoute()
+const theme = useColorMode()
+const navOpen = ref(false)
+const drawerUsed = ref(false)
+const compact = ref(false)
+const status = ref('')
+const linkNotice = useState('research-link-notice', () => ({ path: '', messages: [] as string[] }))
 const saved = useSavedSearches()
 const notebook = useNotebook()
-const navOpen = ref(false)
-
-function currentTitle(): string {
-  if (typeof document === 'undefined') return 'SectorTrace'
-  return document.title.replace(/\s*·\s*SectorTrace.*/, '').replace(/^SectorTrace\s*[—-]\s*/, '') || 'SectorTrace'
-}
-function currentHref(): string {
-  return typeof location !== 'undefined' ? (location.hash || '#/') : '#/'
-}
+const layoutStore = useLocalStore<boolean>('st.sidebar', 1, () => false)
+onMounted(() => { compact.value = layoutStore.read() === true })
+function toggleSidebar() { compact.value = !compact.value; layoutStore.write(compact.value) }
+function openNavigation() { drawerUsed.value = true; navOpen.value = true }
+function skipContent() { document.getElementById('main')?.focus() }
+function currentTitle() { return document.title.replace(/\s*[·—]\s*SectorTrace.*$/, '') || 'SectorTrace' }
 function saveView() {
-  saved.save(currentTitle(), currentHref())
+  const stored = saved.save(currentTitle(), `#${route.fullPath}`)
+  status.value = stored ? 'View saved in this browser.' : 'View kept for this visit. Browser storage is unavailable.'
 }
 function noteView() {
-  notebook.add({ title: currentTitle(), href: currentHref() })
+  const stored = notebook.add({ title: currentTitle(), href: `#${route.fullPath}` })
+  status.value = stored ? 'Reference added to your notebook.' : 'Reference kept for this visit. Browser storage is unavailable.'
 }
+watch(() => route.path, async () => {
+  navOpen.value = false
+  status.value = ''
+  await nextTick()
+  const heading = document.querySelector<HTMLElement>('main h1')
+  heading?.setAttribute('tabindex', '-1')
+  heading?.focus({ preventScroll: true })
+})
 </script>
-
 <template>
-  <div class="min-h-screen flex flex-col">
-    <header class="border-b border-black/10 dark:border-white/10">
-      <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-6">
-        <NuxtLink to="/" class="font-semibold text-lg tracking-tight">
-          SectorTrace
-        </NuxtLink>
-        <button
-          type="button"
-          class="atlas-nav-toggle"
-          :aria-expanded="navOpen"
-          aria-controls="atlas-primary-nav"
-          @click="navOpen = !navOpen"
-        >Sections <span aria-hidden="true">☰</span></button>
-        <nav id="atlas-primary-nav" class="atlas-nav flex flex-wrap gap-x-4 gap-y-1 text-sm flex-1" :class="{ 'is-open': navOpen }" @click="navOpen = false">
-          <NuxtLink
-            v-for="item in nav"
-            :key="item.to"
-            :to="item.to"
-            class="opacity-70 hover:opacity-100"
-            active-class="opacity-100 font-medium"
-          >
-            {{ item.label }}
-          </NuxtLink>
-        </nav>
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            class="text-xs opacity-70 hover:opacity-100"
-            title="Save this filtered view"
-            @click="saveView"
-          >☆ Save</button>
-          <button
-            type="button"
-            class="text-xs opacity-70 hover:opacity-100"
-            title="Pin this page to your notebook"
-            @click="noteView"
-          >✎ Note</button>
-        </div>
-      </div>
-      <div class="atlas-library mx-auto max-w-6xl px-4 pb-2 flex gap-x-4 text-xs" :class="{ 'is-open': navOpen }">
-        <NuxtLink
-          v-for="item in library"
-          :key="item.to"
-          :to="item.to"
-          class="opacity-60 hover:opacity-100"
-          active-class="opacity-100 font-medium"
-        >{{ item.label }}</NuxtLink>
-      </div>
+  <div class="st-shell" :class="{ 'sidebar-compact': compact }">
+    <a href="#main" class="st-skip" @click.prevent="skipContent">Skip to content</a>
+    <header class="st-topbar">
+      <NuxtLink to="/" class="st-brand">SectorTrace<span class="st-brand-dot" aria-hidden="true">.</span></NuxtLink>
+      <span class="st-topbar-context">England's substance misuse sector</span>
+      <NuxtLink to="/search" class="atlas-button st-global-search">Search</NuxtLink>
+      <label class="st-theme"><span class="sr-only">Colour theme</span>
+        <select v-model="theme.preference" aria-label="Colour theme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select>
+      </label>
+      <button type="button" class="atlas-button st-sections" :aria-expanded="navOpen" @click="openNavigation">Sections</button>
     </header>
-
-    <main id="main" class="flex-1 mx-auto w-full max-w-6xl px-4 py-6">
-      <slot />
-    </main>
-
-    <footer class="border-t border-black/10 dark:border-white/10 text-xs opacity-60">
-      <div class="mx-auto max-w-6xl px-4 py-3">
-        Public-domain evidence. Every figure carries its source, fetch time, and
-        content hash.
+    <aside class="st-sidebar" aria-label="Sections">
+      <button type="button" class="st-collapse" :aria-expanded="!compact" :aria-label="compact ? 'Expand sidebar' : 'Collapse sidebar'" @click="toggleSidebar">{{ compact ? '»' : '« Collapse' }}</button>
+      <StNavigation :compact="compact" />
+    </aside>
+    <div class="st-workspace">
+      <div class="st-contextbar">
+        <div aria-label="Location"><NuxtLink to="/">Overview</NuxtLink><span v-if="route.path !== '/'"> / {{ navigationLabel(route.path) }}</span></div>
+        <div class="st-page-actions"><button type="button" class="atlas-button" @click="saveView">Save view</button><button type="button" class="atlas-button" @click="noteView">Add note</button></div>
       </div>
-    </footer>
+      <p v-if="status" role="status" class="st-save-status">{{ status }}</p>
+      <div v-if="linkNotice.messages.length" role="status" class="st-save-status"><p v-for="message in linkNotice.messages" :key="message">{{ message }}</p><button type="button" class="atlas-button" @click="linkNotice.messages = []">Dismiss</button></div>
+      <main id="main" tabindex="-1" class="st-main"><slot /></main>
+      <footer class="st-footer"><span>Published evidence with sources and limitations.</span><NuxtLink to="/about">About</NuxtLink><NuxtLink to="/coverage">Evidence coverage</NuxtLink><NuxtLink to="/api">API</NuxtLink></footer>
+    </div>
+    <LazyStNavigationDrawer v-if="drawerUsed" v-model:open="navOpen" />
   </div>
 </template>

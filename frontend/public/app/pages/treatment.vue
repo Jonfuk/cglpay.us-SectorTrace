@@ -1,155 +1,71 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { Column } from '~/components/StEvidenceTable.vue'
-import type { TreatmentMetric, TreatmentResponse } from '~/types/api'
-
-interface AuthorityOption { ons_code: string; name: string; region: string | null }
-interface AuthoritiesResponse { authorities: AuthorityOption[] }
-interface FingertipsIndicator { indicator_id: number; indicator_name: string; topic: string; unit: string | null; source_url: string | null; retrieved_at: string | null }
-interface FingertipsSeriesRow { indicator_id: number; ons_code: string; authority_name: string | null; time_period: string | null; value: number | null; lower_ci_95: number | null; upper_ci_95: number | null; value_note: string | null; [key: string]: unknown }
-interface FingertipsResponse { indicators: FingertipsIndicator[]; series: FingertipsSeriesRow[]; [key: string]: unknown }
-interface NdtmsDataset { table_ref: string; rows: number; authorities: number; publications: number; label: string }
-interface NdtmsEstimate { dataset: string | null; measure: string | null; time_period: string | null; value: number | null; value_text: string | null; lower: number | null; upper: number | null; published_in: string | null; has_interval: boolean; [key: string]: unknown }
-interface NdtmsResponse { datasets: NdtmsDataset[]; estimates?: NdtmsEstimate[]; other_rows?: NdtmsEstimate[]; authority?: { name: string | null } | null; caveats?: { estimates?: string | null; coverage?: string | null }; [key: string]: unknown }
-interface TreatmentWorkspace { metrics: TreatmentResponse; authorities: AuthoritiesResponse; fingertips: FingertipsResponse; ndtms: NdtmsResponse }
-
+import type { TreatmentMetric } from '~/types/api'
+import type { FingertipsPayload, NdtmsPayload, TreatmentCatalogue, TreatmentRow } from '~/types/treatment'
+import { ndtmsCohort, treatmentTarget, treatmentText } from '~/lib/treatment'
 const api = usePublicApi()
 const filters = useFilterState()
-const topic = computed(() => String(filters.get('topic') || 'numbers_in_treatment'))
-const authorityCode = computed(() => {
-  const value = filters.get('ons_code')
-  return Array.isArray(value) ? value[0] : value
+const get = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
+const { data: catalogue, pending: cataloguePending, error: catalogueError, refresh: refreshCatalogue } = await useAsyncData('public-treatment-catalogue', (_app, { signal }) => api.get<TreatmentCatalogue>('/treatment_metrics', { signal }))
+const metrics = computed(() => Array.isArray(catalogue.value?.metrics) ? catalogue.value.metrics : [])
+const active = computed(() => {
+  if (get('metric')) return metrics.value.find(metric => metric.key === get('metric'))
+  if (get('indicator_id')) return metrics.value.find(metric => metric.source === 'fingertips' && String(metric.indicator_id) === get('indicator_id'))
+  if (get('table_ref')) return metrics.value.find(metric => treatmentTarget(metric)?.table_ref === get('table_ref'))
+  return undefined
 })
-const metricSearch = ref('')
-
-const { data, pending, error } = await useDataRoute<TreatmentWorkspace>(
-  'public-treatment-workspace',
-  async (f) => {
-    const selectedTopic = typeof f.topic === 'string' && f.topic ? f.topic : 'numbers_in_treatment'
-    const selectedAuthority = typeof f.ons_code === 'string' ? f.ons_code : undefined
-    const [metrics, authorities, fingertips, ndtms] = await Promise.all([
-      api.treatment(),
-      api.get<AuthoritiesResponse>('/authorities'),
-      api.get<FingertipsResponse>('/fingertips', { query: { topic: selectedTopic, ons_code: selectedAuthority } }),
-      api.get<NdtmsResponse>('/ndtms', { query: { ons_code: selectedAuthority } }),
-    ])
-    return { metrics, authorities, fingertips, ndtms }
-  },
-)
-
-const topics = [
-  ['numbers_in_treatment', 'Numbers in treatment'],
-  ['successful_completions', 'Successful completions'],
-  ['waiting_times', 'Waiting times'],
-  ['prevalence', 'Prevalence'],
-  ['treatment_need', 'Treatment need'],
-  ['harm', 'Harm'],
-] as const
-const metrics = computed(() => data.value?.metrics.metrics ?? [])
-const filteredMetrics = computed(() => {
-  const q = metricSearch.value.trim().toLowerCase()
-  if (!q) return metrics.value
-  return metrics.value.filter((metric) => `${metric.name ?? ''} ${metric.topic ?? ''} ${metric.unit ?? ''} ${metric.definition ?? ''}`.toLowerCase().includes(q))
-})
-const authorities = computed(() => data.value?.authorities.authorities ?? [])
-const indicators = computed(() => data.value?.fingertips.indicators ?? [])
-const series = computed(() => data.value?.fingertips.series ?? [])
-const ndtmsDatasets = computed(() => data.value?.ndtms.datasets ?? [])
-const ndtmsEstimates = computed(() => data.value?.ndtms.estimates ?? [])
-const firstIndicator = computed(() => indicators.value[0])
-
-const metricColumns: Column<TreatmentMetric>[] = [
-  { key: 'name', label: 'Metric' }, { key: 'substance', label: 'Substance' }, { key: 'unit', label: 'Unit' },
-  { key: 'period_count', label: 'Periods', numeric: true }, { key: 'authority_count', label: 'Authorities', numeric: true },
-  { key: 'has_confidence_interval', label: '95% CI' },
-]
-const seriesColumns: Column<FingertipsSeriesRow>[] = [
-  { key: 'indicator_name', label: 'Indicator' }, { key: 'authority_name', label: 'Authority' },
-  { key: 'time_period', label: 'Period', mono: true }, { key: 'value', label: 'Published value', numeric: true },
-  { key: 'lower_ci_95', label: 'Lower 95% CI', numeric: true }, { key: 'upper_ci_95', label: 'Upper 95% CI', numeric: true },
-]
-const ndtmsColumns: Column<NdtmsEstimate>[] = [
-  { key: 'dataset', label: 'Dataset' }, { key: 'measure', label: 'Measure' }, { key: 'time_period', label: 'Period', mono: true },
-  { key: 'published_in', label: 'Publication' }, { key: 'value_text', label: 'Published as' },
-]
-
-function chooseTopic(value: string): void { void filters.set('topic', value) }
-function chooseAuthority(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value
-  void filters.set('ons_code', value || undefined)
+const requested = computed(() => Boolean(get('metric') || get('indicator_id') || get('table_ref')))
+const target = computed(() => active.value ? treatmentTarget(active.value) : null)
+const invalidAuthority = computed(() => Boolean(get('ons_code') && !/^[A-Z]\d{8}$/.test(get('ons_code'))))
+const choices = computed(() => metrics.value.filter(metric => (!get('topic') || metric.topic === get('topic')) && (!get('substance') || metric.substance === get('substance')) && (!get('metric_source') || metric.source === get('metric_source')) && `${metric.name ?? ''} ${metric.definition ?? ''} ${metric.unit ?? ''}`.toLocaleLowerCase('en-GB').includes(get('metric_q').toLocaleLowerCase('en-GB'))))
+const facet = (key: 'topic' | 'substance') => [...new Set(metrics.value.map(metric => metric[key]).filter((value): value is string => typeof value === 'string' && value.length > 0))].sort()
+const query = computed<Record<string, string | undefined>>(() => target.value?.endpoint === 'fingertips' ? { indicator_id: target.value.indicator_id, ons_code: get('ons_code') || undefined, topic: get('topic') || undefined, substance: get('substance') || undefined } : { ons_code: get('ons_code') || undefined, table_ref: get('ons_code') ? target.value?.table_ref : undefined })
+const signature = computed(() => JSON.stringify({ target: target.value?.endpoint, query: query.value, invalid: invalidAuthority.value }))
+const { data: result, pending, error, refresh } = await useAsyncData('public-treatment-selected-source', async (_app, { signal }) => {
+  if (!target.value || invalidAuthority.value || (target.value.endpoint === 'fingertips' && !get('ons_code'))) return null
+  const key = signature.value
+  if (target.value.endpoint === 'fingertips') return { key, fingertips: await api.get<FingertipsPayload>('/fingertips', { query: query.value, signal }), ndtms: undefined }
+  return { key, ndtms: await api.get<NdtmsPayload>('/ndtms', { query: query.value, signal }), fingertips: undefined }
+}, { watch: [signature] })
+const current = computed(() => !pending.value && !error.value && result.value?.key === signature.value ? result.value : null)
+const ft = computed(() => current.value?.fingertips)
+const ndtms = computed(() => current.value?.ndtms)
+const indicatorCandidates = computed(() => ft.value?.indicators?.filter(row => String(row.indicator_id) === target.value?.indicator_id) ?? [])
+const indicator = computed(() => indicatorCandidates.value.length === 1 ? indicatorCandidates.value[0] : null)
+const unit = computed(() => typeof indicator.value?.unit === 'string' && indicator.value.unit.length ? indicator.value.unit : null)
+const rows = (value: unknown): TreatmentRow[] | null => Array.isArray(value) ? value as TreatmentRow[] : null
+const localRows = computed(() => rows(ft.value?.series))
+const englandRows = computed(() => rows(ft.value?.england_series))
+const estimates = computed(() => rows(ndtms.value?.estimates))
+const context = computed(() => rows(ndtms.value?.other_rows))
+const cohorts = computed(() => [...new Map((estimates.value ?? []).map(row => [ndtmsCohort(row), { key: ndtmsCohort(row), label: `${treatmentText(row.measure)} · Age group: ${treatmentText(row.age_group)}` }])).values()])
+const selectedCohort = computed(() => cohorts.value.find(row => row.key === get('cohort')))
+const displayedEstimates = computed(() => estimates.value === null ? null : get('cohort') ? estimates.value.filter(row => ndtmsCohort(row) === get('cohort')) : estimates.value)
+const sourceCaveats = computed<Record<string, string | null>>(() => target.value?.endpoint === 'ndtms' ? ndtms.value?.caveats ?? {} : { treatment: ft.value?.caveat ?? catalogue.value?.caveat ?? null })
+let update = Promise.resolve()
+function change(values: Record<string, string | undefined>) {
+  const next = update.then(async () => { await filters.setAll({ ...filters.all(), ...values, treatment_record: undefined, treatment_lane: undefined, local_offset: undefined, england_offset: undefined, estimates_offset: undefined, context_offset: undefined }); await nextTick() })
+  update = next.catch(() => {})
+  return next
 }
-function seriesRows(): FingertipsSeriesRow[] {
-  const names = new Map(indicators.value.map((row) => [row.indicator_id, row.indicator_name]))
-  return series.value.map((row, index) => ({
-    ...row,
-    indicator_name: names.get(row.indicator_id) ?? `Indicator ${row.indicator_id}`,
-    row_key: `${row.indicator_id}-${row.ons_code}-${row.time_period ?? index}`,
-  }))
-}
-
-useHead({ title: 'SectorTrace — Treatment data' })
+function choose(metric: TreatmentMetric) { return change({ metric: metric.key, indicator_id: undefined, table_ref: undefined, cohort: undefined }) }
+function catalogueFilter(key: string, value: string) { return change({ [key]: value || undefined, metric: undefined, indicator_id: undefined, table_ref: undefined, cohort: undefined }) }
+useHead({ title: 'Treatment · SectorTrace' })
 </script>
-
 <template>
-  <section class="space-y-8">
-    <div class="atlas-hero">
-      <div>
-        <p class="atlas-kicker">Service access · published indicators</p>
-        <h1>Understand treatment data</h1>
-        <p class="atlas-lede">Explore published treatment indicators by local authority and against the England figure. Demand, activity and outcomes remain separate measures.</p>
-        <div class="atlas-actions"><a class="atlas-button primary" href="#treatment-explorer">Explore the indicators</a><a class="atlas-button" href="#treatment-catalogue">Read the catalogue</a></div>
-      </div>
-      <div class="atlas-hero-aside">
-        <div class="atlas-region"><strong>{{ data?.metrics.count ?? '—' }}</strong><span>published treatment metrics</span></div>
-        <div class="atlas-region"><strong>{{ data?.fingertips.series.length ? 'England + local' : '—' }}</strong><span>comparison context, where published</span></div>
-      </div>
-    </div>
-
-    <details class="atlas-read-first" open>
-      <summary>What treatment data can answer</summary>
-      <p>The figures show published indicators and estimates. They cannot show unmet need by subtracting one measure from another.</p>
-      <p>A blank, suppressed value, or missing confidence interval is not zero and is shown separately from a published value.</p>
-    </details>
-
-    <div v-if="pending" class="text-sm opacity-60">Loading treatment evidence…</div>
-    <StEmptyState v-else-if="error" variant="unavailable" />
-    <template v-else>
-      <section id="treatment-explorer" class="atlas-section">
-        <div class="atlas-section-head"><h2>Choose an indicator and authority</h2><p>Start with national context, then select an authority for its local series.</p></div>
-        <div class="atlas-panel atlas-panel-body space-y-5">
-          <div class="flex flex-wrap gap-2" role="tablist" aria-label="Treatment topics">
-            <button v-for="item in topics" :key="item[0]" type="button" class="atlas-button" :class="topic === item[0] ? 'primary' : ''" :aria-pressed="topic === item[0]" @click="chooseTopic(item[0])">{{ item[1] }}</button>
-          </div>
-          <label class="block max-w-xl text-sm"><span class="block mb-1 opacity-70">Local authority</span><select class="w-full rounded border px-3 py-2" aria-label="Local authority" :value="authorityCode ?? ''" @change="chooseAuthority"><option value="">All authorities</option><option v-for="authority in authorities" :key="authority.ons_code" :value="authority.ons_code">{{ authority.name }}{{ authority.region ? ` · ${authority.region}` : '' }}</option></select></label>
-          <div class="atlas-caveat"><span>What must not be computed here</span> — prevalence and treatment numbers use different estimation methods and populations. This pipeline does not calculate unmet need by subtracting one from the other.</div>
-           <div v-if="firstIndicator" class="atlas-band"><h3>{{ firstIndicator.indicator_name }}</h3><p>{{ firstIndicator.unit || 'Unit published with the indicator' }} · {{ authorityCode ? 'Selected authority and England are shown.' : 'Authority values are shown with their published context.' }}</p></div>
-          <StEvidenceTable v-if="seriesRows().length" :columns="seriesColumns" :rows="seriesRows()" row-key="row_key" />
-          <StEmptyState v-else />
-          <StCaveat v-if="data?.metrics.caveat" :text="data.metrics.caveat" />
-        </div>
-      </section>
-
-      <section id="treatment-catalogue" class="atlas-section">
-        <div class="atlas-section-head"><h2>Treatment metric catalogue</h2><p>Definitions, periods held, confidence-interval availability and authority coverage — before a chart.</p></div>
-        <div class="atlas-panel atlas-panel-body space-y-4">
-          <input v-model="metricSearch" type="search" class="w-full rounded border px-3 py-2" placeholder="Search metrics by name, unit or definition" aria-label="Search treatment metrics">
-          <p class="text-sm opacity-70">{{ filteredMetrics.length }} of {{ metrics.length }} metrics</p>
-          <StEvidenceTable v-if="filteredMetrics.length" :columns="metricColumns" :rows="filteredMetrics" row-key="key" />
-          <StEmptyState v-else />
-          <details v-for="metric in filteredMetrics" :key="`${metric.key}-definition`" class="border-t pt-3 text-sm"><summary class="cursor-pointer">{{ metric.name }} · {{ metric.source ?? 'published source' }}</summary><p class="mt-2 opacity-70">{{ metric.definition || 'No definition was supplied in the published catalogue.' }}</p><p class="opacity-70">{{ metric.period_count ? `${metric.period_count} periods` : 'No periods published' }} · {{ metric.authority_count.toLocaleString('en-GB') }} authorities · {{ metric.england_available ? 'England figure available' : 'England figure not held' }}</p><a v-if="metric.source_url" class="underline" :href="metric.source_url" target="_blank" rel="noopener noreferrer">Source ↗</a></details>
-        </div>
-      </section>
-
-      <section class="atlas-section">
-        <div class="atlas-section-head"><h2>NDTMS estimates</h2><p>Modelled estimates of opiate and crack use, alcohol dependency, and deaths in treatment, published with 95% confidence intervals.</p></div>
-        <div class="atlas-panel atlas-panel-body space-y-4">
-          <div class="atlas-caveat"><span>These are estimates, not counts</span> — published intervals and disclosure markers stay visible.</div>
-          <p v-if="data?.ndtms.caveats?.coverage" class="text-sm opacity-70">{{ data.ndtms.caveats.coverage }}</p>
-          <template v-if="authorityCode && ndtmsEstimates.length"><StEvidenceTable :columns="ndtmsColumns" :rows="ndtmsEstimates" row-key="dataset" /></template>
-          <template v-else-if="ndtmsDatasets.length"><p class="text-sm">Choose an authority above to see its estimates. The catalogue currently holds data across {{ Math.max(...ndtmsDatasets.map((item) => item.authorities)).toLocaleString('en-GB') }} authorities.</p><StEvidenceTable :columns="[{ key: 'label', label: 'Publication' }, { key: 'rows', label: 'Values', numeric: true }, { key: 'authorities', label: 'Authorities', numeric: true }, { key: 'publications', label: 'Editions', numeric: true }]" :rows="ndtmsDatasets" row-key="table_ref" /></template>
-          <StEmptyState v-else />
-        </div>
-      </section>
-    </template>
+  <section class="space-y-6"><header class="st-page-header"><p class="atlas-eyebrow">Evidence</p><h1>Treatment</h1><p>Choose a published measure, read its definition, then select an authority.</p></header><p class="atlas-caveat">Treatment activity, prevalence estimates and workforce figures describe different populations and methods. They do not support an unmet-need calculation or a caseload-per-worker ratio.</p>
+    <StEvidenceState :pending="cataloguePending" :error="catalogueError" @retry="refreshCatalogue"><p v-if="!Array.isArray(catalogue?.metrics)" role="status">The measure catalogue was not supplied. This is not an empty catalogue.</p><template v-else>
+      <template v-if="!active"><h2>Choose a treatment measure</h2><p v-if="requested" role="status">The saved measure identifier is not present in this catalogue. Choose a measure below. No replacement has been selected.</p><div class="st-treatment-filters"><label>Search measure definitions<input type="search" :value="get('metric_q')" @input="catalogueFilter('metric_q', ($event.target as HTMLInputElement).value)"></label><label>Source<select :value="get('metric_source')" @change="catalogueFilter('metric_source', ($event.target as HTMLSelectElement).value)"><option value="">All catalogue sources</option><option value="fingertips">Fingertips</option><option value="ndtms">NDTMS</option></select></label><label>Topic<select :value="get('topic')" @change="catalogueFilter('topic', ($event.target as HTMLSelectElement).value)"><option value="">All supplied topics</option><option v-if="get('topic') && !facet('topic').includes(get('topic'))" :value="get('topic')">{{ get('topic') }}</option><option v-for="topic in facet('topic')" :key="topic" :value="topic">{{ topic.replaceAll('_', ' ') }}</option></select></label><label>Substance<select :value="get('substance')" @change="catalogueFilter('substance', ($event.target as HTMLSelectElement).value)"><option value="">All supplied substances</option><option v-if="get('substance') && !facet('substance').includes(get('substance'))" :value="get('substance')">{{ get('substance') }}</option><option v-for="substance in facet('substance')" :key="substance" :value="substance">{{ substance }}</option></select></label></div><p class="atlas-footnote">{{ choices.length }} of {{ metrics.length }} returned catalogue entries match these display filters.</p><button type="button" class="atlas-button" @click="change({ metric_q: undefined, metric_source: undefined, topic: undefined, substance: undefined, metric: undefined, indicator_id: undefined, table_ref: undefined })">Clear catalogue filters</button><ul class="st-treatment-metrics"><li v-for="metric in choices" :key="metric.key"><h3>{{ metric.name ?? 'Measure name not supplied' }}</h3><p>{{ metric.definition ?? 'Definition not supplied.' }}</p><p class="atlas-footnote">Source: {{ metric.source ?? 'not supplied' }} · Unit: {{ metric.unit ?? 'not supplied' }} · Substance: {{ metric.substance ?? 'not supplied' }}</p><p class="atlas-footnote">Authority coverage: {{ treatmentText(metric.authority_count) }}. Population detail is limited to the supplied definition and source labels.</p><details><summary>Periods and source coverage</summary><p v-if="Array.isArray(metric.periods)">Exact supplied periods: {{ metric.periods.length ? metric.periods.map(treatmentText).join(', ') : 'none returned' }}.</p><p v-else>Exact periods are not enumerated. Published range: {{ treatmentText(metric.period_range) }}. This does not establish that every intervening period is held.</p><p>Period count: {{ treatmentText(metric.period_count) }}. England coverage: {{ metric.england_available === true ? 'represented in the catalogue' : metric.england_available === false ? 'not represented in the catalogue' : 'not supplied' }}.</p><p>Confidence interval coverage is a catalogue flag. Check the numeric bounds on each observation.</p><StLink v-if="typeof metric.source_url === 'string'" :href="metric.source_url">Open catalogue source</StLink><p>Catalogue retrieval summary: {{ metric.retrieved_at ?? 'not supplied' }}. This is a coverage summary, not the provenance of every observation.</p></details><button type="button" class="atlas-button" :disabled="!treatmentTarget(metric)" @click="choose(metric)">Choose {{ metric.name ?? metric.key }}</button></li></ul><StEvidenceState v-if="!choices.length" empty empty-title="No catalogue entries match these filters" /></template>
+      <template v-else><button type="button" class="atlas-button" @click="change({ metric: undefined, indicator_id: undefined, table_ref: undefined, cohort: undefined })">All treatment measures</button><section class="atlas-panel atlas-panel-body space-y-3" aria-label="Selected treatment measure"><h2>{{ active.name ?? active.key }}</h2><p>{{ active.definition ?? 'Definition not supplied.' }}</p><p>Source: {{ active.source }} · Catalogue unit: {{ active.unit ?? 'not supplied' }} · Substance: {{ active.substance ?? 'not supplied' }}</p><p>Population detail is limited to this definition and the returned observation labels. Catalogue authority coverage: {{ treatmentText(active.authority_count) }}.</p><p v-if="Array.isArray(active.periods)">Supplied catalogue periods: {{ active.periods.map(treatmentText).join(', ') || 'none returned' }}.</p><p v-else>Catalogue period range: {{ treatmentText(active.period_range) }}. Exact intervening periods are not enumerated.</p><StLink v-if="typeof active.source_url === 'string'" :href="active.source_url">Open catalogue source</StLink><StEntityPicker kind="authority" label="Local authority" empty-label="Choose an authority" :model-value="get('ons_code')" @update:model-value="change({ ons_code: $event || undefined, cohort: undefined })" /></section>
+        <p v-if="get('provider_key') || get('year_from') || get('year_to')" class="atlas-footnote">Retained provider and year filters do not apply to these treatment endpoints. Observation periods are read from the returned records.</p><p v-if="target?.endpoint === 'ndtms' && (get('topic') || get('substance'))" class="atlas-footnote">Topic and substance selections belong to catalogue discovery. They do not filter NDTMS observations.</p><p v-if="invalidAuthority" role="status">The authority code is not in the expected ONS format. Choose an authority from the supplied list.</p><p v-else-if="!target" role="status">This catalogue entry does not supply a supported source identifier.</p><template v-else><p v-if="!get('ons_code')" role="status">Choose an authority to read this measure’s local observations.</p><StEvidenceState :pending="pending" :error="error" @retry="refresh"><template v-if="ft && get('ons_code')"><p v-if="!indicator" role="status">This response does not identify exactly one selected indicator. The source may no longer match the retained topic or substance filters.</p><template v-else><p class="atlas-footnote">Returned indicator: {{ indicator.indicator_name }}. Unit: {{ unit ?? 'not supplied, so a numeric chart is unavailable' }}.</p><StTreatmentRecords v-if="localRows" :key="`local:${active.key}:${get('ons_code')}`" :rows="localRows" lane="local" title="Selected authority observations" :unit="unit" :periods="active.periods" :chart-allowed="Boolean(unit)" :query="query" endpoint="fingertips" :caveats="sourceCaveats" /><p v-else role="status">Local observations were not supplied as an array.</p><StTreatmentRecords v-if="englandRows" :key="`england:${active.key}`" :rows="englandRows" lane="england" title="England observations" :unit="unit" :periods="active.periods" :chart-allowed="Boolean(unit)" :query="query" endpoint="fingertips" :caveats="sourceCaveats" /><p v-else role="status">The England observation array was not supplied.</p></template></template>
+          <template v-if="ndtms"><template v-if="get('ons_code')"><p class="atlas-footnote">NDTMS source table: {{ target.table_ref }}. Authority: {{ ndtms.authority?.name ?? get('ons_code') }}. Some numeric rows describe contextual populations or rates. Each published measure and age group stays separate.</p><label class="st-treatment-cohort">Published measure and age group<select :value="get('cohort')" @change="change({ cohort: ($event.target as HTMLSelectElement).value || undefined })"><option value="">Read all rows, then choose a chart measure</option><option v-if="get('cohort') && !selectedCohort" :value="get('cohort')">Saved measure and age group are unavailable</option><option v-for="cohort in cohorts" :key="cohort.key" :value="cohort.key">{{ cohort.label }}</option></select></label><p v-if="get('cohort') && !selectedCohort" role="status">The saved measure and age group do not match a returned observation. No replacement has been selected.</p><p class="atlas-footnote">This selection filters only the displayed numeric rows. Context and suppressed rows below retain the whole returned authority/table scope. Observation period and publication edition are never substituted for each other. A separate unit field is not supplied, so read the published measure label.</p><StTreatmentRecords v-if="displayedEstimates" :key="`estimates:${active.key}:${get('ons_code')}`" :rows="displayedEstimates" lane="estimates" :title="selectedCohort?.label ?? 'NDTMS numeric observations'" :unit="null" :chart-allowed="Boolean(selectedCohort)" :query="query" endpoint="ndtms" :caveats="sourceCaveats" /><p v-else role="status">The NDTMS numeric observation array was not supplied.</p><StTreatmentRecords v-if="context" :key="`context:${active.key}:${get('ons_code')}`" :rows="context" lane="context" title="NDTMS context and suppressed rows" :unit="null" :query="query" endpoint="ndtms" :caveats="sourceCaveats" /><p v-else role="status">The NDTMS context array was not supplied.</p></template><section class="space-y-3"><h2>NDTMS publication and table catalogue</h2><p>This catalogue covers all returned NDTMS tables and publications. The selected authority and table do not filter its coverage counts.</p><StEvidenceTable :rows="ndtms.datasets" :columns="[{ key: 'table_ref', label: 'Source table' }, { key: 'label', label: 'Published table label' }, { key: 'rows', label: 'Held rows', numeric: true }, { key: 'authorities', label: 'Matched authorities', numeric: true }, { key: 'publications', label: 'Publications', numeric: true }]" caption="NDTMS table coverage, all returned tables" /><details><summary>Returned publication editions</summary><StEvidenceTable :rows="ndtms.publications" :columns="[{ key: 'title', label: 'Publication' }, { key: 'financial_year', label: 'Publication edition' }, { key: 'cohort', label: 'Published cohort' }, { key: 'document_url', label: 'Original document', link: true }]" caption="NDTMS publication catalogue, not an observation-to-publication join" source-details /><p class="atlas-footnote">The observation response omits publication_slug. A publication edition alone does not identify one catalogue document. These catalogue rows have not been joined onto the observations.</p></details></section></template><StCaveat v-for="(text, key) in sourceCaveats" :key="key" :text="text" /></StEvidenceState></template>
+      </template><StCaveat :text="catalogue?.caveat" />
+    </template></StEvidenceState>
   </section>
 </template>
+<style scoped>
+.st-treatment-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+.st-treatment-filters label, .st-treatment-cohort { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
+.st-treatment-filters input, .st-treatment-filters select, .st-treatment-cohort select { width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border-control); border-radius: 4px; }
+.st-treatment-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 20px; }
+.st-treatment-metrics li { display: grid; align-content: start; gap: 12px; padding: 20px; border: 1px solid var(--border-subtle); background: var(--surface-panel); overflow-wrap: anywhere; }
+</style>

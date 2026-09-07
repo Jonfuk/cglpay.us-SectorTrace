@@ -24,9 +24,9 @@ function goHome() {
         This address has no page. It does not mean the underlying evidence is
         missing.
       </p>
-      <UButton color="primary" @click="goHome">
-        Back to the evidence atlas
-      </UButton>
+      <button type="button" class="atlas-button primary" @click="goHome">
+        Return to Overview
+      </button>
     </div>
   </div>
 </template>

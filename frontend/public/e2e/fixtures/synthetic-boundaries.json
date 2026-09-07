@@ -1,0 +1,21 @@
+{
+  "archive": "/map/synthetic-boundaries.pmtiles",
+  "source_digest": "synthetic-fixture",
+  "boundary_version": "synthetic-fixture",
+  "generator_version": "sectortrace-pmtiles/1",
+  "feature_count": 1,
+  "bounds": [
+    -2,
+    52,
+    -1,
+    53
+  ],
+  "min_zoom": 0,
+  "max_zoom": 0,
+  "zoom_range": [
+    0,
+    0
+  ],
+  "output_digest": "1553b4ca75cf3ecc80882855d569e7ad39c6a919e468a495024a868c9245080e",
+  "tile_count": 1
+}

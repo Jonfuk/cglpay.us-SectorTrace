@@ -59,7 +59,6 @@ const hseColumns: Column<Record<string, unknown>>[] = [
 function setSafetyFilter(key: string, value: string): void { void filters.set(key, value || undefined) }
 function sourceCount(key: string): number { return safetyCounts.value?.by_source[key] ?? 0 }
 function relationshipCount(key: string): number { return safetyCounts.value?.by_relationship[key] ?? 0 }
-function countValue(row: CountRow): string { return String(row.reports ?? row.documents ?? row.occurrences ?? 0) }
 function sortDesc(rows: CountRow[], key: 'reports' | 'documents' | 'occurrences'): CountRow[] { return [...rows].sort((a, b) => Number(b[key] ?? 0) - Number(a[key] ?? 0)).slice(0, 20) }
 
 useHead({ title: 'SectorTrace — Safety & legal evidence' })

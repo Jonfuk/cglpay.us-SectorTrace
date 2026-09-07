@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
 // Playwright smoke gate for the built public app. It serves the generated
@@ -18,6 +20,8 @@ const CHROME = existsSync(PINNED) ? PINNED : undefined
 
 export default defineConfig({
   testDir: './e2e',
+  // Browser traces/screenshots are disposable test output, never repository data.
+  outputDir: process.env.SECTORTRACE_E2E_OUTPUT || join(tmpdir(), `sectortrace-public-e2e-${process.pid}`),
   timeout: 30_000,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

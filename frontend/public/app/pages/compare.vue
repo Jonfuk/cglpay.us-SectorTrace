@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Column } from '~/components/StEvidenceTable.vue'
-import type { CompareResponse, ProviderRow, ProvidersResponse } from '~/types/api'
+import type { ProviderRow, ProvidersResponse } from '~/types/api'
 
 interface AuthorityOption { ons_code: string; name: string; region: string | null }
 interface AuthoritiesResponse { authorities: AuthorityOption[] }

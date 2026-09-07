@@ -26,7 +26,7 @@ test('public shell boots without console errors', async ({ page }) => {
   // The masthead brand link is part of the static shell and must render.
   await expect(page.getByRole('link', { name: 'SectorTrace', exact: true })).toBeVisible()
   // The primary nav renders (data-independent).
-  await expect(page.getByRole('link', { name: 'Overview' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Main sections' }).getByRole('link', { name: 'Overview', exact: true })).toBeVisible()
   await page.waitForTimeout(500)
   expect(problems, problems.join('\n')).toEqual([])
 })
@@ -34,7 +34,7 @@ test('public shell boots without console errors', async ({ page }) => {
 test('navigating to a data route mounts it and updates the hash bookmark', async ({ page }) => {
   const problems = collectProblems(page)
   await page.goto('/')
-  await page.getByRole('link', { name: 'Pay' }).click()
+  await page.getByRole('navigation', { name: 'Main sections' }).getByRole('link', { name: 'Pay and workforce', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Pay' })).toBeVisible()
   // The URL a bookmark would capture is the hash form.
   expect(page.url()).toContain('#/pay')
@@ -45,7 +45,7 @@ test('navigating to a data route mounts it and updates the hash bookmark', async
 test('the map view lazy-loads MapLibre and mounts without errors', async ({ page }) => {
   const problems = collectProblems(page)
   await page.goto('/')
-  await page.getByRole('link', { name: 'Places' }).click()
+  await page.getByRole('navigation', { name: 'Main sections' }).getByRole('link', { name: 'Places', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Places' })).toBeVisible()
   // Switch to the map view — this is what lazy-loads the MapLibre chunk.
   await page.getByRole('button', { name: 'Map' }).click()
@@ -83,6 +83,10 @@ test('all public port routes mount through the SPA fallback', async ({ page }) =
     ['diary', 'Contract diary'],
     ['coverage', 'Data coverage'],
     ['timeline', 'Timeline'],
+    ['authorities', 'Authorities'],
+    ['search', 'Find evidence'],
+    ['research-tools', 'Verification tools'],
+    ['about', 'Evidence for the substance misuse sector'],
   ] as const
 
   for (const [route] of routes) {
@@ -94,12 +98,11 @@ test('all public port routes mount through the SPA fallback', async ({ page }) =
     const link = page.locator(`a[href="#/${route}"]`).first()
     if (await link.count()) await link.click()
     else await page.evaluate((path) => { window.location.hash = `#/${path}` }, route)
-    // Some pages keep their first paint behind a current API response. In
-    // this deliberately backend-free harness, route resolution and bookmark
-    // state are the stable assertion; rendered data states are covered by the
-    // live VPS checks and the focused smoke tests above.
+    // A usable heading must remain available even without a successful API.
+    // Route resolution alone would pass while a reader sees a blank workspace.
     await expect(page).toHaveURL(new RegExp(`#/${route}(?:$|[?])`))
     await expect(page.getByRole('banner').getByRole('link', { name: 'SectorTrace', exact: true })).toBeVisible()
+    await expect(page.locator('main h1').first()).toBeVisible()
   }
   expect(problems, problems.join('\n')).toEqual([])
 })

@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="Row extends object">
 import { computed } from 'vue'
+import type { Provenance } from '~/types/api'
 
 // A deliberately COARSE evidence table. The plan warns against replacing one
 // table row with a deep tree of wrapper components (update + memory cost), so
@@ -33,6 +34,8 @@ const props = defineProps<{
   rows: Row[] | null | undefined
   /** Stable row key for :key. Falls back to index if absent. */
   rowKey?: Extract<keyof Row, string>
+  caption?: string
+  sourceDetails?: boolean
 }>()
 
 const rowsSafe = computed<Row[]>(() => (Array.isArray(props.rows) ? props.rows : []))
@@ -54,18 +57,21 @@ function keyFor(row: Row, i: number): string | number {
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <div class="overflow-x-auto" :tabindex="caption ? 0 : undefined" :role="caption ? 'region' : undefined" :aria-label="caption">
     <table class="w-full text-sm border-collapse">
+      <caption v-if="caption" class="text-left mb-3 atlas-footnote">{{ caption }}</caption>
       <thead>
         <tr class="text-left border-b border-black/15 dark:border-white/15">
           <th
             v-for="col in columns"
             :key="col.key"
+            scope="col"
             class="py-2 pr-4 font-medium opacity-70 whitespace-nowrap"
             :class="{ 'text-right': col.numeric }"
           >
             {{ col.label }}
           </th>
+          <th v-if="sourceDetails" scope="col" class="py-2 pr-4 font-medium">Provenance</th>
         </tr>
       </thead>
       <tbody>
@@ -91,6 +97,7 @@ function keyFor(row: Row, i: number): string | number {
             >{{ cell(row, col) }}</NuxtLink>
             <template v-else>{{ cell(row, col) }}</template>
           </td>
+          <td v-if="sourceDetails" class="py-2 pr-4"><StProvenance :provenance="row as Provenance" /></td>
         </tr>
       </tbody>
     </table>

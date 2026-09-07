@@ -205,8 +205,9 @@ class PmtilesReader {
   async get(z: number, x: number, y: number, signal: AbortSignal): Promise<ArrayBuffer> {
     const entry = await this.entryFor(pmtilesTileId(z, x, y), signal)
     if (!entry) return new ArrayBuffer(0)
-    const tile = pmtilesTileId(z, x, y)
-    const offset = entry.offset + (entry.runLength ? tile - entry.tileId : 0)
+    // A PMTiles run reuses the same payload for consecutive tile IDs. Moving
+    // the byte offset within that payload corrupts every tile after the first.
+    const offset = entry.offset
     const header = await this.loadHeader(signal)
     return this.range(header.tileOffset + offset, entry.length, signal)
   }

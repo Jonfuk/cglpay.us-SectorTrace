@@ -3,7 +3,6 @@
 // are versioned browser storage (useLocalStore) — private to the viewer, never
 // sent anywhere. They are conveniences: a failure to read or write degrades to
 // an empty collection, never a broken page.
-import { ref } from 'vue'
 
 export interface NotebookEntry {
   id: string
@@ -38,12 +37,15 @@ function makeId(): string {
 
 export function useNotebook() {
   const store = useLocalStore<NotebookEntry[]>(NOTEBOOK_KEY, VERSION, () => [])
-  const entries = ref<NotebookEntry[]>(store.read())
+  const entries = useState<NotebookEntry[]>(NOTEBOOK_KEY, () => {
+    const data = store.read()
+    return Array.isArray(data) ? data : []
+  })
 
   const add = (entry: Omit<NotebookEntry, 'id' | 'at'>) => {
     const next: NotebookEntry = { ...entry, id: makeId(), at: Date.now() }
     entries.value = [next, ...entries.value]
-    store.write(entries.value)
+    return store.write(entries.value)
   }
   const remove = (id: string) => {
     entries.value = entries.value.filter((e) => e.id !== id)
@@ -58,14 +60,17 @@ export function useNotebook() {
 
 export function useSavedSearches() {
   const store = useLocalStore<SavedSearch[]>(SAVED_KEY, VERSION, () => [])
-  const searches = ref<SavedSearch[]>(store.read())
+  const searches = useState<SavedSearch[]>(SAVED_KEY, () => {
+    const data = store.read()
+    return Array.isArray(data) ? data : []
+  })
 
   const save = (label: string, href: string) => {
     // De-dupe by href: saving the same view twice updates its label rather
     // than stacking duplicates.
     const rest = searches.value.filter((s) => s.href !== href)
     searches.value = [{ id: makeId(), label, href, at: Date.now() }, ...rest]
-    store.write(searches.value)
+    return store.write(searches.value)
   }
   const remove = (id: string) => {
     searches.value = searches.value.filter((s) => s.id !== id)
@@ -76,7 +81,10 @@ export function useSavedSearches() {
 
 export function useJourney() {
   const store = useLocalStore<JourneyVisit[]>(JOURNEY_KEY, VERSION, () => [])
-  const visits = ref<JourneyVisit[]>(store.read())
+  const visits = useState<JourneyVisit[]>(JOURNEY_KEY, () => {
+    const data = store.read()
+    return Array.isArray(data) ? data : []
+  })
 
   const record = (href: string, label: string) => {
     // Keep the most recent visit per href at the front, bounded length.

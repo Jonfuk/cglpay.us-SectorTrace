@@ -10,8 +10,8 @@
 
 export interface VersionedStore<T> {
   read: () => T
-  write: (value: T) => void
-  clear: () => void
+  write: (value: T) => boolean
+  clear: () => boolean
 }
 
 interface Envelope<T> {
@@ -68,24 +68,27 @@ export function useLocalStore<T>(
     }
   }
 
-  const write = (value: T): void => {
+  const write = (value: T): boolean => {
     const s = storage()
-    if (!s) return
+    if (!s) return false
     try {
       const env: Envelope<T> = { v: version, data: value }
       s.setItem(key, JSON.stringify(env))
+      return true
     } catch {
-      // Quota or blocked storage: a convenience, not a correctness path.
+      // Callers must not confirm persistence when quota or policy blocked it.
+      return false
     }
   }
 
-  const clear = (): void => {
+  const clear = (): boolean => {
     const s = storage()
-    if (!s) return
+    if (!s) return false
     try {
       s.removeItem(key)
+      return true
     } catch {
-      /* ignore */
+      return false
     }
   }
 

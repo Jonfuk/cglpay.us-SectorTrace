@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-type Row = Record<string, any>
+interface DiffField { field: string; class: string; changed?: boolean; a?: unknown; b?: unknown }
+interface Row {
+  kind?: string; note?: string | null; same_ocid?: boolean
+  counts?: Record<string, number | null>; fields?: DiffField[]
+  text_changes?: Array<{ sequence: number; kind: string; element_type?: string; a?: string | null; b?: string | null }>
+}
 const api = usePublicApi()
 const filters = useFilterState()
 const kind = computed({ get: () => String(filters.get('kind') || 'ocds'), set: (v: string) => void filters.setAll({ kind: v, ocid: undefined, document_id: undefined, a: undefined, b: undefined }) })
@@ -11,7 +16,7 @@ const b = computed(() => String(filters.get('b') || ''))
 const target = computed(() => kind.value === 'ocds' ? ocid.value || (a.value && b.value) : documentId.value || (a.value && b.value))
 const { data, pending, error } = await useAsyncData<Row | null>(() => `public-record-diff-${kind.value}-${ocid.value}-${documentId.value}-${a.value}-${b.value}`, () => target.value ? api.get<Row>('/record_diff', { query: { kind: kind.value, ocid: ocid.value || undefined, document_id: documentId.value || undefined, a: a.value || undefined, b: b.value || undefined } }) : Promise.resolve(null), { default: () => null, watch: [kind, ocid, documentId, a, b] })
 function compare(): void { void filters.setAll({ kind: kind.value, ocid: kind.value === 'ocds' ? String(filters.get('draft_id') || '') : undefined, document_id: kind.value === 'document' ? String(filters.get('draft_id') || '') : undefined }) }
-function changed(row: Row): boolean { return Boolean(row.changed) }
+function changed(row: DiffField): boolean { return Boolean(row.changed) }
 useHead({ title: 'SectorTrace — Compare revisions' })
 </script>
 
