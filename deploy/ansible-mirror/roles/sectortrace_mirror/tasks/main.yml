@@ -5,6 +5,15 @@
 # place. This is the part that differs.
 
 # --- What this box is being told to be, checked before it is built ------------
+- name: Persist an explicit frontend choice for subsequent redeploys
+  ansible.builtin.lineinfile:
+    path: "{{ playbook_dir }}/group_vars/all/zz-local.yml"
+    regexp: '^serve_nuxt:'
+    line: "serve_nuxt: {{ mirror_frontend_override | bool | lower }}"
+    create: true
+    mode: "0600"
+  when: mirror_frontend_override is defined
+
 - name: Check the sync mode is one this playbook knows
   ansible.builtin.assert:
     that:
@@ -265,6 +274,27 @@
       {% if mirror_role == 'beta' %}analysis-worker{% endif %}
     chdir: "{{ state_dir }}"
   changed_when: true
+
+# A healthy Python server can still be serving the legacy portal if the flag
+# was overridden in .env.merge or the static output is absent. Check the built
+# image and effective environment before replacing the running app.
+- name: Verify the selected frontend and its built entry assets
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - docker-compose.yml
+      - run
+      - --rm
+      - --no-deps
+      - --entrypoint
+      - python
+      - app
+      - deploy/ansible-mirror/check_frontend.py
+      - "{{ serve_nuxt | bool | lower }}"
+    chdir: "{{ state_dir }}"
+  changed_when: false
 
 # Not in the self-host build, and worth the extra half-minute here: a
 # mirror is a box nobody looks at between syncs. A Caddyfile that does not

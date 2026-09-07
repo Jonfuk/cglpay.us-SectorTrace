@@ -14,6 +14,8 @@
 # configured and goes straight to the playbook.
 #
 #   ./ansible-mirror.sh --reconfigure   # re-run the setup questions
+#   ./ansible-mirror.sh --enable-frontend  # persist the generated frontend
+#   ./ansible-mirror.sh --legacy-frontend  # persist the serving rollback
 #
 # Anything else you pass is handed to ansible-playbook, so
 # `./ansible-mirror.sh --check` does a dry run.
@@ -33,10 +35,19 @@ VAULT_FILE="group_vars/all/vault.yml"
 LOCAL_FILE="group_vars/all/zz-local.yml"
 
 RECONFIGURE=0
+FRONTEND_OVERRIDE=""
 PLAYBOOK_ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--reconfigure" ]; then
         RECONFIGURE=1
+    elif [ "$arg" = "--enable-frontend" ] || [ "$arg" = "--legacy-frontend" ]; then
+        frontend_choice="true"
+        [ "$arg" = "--legacy-frontend" ] && frontend_choice="false"
+        if [ -n "$FRONTEND_OVERRIDE" ] && [ "$FRONTEND_OVERRIDE" != "$frontend_choice" ]; then
+            echo "Choose either --enable-frontend or --legacy-frontend, not both." >&2
+            exit 2
+        fi
+        FRONTEND_OVERRIDE="$frontend_choice"
     else
         PLAYBOOK_ARGS+=("$arg")
     fi
@@ -178,7 +189,7 @@ BANNER
         2) mirror_role="beta" ;;
     esac
 
-    local deploy_git_branch="" recurring_sync="true" serve_nuxt="false"
+    local deploy_git_branch="" recurring_sync="true" serve_nuxt="true"
     if [ "$mirror_role" = "beta" ]; then
         echo
         echo "--- Which branch does this box build and run? -------------------"
@@ -202,15 +213,17 @@ BANNER
             recurring_sync="false"
         fi
 
-        echo
-        echo "--- Serve the Nuxt front end ----------------------------------"
-        echo "The beta box is the cutover proving ground for the generated"
-        echo "public and admin Nuxt apps. The legacy portals remain the"
-        echo "parity oracle when this is off."
-        echo
-        if ask_yes_no "Serve Nuxt on this beta box?" "y"; then
-            serve_nuxt="true"
-        fi
+    fi
+
+    echo
+    echo "--- Serve the generated frontend -------------------------------"
+    echo "The generated public and admin apps use the existing Python"
+    echo "server and APIs. Node is needed only while building the image."
+    if [ -n "$FRONTEND_OVERRIDE" ]; then
+        serve_nuxt="$FRONTEND_OVERRIDE"
+        echo "Using the frontend choice supplied on the command line."
+    elif ! ask_yes_no "Serve the generated frontend on this box?" "y"; then
+        serve_nuxt="false"
     fi
 
     # --- Domain and contact ---
@@ -629,6 +642,12 @@ else
 fi
 
 # --- Run the playbook -------------------------------------------------------------
+
+# Extra vars apply the choice in this run even if zz-local.yml previously said
+# otherwise. The role persists it using lineinfile, which respects --check.
+if [ -n "$FRONTEND_OVERRIDE" ]; then
+    PLAYBOOK_ARGS+=(--extra-vars "{\"serve_nuxt\":$FRONTEND_OVERRIDE,\"mirror_frontend_override\":$FRONTEND_OVERRIDE}")
+fi
 
 echo "==> Running the playbook"
 if [ -n "$VAULT_PW_FILE" ]; then

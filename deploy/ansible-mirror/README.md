@@ -71,12 +71,30 @@ things a mirror never does:
   app image, discarding any change made directly on the box. This box always
   runs the tip of the branch you named; there is no separate `git pull` step
   to remember, unlike a `dr_mirror`'s "Redeploying" section below.
-- **Whether to serve the generated Nuxt front end.** The beta wizard writes
-  `serve_nuxt: true` by default. That renders `SERVE_NUXT=true` into the
-  app's `.env`, so `/` and `/admin` use the generated Nuxt apps while `/api`
-  remains on the Python server. Answer no in the wizard, or set
-  `serve_nuxt: false` in `group_vars/all/zz-local.yml`, to keep the legacy
-  portals as parity oracles. Disaster-recovery mirrors default to false.
+- **Whether to serve the generated frontend.** Both mirror modes now default
+  to `serve_nuxt: true`. That renders `SERVE_NUXT=true` into the app's `.env`,
+  so `/` and `/admin` use the generated Nuxt apps while `/api` remains on the
+  Python server. Node is used only in the Docker build stage. Existing local
+  settings still take precedence over the tracked default.
+
+  To enable the new frontend on an already configured box, run
+  `./ansible-mirror.sh --enable-frontend`. This overrides an older saved false
+  value for the current run and persists true in `group_vars/all/zz-local.yml`
+  for subsequent redeploys. It does not rerun the credential wizard or seed
+  the warehouse. The ordinary playbook still performs its configured build
+  and deployment tasks.
+
+  `./ansible-mirror.sh --legacy-frontend` persists the serving rollback through
+  the same path. On an already configured box, `--check` can accompany either
+  option and does not persist the choice. Initial setup and `--reconfigure`
+  still write the wizard's configuration. Conflicting enable and rollback
+  flags are refused.
+
+  Before restarting the app, the playbook checks its effective flag and the
+  generated public/admin entry points, SPA fallbacks and referenced scripts
+  and stylesheets inside the built image. A conflicting `SERVE_NUXT` in
+  `.env.merge` causes a visible failure instead of silently serving the old
+  portal. This preflight does not replace browser and accessibility testing.
 - **Whether to reseed nightly too.** Default no. The three "how does the
   warehouse get here" sync paths below (snapshot / tunnel / URL) still apply
   — a beta box seeds from the same sources a mirror would — but by default

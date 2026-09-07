@@ -44,11 +44,10 @@ state_dir: /opt/sectortrace-mirror/state
 admin_ui_enabled: true
 expose_admin_publicly: false
 
-# The beta deployment is the cutover proving ground for the generated Nuxt
-# front ends; a disaster-recovery mirror keeps the legacy portals as its
-# parity oracle. The wizard writes an explicit value into zz-local.yml, so an
-# operator can turn the beta cutover off without changing this shared default.
-serve_nuxt: false
+# Generated frontends are the normal mirror entry points. Existing local
+# overrides remain explicit. --enable-frontend upgrades an older saved false
+# setting, and --legacy-frontend persists the rollback without reseeding data.
+serve_nuxt: true
 
 # Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
 # are accepted too (198.51.100.0/24). The allowlist IS the authentication —
