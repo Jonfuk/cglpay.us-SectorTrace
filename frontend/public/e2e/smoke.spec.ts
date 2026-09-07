@@ -63,7 +63,7 @@ test('all public port routes mount through the SPA fallback', async ({ page }) =
     ['geography', 'Places'],
     ['treatment', 'Treatment'],
     ['cqc', 'CQC'],
-    ['pfd', 'Safety & legal evidence'],
+    ['pfd', 'Safety and legal evidence'],
     ['relationships', 'Relationships'],
     ['claims', 'Claims'],
     ['documents', 'Document search'],
