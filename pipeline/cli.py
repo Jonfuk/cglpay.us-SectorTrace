@@ -95,6 +95,69 @@ def open_jobs_status() -> None:
         client_http.__exit__(None, None, None)
 
 
+@open_jobs_app.command("triage")
+def open_jobs_triage(
+    limit: int | None = typer.Option(None, min=1,
+                                     help="Maximum current adverts to inspect."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Count candidates without creating review items."),
+) -> None:
+    """Find role-shaped Open Jobs adverts for human review.
+
+    This is deliberately a finding aid.  It never changes an advert, provider
+    attribution, export membership, or public response.  The review payload
+    records the exact terms and fields that caused a candidate to be queued.
+    """
+    from pipeline.open_jobs.relevance import classify
+    from pipeline.open_jobs.store import OpenJobsStore, _value
+
+    conn = None
+    counts = {"scanned": 0, "candidate": 0, "excluded": 0,
+              "no_match": 0, "queued": 0}
+    try:
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT advert_id, title, company, location "
+            "FROM open_jobs_adverts "
+            "WHERE operation IN ('added', 'changed', 'carried') "
+            "ORDER BY advert_id"
+            + (" LIMIT %s" if limit else ""),
+            (limit,) if limit else (),
+        )
+        store = OpenJobsStore(conn)
+        for row in cursor:
+            counts["scanned"] += 1
+            result = classify(title=_value(row, "title"),
+                              company=_value(row, "company"),
+                              location=_value(row, "location"))
+            counts[result.decision] += 1
+            if not result.candidate or dry_run:
+                continue
+            advert_id = _value(row, "advert_id")
+            store.queue_review(
+                "role_relevance",
+                "Role vocabulary match requires substance-misuse and England relevance review",
+                advert_id=advert_id,
+                payload=result.payload(),
+            )
+            counts["queued"] += 1
+        if not dry_run:
+            conn.commit()
+        typer.echo(__import__("json").dumps({**counts, "dry_run": dry_run},
+                                             indent=2, sort_keys=True))
+    except Exception as exc:
+        if conn:
+            conn.rollback()
+        typer.echo(f"open jobs triage failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
+
+
 def _document_reference(row):
     from pipeline.documents.models import EvidenceReference
 
