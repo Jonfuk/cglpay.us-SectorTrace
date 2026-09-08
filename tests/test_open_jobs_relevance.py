@@ -30,3 +30,16 @@ def test_location_does_not_make_an_advert_relevant():
     result = classify(title="Support Worker", company=None, location="England")
 
     assert result.decision == "no_match"
+
+
+def test_archived_content_can_surface_a_role_without_title_hit():
+    result = classify(
+        title="Clinical Practitioner",
+        company=None,
+        location="Manchester",
+        content="The post delivers opioid substitution treatment.",
+    )
+
+    assert result.decision == "candidate"
+    assert result.matched_terms == ("opioid",)
+    assert result.matched_fields == ("content",)

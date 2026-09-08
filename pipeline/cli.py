@@ -108,7 +108,7 @@ def open_jobs_triage(
     attribution, export membership, or public response.  The review payload
     records the exact terms and fields that caused a candidate to be queued.
     """
-    from pipeline.open_jobs.relevance import classify
+    from pipeline.open_jobs.relevance import TriageResult, classify
     from pipeline.open_jobs.store import OpenJobsStore, _value
 
     conn = None
@@ -120,7 +120,7 @@ def open_jobs_triage(
         db.apply_migrations(conn, db.migrations_dir_for(settings))
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT advert_id, generation_id, release_id, provenance_id, "
+            "SELECT advert_id, ats, slug, upstream_id, generation_id, release_id, provenance_id, "
             "title, company, location "
             "FROM open_jobs_adverts "
             "WHERE operation IN ('added', 'changed', 'carried') "
@@ -129,22 +129,84 @@ def open_jobs_triage(
             (limit,) if limit else (),
         )
         store = OpenJobsStore(conn)
+        current: dict[tuple[str, str, str], dict] = {}
         for row in cursor:
+            advert = dict(row)
+            current[(str(advert["ats"]), str(advert["slug"]), str(advert["upstream_id"]))] = advert
             counts["scanned"] += 1
             result = classify(title=_value(row, "title"),
                               company=_value(row, "company"),
                               location=_value(row, "location"))
+            advert["triage"] = result
+
+        # The web UI searches the archived Open Jobs content, while the
+        # current projection intentionally keeps only small source-shaped
+        # fields.  Reuse those exact archived bytes when available so the
+        # operator count measures the same text without bypassing provenance.
+        try:
+            import pyarrow.parquet as parquet
+        except ImportError:
+            parquet = None
+        archive_dir = settings.raw_archive_dir / "open_jobs"
+        archive_rows = 0
+        if parquet and archive_dir.is_dir():
+            for path in sorted(archive_dir.glob("*.bin")):
+                parquet_file = parquet.ParquetFile(path)
+                columns = {field.name for field in parquet_file.schema_arrow}
+                wanted = [name for name in ("ats", "slug", "id", "title", "content",
+                                            "departments", "location") if name in columns]
+                if not {"ats", "slug", "id"}.issubset(wanted):
+                    continue
+                for batch in parquet_file.iter_batches(columns=wanted, batch_size=4096):
+                    for source_row in batch.to_pylist():
+                        archive_rows += 1
+                        key = (str(source_row.get("ats")), str(source_row.get("slug")),
+                               str(source_row.get("id")))
+                        advert = current.get(key)
+                        if advert is None:
+                            continue
+                        result = classify(
+                            title=source_row.get("title") or advert.get("title"),
+                            company=advert.get("company"),
+                            location=source_row.get("location") or advert.get("location"),
+                            content=source_row.get("content"),
+                            departments=source_row.get("departments"),
+                        )
+                        previous = advert["triage"]
+                        if result.candidate or previous.candidate:
+                            decision = "candidate"
+                        elif result.decision == "excluded" or previous.decision == "excluded":
+                            decision = "excluded"
+                        else:
+                            decision = "no_match"
+                        advert["triage"] = TriageResult(
+                            decision=decision,
+                            matched_terms=tuple(dict.fromkeys((*previous.matched_terms,
+                                                               *result.matched_terms))),
+                            excluded_terms=tuple(dict.fromkeys((*previous.excluded_terms,
+                                                                 *result.excluded_terms))),
+                            matched_fields=tuple(dict.fromkeys((*previous.matched_fields,
+                                                                 *result.matched_fields))),
+                        )
+
+        # Counts are over unique current adverts, even when a key appeared in
+        # more than one archived release.  This keeps the result comparable to
+        # the web UI's role list and makes repeat runs deterministic.
+        counts = {"scanned": len(current), "candidate": 0, "excluded": 0,
+                  "no_match": 0, "queued": 0, "archive_rows": archive_rows}
+        for advert in current.values():
+            result = advert["triage"]
             counts[result.decision] += 1
             if not result.candidate or dry_run:
                 continue
-            advert_id = _value(row, "advert_id")
+            advert_id = advert["advert_id"]
             store.queue_review(
                 "role_relevance",
                 "Role vocabulary match requires substance-misuse and England relevance review",
                 advert_id=advert_id,
-                generation_id=_value(row, "generation_id"),
-                release_id=_value(row, "release_id"),
-                provenance_id=_value(row, "provenance_id"),
+                generation_id=advert["generation_id"],
+                release_id=advert["release_id"],
+                provenance_id=advert["provenance_id"],
                 payload=result.payload(),
             )
             counts["queued"] += 1

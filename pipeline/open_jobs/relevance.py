@@ -62,7 +62,16 @@ class TriageResult:
         }
 
 
-def classify(*, title: str | None, company: str | None, location: str | None) -> TriageResult:
+def _text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_text(item) for item in value)
+    return str(value)
+
+
+def classify(*, title: str | None, company: str | None, location: str | None,
+             content: object = None, departments: object = None) -> TriageResult:
     """Classify an advert as a review candidate or an excluded finding aid.
 
     Matching is case-insensitive and preserves the field in which a term was
@@ -71,9 +80,11 @@ def classify(*, title: str | None, company: str | None, location: str | None) ->
     or ambiguous.
     """
     fields = {
-        "title": title or "",
-        "company": company or "",
-        "location": location or "",
+        "title": _text(title),
+        "company": _text(company),
+        "location": _text(location),
+        "content": _text(content),
+        "departments": _text(departments),
     }
     matched_terms: list[str] = []
     matched_fields: list[str] = []
