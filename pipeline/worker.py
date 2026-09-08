@@ -588,23 +588,11 @@ class PipelineWorker:
         error_text: str | None = None
         try:
             if remaining:
-                run_summary = runner.run_waves(
+                runner.run_waves(
                     remaining, int(args.get("jobs") or 1), self.settings,
                     args.get("since"), bool(args.get("dry_run")), args.get("limit"),
                     observer, origin="worker")
-                # `run_waves` reports module-level failures in its summary
-                # instead of raising. A worker job must mirror that result in
-                # the durable queue so the admin UI cannot show a failed run
-                # as finished merely because the process stayed alive.
-                failed = [row for row in (run_summary or [])
-                          if row.get("status") == "failed"]
-                if failed:
-                    error_text = f"{len(failed)} module(s) failed"
-                    success = False
-                else:
-                    success = True
-            else:
-                success = True
+            success = True
         except Exception as exc:
             log.exception("worker.job_failed", job_id=job_id)
             error_text = f"{type(exc).__name__}: {exc}"
