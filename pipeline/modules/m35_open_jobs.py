@@ -199,8 +199,20 @@ def collect(ctx: ModuleContext, *, http: Any | None = None) -> dict[str, int]:
         log.info("open_jobs.dry_run", **result)
         return result
     generation_url = policy.url("/data/diffs/index.json")
-    generation_id = store.generation(SOURCE_SYSTEM, generation_url,
-                                     metadata={"since": ctx.since, "source": ctx.source})
+    # A normal replay belongs to the existing source generation. A new
+    # generation is reserved for a first run or an explicit recovery path;
+    # otherwise event identities would change on every invocation and replay
+    # would duplicate append-only history.
+    current = store.current(CURRENT_KEY)
+    existing_generation = (
+        current.get("generation_id")
+        if current and current.get("source_name") == SOURCE_SYSTEM
+        else None
+    )
+    generation_id = store.generation(
+        SOURCE_SYSTEM, generation_url, generation_id=existing_generation,
+        metadata={"since": ctx.since, "source": ctx.source},
+    )
     # Make the attempt durable before any release work. If a later artifact or
     # schema failure rolls back the module transaction, a separate bookkeeping
     # update can still mark this generation failed for operator diagnosis.

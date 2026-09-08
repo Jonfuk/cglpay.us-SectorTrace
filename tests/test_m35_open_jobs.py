@@ -8,6 +8,7 @@ import pytest
 from pipeline.modules import m35_open_jobs
 from pipeline.open_jobs.commands import OpenJobsClient
 from pipeline.open_jobs.policy import OpenJobsPolicy, PolicyError
+from pipeline.open_jobs.store import _stable_id
 
 
 def _settings(**overrides):
@@ -53,3 +54,14 @@ def test_client_builds_lite_artifact_urls_without_network():
     })
     assert parts[0].url.endswith("/data/diffs/2026-09-07__2026-09-08/lite/data_0.parquet")
     assert parts[0].byte_size == 3
+
+
+def test_advert_event_identity_is_stable_for_replay_and_changes_by_release():
+    first = _stable_id("oj-advert-event", "generation", "release-1", "ats",
+                       "board", "job-1", "changed", "")
+    replay = _stable_id("oj-advert-event", "generation", "release-1", "ats",
+                        "board", "job-1", "changed", "")
+    later = _stable_id("oj-advert-event", "generation", "release-2", "ats",
+                       "board", "job-1", "changed", "")
+    assert replay == first
+    assert later != first

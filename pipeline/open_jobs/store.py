@@ -369,8 +369,13 @@ class OpenJobsStore:
             raise ValueError(f"invalid Open Jobs removal reason: {removal_reason!r}")
         if not provenance_id:
             raise ValueError("an Open Jobs advert event needs provenance_id")
+        # The generation is reused while a source chain continues, and the
+        # release id separates repeated operations for the same advert across
+        # releases. Together these make a replay of one verified release a
+        # no-op while preserving a later `changed` event as history.
         eid = advert_event_id or _stable_id(
-            "oj-advert-event", generation_id, ats, slug, upstream_id, operation
+            "oj-advert-event", generation_id, release_id, ats, slug,
+            upstream_id, operation, removal_reason or "",
         )
         self.conn.execute(
             "INSERT INTO open_jobs_advert_events "
