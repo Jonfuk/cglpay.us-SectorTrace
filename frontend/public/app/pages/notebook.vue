@@ -6,13 +6,22 @@ const status = ref('')
 const clearing = ref(false)
 const editing = ref<{ id: string; title: string; snapshot: string } | null>(null)
 const draft = ref('')
+const originalAnnotation = ref('')
+const dirty = computed(() => editing.value !== null && draft.value !== originalAnnotation.value)
 const input = ref<HTMLTextAreaElement | null>(null)
+// Guard only changed drafts. Opening an editor or returning to its original
+// text must not interrupt ordinary navigation or attach an unload listener.
+function beforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = '' }
+watch(dirty, value => { if (value) window.addEventListener('beforeunload', beforeUnload); else window.removeEventListener('beforeunload', beforeUnload) })
+onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
+onBeforeRouteLeave(() => !dirty.value || window.confirm('Leave without saving your personal note? Your draft will be lost.'))
 let editTrigger: HTMLElement | null = null
 async function edit(entry: NotebookEntry, event: Event) {
   if (editing.value) { status.value = 'Save or cancel the current edit before opening another entry.'; input.value?.focus(); return }
   editTrigger = event.currentTarget as HTMLElement
   editing.value = { id: entry.id, title: entry.title, snapshot: JSON.stringify(entry) }
   draft.value = entry.annotation ?? ''
+  originalAnnotation.value = draft.value
   await nextTick()
   input.value?.focus()
 }
