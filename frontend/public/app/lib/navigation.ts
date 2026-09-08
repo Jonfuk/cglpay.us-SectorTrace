@@ -23,6 +23,7 @@ export const navigationGroups = [
 ] as const
 
 export function navigationSectionPath(path: string): string {
+  if (['/discrepancies', '/revisions', '/links', '/doctables'].includes(path)) return '/research-tools'
   return ['/pathfinder', '/cooccurrence'].includes(path) ? '/relationships' : path
 }
 
