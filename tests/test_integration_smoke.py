@@ -769,7 +769,9 @@ def test_every_registered_module_has_a_smoke_test() -> None:
     """Otherwise a new module joins the pipeline with no live coverage and
     nothing says so.
     """
-    real = {n for n in MODULE_REGISTRY if n.startswith("m") and n[1:3].isdigit()}
+    from pipeline.registry import module_meta
+    real = {n for n in MODULE_REGISTRY
+            if n.startswith("m") and n[1:3].isdigit() and not module_meta(n).operator_only}
     assert sorted(real - set(SMOKE_SPECS)) == []
 
 

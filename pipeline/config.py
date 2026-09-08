@@ -723,6 +723,23 @@ class Settings(BaseSettings):
     # memory a single stuck page can genuinely blow up.
     scrapy_playwright_memory_limit_mb: int = 512
 
+    # Open Jobs is an operator-only shadow collector.  Keeping the gate in
+    # Settings makes an installed optional reader harmless until a deliberate
+    # deployment change enables it; the module refuses to run while false.
+    open_jobs_enabled: bool = False
+    open_jobs_base_url: str = "https://backend.dehnbostele.workers.dev"
+    open_jobs_max_artifact_bytes: int = 128 * 1024 * 1024
+    open_jobs_max_release_bytes: int = 512 * 1024 * 1024
+    open_jobs_max_run_bytes: int = 1024 * 1024 * 1024
+    open_jobs_max_temp_bytes: int = 1024 * 1024 * 1024
+    open_jobs_max_record_bytes: int = 1024 * 1024
+    open_jobs_decode_batch_rows: int = 256
+    open_jobs_run_timeout_seconds: int = 1800
+    open_jobs_max_releases_per_run: int = 2
+    open_jobs_status_batch_size: int = 100
+    open_jobs_status_max_requests: int = 10
+    open_jobs_archive_budget_bytes: int = 5 * 1024 * 1024 * 1024
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes

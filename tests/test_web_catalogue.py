@@ -25,7 +25,7 @@ from pipeline import licences
 from pipeline.config import Settings
 from pipeline.exports import guard_not_restricted
 from pipeline.web import datasets
-from pipeline.web.datasets import DATASETS, EVIDENCE_LAYERS
+from pipeline.web.datasets import DATASETS, EVIDENCE_LAYERS, PUBLIC_DATASETS
 from pipeline.web.server import build_server
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -115,11 +115,11 @@ def client(settings: Settings, conn: sqlite3.Connection):
 
 def test_catalogue_lists_every_dataset_with_measured_counts(client):
     body = client.get("/api/v1/catalogue").json()
-    assert body["count"] == len(DATASETS)
+    assert body["count"] == len(PUBLIC_DATASETS)
     assert body["evidence_layers"] == EVIDENCE_LAYERS
     assert "caveat" in body
     by_id = {d["dataset_id"]: d for d in body["datasets"]}
-    assert set(by_id) == {d.dataset_id for d in DATASETS}
+    assert set(by_id) == {d.dataset_id for d in PUBLIC_DATASETS}
 
     geography = by_id["geography"]
     assert geography["row_count"] == 1

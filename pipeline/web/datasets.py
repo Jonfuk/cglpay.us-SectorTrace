@@ -67,6 +67,10 @@ class Dataset:
     # `_STATED_CADENCE_DAYS` below so every judgement sits in one auditable
     # block (BETA-091).
     stated_cadence_days: int | None = None
+    # Operator-only datasets may be inspected and reviewed in the admin UI,
+    # but are excluded from every public catalogue/query projection until a
+    # separate publication decision is made.
+    operator_only: bool = False
 
 
 # The publisher's stated release period, in days, keyed by dataset_id. A key is
@@ -526,6 +530,19 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "never attributed to an LA or added to anything. Officer names and "
         "incident detail are held in restricted_ tables.",
     ),
+    Dataset(
+        "open-jobs-shadow", "m35_open_jobs",
+        "Open Jobs vacancy observations (operator-only shadow)",
+        "Open Jobs publication (dehnbostele)",
+        "https://github.com/elliottdehn/open-jobs",
+        "sector-context", "England and unresolved source geography",
+        "Daily release feed; incremental shadow capture",
+        ("open_jobs_adverts", "open_jobs_advert_events"),
+        "Aggregator observations are not vacancy counts or provider facts. "
+        "This dataset is disabled by default and excluded from all public "
+        "catalogue, query and export projections until separately approved.",
+        operator_only=True,
+    ),
 )
 
 
@@ -539,3 +556,5 @@ DATASETS: tuple[Dataset, ...] = tuple(
 
 BY_ID: dict[str, Dataset] = {d.dataset_id: d for d in DATASETS}
 BY_MODULE: dict[str, Dataset] = {d.module: d for d in DATASETS}
+PUBLIC_DATASETS: tuple[Dataset, ...] = tuple(d for d in DATASETS if not d.operator_only)
+PUBLIC_BY_ID: dict[str, Dataset] = {d.dataset_id: d for d in PUBLIC_DATASETS}

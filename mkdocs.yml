@@ -185,6 +185,7 @@ nav:
       - Data dictionary: DATA_DICTIONARY.md
       - AI promotion policy: AI_PROMOTION_POLICY.md
       - Evidence graph: evidence-graph.md
+      - Open Jobs shadow collector: open-jobs.md
   - Running it:
       - Deployment: DEPLOYMENT.md
       - Backups: BACKUP.md

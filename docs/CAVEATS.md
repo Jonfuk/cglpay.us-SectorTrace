@@ -59,6 +59,27 @@ anyone using it.
 
 ## Per source
 
+### Open Jobs (operator-only shadow observations)
+
+- An Open Jobs row is an aggregator observation of an advertisement, not a
+  confirmed vacancy, successful recruitment event, staffing measure or
+  provider fact. The source may relay employer or ATS text and may include
+  deterministic or model-derived enrichment; those origins remain separate.
+- The collector is disabled by default and its tables are excluded from all
+  public catalogue, query and export projections. Nothing is promoted to
+  evidence or to a provider without a human review decision.
+- Lifecycle values describe the upstream export or crawler report only:
+  `closed` is not proof that a role was filled, `left_dataset` is not closure,
+  `unknown` remains unresolved, and `carried` does not refresh employer
+  confirmation. Absence-derived closures are not enabled.
+- Open Jobs' CC0 statement does not clear third-party employer or ATS rights.
+  Full descriptions and raw artifacts stay behind operator and restricted-data
+  boundaries; no bulk job-description reproduction is provided.
+- Pay is parsed only from identifiable source text using the existing salary
+  discipline. Rates are not annualised, converted, midpointed or inferred.
+  England geography and provider attribution remain nullable until supported
+  by evidence and a reversible review decision.
+
 ### Procurement (Modules 1)
 
 - Contract values are **estimates at notice stage** and may differ from actual

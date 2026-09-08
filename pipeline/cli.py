@@ -10,6 +10,7 @@ import typer
 from pipeline import console as ui
 from pipeline import db, runner
 from pipeline.config import get_settings
+from pipeline.http import PipelineHTTPClient
 from pipeline.logging_conf import configure_logging
 from pipeline.registry import (
     MODULE_REGISTRY,
@@ -31,11 +32,13 @@ nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunk
 analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
 worker_app = typer.Typer(help="Claim and execute queued pipeline-module runs (Phase 5 worker cutover).")
+open_jobs_app = typer.Typer(help="Inspect and run the operator-only Open Jobs shadow collector.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
 app.add_typer(worker_app, name="worker")
+app.add_typer(open_jobs_app, name="open-jobs")
 app.add_typer(mirror_app, name="mirror")
 # Keep the TUI as another entry point over the existing command schema. The
 # project wrapper adds a confirmation boundary, while validation and side
@@ -49,6 +52,47 @@ def _document_connection():
     conn = db.get_connection(settings)
     db.apply_migrations(conn, db.migrations_dir_for(settings))
     return conn, settings
+
+
+@open_jobs_app.command("init")
+def open_jobs_init() -> None:
+    """Show the disabled-by-default Open Jobs activation gate and budgets."""
+    settings = get_settings()
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    typer.echo(__import__("json").dumps({
+        "enabled": bool(settings.open_jobs_enabled),
+        "base_url": policy.base_url,
+        "mode": "incremental-only",
+        "archive_budget_bytes": policy.archive_budget_bytes,
+        "note": "Activation remains an explicit operator decision after source-contract verification.",
+    }, indent=2, sort_keys=True))
+
+
+@open_jobs_app.command("status")
+def open_jobs_status() -> None:
+    """Read the public release indexes and report their validated shape."""
+    settings = get_settings()
+    from pipeline.open_jobs.commands import OpenJobsClient
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    if not settings.open_jobs_enabled:
+        typer.echo('{"enabled": false, "status": "disabled"}')
+        return
+    client_http = PipelineHTTPClient("open_jobs", settings=settings)
+    try:
+        client = OpenJobsClient(client_http, policy)
+        result = {}
+        for kind in ("diffs", "ledger"):
+            response, entries = client.fetch_index(kind)
+            result[kind] = {"http_status": response.status_code,
+                            "entries": len(entries),
+                            "bytes": len(response.body)}
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        client_http.__exit__(None, None, None)
 
 
 def _document_reference(row):
