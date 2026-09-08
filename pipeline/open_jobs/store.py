@@ -377,6 +377,19 @@ class OpenJobsStore:
             "oj-advert-event", generation_id, release_id, ats, slug,
             upstream_id, operation, removal_reason or "",
         )
+        # 0114 generated ids without the release identity. Recognise an
+        # already committed row by its source/release tuple so upgrading a
+        # live beta database does not append a third copy of the same event.
+        existing = self.conn.execute(
+            "SELECT advert_event_id FROM open_jobs_advert_events "
+            "WHERE ats = %s AND slug = %s AND upstream_id = %s "
+            "AND generation_id = %s AND release_id = %s AND operation = %s "
+            "AND removal_reason IS NOT DISTINCT FROM %s LIMIT 1",
+            (ats, slug, upstream_id, generation_id, release_id, operation,
+             removal_reason),
+        ).fetchone()
+        if existing is not None:
+            return _value(existing, "advert_event_id")
         self.conn.execute(
             "INSERT INTO open_jobs_advert_events "
             "(advert_event_id, ats, slug, upstream_id, generation_id, release_id, provenance_id, "
