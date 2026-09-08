@@ -583,6 +583,12 @@
     dest: /usr/local/bin/sectortrace-mirror-analysis-watchdog
     mode: "0700"
 
+- name: Install the Open Jobs shadow collector script
+  ansible.builtin.template:
+    src: sectortrace-mirror-open-jobs.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-open-jobs
+    mode: "0700"
+
 - name: Install the sync, alert and verify units
   ansible.builtin.template:
     src: "{{ item }}.j2"
@@ -598,6 +604,8 @@
     - sectortrace-mirror-verify-deep.timer
     - sectortrace-mirror-analysis-watchdog.service
     - sectortrace-mirror-analysis-watchdog.timer
+    - sectortrace-mirror-open-jobs.service
+    - sectortrace-mirror-open-jobs.timer
   notify: Reload systemd
 
 # Created here rather than by the sync, which runs as a container and would
@@ -641,6 +649,24 @@
     enabled: false
   failed_when: false
   when: mirror_role != 'beta'
+
+- name: Enable and start the Open Jobs shadow timer on an opted-in beta
+  ansible.builtin.service:
+    name: sectortrace-mirror-open-jobs.timer
+    enabled: true
+    state: started
+  when:
+    - mirror_role == 'beta'
+    - open_jobs_enabled | bool
+    - open_jobs_schedule_enabled | bool
+
+- name: Stop the Open Jobs shadow timer when it is not explicitly enabled
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-open-jobs.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not (mirror_role == 'beta' and open_jobs_enabled | bool and open_jobs_schedule_enabled | bool)
 
 - name: Enable and start the SSH tunnel
   ansible.builtin.service:

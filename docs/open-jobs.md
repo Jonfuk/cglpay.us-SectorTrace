@@ -25,3 +25,11 @@ the public catalogue. Provider-board bindings, role relevance, geography,
 salary parsing and cross-source links remain nullable until a person records a
 review decision. See [CAVEATS.md](CAVEATS.md#open-jobs-operator-only-shadow-observations)
 for the limits that must travel with any operator report.
+
+On a beta mirror, the tracked Ansible role can install a daily systemd timer.
+It remains off unless both `open_jobs_enabled` and
+`open_jobs_schedule_enabled` are explicitly set in the machine's ignored
+`group_vars/all/zz-local.yml`. Each invocation is host-locked and runs at most
+the configured release cap; inspect it with `systemctl status
+sectortrace-mirror-open-jobs.timer` and `journalctl -u
+sectortrace-mirror-open-jobs.service`.
