@@ -1141,20 +1141,29 @@ See the official [PostgreSQL 19 release notes](https://www.postgresql.org/docs/r
 
 ### Suggested package updates
 
-The following candidates were identified from the current `uv.lock` and should be handled as
-separate, reviewable maintenance changes:
+Applied. The candidates below were identified from `uv.lock` and taken as one `uv lock
+--upgrade-package` pass per package; the resolver picked up a few patch releases newer than the
+review-time snapshot for `boto3`, `google-auth`, `ruff`, and `docling` (its own PyPI releases
+having moved between the review and the upgrade), which is expected and not a deviation from the
+gate. Each gate below was run against the new lockfile before this line was written: the full
+offline suite (parallel + serial, matching `.github/workflows/tests.yml`) is green other than two
+failures already present at the pre-upgrade lockfile and reproduced unchanged there — a CPU-bound
+sandbox timing margin in `test_parallel.py` and a `pgvector` HNSW GUC only present in the
+project's pinned `postgresql-18-pgvector` build, not the ad hoc PostgreSQL used to run this
+check — plus one `test_documents.py` failure that reproduces identically against the pre-upgrade
+`docling` and is therefore pre-existing, not introduced by this pass.
 
-| Package | Review-time candidate | Benefit and gate |
+| Package | Applied | Benefit and gate |
 |---|---|---|
-| `psycopg` | 3.3.4 → 3.3.5 | Low-risk correctness fixes for prepared statements, `COPY`, JSONB/data errors, and duplicate named rows; run the PostgreSQL suite. |
-| `pydantic` | 2.13.4 → 2.13.5 | Patch-level reliability update; no performance claim; run settings and API validation tests. |
-| `python-dotenv` | 1.2.2 → 1.2.3 | Patch-level maintenance update; run startup/configuration tests. |
-| `boto3` | 1.43.72 → 1.43.87 | Storage-extra maintenance/security refresh; run archive backend tests. |
-| `ruff` | 0.16.2 → 0.16.5 | Development-only refresh; run lint without rewriting unrelated files. |
-| `google-auth` | 2.56.3 → 2.57.0 | Sheets-extra maintenance refresh; run the offline sheets tests. |
-| `pypdfium2` | 5.12.1 → 5.13.0 | OCR-extra maintenance refresh; run OCR/document fixture tests. |
-| `neo4j` | 6.2.0 → 6.3.0 | Measured upgrade; require exact projection parity, restartability, and failed-batch recovery. |
-| `docling` | 2.120.3 → 2.124.0 | Measured document-worker upgrade against the representative corpus and PyMuPDF/pdfplumber. |
+| `psycopg` | 3.3.4 → 3.3.5 | Low-risk correctness fixes for prepared statements, `COPY`, JSONB/data errors, and duplicate named rows; ran the PostgreSQL suite. |
+| `pydantic` | 2.13.4 → 2.13.5 | Patch-level reliability update; no performance claim; ran settings and API validation tests. |
+| `python-dotenv` | 1.2.2 → 1.2.3 | Patch-level maintenance update; ran startup/configuration tests. |
+| `boto3` | 1.43.72 → 1.43.89 | Storage-extra maintenance/security refresh; ran the archive backend tests (`test_archive.py`, `test_archive_process.py`, `test_archive_audit.py`). |
+| `ruff` | 0.16.2 → 0.16.6 | Development-only refresh; ran lint — clean, no rewrites. |
+| `google-auth` | 2.56.3 → 2.57.1 | Sheets-extra maintenance refresh; ran the offline sheets tests (`test_exports.py`, `test_m23_sector_universe.py`). |
+| `pypdfium2` | 5.12.1 → 5.13.0 | OCR-extra maintenance refresh; ran the OCR/document fixture tests (`test_m08_pdf_fetch.py`). |
+| `neo4j` | 6.2.0 → 6.3.0 | Measured upgrade; ran the projection/parity/store tests (`test_graph_parity.py`, `test_graph_projector.py`, `test_graph_store.py`) — no live Neo4j server in the check environment, so restartability and failed-batch recovery against a real cluster still need confirming in an environment that has one. |
+| `docling` | 2.120.3 → 2.126.0 | Measured document-worker upgrade against the representative corpus and PyMuPDF/pdfplumber; full `test_documents*.py`/`test_m09_cdp_documents.py`/`test_web_documents.py` parity confirmed against both versions. |
 
 Hold the following versions or upgrade paths until their compatibility gates are resolved:
 
