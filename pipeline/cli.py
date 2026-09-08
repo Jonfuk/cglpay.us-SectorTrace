@@ -120,7 +120,8 @@ def open_jobs_triage(
         db.apply_migrations(conn, db.migrations_dir_for(settings))
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT advert_id, title, company, location "
+            "SELECT advert_id, generation_id, release_id, provenance_id, "
+            "title, company, location "
             "FROM open_jobs_adverts "
             "WHERE operation IN ('added', 'changed', 'carried') "
             "ORDER BY advert_id"
@@ -141,6 +142,9 @@ def open_jobs_triage(
                 "role_relevance",
                 "Role vocabulary match requires substance-misuse and England relevance review",
                 advert_id=advert_id,
+                generation_id=_value(row, "generation_id"),
+                release_id=_value(row, "release_id"),
+                provenance_id=_value(row, "provenance_id"),
                 payload=result.payload(),
             )
             counts["queued"] += 1
