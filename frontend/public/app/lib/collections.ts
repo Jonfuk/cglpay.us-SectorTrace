@@ -1,5 +1,5 @@
 export type CollectionKind = 'saved' | 'notebook'
-export interface CollectionEntry { id: string; href: string; at: number; label?: string; title?: string; note?: string }
+export interface CollectionEntry { id: string; href: string; at: number; label?: string; title?: string; note?: string; annotation?: string }
 
 export function collectionHref(value: unknown): string | null {
   if (typeof value !== 'string' || [...value].some(character => character === '\\' || character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)) return null
@@ -17,6 +17,13 @@ export function validCollectionEntry(value: unknown, kind: CollectionKind): valu
     && typeof entry.at === 'number' && Number.isFinite(entry.at) && entry.at >= 0
     && typeof entry[kind === 'saved' ? 'label' : 'title'] === 'string'
     && (entry.note === undefined || typeof entry.note === 'string')
+    && (entry.annotation === undefined || typeof entry.annotation === 'string')
+}
+
+export function annotateCollection<T extends CollectionEntry>(entries: T[], id: string, snapshot: string, annotation: string): T[] | null {
+  const matches = entries.filter(entry => entry?.id === id)
+  if (matches.length !== 1 || JSON.stringify(matches[0]) !== snapshot) return null
+  return entries.map(entry => entry === matches[0] ? { ...entry, annotation } : entry)
 }
 
 export function parseCollection(text: string, kind: CollectionKind): CollectionEntry[] {

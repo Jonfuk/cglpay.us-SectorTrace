@@ -4,13 +4,14 @@
 // sent anywhere. They are conveniences: a failure to read or write degrades to
 // an empty collection, never a broken page.
 
-import { mergeCollection } from '~/lib/collections'
+import { annotateCollection, mergeCollection } from '~/lib/collections'
 
 export interface NotebookEntry {
   id: string
   title: string
   href: string
   note?: string
+  annotation?: string
   at: number
 }
 
@@ -62,7 +63,13 @@ export function useNotebook() {
     entries.value = result.entries
     return { ...result, persisted: store.write(entries.value) }
   }
-  return { entries, add, remove, clear, importEntries }
+  const annotate = (id: string, snapshot: string, annotation: string) => {
+    const next = annotateCollection(entries.value, id, snapshot, annotation)
+    if (!next) return { updated: false, persisted: false }
+    entries.value = next
+    return { updated: true, persisted: store.write(next) }
+  }
+  return { entries, add, remove, clear, importEntries, annotate }
 }
 
 export function useSavedSearches() {
