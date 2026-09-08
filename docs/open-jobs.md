@@ -33,3 +33,11 @@ It remains off unless both `open_jobs_enabled` and
 the configured release cap; inspect it with `systemctl status
 sectortrace-mirror-open-jobs.timer` and `journalctl -u
 sectortrace-mirror-open-jobs.service`.
+
+The operator can run `pipeline open-jobs triage --dry-run` to count current,
+role-shaped observations without writing anything. Running it without
+`--dry-run` coalesces those matches into `open_jobs_review_queue` with
+`review_kind = 'role_relevance'`; each item retains the matched terms and
+fields plus its release and provenance context. The result is a review worklist,
+not a substance-misuse job total. A person must decide England scope, role
+relevance and provider attribution before any downstream use.
