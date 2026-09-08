@@ -8,7 +8,8 @@ not replace NHS Jobs, create a canonical vacancy table, or publish advert
 descriptions.
 
 Enable the optional reader dependency with `uv sync --extra open-jobs` only on
-an operator worker. Before enabling collection, verify the deployed Open Jobs
+an operator worker (the beta mirror image installs it at build time). Before
+enabling collection, verify the deployed Open Jobs
 manifest contract (release anchor, predecessor, part digests, schema and
 finality metadata). A contract failure quarantines the release and leaves the
 last committed cursor unchanged.

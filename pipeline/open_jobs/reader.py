@@ -34,7 +34,7 @@ class ReaderLimits:
     """Explicit local-reader ceilings; no limit is implied by Arrow defaults."""
 
     max_artifact_bytes: int = 128 * 1024 * 1024
-    max_record_bytes: int = 1024 * 1024
+    max_record_bytes: int = 16 * 1024 * 1024
     decode_batch_rows: int = 256
 
     def __post_init__(self) -> None:

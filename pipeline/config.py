@@ -732,7 +732,10 @@ class Settings(BaseSettings):
     open_jobs_max_release_bytes: int = 512 * 1024 * 1024
     open_jobs_max_run_bytes: int = 1024 * 1024 * 1024
     open_jobs_max_temp_bytes: int = 1024 * 1024 * 1024
-    open_jobs_max_record_bytes: int = 1024 * 1024
+    # Open Jobs rows may carry a bounded, source-shaped location/enrichment
+    # payload. Keep a hard ceiling while allowing the observed release rows;
+    # operators can lower it for a stricter shadow run.
+    open_jobs_max_record_bytes: int = 16 * 1024 * 1024
     open_jobs_decode_batch_rows: int = 256
     open_jobs_run_timeout_seconds: int = 1800
     open_jobs_max_releases_per_run: int = 2
