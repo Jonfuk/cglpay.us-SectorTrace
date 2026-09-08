@@ -14,4 +14,5 @@ fi
 
 cd "$STATE_DIR"
 exec docker compose -f docker-compose.yml run --rm --no-deps app \
-    run m35_open_jobs --limit {{ open_jobs_max_releases_per_run }} --origin scheduled
+    /app/.venv/bin/python -m pipeline run m35_open_jobs \
+    --limit {{ open_jobs_max_releases_per_run }} --origin scheduled
