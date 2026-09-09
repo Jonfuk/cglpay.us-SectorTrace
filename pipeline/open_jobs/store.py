@@ -426,7 +426,15 @@ class OpenJobsStore:
             "INSERT INTO open_jobs_review_queue "
             "(review_id, advert_id, review_kind, ats, slug, upstream_id, generation_id, release_id, "
             "provenance_id, reason, payload_json) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (review_id) DO NOTHING",
+            # A pending review is a current work item.  Refresh its source
+            # context and explainable triage payload when a later archive
+            # contains richer text; resolved decisions are left untouched.
+            "ON CONFLICT (review_id) DO UPDATE SET "
+            "generation_id = COALESCE(excluded.generation_id, open_jobs_review_queue.generation_id), "
+            "release_id = COALESCE(excluded.release_id, open_jobs_review_queue.release_id), "
+            "provenance_id = COALESCE(excluded.provenance_id, open_jobs_review_queue.provenance_id), "
+            "payload_json = excluded.payload_json "
+            "WHERE open_jobs_review_queue.status = 'pending'",
             (rid, advert_id, review_kind, ats, slug, upstream_id, generation_id, release_id,
              provenance_id, reason, _json(payload)),
         )

@@ -187,6 +187,9 @@ def open_jobs_triage(
                                                                  *result.excluded_terms))),
                             matched_fields=tuple(dict.fromkeys((*previous.matched_fields,
                                                                  *result.matched_fields))),
+                            location_state=(result.location_state
+                                            if result.location_state == previous.location_state
+                                            else "unresolved"),
                         )
 
         # Counts are over unique current adverts, even when a key appeared in
@@ -194,9 +197,14 @@ def open_jobs_triage(
         # the web UI's role list and makes repeat runs deterministic.
         counts = {"scanned": len(current), "candidate": 0, "excluded": 0,
                   "no_match": 0, "queued": 0, "archive_rows": archive_rows}
+        location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
+        candidate_location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
         for advert in current.values():
             result = advert["triage"]
             counts[result.decision] += 1
+            location_counts[result.location_state] += 1
+            if result.candidate:
+                candidate_location_counts[result.location_state] += 1
             if not result.candidate or dry_run:
                 continue
             advert_id = advert["advert_id"]
@@ -212,7 +220,10 @@ def open_jobs_triage(
             counts["queued"] += 1
         if not dry_run:
             conn.commit()
-        typer.echo(__import__("json").dumps({**counts, "dry_run": dry_run},
+        typer.echo(__import__("json").dumps({**counts,
+                                             "location": location_counts,
+                                             "candidate_location": candidate_location_counts,
+                                             "dry_run": dry_run},
                                              indent=2, sort_keys=True))
     except Exception as exc:
         if conn:

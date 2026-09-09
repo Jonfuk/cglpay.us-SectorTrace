@@ -30,6 +30,31 @@ NEGATIVE_TERMS: tuple[str, ...] = (
     "mortgage recovery", "recovery of", "recovery technician",
 )
 
+# Location is a separate tri-state finding aid.  A country or region not in
+# either list remains unresolved; an unrecognised value is never treated as
+# proof that an advert is outside England.
+ENGLAND_TERMS: tuple[str, ...] = (
+    "england", "london", "birmingham", "leeds", "sheffield", "liverpool",
+    "bristol", "newcastle", "nottingham", "leicester", "coventry", "sunderland",
+    "hull", "york", "manchester", "north east", "north west", "yorkshire",
+    "east midlands", "west midlands", "east of england", "south east",
+    "south west", "tyne and wear", "greater manchester", "merseyside",
+    "lancashire", "cheshire", "cumbria", "county durham", "durham",
+    "northumberland", "west yorkshire", "south yorkshire", "north yorkshire",
+    "east riding", "lincolnshire", "nottinghamshire", "derbyshire",
+    "leicestershire", "northamptonshire", "staffordshire", "warwickshire",
+    "worcestershire", "shropshire", "herefordshire", "gloucestershire",
+    "bristol", "somerset", "dorset", "devon", "cornwall", "wiltshire",
+    "hampshire", "surrey", "east sussex", "west sussex", "kent", "essex",
+    "suffolk", "norfolk", "cambridgeshire", "hertfordshire", "bedfordshire",
+    "buckinghamshire", "berkshire", "oxfordshire", "rutland",
+)
+
+NON_ENGLAND_TERMS: tuple[str, ...] = (
+    "scotland", "wales", "northern ireland", "republic of ireland", "ireland",
+    "united states", "usa", "canada", "australia", "new zealand",
+)
+
 
 def _pattern(term: str) -> re.Pattern[str]:
     return re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.IGNORECASE)
@@ -37,6 +62,8 @@ def _pattern(term: str) -> re.Pattern[str]:
 
 _POSITIVE = tuple((term, _pattern(term)) for term in POSITIVE_TERMS)
 _NEGATIVE = tuple((term, _pattern(term)) for term in NEGATIVE_TERMS)
+_ENGLAND = tuple((term, _pattern(term)) for term in ENGLAND_TERMS)
+_NON_ENGLAND = tuple((term, _pattern(term)) for term in NON_ENGLAND_TERMS)
 
 
 @dataclass(frozen=True)
@@ -47,6 +74,7 @@ class TriageResult:
     matched_terms: tuple[str, ...]
     excluded_terms: tuple[str, ...]
     matched_fields: tuple[str, ...]
+    location_state: str
 
     @property
     def candidate(self) -> bool:
@@ -59,6 +87,7 @@ class TriageResult:
             "matched_terms": list(self.matched_terms),
             "excluded_terms": list(self.excluded_terms),
             "matched_fields": list(self.matched_fields),
+            "location_state": self.location_state,
         }
 
 
@@ -86,6 +115,13 @@ def classify(*, title: str | None, company: str | None, location: str | None,
         "content": _text(content),
         "departments": _text(departments),
     }
+    location_text = fields["location"]
+    if any(pattern.search(location_text) for _, pattern in _NON_ENGLAND):
+        location_state = "non_england"
+    elif any(pattern.search(location_text) for _, pattern in _ENGLAND):
+        location_state = "england"
+    else:
+        location_state = "unresolved"
     matched_terms: list[str] = []
     matched_fields: list[str] = []
     for term, pattern in _POSITIVE:
@@ -108,4 +144,5 @@ def classify(*, title: str | None, company: str | None, location: str | None,
         matched_terms=tuple(matched_terms),
         excluded_terms=tuple(excluded_terms),
         matched_fields=tuple(dict.fromkeys(matched_fields)),
+        location_state=location_state,
     )
