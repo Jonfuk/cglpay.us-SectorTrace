@@ -1,23 +1,24 @@
 # Reproducible agent environment profiles
 
-Inspection baseline: `62b4d161cf13cd00a21caf45c23317c7deef08a5`, 9 September 2026. Commands below are execution recipes, not a claim they ran in the planning review. Recheck the actual revision before use. Shell examples require Bash with `set -euo pipefail`.
+Inspection baseline: `62b4d161cf13cd00a21caf45c23317c7deef08a5`, 9 September 2026. These are source-checked recipes, not a claim that an environment or test ran in the planning session. Capture the actual task revision before use. Shell examples require Bash. Runtime preflight is still required.
 
 ## Common preflight
 
-Use an agent-owned clean checkout/worktree and a disposable container/VM where services cannot collide with another agent. Capture `git rev-parse HEAD`, `git status --short` and relevant tool versions. Do not source a shared/production `.env`; do not print credentials. Set an execution-specific external output directory, for example `EVIDENCE_DIR=$(mktemp -d)` and export it. Preserve the directory or upload its reports before the environment is destroyed. Dependency/browser/image downloads require the dispatch's setup network allowance; actual tests remain offline. Stop if setup is unavailable rather than silently reducing the required matrix.
+Use an agent-owned clean checkout/worktree plus a disposable container/VM for service isolation. Capture `git rev-parse HEAD`, `git status --short` and actual tool versions. Do not source a shared or production `.env`. Require an isolated configuration; stop if its destination cannot be established. Do not print credentials. Prepare an external evidence directory with `export EVIDENCE_DIR=$(mktemp -d)` and retain its reports before teardown. Dependency/browser/image downloads belong to explicitly permitted setup; test execution stays offline except for the named disposable local services.
 
-Record profile, execution ID, source SHA, tool/image versions, network policy, test database identity and approval reference. Never use `TEST_ALLOW_UNSAFE_DB` to bypass safety checks. Repository instructions are not authority to inspect unrelated private data or start paid services.
+Record profile, execution ID, source SHA, installed versions/image digests, network policy, test database identity and approved mode. Never disable test safety guards. A topic worktree alone does not isolate server ports, database schemas, container names or output directories. Do not delete or reuse another agent's resources.
 
-## F — frontend verification
+## F - frontend verification
 
-Source of truth: `frontend/public/package.json`, its lockfile, `frontend/public/playwright.config.ts`, corresponding admin files and `.github/workflows/tests.yml`. CI currently uses Node 24; the production Dockerfile's build stage uses Node 22. Record and test those profiles separately; do not silently change either version or claim they are identical.
+Authoritative files: each app's `package.json`, committed package lock, `.npmrc`, Playwright configuration and the applicable workflow under `.github/workflows`. Resolve the actual frontend workflow before calling a run CI-equivalent; `.github/workflows/tests.yml` is the Python/PostgreSQL workflow, not the frontend build recipe. Use the version required by the selected frontend workflow and record it. The root Dockerfile explicitly uses Node 22 in its build stage, which is a separate production-build profile.
 
-Use one isolated network namespace/container per agent: the current public test server and fixtures use localhost:4173. `CI=1` prevents Playwright from reusing another running server, but does not itself isolate ports. Separate worktrees alone are insufficient. Keep public/admin builds separate. Use the committed package lock; do not upgrade dependencies during acceptance.
+Current public fixtures and Playwright use `http://localhost:4173`. Use one isolated network namespace/container per concurrent agent. `CI=1` prevents server reuse, but does not isolate ports. Keep public/admin builds and outputs separate. No opportunistic dependency upgrades are part of acceptance.
 
-From repository root, with approved setup network access:
+From repository root, after approved setup-network and browser installation preflight:
 
 ```bash
 set -euo pipefail
+: "${EVIDENCE_DIR:?set an external execution-specific evidence directory}"
 export CI=1
 export SECTORTRACE_E2E_OUTPUT="$EVIDENCE_DIR/playwright"
 node --version
@@ -28,58 +29,78 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
-cd ../..
-node scripts/check_frontend_bundles.mjs --app public
-cd frontend/public
-# Install only in authorised setup, not during offline test execution.
-npx playwright install --with-deps chromium firefox webkit
-npx playwright test e2e/document-tables.spec.ts --project=chromium --workers=1 --trace=retain-on-failure
+# Only during permitted setup, when matching browser binaries are absent:
+# npx playwright install --with-deps chromium firefox webkit
+npm run test:e2e -- --project=chromium e2e/document-tables.spec.ts --workers=1 --trace=retain-on-failure
 ```
 
-The final command is the JON-109 focused example, not a replacement for required regression/browser matrices. Use the task's resolved spec path for another route and retain command output/exit status. `npm run build` includes SPA fallback generation; `npm run generate` alone does not. Test source-derived text and downloads against fixture oracles, not screenshots alone. Confirm the chosen spec rejects external source requests. For admin use its own directory, lockfile and `scripts/check_nuxt_bundles.mjs --app admin` from the root. Do not claim manual assistive-technology acceptance from automated browser tests.
+The last command is the JON-109 focused example, not the entire release browser matrix. Use the task's resolved existing spec for another route; final JON-77 acceptance includes the required real Chromium/Firefox/WebKit projects. Capture command output and exit codes. `npm run build` includes SPA fallback generation; `npm run generate` alone is different. Inspect the chosen fixture's off-origin request guard. Compare source-derived text and downloads with independent expected outputs, not screenshots alone.
 
-## P — offline PostgreSQL verification
+Resolve current bundle/Lighthouse scripts and their exact flags from the committed workflow/configuration before running them; do not guess a script name. Repeat the appropriate setup in the separate admin app when required. Automated browser tests do not certify manual assistive-technology acceptance.
 
-Source of truth: `.github/workflows/tests.yml`, `deploy/postgres.Dockerfile`, `tests/conftest.py`, `pyproject.toml` and `uv.lock`. CI uses Python 3.12, uv 0.11.14 and PostgreSQL 18 with vector, pg_trgm and postgis. Use the exact task baseline's lock and record actual installed versions. A lock mismatch is a setup failure, not permission to update it silently.
+## P - offline PostgreSQL verification
 
-Use a fresh database created for this execution. In an agent-owned disposable environment, with Docker setup authorised:
+Authoritative files: `.github/workflows/tests.yml`, `deploy/postgres/Dockerfile`, `deploy/postgres/initdb`, `tests/conftest.py`, `pyproject.toml` and `uv.lock`. Use the task revision's Python requirement and actual workflow/tool versions. The inspected workflow installs the `maps` and `otel` extras; test tooling is in the default `dev` dependency group, not a `dev` extra or a `test` group. Add `--locked` during preparation to detect lock drift rather than silently rewriting it.
+
+`tests/conftest.py` reads `POSTGRES_TEST_URL`, not `TEST_DATABASE_URL`, and may fall back to `.env` if it is missing. Its autouse fixtures create/drop worker schemas and truncate tables. Therefore use a new dedicated database/container for this execution, never the working warehouse. A second agent cannot safely share it merely because pytest uses per-worker schemas: separate pytest sessions reuse names such as `pgtest_main`/`pgtest_gw0`.
+
+The following adapts the actual workflow to a unique, loopback-bound ephemeral port. Run only in a verified disposable environment with setup/Docker authority. Its credentials are public example credentials for this new local test container only.
 
 ```bash
 set -euo pipefail
-: "${RUN_ID:?set a unique safe execution ID}"
-: "${SECTORTRACE_DISPOSABLE_ENV:?set only after verifying this environment is disposable}"
+: "${RUN_ID:?set a unique execution ID using letters, digits or hyphens}"
+: "${EVIDENCE_DIR:?set an external execution-specific evidence directory}"
+: "${SECTORTRACE_DISPOSABLE_ENV:?set only after verifying the environment is disposable}"
 test "$SECTORTRACE_DISPOSABLE_ENV" = 1
+case "$RUN_ID" in *[!A-Za-z0-9-]*|'') echo 'Invalid RUN_ID' >&2; exit 1;; esac
 PG_CONTAINER="sectortrace-agent-$RUN_ID"
-docker build -t "sectortrace-postgres-agent:$RUN_ID" -f deploy/postgres.Dockerfile .
-docker run -d --name "$PG_CONTAINER" --label "sectortrace.agent=$RUN_ID" \
-  -e POSTGRES_DB=sectortrace -e POSTGRES_USER=sectortrace -e POSTGRES_PASSWORD=sectortrace \
-  -p 127.0.0.1::5432 "sectortrace-postgres-agent:$RUN_ID"
+PG_IMAGE="sectortrace-postgres-agent:$RUN_ID"
+docker build --tag "$PG_IMAGE" deploy/postgres
+docker run --detach --name "$PG_CONTAINER" --label "sectortrace.agent=$RUN_ID" \
+  --publish 127.0.0.1::5432 \
+  --env POSTGRES_USER=sectortrace_app \
+  --env POSTGRES_PASSWORD=sectortrace_app_dev \
+  --env POSTGRES_DB=postgres \
+  --volume "$PWD/deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro" \
+  "$PG_IMAGE"
 for attempt in $(seq 1 60); do
-  if docker exec "$PG_CONTAINER" pg_isready -U sectortrace -d sectortrace; then break; fi
+  if docker exec "$PG_CONTAINER" pg_isready -U sectortrace_app -d postgres; then break; fi
   sleep 1
 done
-docker exec "$PG_CONTAINER" pg_isready -U sectortrace -d sectortrace
-for extension in vector pg_trgm postgis; do
-  docker exec "$PG_CONTAINER" psql -U sectortrace -d sectortrace -v ON_ERROR_STOP=1 \
-    -c "CREATE EXTENSION IF NOT EXISTS $extension;"
-done
+docker exec "$PG_CONTAINER" pg_isready -U sectortrace_app -d postgres
 PGPORT=$(docker port "$PG_CONTAINER" 5432/tcp | head -n 1 | awk -F: '{print $NF}')
-export DATABASE_URL="postgresql://sectortrace:sectortrace@127.0.0.1:$PGPORT/sectortrace"
-export TEST_DATABASE_URL="$DATABASE_URL"
+export POSTGRES_TEST_URL="postgresql://sectortrace_app:sectortrace_app_dev@127.0.0.1:$PGPORT/sectortrace"
+export DATABASE_URL="$POSTGRES_TEST_URL"
+export DATABASE_RO_URL=''
+export POSTGRES_TEST_RO_URL=''
 export CONTACT_EMAIL=agent@example.invalid
-unset TEST_ALLOW_UNSAFE_DB
-uv sync --extra dev --locked
-uv run ruff check pipeline tests
-uv run python -m pipeline docs-check
-uv run python -m pytest -n auto -m 'not serial' --junitxml="$EVIDENCE_DIR/junit-parallel.xml"
-uv run python -m pytest -n 0 -m serial --junitxml="$EVIDENCE_DIR/junit-serial.xml"
+# Verify the init scripts created the expected disposable DB/extensions.
+docker exec "$PG_CONTAINER" psql -U sectortrace_app -d sectortrace -v ON_ERROR_STOP=1 \
+  -c "SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm','postgis') ORDER BY extname;"
+# Stop if any required extension is missing; do not convert this into a skip.
+uv sync --locked --extra maps --extra otel
+uv run --no-sync ruff check pipeline tests
+uv run --no-sync python -m pipeline docs-check
+parallel_status=0
+uv run --no-sync python -m pytest -q --tb=short -m 'not serial and not integration' \
+  -n auto --dist loadscope --durations=50 --junitxml="$EVIDENCE_DIR/pytest-parallel.xml" \
+  > "$EVIDENCE_DIR/pytest-parallel.log" 2>&1 || parallel_status=$?
+serial_status=0
+uv run --no-sync python -m pytest -q --tb=short -m 'serial and not integration' \
+  --durations=50 --junitxml="$EVIDENCE_DIR/pytest-serial.xml" \
+  > "$EVIDENCE_DIR/pytest-serial.log" 2>&1 || serial_status=$?
+cat "$EVIDENCE_DIR/pytest-parallel.log" "$EVIDENCE_DIR/pytest-serial.log"
+printf 'parallel_exit=%s serial_exit=%s\n' "$parallel_status" "$serial_status"
+test "$parallel_status" -eq 0 && test "$serial_status" -eq 0
 ```
 
-The displayed database credential is only for the newly created loopback-bound disposable container, never a production credential. Verify extensions and test safety preflight before running tests. Tests own fixture seeding/temporary writable paths; never replay source collection to manufacture fixtures. Destroy only the named, execution-labelled container after retaining logs/results; do not use broad Docker prune or remove another agent's database. Full suite commands can be replaced by a task's verified focused selector during iteration; final required gates still apply.
+This is a local verification recipe, not a replacement for every qualifying CI job. The workflow also checks the beta queue, generated documentation and optional NLP/Mojo boundaries; use its actual commands and required job matrix for JON-76/JON-77. The `--no-sync` calls retain the explicitly installed locked environment. Record that choice and actual versions. A selected task can use a focused pytest path during iteration; the final required matrix still applies.
 
-## C — container and approved staging rehearsal
+The extension query must return all three named extensions before tests. Record the query output and actual database identity. Stop on any unexpected destination or missing init state. On completion/failure, retain logs and then remove only this named execution-labelled container if teardown is authorised; never use broad prune. Tests must not fetch live sources, import production snapshots without approval, or write into repository evidence directories.
 
-JON-82 supplies source/configuration lock. JON-78 owns build/artefact identity. At the inspected baseline the Dockerfile uses Node 22 only in the build stage, then Python 3.12 serving, with optional extras off by default. Build both static apps through that Dockerfile; do not substitute a local Node 24 build and call it the same artefact.
+## C - build and approved staging rehearsal
+
+JON-82 supplies the source/configuration lock. JON-78 owns the immutable build manifest and basic serving acceptance. The inspected Dockerfile uses Node 22 only in the frontend build stage and a Python 3.12 uv runtime image. It builds each app from its own lockfile. Do not substitute locally built assets and call them the same artefact.
 
 ```bash
 set -euo pipefail
@@ -89,10 +110,10 @@ docker build --build-arg INSTALL_ASSISTANT=false --build-arg INSTALL_SCRAPY=fals
 docker image inspect "sectortrace-agent:$RUN_ID" --format '{{.Id}}'
 ```
 
-This is the disabled-optional baseline, not an instruction to override an approved candidate configuration. Record base image digests, lockfiles, source SHA, build arguments, image ID/registry digest where available, hashes of static outputs and redacted runtime configuration. Run the same image in an isolated network against profile P data using an explicitly reviewed entrypoint and serving flags. Do not invoke the deployment startup path until its side effects, database destination and worker/collection behaviour are checked. Verify public/admin isolation, CSP, fallback assets, PMTiles Range/caching and selected variants; retain results for those exact bytes.
+This is the disabled-optional example, not authority to override approved candidate flags. Record source SHA, exact base image digests, lockfiles, build arguments, resulting image ID/registry digest where available, static-output hashes and redacted configuration. Building an image does not start it. The default `deploy/railway-start.sh` path may migrate or start workers; inspect it and approve an isolated runtime command before any run. Do not inherit production credentials or start live collection.
 
-JON-79/JON-86 additionally require an approved disposable staging inventory, recovery-time/data-loss tolerances, backup/archive manifest, target identity, and permission for destructive restore on that target. Missing any of these stops rehearsal, not read-only preparation. Record measured results; no invented recovery targets. Use existing Ansible and backup code, inspect exact commands at the task revision, and keep production credentials/hosts out of the rehearsal. Production rollout is JON-84 only after JON-83 approval.
+Use the same image bytes for final serving/browser/recovery checks. JON-79/JON-86 additionally require approved disposable inventory, target identity, backup/archive manifest, recovery-time/data-loss tolerances and permitted restore/rollback commands. Check mode alone is not proof of no side effects. Missing inputs stop dependent execution, not safe inspection. Record measured results; do not invent recovery targets or human approval. Production launch remains JON-84 after JON-83.
 
 ## Failure classification
 
-Separate environment/tool/network setup failure, missing input, test failure, known baseline defect and human acceptance pending. Keep raw results. Do not turn a skipped browser, unavailable database, transient CI cancellation or an unrun command into a pass. Use Waiting for input for absent prerequisites and a linked defect for reproducible implementation failures.
+Distinguish missing input, environment/tool/network setup failure, test failure, known baseline defect and human acceptance pending. Keep raw results and report omitted checks. A skipped browser, unavailable database, cancelled CI run or unrun recipe is not a pass. No application tests or runtime preflight were executed during authoring of these profiles.
