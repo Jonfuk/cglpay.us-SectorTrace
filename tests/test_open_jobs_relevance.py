@@ -41,6 +41,32 @@ def test_location_is_non_england_only_when_source_supports_it():
     assert result.location_state == "non_england"
 
 
+def test_location_state_handles_countryless_us_feed_values():
+    assert classify(
+        title="Substance Use Counselor", company=None, location="Athens, GA, GA, US"
+    ).location_state == "non_england"
+    assert classify(
+        title="Substance Use Counselor", company=None, location="Spokane, Washington"
+    ).location_state == "non_england"
+
+
+def test_location_state_recognises_common_english_place_only_values():
+    result = classify(
+        title="Substance Use Practitioner", company=None,
+        location="Gateshead, Tyne and Wear, United Kingdom",
+    )
+
+    assert result.location_state == "england"
+
+
+def test_ambiguous_york_value_is_non_england_when_new_york_is_present():
+    result = classify(
+        title="Substance Use Counselor", company=None, location="New York, NY"
+    )
+
+    assert result.location_state == "non_england"
+
+
 def test_uk_wide_location_stays_unresolved():
     result = classify(title="Recovery Worker", company=None, location="United Kingdom")
 

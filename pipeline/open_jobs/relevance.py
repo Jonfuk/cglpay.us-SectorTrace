@@ -48,11 +48,49 @@ ENGLAND_TERMS: tuple[str, ...] = (
     "hampshire", "surrey", "east sussex", "west sussex", "kent", "essex",
     "suffolk", "norfolk", "cambridgeshire", "hertfordshire", "bedfordshire",
     "buckinghamshire", "berkshire", "oxfordshire", "rutland",
+    # Common place-only values returned by the Open Jobs feeds.  A place name
+    # is useful evidence when it is paired with a UK region in the source;
+    # non-England markers are checked first for ambiguous names such as York.
+    "gateshead", "royal tunbridge wells", "tunbridge wells", "leatherhead",
+    "preston", "barnet", "bromley", "reading", "exeter", "brighton",
+    "portsmouth", "southampton", "milton keynes", "luton", "basildon",
+    "colchester", "ipswich", "peterborough", "cambridge", "oxford", "swindon",
+    "bath", "plymouth", "torquay", "gloucester", "worcester", "derby",
+    "lincoln", "doncaster", "wakefield", "bradford", "huddersfield", "harrogate",
+    "blackpool", "bolton", "stockport", "wigan", "salford", "oldham", "rochdale",
+    "burnley", "blackburn", "birkenhead", "st helens", "warrington", "crewe",
+    "macclesfield", "carlisle", "middlesbrough", "darlington", "hartlepool",
+    "newcastle upon tyne", "scarborough", "grimsby", "chester", "shrewsbury",
+    "telford", "wolverhampton", "warwick", "northampton", "bedford", "watford",
+    "st albans", "chelmsford", "southend", "maidstone", "canterbury", "ashford",
+    "guildford", "woking", "redhill", "crawley", "worthing", "eastbourne", "hastings",
+    "bournemouth", "poole", "salisbury", "taunton", "truro", "newquay", "barnstaple",
 )
 
 NON_ENGLAND_TERMS: tuple[str, ...] = (
     "scotland", "wales", "northern ireland", "republic of ireland", "ireland",
-    "united states", "usa", "canada", "australia", "new zealand",
+    "united states", "usa", "us", "canada", "india", "philippines", "australia",
+    "new zealand", "south africa", "singapore", "malaysia", "indonesia", "china",
+    "japan", "united arab emirates", "dubai", "saudi arabia", "ontario", "alberta",
+    "british columbia", "new south wales", "victoria", "queensland", "western australia",
+    "south australia", "tasmania", "australian capital territory", "northern territory",
+    # State/province names catch feeds which omit the country (for example
+    # ``Spokane, Washington``).  Codes are handled separately below.
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
+    "delaware", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa",
+    "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan",
+    "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada", "new jersey",
+    "new mexico", "new york", "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota", "tennessee", "texas",
+    "utah", "vermont", "virginia", "washington", "west virginia", "wisconsin", "wyoming",
+)
+
+# A few feeds use postal abbreviations with no country name (``Athens, GA``).
+# Restrict this to comma/line boundaries so ordinary words cannot be mistaken
+# for a location marker.
+_US_STATE_CODE = re.compile(
+    r"(?:^|[,;/]\s*)(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)(?:\s*[,;/]|$)",
+    re.IGNORECASE,
 )
 
 
@@ -116,7 +154,8 @@ def classify(*, title: str | None, company: str | None, location: str | None,
         "departments": _text(departments),
     }
     location_text = fields["location"]
-    if any(pattern.search(location_text) for _, pattern in _NON_ENGLAND):
+    if (_US_STATE_CODE.search(location_text)
+            or any(pattern.search(location_text) for _, pattern in _NON_ENGLAND)):
         location_state = "non_england"
     elif any(pattern.search(location_text) for _, pattern in _ENGLAND):
         location_state = "england"
