@@ -10,6 +10,10 @@ Read [`README.md`](README.md) for what it does.
 anything that produces a figure — it leads with the things that must **not** be
 computed.
 
+For agent execution, read [`agent/README.md`](agent/README.md) and the current
+issue packet. The runbook distinguishes preparation, permitted local work,
+human acceptance and production actions; it does not relax these guardrails.
+
 **`README.md` is hand-maintained. Do not rewrite, restructure, "refresh" or
 otherwise edit it on your own initiative** — not for staleness, not to match a
 template, not as a side effect of another task. Edit it only when a user
@@ -47,8 +51,15 @@ explicitly, not to slip in.
    rate limiting, `Retry-After` honoured, conditional requests, a User-Agent
    carrying `CONTACT_EMAIL`. Concurrency only ever spans *different* hosts.
    Nothing in CI or tests touches a real source.
-6. **Stdlib web server. No framework, no ASGI, no build step, no CDN.** Both
-   front ends must render with the network cable unplugged.
+6. **Stdlib Python serving runtime; no ASGI, runtime Node server or CDN.**
+   The approved public redesign uses the existing independent public/admin
+   Nuxt applications, compiled to static client-rendered output at build time.
+   Node/npm are build dependencies, not production serving dependencies.
+   This supersedes the older no-framework/no-build-step wording for that
+   approved migration; it does not authorise a new backend framework or
+   unrelated frontend migration. Both front ends must render with the
+   network cable unplugged. See `docs/frontend-redesign-plan.md`, `Dockerfile`
+   and `agent/environments.md` for the current build/serving boundary.
 7. **Portal isolation.** Admin work never edits
    `pipeline/web/static/public/**`, `public_queries.py`, `public_export.py` or
    any `/api/v1/*` route. New admin endpoints go under `/api/admin/*`, new
@@ -56,7 +67,8 @@ explicitly, not to slip in.
 8. **No authentication**, by explicit decision. The security model is the JSON
    content-type + same-origin `Origin` guard on writes, the destination guard
    in `pipeline/netguard.py`, and `--host 127.0.0.1` when the LAN is not
-   trusted.
+   trusted. This is not permission to expose operator endpoints publicly;
+   the intended public/operator network boundary requires deployment checks.
 9. **Values reach the DOM as text nodes**, never as concatenated HTML.
    `static/app.js` throws on an `html:` prop — keep it that way.
 10. **PostgreSQL discipline.** PostgreSQL 18 is the only application database
@@ -84,9 +96,9 @@ explicitly, not to slip in.
 ## Working here
 
 ```bash
-uv run python -m pytest          # the offline suite, ~2.5 minutes
+uv run python -m pytest          # offline suite; use a disposable test database
 uv run ruff check pipeline tests # lint; CI runs both
-./start.sh backup                # before anything that rewrites the warehouse
+./start.sh backup                # before an authorised warehouse rewrite
 ./start.sh web --host 127.0.0.1  # portal on /, operator tools on /admin
 ```
 
@@ -100,19 +112,23 @@ uv run ruff check pipeline tests # lint; CI runs both
   tell you a vendored library still works, and a CSP hash test that recomputes
   the hash the way the code does will agree with itself while the page is
   broken.
-- **Several sessions share this checkout.** Stage explicit paths; never
-  `git commit -a`. Check `git status` before staging and touch nothing you did
-  not write. Push after committing.
+- **Several sessions share this checkout.** Prefer an isolated worktree plus
+  isolated services as described in `agent/environments.md`. Stage explicit
+  paths; never `git commit -a`. Check `git status` before staging and touch
+  nothing you did not write. Push the assigned topic branch and open the
+  agreed review; do not merge, force-push shared history or deploy merely
+  because an implementation task is complete.
 
 ## Where things are
 
 | | |
 |---|---|
-| `pipeline/modules/m00`–`m16` | One per source; each declares its dependencies |
+| `pipeline/modules/` | Source modules and their declared dependencies |
 | `pipeline/registry.py`, `runner.py`, `parallel.py` | Module registry, execution, worker fan-out |
 | `pipeline/http.py`, `netguard.py` | The shared client; where a fetch may land |
 | `pipeline/promote.py` | Candidates becoming evidence |
-| `pipeline/backup.py` | `VACUUM INTO` snapshots and restore |
+| `pipeline/backup.py` | PostgreSQL COPY snapshots, checksum manifests and restore |
 | `pipeline/web/` | Server, admin API, portal API, static front ends |
 | `pipeline/migrations/` | Schema, applied in order and recorded |
 | [`docs/upgrade-roadmap.md`](docs/upgrade-roadmap.md) | Current findings register and phase status |
+| [`agent/README.md`](agent/README.md) | Agent pickup, readiness, repair and evidence contract |
