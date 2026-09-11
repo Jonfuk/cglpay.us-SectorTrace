@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from pipeline.registry import MODULE_REGISTRY, discover_modules
+from pipeline.registry import MODULE_REGISTRY, discover_modules, module_meta
 
 _REAL_MODULE_RE = re.compile(r"^m\d{2}_[a-z_]+$")
 
@@ -27,7 +27,8 @@ def _discovered():
 
 
 def _real_modules() -> list[str]:
-    return sorted(n for n in MODULE_REGISTRY if _REAL_MODULE_RE.match(n))
+    return sorted(n for n in MODULE_REGISTRY
+                  if _REAL_MODULE_RE.match(n) and not module_meta(n).operator_only)
 
 
 def test_every_module_reports_progress():

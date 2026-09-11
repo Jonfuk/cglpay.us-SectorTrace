@@ -74,6 +74,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | Safety & safeguarding | Ad hoc | `sab_site_crawls`, `safeguarding_adults_boards` | Varies by authority |
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
+| `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
 
 <!-- END GENERATED: source-capability-matrix -->
 

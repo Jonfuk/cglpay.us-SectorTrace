@@ -823,16 +823,16 @@ def catalogue(conn: sqlite3.Connection) -> dict:
     has exactly one entry.
     """
     return {
-        "datasets": [_dataset_figures(conn, ds) for ds in datasets.DATASETS],
+        "datasets": [_dataset_figures(conn, ds) for ds in datasets.PUBLIC_DATASETS],
         "evidence_layers": EVIDENCE_LAYERS,
-        "count": len(datasets.DATASETS),
+        "count": len(datasets.PUBLIC_DATASETS),
         "caveat": CAVEATS["catalogue"],
     }
 
 
 def catalogue_detail(conn: sqlite3.Connection, dataset_id: str) -> dict:
     """One dataset, with the full licence statement and its caution."""
-    ds = datasets.BY_ID.get(dataset_id)
+    ds = datasets.PUBLIC_BY_ID.get(dataset_id)
     if ds is None:
         raise QueryError(f"No dataset {dataset_id!r}.")
     figures = _dataset_figures(conn, ds)
@@ -920,7 +920,7 @@ def publication_calendar(conn: sqlite3.Connection, *,
     rows: list[dict] = []
     by_status: dict[str, int] = {}
     by_basis: dict[str, int] = {}
-    for ds in datasets.DATASETS:
+    for ds in datasets.PUBLIC_DATASETS:
         _public(list(ds.public_tables))
         seen: set[str] = set()
         for t in ds.public_tables:
@@ -1055,7 +1055,7 @@ def change_feed(conn: sqlite3.Connection, *, kind=None, source=None,
                  release=r["run_id"])
 
     # `refreshed`: the catalogue's measured last-retrieval per dataset.
-    for figures in (_dataset_figures(conn, ds) for ds in datasets.DATASETS):
+    for figures in (_dataset_figures(conn, ds) for ds in datasets.PUBLIC_DATASETS):
         last = figures.get("last_retrieved_at")
         if last:
             keep(kind="refreshed", at=last, source=figures.get("publisher"),

@@ -10,6 +10,7 @@ import typer
 from pipeline import console as ui
 from pipeline import db, runner
 from pipeline.config import get_settings
+from pipeline.http import PipelineHTTPClient
 from pipeline.logging_conf import configure_logging
 from pipeline.registry import (
     MODULE_REGISTRY,
@@ -31,11 +32,13 @@ nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunk
 analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
 worker_app = typer.Typer(help="Claim and execute queued pipeline-module runs (Phase 5 worker cutover).")
+open_jobs_app = typer.Typer(help="Inspect and run the operator-only Open Jobs shadow collector.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
 app.add_typer(nlp_app, name="nlp")
 app.add_typer(analysis_app, name="analysis")
 app.add_typer(worker_app, name="worker")
+app.add_typer(open_jobs_app, name="open-jobs")
 app.add_typer(mirror_app, name="mirror")
 # Keep the TUI as another entry point over the existing command schema. The
 # project wrapper adds a confirmation boundary, while validation and side
@@ -49,6 +52,187 @@ def _document_connection():
     conn = db.get_connection(settings)
     db.apply_migrations(conn, db.migrations_dir_for(settings))
     return conn, settings
+
+
+@open_jobs_app.command("init")
+def open_jobs_init() -> None:
+    """Show the disabled-by-default Open Jobs activation gate and budgets."""
+    settings = get_settings()
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    typer.echo(__import__("json").dumps({
+        "enabled": bool(settings.open_jobs_enabled),
+        "base_url": policy.base_url,
+        "mode": "incremental-only",
+        "archive_budget_bytes": policy.archive_budget_bytes,
+        "note": "Activation remains an explicit operator decision after source-contract verification.",
+    }, indent=2, sort_keys=True))
+
+
+@open_jobs_app.command("status")
+def open_jobs_status() -> None:
+    """Read the public release indexes and report their validated shape."""
+    settings = get_settings()
+    from pipeline.open_jobs.commands import OpenJobsClient
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    if not settings.open_jobs_enabled:
+        typer.echo('{"enabled": false, "status": "disabled"}')
+        return
+    client_http = PipelineHTTPClient("open_jobs", settings=settings)
+    try:
+        client = OpenJobsClient(client_http, policy)
+        result = {}
+        for kind in ("diffs", "ledger"):
+            response, entries = client.fetch_index(kind)
+            result[kind] = {"http_status": response.status_code,
+                            "entries": len(entries),
+                            "bytes": len(response.body)}
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        client_http.__exit__(None, None, None)
+
+
+@open_jobs_app.command("triage")
+def open_jobs_triage(
+    limit: int | None = typer.Option(None, min=1,
+                                     help="Maximum current adverts to inspect."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Count candidates without creating review items."),
+) -> None:
+    """Find role-shaped Open Jobs adverts for human review.
+
+    This is deliberately a finding aid.  It never changes an advert, provider
+    attribution, export membership, or public response.  The review payload
+    records the exact terms and fields that caused a candidate to be queued.
+    """
+    from pipeline.open_jobs.relevance import TriageResult, classify
+    from pipeline.open_jobs.store import OpenJobsStore, _value
+
+    conn = None
+    counts = {"scanned": 0, "candidate": 0, "excluded": 0,
+              "no_match": 0, "queued": 0}
+    try:
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT advert_id, ats, slug, upstream_id, generation_id, release_id, provenance_id, "
+            "title, company, location "
+            "FROM open_jobs_adverts "
+            "WHERE operation IN ('added', 'changed', 'carried') "
+            "ORDER BY advert_id"
+            + (" LIMIT %s" if limit else ""),
+            (limit,) if limit else (),
+        )
+        store = OpenJobsStore(conn)
+        current: dict[tuple[str, str, str], dict] = {}
+        for row in cursor:
+            advert = dict(row)
+            current[(str(advert["ats"]), str(advert["slug"]), str(advert["upstream_id"]))] = advert
+            counts["scanned"] += 1
+            result = classify(title=_value(row, "title"),
+                              company=_value(row, "company"),
+                              location=_value(row, "location"))
+            advert["triage"] = result
+
+        # The web UI searches the archived Open Jobs content, while the
+        # current projection intentionally keeps only small source-shaped
+        # fields.  Reuse those exact archived bytes when available so the
+        # operator count measures the same text without bypassing provenance.
+        try:
+            import pyarrow.parquet as parquet
+        except ImportError:
+            parquet = None
+        archive_dir = settings.raw_archive_dir / "open_jobs"
+        archive_rows = 0
+        if parquet and archive_dir.is_dir():
+            for path in sorted(archive_dir.glob("*.bin")):
+                parquet_file = parquet.ParquetFile(path)
+                columns = {field.name for field in parquet_file.schema_arrow}
+                wanted = [name for name in ("ats", "slug", "id", "title", "content",
+                                            "departments", "location") if name in columns]
+                if not {"ats", "slug", "id"}.issubset(wanted):
+                    continue
+                for batch in parquet_file.iter_batches(columns=wanted, batch_size=4096):
+                    for source_row in batch.to_pylist():
+                        archive_rows += 1
+                        key = (str(source_row.get("ats")), str(source_row.get("slug")),
+                               str(source_row.get("id")))
+                        advert = current.get(key)
+                        if advert is None:
+                            continue
+                        result = classify(
+                            title=source_row.get("title") or advert.get("title"),
+                            company=advert.get("company"),
+                            location=source_row.get("location") or advert.get("location"),
+                            content=source_row.get("content"),
+                            departments=source_row.get("departments"),
+                        )
+                        previous = advert["triage"]
+                        if result.candidate or previous.candidate:
+                            decision = "candidate"
+                        elif result.decision == "excluded" or previous.decision == "excluded":
+                            decision = "excluded"
+                        else:
+                            decision = "no_match"
+                        advert["triage"] = TriageResult(
+                            decision=decision,
+                            matched_terms=tuple(dict.fromkeys((*previous.matched_terms,
+                                                               *result.matched_terms))),
+                            excluded_terms=tuple(dict.fromkeys((*previous.excluded_terms,
+                                                                 *result.excluded_terms))),
+                            matched_fields=tuple(dict.fromkeys((*previous.matched_fields,
+                                                                 *result.matched_fields))),
+                            location_state=(result.location_state
+                                            if result.location_state == previous.location_state
+                                            else "unresolved"),
+                        )
+
+        # Counts are over unique current adverts, even when a key appeared in
+        # more than one archived release.  This keeps the result comparable to
+        # the web UI's role list and makes repeat runs deterministic.
+        counts = {"scanned": len(current), "candidate": 0, "excluded": 0,
+                  "no_match": 0, "queued": 0, "archive_rows": archive_rows}
+        location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
+        candidate_location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
+        for advert in current.values():
+            result = advert["triage"]
+            counts[result.decision] += 1
+            location_counts[result.location_state] += 1
+            if result.candidate:
+                candidate_location_counts[result.location_state] += 1
+            if not result.candidate or dry_run:
+                continue
+            advert_id = advert["advert_id"]
+            store.queue_review(
+                "role_relevance",
+                "Role vocabulary match requires substance-misuse and England relevance review",
+                advert_id=advert_id,
+                generation_id=advert["generation_id"],
+                release_id=advert["release_id"],
+                provenance_id=advert["provenance_id"],
+                payload=result.payload(),
+            )
+            counts["queued"] += 1
+        if not dry_run:
+            conn.commit()
+        typer.echo(__import__("json").dumps({**counts,
+                                             "location": location_counts,
+                                             "candidate_location": candidate_location_counts,
+                                             "dry_run": dry_run},
+                                             indent=2, sort_keys=True))
+    except Exception as exc:
+        if conn:
+            conn.rollback()
+        typer.echo(f"open jobs triage failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
 
 
 def _document_reference(row):

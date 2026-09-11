@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CqcLocation, CqcResponse } from '~/types/api'
 import { validLocation, type MapLocation } from '~/lib/places'
+import { downloadEvidenceCsv, downloadEvidenceJson } from '~/lib/evidence-export'
 interface Facet { value: string; count: number }
 interface CqcExplorerResponse extends CqcResponse {
   limit: number
@@ -9,6 +10,7 @@ interface CqcExplorerResponse extends CqcResponse {
 }
 const api = usePublicApi()
 const filters = useFilterState()
+const route = useRoute()
 const filter = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
 const filterKeys = ['provider_key', 'authority_ons_code', 'registration_status', 'regulated_activity', 'service_type', 'rating'] as const
 function integer(key: string, fallback: number, min: number, max = Number.MAX_SAFE_INTEGER) {
@@ -30,9 +32,11 @@ const { data, pending, error, refresh } = await useAsyncData('public-cqc-workspa
   return { key, response }
 }, { watch: [signature] })
 const current = computed(() => !pending.value && !error.value && data.value?.key === signature.value ? data.value.response : null)
-const rows = computed(() => current.value?.results ?? [])
+const hasRows = computed(() => Array.isArray(current.value?.results))
+const rows = computed(() => hasRows.value ? current.value!.results : [])
 const located = computed(() => rows.value.filter((row): row is CqcLocation & MapLocation => validLocation(row)))
-const selected = computed(() => rows.value.find(row => row.location_id === locationId.value))
+const selectedMatches = computed(() => rows.value.filter(row => row.location_id === locationId.value))
+const selected = computed(() => selectedMatches.value.length === 1 ? selectedMatches.value[0] : undefined)
 const shownFrom = computed(() => (current.value?.offset ?? offset.value) + 1)
 const shownTo = computed(() => (current.value?.offset ?? offset.value) + rows.value.length)
 const facetFields = [
@@ -63,6 +67,22 @@ async function inspect(id: string, event?: Event) {
 }
 async function close() { await filters.set('location_id', undefined); await nextTick(); if (trigger?.isConnected) trigger.focus() }
 function ratingOrigin(row: CqcLocation) { return row.rating_source === 'api' ? 'CQC API' : row.rating_source === 'bulk_export' ? 'CQC bulk export' : row.rating_source ?? 'Origin not supplied' }
+function exportContext(scope: string) {
+  return {
+    scope, endpoint: '/api/v1/cqc_locations', request: query.value,
+    view: `#${route.fullPath}`, selected_location_id: locationId.value || null,
+    response_context: current.value ? { ...current.value, results: undefined } : null,
+    loaded_records: rows.value.length, mapped_records: located.value.length,
+    limitations: 'Only this returned page is included. Matching totals and missing-coordinate counts refer to all matching pages. Facet counts use the provider scope and do not apply the other filters. Location counts do not measure service coverage or quality.',
+    provenance_limitations: 'Source URL and retrieval date describe each location record. The response supplies no payload hash or separate bulk-rating source URL or retrieval date. Registration, inspection and rating dates are distinct. Missing provenance remains missing.',
+  }
+}
+function download(kind: 'csv' | 'json' | 'selected') {
+  if (!current.value || !hasRows.value) return
+  if (kind === 'csv') downloadEvidenceCsv('cqc-loaded-registrations', rows.value)
+  else if (kind === 'selected') { if (selected.value) downloadEvidenceJson('cqc-selected-registration', [selected.value], exportContext('selected-record-in-returned-page')) }
+  else downloadEvidenceJson('cqc-result-window', rows.value, exportContext('complete-returned-page'))
+}
 useHead({ title: 'CQC registrations · SectorTrace' })
 </script>
 
@@ -85,26 +105,30 @@ useHead({ title: 'CQC registrations · SectorTrace' })
       <div class="min-w-0 space-y-4">
         <StEvidenceState :pending="pending" :error="error" @retry="refresh">
           <template v-if="current">
-            <p class="atlas-footnote" role="status">Matching registrations: {{ current.total.toLocaleString('en-GB') }} · Loaded records: {{ rows.length.toLocaleString('en-GB') }} · Mapped records: {{ located.length.toLocaleString('en-GB') }}</p>
+            <div v-if="hasRows" class="flex flex-wrap gap-2" role="group" aria-label="Registration downloads"><button type="button" class="atlas-button" @click="download('csv')">Download loaded registrations CSV</button><button type="button" class="atlas-button" @click="download('json')">Download result-window JSON</button></div>
+            <p v-if="hasRows" class="atlas-footnote">Downloads include every registration in this loaded page, including records without usable coordinates. They do not include other matching pages. Keep the JSON with the CSV for the request, response metadata and provenance limitations.</p>
+            <div v-else><p role="status">The response did not supply a registration array. Downloads are unavailable.</p><button type="button" class="atlas-button" @click="refresh()">Retry registrations</button></div>
+            <p v-if="hasRows" class="atlas-footnote" role="status">Matching registrations: {{ current.total.toLocaleString('en-GB') }} · Loaded records: {{ rows.length.toLocaleString('en-GB') }} · Mapped records: {{ located.length.toLocaleString('en-GB') }}</p>
             <p v-if="current.without_coordinate != null" class="atlas-footnote">{{ current.without_coordinate.toLocaleString('en-GB') }} matching registrations have a missing coordinate across all matching pages.</p>
             <p class="atlas-footnote">The map uses only valid coordinates in this loaded page. All loaded records remain in the list, including those without usable coordinates. Nearby groups represent loaded registrations.</p>
-            <LazyGeographyMap v-if="showMap" :features="[]" locator point-layer :locations="located" :selected-location="locationId" @select-location="inspect" />
+            <LazyGeographyMap v-if="showMap && hasRows" :features="[]" locator point-layer :locations="located" :selected-location="locationId" @select-location="inspect" />
             <ul v-if="rows.length" class="st-directory-list st-cqc-list" aria-label="Loaded registrations">
-              <li v-for="(row, index) in rows" :key="row.location_id ?? index" :class="{ selected: row.location_id === locationId }">
+              <li v-for="(row, index) in rows" :key="`${row.location_id}:${index}`" :class="{ selected: row.location_id === locationId }">
                 <div><h2>{{ row.location_name ?? 'Name not supplied' }}</h2><p><NuxtLink v-if="row.provider_key" :to="`/providers/${encodeURIComponent(row.provider_key)}`">{{ row.provider_name ?? row.provider_key }}</NuxtLink><span v-else>{{ row.provider_name ?? 'Provider not supplied' }}</span> · {{ row.local_authority_raw ?? row.local_authority_ons_code ?? 'Authority not supplied' }}</p><p>{{ row.registration_status ?? 'Status not supplied' }} · {{ row.overall_rating ?? 'Rating not supplied' }}<span v-if="row.overall_rating"> · {{ ratingOrigin(row) }} · {{ row.overall_rating_date ?? 'Rating date not supplied' }}</span></p><p>{{ row.location_id ?? 'Identifier not supplied' }} · {{ validLocation(row) ? 'Located on this page’s map' : 'No usable coordinate' }}</p></div>
                 <button v-if="row.location_id" class="atlas-button" type="button" :aria-label="`Inspect ${row.location_name ?? row.location_id}`" @click="inspect(row.location_id, $event)">Inspect</button>
               </li>
             </ul>
-            <StEvidenceState v-else empty :empty-title="offset ? 'No records in this result window' : 'No matching registrations'" :message="offset ? 'The matching results may have changed. Return to the first page or change the filters.' : 'Try another selection or clear the active filters.'" />
-            <nav class="flex flex-wrap gap-3 items-center" aria-label="Registration pages"><span class="atlas-footnote">{{ rows.length ? `Records ${shownFrom.toLocaleString('en-GB')} to ${shownTo.toLocaleString('en-GB')}` : 'No loaded records' }} · up to {{ current.limit ?? limit }} per page</span><button class="atlas-button" type="button" :disabled="offset === 0" @click="page(-limit)">Previous</button><button class="atlas-button" type="button" :disabled="shownTo >= current.total" @click="page(limit)">Next</button><button v-if="offset" class="atlas-button" type="button" @click="page(-offset)">First page</button></nav>
+            <StEvidenceState v-else-if="hasRows" empty :empty-title="offset ? 'No records in this result window' : 'No matching registrations'" :message="offset ? 'The matching results may have changed. Return to the first page or change the filters.' : 'Try another selection or clear the active filters.'" />
+            <nav v-if="hasRows" class="flex flex-wrap gap-3 items-center" aria-label="Registration pages"><span class="atlas-footnote">{{ rows.length ? `Records ${shownFrom.toLocaleString('en-GB')} to ${shownTo.toLocaleString('en-GB')}` : 'No loaded records' }} · up to {{ current.limit ?? limit }} per page</span><button class="atlas-button" type="button" :disabled="offset === 0" @click="page(-limit)">Previous</button><button class="atlas-button" type="button" :disabled="shownTo >= current.total" @click="page(limit)">Next</button><button v-if="offset" class="atlas-button" type="button" @click="page(-offset)">First page</button></nav>
             <StCaveat v-if="current.caveat" :text="current.caveat" />
           </template>
         </StEvidenceState>
       </div>
-      <StInspector v-if="locationId" :title="selected?.location_name ?? selected?.location_id ?? (pending ? 'Loading registration' : error ? 'Registration unavailable' : 'Registration not in this result window')" @close="close">
+      <StInspector v-if="locationId" :title="selected?.location_name ?? selected?.location_id ?? (pending ? 'Loading registration' : error ? 'Registration unavailable' : selectedMatches.length > 1 ? 'Ambiguous registration' : 'Registration not in this result window')" @close="close">
         <p v-if="pending" role="status">Loading the selected result window…</p>
         <p v-else-if="error">The result window could not load. Retry the evidence request to check this selection.</p>
-        <LazyStCqcInspectorContent v-else-if="selected" :key="locationId" :row="selected" />
+        <template v-else-if="selected"><LazyStCqcInspectorContent :key="locationId" :row="selected" /><button type="button" class="atlas-button" @click="download('selected')">Download selected registration JSON</button></template>
+        <p v-else-if="selectedMatches.length > 1" role="status">Several returned records share location {{ locationId }}. No single record has been selected. The result-window download retains every returned row.</p>
         <template v-else><p>Location {{ locationId }} is not in the returned page. The result window may have changed since this link was saved. No replacement record has been selected.</p><NuxtLink v-if="filter('provider_key')" class="atlas-button" :to="`/providers/${encodeURIComponent(filter('provider_key'))}`">Open selected provider</NuxtLink><button class="atlas-button" type="button" @click="close">Return to registrations</button></template>
       </StInspector>
     </div>

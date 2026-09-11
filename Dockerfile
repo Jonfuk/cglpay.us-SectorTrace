@@ -38,7 +38,7 @@ WORKDIR /app
 # application database.
 #
 # The extra list is deliberate and closed for the ordinary image: `nlp`,
-# `docs`, `ocr` and `sheets`
+# `docs`, `ocr`, `sheets` and `open-jobs`
 # are NOT installed here. `otel` (performance.md's Phase 5 pipeline
 # observability) is always installed alongside `storage`/`graph` rather than
 # gated behind a build arg: unlike the excluded extras above it carries no
@@ -58,11 +58,13 @@ WORKDIR /app
 # Chromium; ordinary publication images remain browser-free.
 ARG INSTALL_ASSISTANT=false
 ARG INSTALL_SCRAPY=false
+ARG INSTALL_OPEN_JOBS=false
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --extra storage --extra graph --extra otel \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant") \
-    $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy")
+    $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy") \
+    $([ "$INSTALL_OPEN_JOBS" = "true" ] && echo "--extra open-jobs")
 
 COPY pipeline ./pipeline
 COPY deploy ./deploy
@@ -76,7 +78,8 @@ COPY --from=frontend /frontend/admin/.output/public ./pipeline/web/static_nuxt/a
 
 RUN uv sync --frozen --no-dev --extra storage --extra graph --extra otel \
     $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant") \
-    $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy")
+    $([ "$INSTALL_SCRAPY" = "true" ] && echo "--extra scrapy") \
+    $([ "$INSTALL_OPEN_JOBS" = "true" ] && echo "--extra open-jobs")
 
 # The Python extra deliberately does not download a browser on ordinary
 # images. Beta collection hosts opt in at build time so Power BI interception

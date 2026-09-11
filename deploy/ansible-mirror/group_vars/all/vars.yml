@@ -500,6 +500,17 @@ mirror_docker_subnet: "172.29.0.0/16"
 # are worse to run out of space part way through than to not start.
 mirror_min_free_gb: 10
 
+# Open Jobs is an operator-only shadow collector. Keep its gate off in the
+# generated environment; a beta operator can enable a test run in the
+# gitignored .env.merge file after verifying the source contract.
+open_jobs_enabled: false
+# The timer is a separate switch so installing the collector never schedules
+# live source traffic by accident. Set both this and open_jobs_enabled in the
+# beta box's gitignored zz-local.yml after the source contract is verified.
+open_jobs_schedule_enabled: false
+open_jobs_schedule_time: "05:30"
+open_jobs_max_releases_per_run: 2
+
 # --- snapshot mode: the source's offsite backup bucket -------------------------
 # Where the source deployment's sectortrace-backup-offsite script puts its
 # verified snapshots. Its own vars.yml calls this backup_s3_prefix, and

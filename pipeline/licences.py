@@ -145,6 +145,14 @@ LICENCES: dict[str, Licence] = {
                 "Official statistics under the Code of Practice for "
                 "Statistics; check the publisher's terms before republishing.",
     ),
+    "open_jobs_cc0": Licence(
+        id="open_jobs_cc0",
+        name="CC0 1.0 (Open Jobs publication; third-party advert rights remain)",
+        url="https://creativecommons.org/publicdomain/zero/1.0/legalcode.en",
+        attribution="Open Jobs public data release.",
+        caution="CC0 does not clear third-party employer or ATS rights. Shadow "
+                "payloads remain operator-only and are not republished wholesale.",
+    ),
 }
 
 # Read from docs/SOURCES.md, one row per module. A new module belongs here on
@@ -187,6 +195,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m32_sab_site_reviews": "authority_varies",
     "m33_hse_notices": "hse_notices",
     "m34_icb_board_papers": "ogl_v3",
+    "m35_open_jobs": "open_jobs_cc0",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by

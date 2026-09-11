@@ -78,6 +78,7 @@ def modules(conn) -> dict:
             "name": name,
             "wave": waves.get(name),
             "supports_since": meta[name].supports_since,
+            "operator_only": meta[name].operator_only,
             "since_note": meta[name].since_note,
             "depends_on": list(meta[name].depends_on),
             "depends_note": meta[name].depends_note,
