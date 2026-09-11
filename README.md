@@ -114,7 +114,7 @@ figure a year after publishing it.
 
 | Layer | What it uses |
 | --- | --- |
-| Serving | Python 3.10+ standard-library HTTP server. No framework, no ASGI, no runtime build step, no CDN. Both front ends render with the network cable unplugged. |
+| Serving | Python 3.11+ standard-library HTTP server. No framework, no ASGI, no runtime build step, no CDN. Both front ends render with the network cable unplugged. |
 | Warehouse | PostgreSQL 18 with pgvector, pg_trgm and PostGIS, driven by psycopg 3. Reads go through a pooled, SELECT-only role, writes through their own connection. |
 | Collection | httpx and tenacity behind a shared client that owns rate limiting, robots.txt and conditional requests. An optional Scrapy and scrapy-playwright transport exists and is off by default. |
 | Document parsing | pdfplumber for text and position-based extraction, odfpy for spreadsheets, PyMuPDF and Docling in the optional document worker, OnnxTR OCR for coroner reports that arrive as paper scans. |

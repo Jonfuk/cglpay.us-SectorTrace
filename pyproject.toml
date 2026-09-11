@@ -2,7 +2,7 @@
 name = "sub-misuse-evidence-pipeline"
 version = "0.1.0"
 description = "England-wide substance misuse sector evidence pipeline for a trade union pay campaign evidence base"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "tenacity>=8.2",
@@ -110,14 +110,15 @@ maps = [
 #
 #   uv sync --extra ocr
 #
-# onnxruntime is pinned below 1.20 because this project targets Python 3.10
-# and 1.20 onwards ships no cp310 wheel. Raise it when requires-python does.
+# onnxruntime was pinned below 1.20 while requires-python was ">=3.10": 1.20
+# onwards ships no cp310 wheel. requires-python is now ">=3.11", so that floor
+# is gone -- raised to >=1.20 for cp313 wheels (1.16-1.19 top out at cp312).
 # `cpu-headless` is OnnxTR's own extra: CPU inference and the headless build
 # of OpenCV. The plain `cpu` extra pulls the desktop OpenCV, whose GUI
 # libraries are of no use to a pipeline and do not exist on a server.
 ocr = [
     "onnxtr[cpu-headless]>=0.8",
-    "onnxruntime>=1.16,<1.20",
+    "onnxruntime>=1.20",
     "pypdfium2>=4.0",
 ]
 
