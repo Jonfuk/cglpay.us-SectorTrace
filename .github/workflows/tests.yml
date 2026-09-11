@@ -106,10 +106,12 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
+          set +e
           uv run python -m pytest -q --tb=short -m "not serial and not integration" -n auto \
             --dist loadscope --durations=50 --junitxml=artifacts/pytest-parallel.xml \
             > artifacts/pytest-parallel.log 2>&1
           status=$?
+          set -e
           cat artifacts/pytest-parallel.log
           grep -E '^(FAILED|ERROR)' artifacts/pytest-parallel.log | while read -r line; do
             echo "::error::$line"
@@ -128,10 +130,12 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
+          set +e
           uv run python -m pytest -q --tb=short -m "serial and not integration" --durations=50 \
             --junitxml=artifacts/pytest-serial.xml \
             > artifacts/pytest-serial.log 2>&1
           status=$?
+          set -e
           cat artifacts/pytest-serial.log
           grep -E '^(FAILED|ERROR)' artifacts/pytest-serial.log | while read -r line; do
             echo "::error::$line"
